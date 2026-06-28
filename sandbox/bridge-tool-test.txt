@@ -1,4 +1,0 @@
-Bridge MCP tool test
-status: initial
-patch-target: patched-ok
-append-line: write-append-ok
