@@ -133,3 +133,45 @@ That is the base needed for safer tool iteration, local dashboard, verbose logs,
 The HTTP profile is local-only and no-auth at the MCP listener layer. The intended boundary is the managed tunnel plus a loopback-only bridge HTTP listener.
 
 Use the `sample_mcp_remote_no_auth` profile family. Do not add fake auth metadata just to silence diagnostics. See `OPENAI_TUNNEL_LOCAL_AUTH.md`.
+
+## Current production-candidate status
+
+HTTP mode is now production-candidate for local use.
+
+Active runtime shape:
+
+```text
+ChatGPT -> OpenAI Secure MCP Tunnel -> bridge-local-http -> http://127.0.0.1:3001/mcp -> bridge-mcp Streamable HTTP
+```
+
+Validated behavior:
+
+- `/healthz`, `/readyz`, and `/status` return successfully.
+- MCP `initialize` returns server info and an `Mcp-Session-Id`.
+- MCP `notifications/initialized` succeeds with HTTP 202 when sent with the session id.
+- HTTP sessions are tracked per `Mcp-Session-Id`.
+- Stale anonymous transports are cleaned automatically.
+- Idle sessions are cleaned automatically.
+- The HTTP watchdog can restart the local HTTP bridge if the bridge process dies.
+- The HTTP watchdog can restart `tunnel-client` if the tunnel process dies.
+- Startup fallback now supports `-WatchdogMode Http` and is installed for the current user.
+
+Current startup command installed in the user Startup folder:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\dev\bridge-mcp\scripts\start-bridge-http-watchdog.ps1" -ProjectRoot "C:\dev\bridge-mcp" -Profile "bridge-local-http" -TunnelBaseUrl "http://127.0.0.1:8081"
+```
+
+Useful checks:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:3001/status
+Invoke-RestMethod http://127.0.0.1:8081/readyz
+.\scripts\test-bridge-http.ps1
+```
+
+Rollback to stdio remains available with:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-bridge-watchdog.ps1 -ProjectRoot C:\dev\bridge-mcp
+```
