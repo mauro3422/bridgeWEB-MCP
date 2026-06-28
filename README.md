@@ -165,3 +165,9 @@ No commitear:
 - sandbox local
 
 Mantener secretos como variables de entorno de Windows o en perfiles locales fuera de Git.
+
+## Local auth model
+
+The HTTP local profile is intentionally local-only and no-auth at the MCP listener layer.
+
+See `OPENAI_TUNNEL_LOCAL_AUTH.md`.

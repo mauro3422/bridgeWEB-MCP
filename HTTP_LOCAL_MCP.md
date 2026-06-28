@@ -127,3 +127,9 @@ ChatGPT can get clearer status about which layer failed
 ```
 
 That is the base needed for safer tool iteration, local dashboard, verbose logs, and controlled restart requests.
+
+## Local auth decision
+
+The HTTP profile is local-only and no-auth at the MCP listener layer. The intended boundary is the managed tunnel plus a loopback-only bridge HTTP listener.
+
+Use the `sample_mcp_remote_no_auth` profile family. Do not add fake auth metadata just to silence diagnostics. See `OPENAI_TUNNEL_LOCAL_AUTH.md`.
