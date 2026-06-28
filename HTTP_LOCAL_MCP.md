@@ -43,6 +43,26 @@ POST http://127.0.0.1:3001/mcp     -> MCP Streamable HTTP JSON-RPC
 GET  http://127.0.0.1:3001/mcp     -> MCP SSE stream when requested with Accept: text/event-stream
 ```
 
+## Validation
+
+Run the local HTTP smoke test while the HTTP server is running:
+
+```powershell
+Set-Location C:\dev\bridge-mcp
+.\scripts\test-bridge-http.ps1
+```
+
+The test checks:
+
+```text
+/healthz
+/readyz
+/status
+POST /mcp initialize
+```
+
+The startup script also refuses to start if the configured port is already in use, and prints the owning process so stale Node instances are easier to find.
+
 ## Tunnel profile
 
 Prepared profile:

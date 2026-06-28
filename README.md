@@ -92,6 +92,12 @@ bridge-local-http -> http://127.0.0.1:3001/mcp
 
 The stable connector still uses the `bridge-local` stdio profile. Do not run both profiles with the same tunnel id at the same time. See `HTTP_LOCAL_MCP.md`.
 
+HTTP validation helper:
+
+```powershell
+.\scripts\test-bridge-http.ps1
+```
+
 ## Watchdog local
 
 El túnel no debe reiniciarse desde adentro de una tool MCP porque ChatGPT perdería el transporte que está usando para llamar esa tool.

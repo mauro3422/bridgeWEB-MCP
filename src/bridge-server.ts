@@ -8,14 +8,17 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { spawn, type ChildProcess } from "node:child_process";
+import {
+  DEFAULT_GIT_REMOTE_URL,
+  DEFAULT_MAX_FILE_BYTES,
+  DEFAULT_TIMEOUT_MS,
+  DEFAULT_TUNNEL_ADMIN_BASE_URL,
+  MAX_CAPTURE_CHARS,
+  SERVER_NAME,
+  SERVER_VERSION,
+} from "./config.js";
 
-export const SERVER_NAME = "bridge-mcp";
-export const SERVER_VERSION = "0.3.0";
-const DEFAULT_MAX_FILE_BYTES = 2 * 1024 * 1024;
-const DEFAULT_TIMEOUT_MS = 30_000;
-const MAX_CAPTURE_CHARS = 512 * 1024;
-const DEFAULT_GIT_REMOTE_URL = "https://github.com/mauro3422/bridgeWEB-MCP.git";
-const DEFAULT_TUNNEL_ADMIN_BASE_URL = "http://127.0.0.1:8080";
+export { SERVER_NAME, SERVER_VERSION } from "./config.js";
 
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
 type TerminalSession = {
