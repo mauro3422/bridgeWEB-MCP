@@ -299,7 +299,9 @@ Reason: parallel arbitrary shell is harder to diagnose and can destabilize the l
 
 ### v0.4.2: navigation primitives
 
-Deliver:
+Status: implemented.
+
+Delivered:
 
 ```txt
 read_file_lines

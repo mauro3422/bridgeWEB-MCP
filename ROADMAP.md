@@ -6,7 +6,7 @@ Local MCP bridge for MauroPrime. The goal is to let ChatGPT operate MauroPrime t
 
 ```txt
 Project root: C:\dev\bridge-mcp
-Server: bridge-mcp v0.4.1
+Server: bridge-mcp v0.4.2
 Mode: HTTP production-candidate
 Bridge HTTP: http://127.0.0.1:3001/mcp
 Bridge status: http://127.0.0.1:3001/status
@@ -30,7 +30,7 @@ Do not commit keys, tunnel secrets, `node_modules`, `dist`, logs, SQLite metrics
 
 ## Confirmed working checks
 
-Known-good checks for v0.4.1:
+Known-good checks for v0.4.2:
 
 ```txt
 bridge_self_check -> ok true
@@ -38,7 +38,7 @@ npm run check -> OK
 npm run build -> OK
 scripts/test-bridge-http.ps1 -> OK
 scripts/test-bridge-regressions.ps1 -> OK
-http://127.0.0.1:3001/status -> bridge-mcp v0.4.1
+http://127.0.0.1:3001/status -> bridge-mcp v0.4.2
 http://127.0.0.1:8081/healthz -> live
 http://127.0.0.1:8081/readyz -> ready
 ```
@@ -52,7 +52,11 @@ Base tools:
 ```txt
 system_info
 list_dir
+list_files_smart
 read_text_file
+read_file_lines
+read_many_files
+search_files
 write_text_file
 apply_patch
 run_command
@@ -152,7 +156,7 @@ If the wrapper blocks that tool, use `write_text_file` to create `.bridge-restar
 
 Detailed plan: `AGENTIC_TOOLS_ROADMAP.md`.
 
-Next implementation package for v0.4.2:
+Completed implementation package for v0.4.2:
 
 ```txt
 read_file_lines
@@ -161,7 +165,7 @@ search_files
 list_files_smart
 ```
 
-These tools are inspired by K-Chat/Kairos and should reduce raw shell usage by giving ChatGPT line-numbered reading, grep-like search with context, smart directory summaries, and batch file reads.
+These tools are inspired by K-Chat/Kairos and reduce raw shell usage by giving ChatGPT line-numbered reading, grep-like search with context, smart directory summaries, and batch file reads.
 
 ### Diagnostics hardening
 

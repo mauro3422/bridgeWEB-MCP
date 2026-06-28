@@ -20,9 +20,9 @@ Set-Location -LiteralPath $ProjectRoot
 Invoke-Check "version bump is consistent" {
   $packageJson = Get-Content -LiteralPath "package.json" -Raw | ConvertFrom-Json
   $configText = Get-Content -LiteralPath "src\config.ts" -Raw
-  if ($packageJson.version -ne "0.4.1") { throw "package.json version is $($packageJson.version), expected 0.4.1" }
-  if ($configText -notmatch 'SERVER_VERSION = "0\.4\.1"') { throw "src/config.ts does not report SERVER_VERSION 0.4.1" }
-  Write-Host "  OK 0.4.1"
+  if ($packageJson.version -ne "0.4.2") { throw "package.json version is $($packageJson.version), expected 0.4.2" }
+  if ($configText -notmatch 'SERVER_VERSION = "0\.4\.2"') { throw "src/config.ts does not report SERVER_VERSION 0.4.2" }
+  Write-Host "  OK 0.4.2"
 }
 
 Invoke-Check "tunnel admin default stays on HTTP profile port" {
@@ -32,6 +32,34 @@ Invoke-Check "tunnel admin default stays on HTTP profile port" {
     throw "DEFAULT_TUNNEL_ADMIN_BASE_URL is not $ExpectedTunnelAdminBaseUrl"
   }
   Write-Host "  OK $ExpectedTunnelAdminBaseUrl"
+}
+
+Invoke-Check "agentic file tools work from dist" {
+  $nodeScript = @'
+import { pathToFileURL } from "node:url";
+const fileToolsModuleUrl = pathToFileURL(process.argv[2]).href;
+const { listFilesSmart, readFileLines, readManyFiles, searchFiles } = await import(fileToolsModuleUrl);
+const root = process.cwd();
+const read = await readFileLines({ path: "src/config.ts", startLine: 1, maxLines: 20 });
+if (!read.lines.some((line) => line.text.includes("SERVER_VERSION"))) process.exit(11);
+const many = await readManyFiles({ files: ["src/config.ts:1-8", "src/file-tools.ts:1-20"], maxLinesPerFile: 20 });
+if (many.count !== 2 || many.results.some((r) => !r.ok)) process.exit(12);
+const search = await searchFiles({ path: root, pattern: "readFileLines", filePattern: "*.ts", contextLines: 1, maxResults: 10 });
+if (search.totalMatches < 1) process.exit(13);
+const listed = await listFilesSmart({ path: "src", depth: 1, pattern: "*.ts" });
+if (!listed.entries.some((entry) => entry.path === "file-tools.ts")) process.exit(14);
+console.log("  OK file navigation tools");
+'@
+  $tmpScript = Join-Path ([System.IO.Path]::GetTempPath()) ("bridge-file-tools-" + [Guid]::NewGuid().ToString("N") + ".mjs")
+  try {
+    Set-Content -LiteralPath $tmpScript -Value $nodeScript -Encoding utf8
+    $fileToolsModulePath = (Resolve-Path -LiteralPath ".\dist\file-tools.js").Path
+    node $tmpScript $fileToolsModulePath
+    if ($LASTEXITCODE -ne 0) { throw "agentic file tools regression failed" }
+  }
+  finally {
+    Remove-Item -LiteralPath $tmpScript -Force -ErrorAction SilentlyContinue
+  }
 }
 
 Invoke-Check "restart ack JSON accepts UTF-8 BOM" {

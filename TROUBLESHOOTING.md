@@ -85,7 +85,7 @@ powershell -NoProfile -File .\scripts\test-bridge-http.ps1
 
 ## Restart ack parse issues
 
-`.bridge-restart-ack` may contain a UTF-8 BOM. Runtime parsing is BOM-tolerant as of v0.4.1. If a parse warning appears, first check whether the ack is stale/corrupt metadata before assuming the bridge is down.
+`.bridge-restart-ack` may contain a UTF-8 BOM. Runtime parsing is BOM-tolerant as of v0.4.1 and remains covered by regressions in v0.4.2. If a parse warning appears, first check whether the ack is stale/corrupt metadata before assuming the bridge is down.
 
 ## Common false positives
 

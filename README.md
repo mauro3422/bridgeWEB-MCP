@@ -9,7 +9,7 @@ El objetivo no es depender de un runner genérico: este repo es el puente local 
 Versión esperada del servidor:
 
 ```text
-bridge-mcp v0.4.1
+bridge-mcp v0.4.2
 ```
 
 Modo recomendado actual:
@@ -47,7 +47,11 @@ Base local:
 
 - `system_info`: datos básicos de la máquina.
 - `list_dir`: lista carpetas con profundidad limitada.
+- `list_files_smart`: lista archivos con lenguaje, líneas y símbolos livianos.
 - `read_text_file`: lee texto UTF-8 con límite de tamaño.
+- `read_file_lines`: lee archivos con líneas numeradas y paginación.
+- `read_many_files`: lee hasta 10 archivos o rangos en una llamada.
+- `search_files`: busca texto literal con líneas, contexto y contenedor aproximado.
 - `write_text_file`: escribe o agrega texto UTF-8.
 - `apply_patch`: reemplazo exacto y controlado en archivos de texto.
 - `run_command`: ejecuta comandos con `cwd`, timeout y salida capturada.

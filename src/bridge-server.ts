@@ -24,6 +24,7 @@ import {
 export { SERVER_NAME, SERVER_VERSION } from "./config.js";
 import { beginToolMetric, finishToolMetric, getMetricsStatus, getMetricsSummary, getRecentMetrics } from "./metrics.js";
 import { getMetricsVisualization, getVisualizationCatalog, type MetricsVisualizationKind } from "./visualizations.js";
+import { listFilesSmart, readFileLines, readManyFiles, searchFiles } from "./file-tools.js";
 
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
 type TerminalSession = {
@@ -415,7 +416,11 @@ export function createBridgeServer() {
 const toolSchemas = [
   { name: "system_info", description: "Return basic OS, Node, CPU, memory, hostname and cwd information.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
   { name: "list_dir", description: "List a directory recursively with bounded depth and entry limits.", inputSchema: { type: "object", properties: { path: { type: "string" }, depth: { type: "number", default: 1, minimum: 1, maximum: 5 } }, required: ["path"], additionalProperties: false } },
+  { name: "list_files_smart", description: "List files with language, line counts, and lightweight symbols so code structure is visible without opening every file.", inputSchema: { type: "object", properties: { path: { type: "string" }, depth: { type: "number", default: 1, minimum: 0, maximum: 3 }, pattern: { type: "string" }, showImports: { type: "boolean", default: false } }, required: ["path"], additionalProperties: false } },
   { name: "read_text_file", description: "Read a UTF-8 text file with a maximum byte limit.", inputSchema: { type: "object", properties: { path: { type: "string" }, maxBytes: { type: "number", default: DEFAULT_MAX_FILE_BYTES } }, required: ["path"], additionalProperties: false } },
+  { name: "read_file_lines", description: "Read a text file as numbered lines with pagination. Prefer this over reading whole code files.", inputSchema: { type: "object", properties: { path: { type: "string" }, startLine: { type: "number", default: 1, minimum: 1 }, endLine: { type: "number", minimum: 1 }, maxLines: { type: "number", default: 250, minimum: 1, maximum: 500 } }, required: ["path"], additionalProperties: false } },
+  { name: "read_many_files", description: "Read up to 10 files or file ranges in one call, using specs like 'src/config.ts:1-80'.", inputSchema: { type: "object", properties: { files: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 10 }, maxLinesPerFile: { type: "number", default: 250, minimum: 1, maximum: 500 } }, required: ["files"], additionalProperties: false } },
+  { name: "search_files", description: "Search literal text across files with line numbers, nearby context, and lightweight containing function/class hints.", inputSchema: { type: "object", properties: { path: { type: "string" }, pattern: { type: "string" }, filePattern: { type: "string" }, contextLines: { type: "number", default: 2, minimum: 0, maximum: 10 }, maxResults: { type: "number", default: 50, minimum: 1, maximum: 200 }, caseSensitive: { type: "boolean", default: false } }, required: ["path", "pattern"], additionalProperties: false } },
   { name: "write_text_file", description: "Write or append a UTF-8 text file, creating parent directories if needed.", inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" }, append: { type: "boolean", default: false } }, required: ["path", "content"], additionalProperties: false } },
   { name: "apply_patch", description: "Exact string replacement patch for one text file. Fails if replacement count differs from expectedReplacements.", inputSchema: { type: "object", properties: { path: { type: "string" }, oldText: { type: "string" }, newText: { type: "string" }, expectedReplacements: { type: "number", default: 1 } }, required: ["path", "oldText", "newText"], additionalProperties: false } },
 ] as const;
@@ -469,9 +474,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const parsed = z.object({ path: z.string(), depth: z.number().min(1).max(5).default(1) }).parse(args);
       return complete(jsonText(await listDir(parsed.path, parsed.depth)));
     }
+    if (name === "list_files_smart") {
+      const parsed = z.object({ path: z.string(), depth: z.number().min(0).max(3).default(1), pattern: z.string().optional(), showImports: z.boolean().default(false) }).parse(args);
+      return complete(jsonText(await listFilesSmart(parsed)));
+    }
     if (name === "read_text_file") {
       const parsed = z.object({ path: z.string(), maxBytes: z.number().positive().default(DEFAULT_MAX_FILE_BYTES) }).parse(args);
       return complete(jsonText(await readTextFile(parsed.path, parsed.maxBytes)));
+    }
+    if (name === "read_file_lines") {
+      const parsed = z.object({ path: z.string(), startLine: z.number().int().min(1).default(1), endLine: z.number().int().min(1).optional(), maxLines: z.number().int().min(1).max(500).default(250) }).parse(args);
+      return complete(jsonText(await readFileLines(parsed)));
+    }
+    if (name === "read_many_files") {
+      const parsed = z.object({ files: z.array(z.string()).min(1).max(10), maxLinesPerFile: z.number().int().min(1).max(500).default(250) }).parse(args);
+      return complete(jsonText(await readManyFiles(parsed)));
+    }
+    if (name === "search_files") {
+      const parsed = z.object({ path: z.string(), pattern: z.string().min(1), filePattern: z.string().optional(), contextLines: z.number().int().min(0).max(10).default(2), maxResults: z.number().int().min(1).max(200).default(50), caseSensitive: z.boolean().default(false) }).parse(args);
+      return complete(jsonText(await searchFiles(parsed)));
     }
     if (name === "write_text_file") {
       const parsed = z.object({ path: z.string(), content: z.string(), append: z.boolean().default(false) }).parse(args);
