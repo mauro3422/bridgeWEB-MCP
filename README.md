@@ -9,7 +9,7 @@ El objetivo no es depender de un runner genérico: este repo es el puente local 
 Versión esperada del servidor:
 
 ```text
-bridge-mcp v0.4.0
+bridge-mcp v0.4.1
 ```
 
 Modo recomendado actual:
@@ -87,6 +87,8 @@ Nota: puede que ChatGPT no muestre tools nuevas en una conversación ya abierta 
 npm install
 npm run check
 npm run build
+npm run smoke:http
+npm run test:regressions
 npm run start
 npm run start:http
 ```
@@ -127,7 +129,7 @@ El modo HTTP ya valida:
 - watchdog para reinicio de HTTP
 - watchdog para reinicio de `tunnel-client`
 
-Ver `HTTP_LOCAL_MCP.md`.
+Ver `HTTP_LOCAL_MCP.md` y `TROUBLESHOOTING.md`.
 
 ## Watchdog local
 

@@ -296,7 +296,7 @@ async function bridgeRequestRestart(reason: string, mode: "http" | "tunnel" | "f
   };
 }
 
-async function bridgeRestartStatus(cwd?: string) {
+export async function bridgeRestartStatus(cwd?: string) {
   const requestPath = getRestartRequestPath(cwd);
   const ackPath = getRestartAckPath(cwd);
   const readJsonIfExists = async (filePath: string) => {

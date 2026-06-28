@@ -9,63 +9,58 @@ Use the BrigdeMCP-WEB connector.
 
 Project summary:
 - Repo: https://github.com/mauro3422/bridgeWEB-MCP
-- Stack: Node.js / TypeScript / @modelcontextprotocol/sdk / zod / MCP over stdio.
-- Tunnel: OpenAI Secure MCP Tunnel through tunnel-client.
-- Tunnel id: tunnel_6a410d99e808819196c5137c59cc0f9e
-- Tunnel profile: bridge-local
-- tunnel-client path: C:\dev\bridge-mcp\tools\tunnel-client\tunnel-client.exe
-- profile path: C:\Users\mauro\AppData\Roaming\tunnel-client\bridge-local.yaml
-- CONTROL_PLANE_API_KEY is stored as a Windows User environment variable; do not ask me to paste it.
-- Current server should report bridge-mcp v0.3.0.
+- Stack: Node.js / TypeScript / @modelcontextprotocol/sdk / zod / node:sqlite metrics.
+- Current mode: HTTP production-candidate through OpenAI Secure MCP Tunnel.
+- Bridge HTTP: http://127.0.0.1:3001/mcp
+- Bridge status: http://127.0.0.1:3001/status
+- Tunnel admin: http://127.0.0.1:8081
+- Tunnel profile: bridge-local-http
+- Server should report bridge-mcp v0.4.1.
+- CONTROL_PLANE_API_KEY is stored locally as a Windows User environment variable; do not ask me to paste it.
 
-Important current state:
-- The bridge was upgraded from v0.2.0 to v0.3.0.
-- v0.3.0 added Git and diagnostic tools in src/index.ts and dist/index.js:
-  - git_status
-  - git_set_remote
-  - git_commit_all
-  - git_push_current_branch
-  - tunnel_health
-  - bridge_self_check
-- Some old chats only show the original 11 tools due to connector/tool catalog cache. In this new chat, first verify whether the new tools appear.
-- If new tools do not appear, use system_info and run_command as fallback, but do not assume the server code is wrong. Check dist/index.js for those tool names.
+Important state:
+- HTTP is the recommended active profile.
+- stdio remains the rollback profile only.
+- Use scripts/start-bridge-http-watchdog.ps1 for the active HTTP watchdog.
+- Use scripts/start-bridge-watchdog.ps1 only for rollback to stdio.
+- Do not kill node.exe or tunnel-client.exe directly from the active MCP call.
+- If a restart is needed, use bridge_request_restart. If wrapper blocks it, write .bridge-restart-request and let the external watchdog process it.
+- Current tunnel admin is 8081. Treat 8080 references as stale unless we intentionally changed profiles.
 
 Start by running:
-1. system_info
-2. list available BrigdeMCP-WEB tools if possible
-3. tunnel_health if visible, otherwise use run_command to check http://127.0.0.1:8080/healthz and /readyz
-4. bridge_self_check if visible
-5. git_status if visible, otherwise run_command git status --short --branch
+1. bridge_self_check if visible.
+2. bridge_restart_status if visible.
+3. git_status if visible.
+4. If needed, run_command "powershell -NoProfile -File .\scripts\bridge-doctor.ps1".
+5. Before committing any code: npm run check, npm run build, .\scripts\test-bridge-http.ps1, .\scripts\test-bridge-regressions.ps1.
 
-Known good previous checks:
-- system_info returned bridge-mcp v0.3.0.
-- npm run check passed.
-- npm run build passed.
-- healthz returned 200 live.
-- readyz returned 200 ready.
+Known good checks:
+- bridge_self_check ok true.
+- tunnel.baseUrl http://127.0.0.1:8081.
+- tunnel healthz live / readyz ready.
+- test-bridge-http.ps1 passes.
+- test-bridge-regressions.ps1 passes.
 
-Files recently created/updated:
+Key files:
+- README.md
+- HTTP_LOCAL_MCP.md
+- AGENTS.md
+- TROUBLESHOOTING.md
 - ROADMAP.md
-- NEXT_CHAT_PROMPT.md
-- BRIDGE_WATCHDOG.md
-- scripts/start-bridge-watchdog.ps1
-- scripts/install-bridge-watchdog-task.ps1
-- .gitignore
-
-Watchdog issue:
-- install-bridge-watchdog-task.ps1 failed with Access Denied on Register-ScheduledTask because Windows permissions did not allow registering the task.
-- The script initially printed success incorrectly after failure; it should be fixed if not already committed.
-- We need a no-admin fallback using the user's Startup folder, for example creating BridgeMCP-Watchdog.cmd in [Environment]::GetFolderPath('Startup').
-
-Next desired work:
-1. Verify the new v0.3.0 tools are visible in this chat.
-2. Fix or create a no-admin watchdog startup installer.
-3. Add bridge_request_restart design/implementation later: MCP writes a restart-request file, external watchdog restarts the tunnel/MCP safely.
-4. Commit and push changes after validation.
+- src/config.ts
+- src/http.ts
+- src/bridge-server.ts
+- src/metrics.ts
+- src/visualizations.ts
+- scripts/bridge-doctor.ps1
+- scripts/start-bridge-http-watchdog.ps1
+- scripts/test-bridge-http.ps1
+- scripts/test-bridge-regressions.ps1
 
 Safety rules:
 - Never print or request secrets/API keys in chat.
-- Do not commit node_modules, dist, tunnel-client binaries, sandbox, logs, .env, or keys.
+- Do not commit node_modules, dist, tunnel-client binaries, sandbox, logs, .env, keys, or metrics SQLite files.
 - Prefer explicit MCP tools over raw run_command.
-- Avoid restarting the active tunnel from inside a tool call; use external watchdog/restart-request pattern.
+- Keep changes small and testable.
+- Do not break stdio rollback.
 ```

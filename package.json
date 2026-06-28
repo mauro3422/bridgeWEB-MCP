@@ -1,6 +1,6 @@
 {
   "name": "bridge-mcp",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Kairos/KChat local MCP bridge for MauroPrime and future laptop agents.",
   "type": "module",
   "bin": {
@@ -13,7 +13,9 @@
     "start": "node dist/index.js",
     "start:stdio": "node dist/index.js",
     "start:http": "node dist/http.js",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "smoke:http": "powershell -NoProfile -File .\\scripts\\test-bridge-http.ps1",
+    "test:regressions": "powershell -NoProfile -File .\\scripts\\test-bridge-regressions.ps1"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.9.0",

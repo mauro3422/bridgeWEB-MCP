@@ -4,7 +4,8 @@
   [string]$BridgeHost = "127.0.0.1",
   [int]$BridgePort = 3001,
   [string]$TunnelBaseUrl = "http://127.0.0.1:8081",
-  [string]$StartupFileName = "BridgeMCP-Watchdog.cmd"
+  [string]$StartupFileName = "BridgeMCP-Watchdog.cmd",
+  [string]$ExpectedServerVersion = "0.4.1"
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,6 +14,11 @@ function Write-Section {
   param([string]$Title)
   Write-Host ""
   Write-Host "=== $Title ==="
+}
+
+function Write-RecoveryHint {
+  param([string]$Message)
+  Write-Host "  hint: $Message"
 }
 
 function Test-HttpText {
@@ -69,15 +75,21 @@ Write-Host "ProjectRoot: $ProjectRoot"
 Write-Host "Profile:     $Profile"
 Write-Host "Bridge:      $bridgeBaseUrl/mcp"
 Write-Host "Tunnel:      $TunnelBaseUrl"
+Write-Host "Expected:    server=$ExpectedServerVersion profile=$Profile bridgePort=$BridgePort tunnelPort=$tunnelPort"
 
 Write-Section "HTTP health"
 $bridgeStatus = Get-JsonStatus -Url "$bridgeBaseUrl/status"
 if ($bridgeStatus.ok) {
   $status = $bridgeStatus.value
   Write-Host "bridge /status: OK server=$($status.server.name) version=$($status.server.version) pid=$($status.pid) sessions=$($status.sessions) uptimeSeconds=$($status.uptimeSeconds)"
+  if ([string]$status.server.version -ne $ExpectedServerVersion) {
+    $warnings.Add("bridge server version is $($status.server.version), expected $ExpectedServerVersion") | Out-Null
+    Write-RecoveryHint "run npm run build, then request an HTTP restart through the watchdog."
+  }
 }
 else {
   Write-Host "bridge /status: FAIL $($bridgeStatus.error)"
+  Write-RecoveryHint "check the HTTP watchdog and port $BridgePort before changing code."
   $warnings.Add("bridge status is not reachable") | Out-Null
 }
 
@@ -85,9 +97,19 @@ $bridgeReady = Test-HttpText -Url "$bridgeBaseUrl/readyz" -Expected "ready"
 Write-Host "bridge /readyz: $(if ($bridgeReady.ok) { 'OK ready' } else { 'FAIL ' + $bridgeReady.error })"
 if (-not $bridgeReady.ok) { $warnings.Add("bridge readyz is not ready") | Out-Null }
 
+$tunnelHealth = Test-HttpText -Url "$TunnelBaseUrl/healthz" -Expected "live"
+Write-Host "tunnel /healthz: $(if ($tunnelHealth.ok) { 'OK live' } else { 'FAIL ' + $tunnelHealth.error })"
+if (-not $tunnelHealth.ok) {
+  Write-RecoveryHint "the active HTTP profile uses tunnel admin $TunnelBaseUrl; do not fall back to 8080 unless you intentionally changed profiles."
+  $warnings.Add("tunnel healthz is not live") | Out-Null
+}
+
 $tunnelReady = Test-HttpText -Url "$TunnelBaseUrl/readyz" -Expected "ready"
 Write-Host "tunnel /readyz: $(if ($tunnelReady.ok) { 'OK ready' } else { 'FAIL ' + $tunnelReady.error })"
-if (-not $tunnelReady.ok) { $warnings.Add("tunnel readyz is not ready") | Out-Null }
+if (-not $tunnelReady.ok) {
+  Write-RecoveryHint "check tunnel-client, the Startup watchdog launcher, and the profile name before restarting manually."
+  $warnings.Add("tunnel readyz is not ready") | Out-Null
+}
 
 Write-Section "Listening ports"
 $interestingPorts = @($BridgePort, $tunnelPort, 3002, 3004, 8080, 8094) | Sort-Object -Unique
@@ -151,10 +173,12 @@ Write-Host "request exists: $(Test-Path -LiteralPath $requestPath) path=$request
 Write-Host "ack exists:     $(Test-Path -LiteralPath $ackPath) path=$ackPath"
 if (Test-Path -LiteralPath $ackPath) {
   try {
-    $ack = Get-Content -LiteralPath $ackPath -Raw | ConvertFrom-Json
+    $ackText = Get-Content -LiteralPath $ackPath -Raw
+    $ack = $ackText -replace '^\uFEFF', '' | ConvertFrom-Json
     Write-Host "last ack: action=$($ack.action) acknowledgedAt=$($ack.acknowledgedAt) watchdogPid=$($ack.watchdogPid)"
   }
   catch {
+    Write-RecoveryHint "ack parse failures are usually stale/corrupt restart metadata, not a live bridge failure."
     $warnings.Add("restart ack exists but could not be parsed") | Out-Null
   }
 }

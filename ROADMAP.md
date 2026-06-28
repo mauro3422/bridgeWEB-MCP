@@ -1,13 +1,18 @@
 # bridge-mcp Roadmap
 
-Local MCP bridge for MauroPrime. The goal is to let ChatGPT operate a Windows PC through a controlled OpenAI Secure MCP Tunnel, similar to a small local Codex bridge, but with explicit safety boundaries.
+Local MCP bridge for MauroPrime. The goal is to let ChatGPT operate MauroPrime through a controlled OpenAI Secure MCP Tunnel with explicit diagnostics, safe restart flow, Git workflow, metrics, and rollback.
 
 ## Current status
 
-Project root:
-
 ```txt
-C:\dev\bridge-mcp
+Project root: C:\dev\bridge-mcp
+Server: bridge-mcp v0.4.1
+Mode: HTTP production-candidate
+Bridge HTTP: http://127.0.0.1:3001/mcp
+Bridge status: http://127.0.0.1:3001/status
+Tunnel admin: http://127.0.0.1:8081
+Tunnel profile: bridge-local-http
+Rollback profile: stdio through scripts/start-bridge-watchdog.ps1
 ```
 
 Stack:
@@ -16,63 +21,33 @@ Stack:
 Node.js / TypeScript
 @modelcontextprotocol/sdk
 zod
-MCP over stdio
-OpenAI tunnel-client for Secure MCP Tunnel
+node:sqlite metrics
+MCP Streamable HTTP local
+OpenAI Secure MCP Tunnel through tunnel-client
 ```
 
-Current local server version:
-
-```txt
-bridge-mcp v0.3.0
-```
-
-Tunnel profile:
-
-```txt
-bridge-local
-```
-
-Tunnel id:
-
-```txt
-tunnel_6a410d99e808819196c5137c59cc0f9e
-```
-
-Tunnel client path:
-
-```txt
-C:\dev\bridge-mcp\tools\tunnel-client\tunnel-client.exe
-```
-
-Profile path:
-
-```txt
-C:\Users\mauro\AppData\Roaming\tunnel-client\bridge-local.yaml
-```
-
-The profile reads the runtime key from:
-
-```txt
-env:CONTROL_PLANE_API_KEY
-```
-
-Do not commit keys or tunnel secrets.
+Do not commit keys, tunnel secrets, `node_modules`, `dist`, logs, SQLite metrics, sandbox files, or tunnel-client binaries.
 
 ## Confirmed working checks
 
-Known-good checks after v0.3.0 build:
+Known-good checks for v0.4.1:
 
 ```txt
-system_info -> bridge-mcp v0.3.0
+bridge_self_check -> ok true
 npm run check -> OK
 npm run build -> OK
-http://127.0.0.1:8080/healthz -> 200 live
-http://127.0.0.1:8080/readyz -> 200 ready
+scripts/test-bridge-http.ps1 -> OK
+scripts/test-bridge-regressions.ps1 -> OK
+http://127.0.0.1:3001/status -> bridge-mcp v0.4.1
+http://127.0.0.1:8081/healthz -> live
+http://127.0.0.1:8081/readyz -> ready
 ```
 
-## Existing tools
+If anything points at `8080`, treat it as stale context unless the active profile was intentionally changed.
 
-Original tools:
+## Current tool groups
+
+Base tools:
 
 ```txt
 system_info
@@ -81,6 +56,11 @@ read_text_file
 write_text_file
 apply_patch
 run_command
+```
+
+Persistent terminal tools:
+
+```txt
 terminal_start
 terminal_write
 terminal_read
@@ -88,7 +68,7 @@ terminal_stop
 terminal_list
 ```
 
-Added in v0.3.0 source/build:
+Git, tunnel, restart and self-check tools:
 
 ```txt
 git_status
@@ -97,131 +77,105 @@ git_commit_all
 git_push_current_branch
 tunnel_health
 bridge_self_check
+bridge_request_restart
+bridge_restart_status
 ```
 
-Note: some ChatGPT chats may still show the old 11-tool catalog due to connector/tool cache. Open a new chat with the BrigdeMCP-WEB connector selected to refresh the tool list.
+Metrics and visualization tools:
+
+```txt
+bridge_metrics_status
+bridge_metrics_summary
+bridge_metrics_recent
+bridge_visualization_catalog
+bridge_visualize_metrics
+```
+
+Note: some ChatGPT chats may show an old cached tool catalog. Reopen/refresh the connector if tools are missing.
 
 ## Git repository
 
-Remote:
-
 ```txt
-https://github.com/mauro3422/bridgeWEB-MCP
+Remote: https://github.com/mauro3422/bridgeWEB-MCP
+Expected branch: main
+Expected clean state: ## main...origin/main
 ```
 
-Known pushed commits:
+Operational flow:
 
 ```txt
-879102f feat: add git and bridge self-check tools
-7d6b22d chore: harden gitignore for bridge artifacts
+plan -> patch -> check -> build -> smoke -> regression -> commit -> push
 ```
 
-Pending local commits may exist after edits. Use:
+## Watchdog and restart status
+
+Active watchdog:
 
 ```powershell
-git status --short --branch
-git push
+.\scripts\start-bridge-http-watchdog.ps1 -ProjectRoot C:\dev\bridge-mcp -Profile bridge-local-http -TunnelBaseUrl http://127.0.0.1:8081
 ```
 
-## Watchdog status
-
-Created files:
-
-```txt
-BRIDGE_WATCHDOG.md
-scripts/start-bridge-watchdog.ps1
-scripts/install-bridge-watchdog-task.ps1
-```
-
-`install-bridge-watchdog-task.ps1` may fail without Windows task permissions. If Scheduled Task registration fails, use a user Startup shortcut/cmd fallback.
-
-Manual tunnel recovery:
-
-```powershell
-Set-Location C:\dev\bridge-mcp
-& "C:\dev\bridge-mcp\tools\tunnel-client\tunnel-client.exe" doctor --profile bridge-local --explain
-& "C:\dev\bridge-mcp\tools\tunnel-client\tunnel-client.exe" run --profile bridge-local
-```
-
-## Immediate next steps
-
-1. Open a new ChatGPT chat with the BrigdeMCP-WEB connector selected.
-2. Verify the new tool catalog includes 17 tools.
-3. Run `system_info` and confirm `bridge-mcp v0.3.0`.
-4. Run `tunnel_health` and `bridge_self_check` if visible.
-5. Fix the watchdog install script so it does not print success after failure and add a no-admin Startup fallback.
-6. Commit and push the watchdog/context updates.
-
-## v0.4 roadmap
-
-### Safer restart flow
-
-Add a restart request mechanism instead of restarting the bridge from inside a tool call.
-
-Proposed tool:
-
-```txt
-bridge_request_restart
-```
-
-Behavior:
+Safe restart flow:
 
 ```txt
 1. MCP writes C:\dev\bridge-mcp\.bridge-restart-request
 2. Tool returns success
 3. External watchdog sees the file
-4. Watchdog restarts tunnel-client/MCP
-5. Watchdog deletes the request file
+4. Watchdog restarts HTTP MCP and/or tunnel-client
+5. Watchdog writes .bridge-restart-ack and deletes the request file
 ```
 
-This avoids the MCP killing the same tunnel ChatGPT is using for the active call.
-
-### Watchdog improvements
-
-- Add no-admin Startup installer.
-- Add log file output under ignored `logs/`.
-- Add restart-request detection.
-- Add duplicate tunnel detection to avoid two `tunnel-client run` processes for the same profile.
-- Make install script fail loudly and truthfully.
-
-### Safety and policy improvements
-
-- Add allowed roots, for example `C:\dev\bridge-mcp`, `C:\dev\Kairos`.
-- Add denied paths/globs: `.env`, keys, AppData, Windows, System32, node_modules.
-- Add secret redaction in command output.
-- Add max terminal age and max terminal count.
-- Add safer file operations: `rename_path`, `copy_path`, `delete_path_to_trash`.
-
-### Mini-Codex workflow
-
-Goal: explicit high-level operation flow:
+Preferred tool:
 
 ```txt
-plan -> patch -> check -> build -> smoke -> commit -> push
+bridge_request_restart
 ```
 
-Prefer declarative tools over raw shell commands whenever possible.
+If the wrapper blocks that tool, use `write_text_file` to create `.bridge-restart-request`. Do not kill the active MCP/tunnel process directly from the same tool call.
 
-## v0.5 roadmap
+## Current completed v0.4 work
 
-Consider migrating from stdio MCP target to a local HTTP MCP server. Current architecture:
+- HTTP local production-candidate profile.
+- No-admin Startup launcher for the HTTP watchdog.
+- Restart request/ack flow through external watchdog.
+- BOM-tolerant restart ack parsing.
+- Tunnel health default aligned to `8081`.
+- Bridge metrics in SQLite/logs.
+- Chat-renderable metrics visualization specs.
+- HTTP smoke test.
+- Regression test for version/defaults/BOM ack parsing.
+- Troubleshooting notes for wrapper blocks and stale `8080` context.
 
-```txt
-ChatGPT -> tunnel-client -> node dist/index.js over stdio
+## Next recommended work
+
+### Diagnostics hardening
+
+- Keep improving `scripts/bridge-doctor.ps1` messages when a failure occurs.
+- Add stale-ack age warnings.
+- Add explicit detection of wrong tunnel profile.
+- Add a single command that runs doctor + check + build + smoke + regressions.
+
+### Test coverage
+
+- Add tests for duplicate watchdog/tunnel detection.
+- Add tests for restart-request lifecycle.
+- Add tests for metrics SQLite availability without leaking arguments.
+
+### Workflow polish
+
+- Add a short `RELEASE.md` checklist.
+- Add npm script aliases for smoke/regression tests.
+- Consider tagging stable versions after clean push.
+
+### Later safety work
+
+Allowed roots / denied path policy is intentionally not part of this change. Keep it as a later design item so it does not destabilize the active bridge.
+
+## Rollback
+
+`stdio` rollback remains available:
+
+```powershell
+Set-Location C:\dev\bridge-mcp
+.\scripts\start-bridge-watchdog.ps1 -ProjectRoot C:\dev\bridge-mcp
 ```
-
-More robust architecture:
-
-```txt
-ChatGPT -> tunnel-client always running -> MCP HTTP server on 127.0.0.1
-```
-
-This would allow cleaner local MCP server restarts while keeping the tunnel process more stable.
-
-## Operational notes
-
-- If the tunnel is down, ChatGPT cannot operate the PC through BrigdeMCP-WEB.
-- If `doctor` says `CONTROL_PLANE_API_KEY` is missing, set it as a User environment variable and open a new PowerShell.
-- Do not paste API keys into chat.
-- Do not commit tunnel-client binaries, secrets, logs, sandbox output, or node_modules.
-- Prefer Git commits after each stable change.
