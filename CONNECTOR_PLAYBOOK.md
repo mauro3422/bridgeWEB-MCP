@@ -431,6 +431,7 @@ Proceso:
 
 ```txt
 npm run docs:tools
+npm run docs:tools:check
 ```
 
 Usar si cambio:
@@ -441,6 +442,8 @@ description
 inputSchema
 module registry
 ```
+
+`bridge_verify_all` tambien ejecuta `docs:tools:check`, asi que `TOOLS.md` queda controlado contra las definitions/schemas reales.
 
 ### D. Tools MCP y registry
 

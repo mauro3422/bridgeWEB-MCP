@@ -192,6 +192,7 @@ npm run check
 npm run build
 smoke:http
 test:regressions
+docs:tools:check
 tools/list sanity
 git status
 ```

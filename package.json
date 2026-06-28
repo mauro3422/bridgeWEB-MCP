@@ -17,7 +17,8 @@
     "smoke:http": "powershell -NoProfile -File .\\scripts\\test-bridge-http.ps1",
     "test:regressions": "powershell -NoProfile -File .\\scripts\\test-bridge-regressions.ps1",
     "verify:all": "powershell -NoProfile -File .\\scripts\\verify-all.ps1",
-    "docs:tools": "npm run build && node scripts/generate-tools-doc.mjs"
+    "docs:tools": "npm run build && node scripts/generate-tools-doc.mjs",
+    "docs:tools:check": "npm run build && node scripts/generate-tools-doc.mjs --check"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.9.0",
