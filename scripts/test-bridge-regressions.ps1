@@ -1,4 +1,4 @@
-﻿param(
+param(
   [string]$ProjectRoot = "C:\dev\bridge-mcp",
   [string]$ExpectedTunnelAdminBaseUrl = "http://127.0.0.1:8081"
 )
@@ -20,9 +20,9 @@ Set-Location -LiteralPath $ProjectRoot
 Invoke-Check "version bump is consistent" {
   $packageJson = Get-Content -LiteralPath "package.json" -Raw | ConvertFrom-Json
   $configText = Get-Content -LiteralPath "src\config.ts" -Raw
-  if ($packageJson.version -ne "0.4.5") { throw "package.json version is $($packageJson.version), expected 0.4.5" }
-  if ($configText -notmatch 'SERVER_VERSION = "0\.4\.5"') { throw "src/config.ts does not report SERVER_VERSION 0.4.5" }
-  Write-Host "  OK 0.4.5"
+  if ($packageJson.version -ne "0.4.6") { throw "package.json version is $($packageJson.version), expected 0.4.6" }
+  if ($configText -notmatch 'SERVER_VERSION = "0\.4\.6"') { throw "src/config.ts does not report SERVER_VERSION 0.4.6" }
+  Write-Host "  OK 0.4.6"
 }
 
 Invoke-Check "tunnel admin default stays on HTTP profile port" {
@@ -112,6 +112,28 @@ console.log("  OK code intelligence tools");
   }
 }
 
+Invoke-Check "bridge workflow tool is registered" {
+  $nodeScript = @'
+import { pathToFileURL } from "node:url";
+const registryModuleUrl = pathToFileURL(process.argv[2]).href;
+const { createDefaultToolRegistry } = await import(registryModuleUrl);
+const registry = createDefaultToolRegistry();
+if (!registry.has("bridge_verify_all")) process.exit(40);
+if (!registry.modules.includes("bridge-workflow")) process.exit(41);
+console.log("  OK bridge workflow tool");
+'@
+  $tmpScript = Join-Path ([System.IO.Path]::GetTempPath()) ("bridge-workflow-" + [Guid]::NewGuid().ToString("N") + ".mjs")
+  try {
+    Set-Content -LiteralPath $tmpScript -Value $nodeScript -Encoding utf8
+    $registryModulePath = (Resolve-Path -LiteralPath ".\dist\tool-registry.js").Path
+    node $tmpScript $registryModulePath
+    if ($LASTEXITCODE -ne 0) { throw "bridge workflow registry regression failed" }
+  }
+  finally {
+    Remove-Item -LiteralPath $tmpScript -Force -ErrorAction SilentlyContinue
+  }
+}
+
 Invoke-Check "restart ack JSON accepts UTF-8 BOM" {
   $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("bridge-regression-" + [Guid]::NewGuid().ToString("N"))
   New-Item -ItemType Directory -Path $tmp | Out-Null
@@ -147,4 +169,3 @@ if (status.lastAck.id !== "bom-test" || status.lastAck.action !== "restart-http"
 }
 
 Write-Host "[bridge-regression-test] all checks passed"
-

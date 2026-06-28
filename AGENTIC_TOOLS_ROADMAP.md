@@ -423,7 +423,22 @@ duplicate definition grouping
 approximate impact risk summary
 ```
 
-### v0.4.6: TypeScript intelligence
+### v0.4.6: verify-all workflow
+
+Status: implemented.
+
+Delivered:
+
+```txt
+scripts/verify-all.ps1
+npm run verify:all
+src/tools/bridge-workflow.ts
+bridge_verify_all
+```
+
+This closes the loop for normal bridge work: navigate code, edit safely, check impact, then run one verification workflow.
+
+### v0.4.7: TypeScript intelligence
 
 Deliver:
 

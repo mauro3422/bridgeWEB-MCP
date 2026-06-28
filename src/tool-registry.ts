@@ -1,3 +1,4 @@
+import { bridgeWorkflowToolModule } from "./tools/bridge-workflow.js";
 import { codeIntelligenceToolModule } from "./tools/code-intelligence.js";
 import { fileNavigationToolModule } from "./tools/file-navigation.js";
 import { fileWritingToolModule } from "./tools/file-writing.js";
@@ -42,5 +43,6 @@ export function createDefaultToolRegistry(): BridgeToolRegistry {
     fileNavigationToolModule,
     fileWritingToolModule,
     codeIntelligenceToolModule,
+    bridgeWorkflowToolModule,
   ]);
 }

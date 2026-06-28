@@ -9,7 +9,7 @@ El objetivo no es depender de un runner genÃ©rico: este repo es el puente loca
 VersiÃ³n esperada del servidor:
 
 ```text
-bridge-mcp v0.4.5
+bridge-mcp v0.4.6
 ```
 
 Modo recomendado actual:
@@ -58,6 +58,7 @@ Base local:
 - `analyze_code`: analisis liviano de simbolos, lineas y referencias en un archivo.
 - `impact_analysis`: impacto aproximado de un simbolo en el proyecto.
 - `find_duplicate_symbols`: deteccion liviana de simbolos duplicados.
+- `bridge_verify_all`: ejecuta doctor, check, build, smoke, regressions, tools/list y git status.
 - `run_command`: ejecuta comandos con `cwd`, timeout y salida capturada.
 
 Terminal persistente:
@@ -230,4 +231,5 @@ Mantener secretos como variables de entorno de Windows o en perfiles locales fue
 El perfil HTTP local es intencionalmente loopback-only y no-auth en el listener MCP. La barrera de seguridad real es el OpenAI Secure MCP Tunnel + runtime key + permisos del workspace.
 
 Ver `OPENAI_TUNNEL_LOCAL_AUTH.md`.
+
 

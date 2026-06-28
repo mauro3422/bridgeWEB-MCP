@@ -5,7 +5,7 @@
   [int]$BridgePort = 3001,
   [string]$TunnelBaseUrl = "http://127.0.0.1:8081",
   [string]$StartupFileName = "BridgeMCP-Watchdog.cmd",
-  [string]$ExpectedServerVersion = "0.4.5"
+  [string]$ExpectedServerVersion = "0.4.6"
 )
 
 $ErrorActionPreference = "Stop"
@@ -195,5 +195,6 @@ if ($warnings.Count -eq 0) {
 Write-Host "WARNINGS:"
 foreach ($warning in $warnings) { Write-Host "- $warning" }
 exit 1
+
 
 
