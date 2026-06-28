@@ -9,7 +9,7 @@ El objetivo no es depender de un runner genÃ©rico: este repo es el puente loca
 VersiÃ³n esperada del servidor:
 
 ```text
-bridge-mcp v0.4.6
+bridge-mcp v0.4.7
 ```
 
 Modo recomendado actual:

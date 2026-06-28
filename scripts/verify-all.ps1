@@ -1,6 +1,6 @@
 param(
   [string]$ProjectRoot = "C:\dev\bridge-mcp",
-  [string]$ExpectedServerVersion = "0.4.6",
+  [string]$ExpectedServerVersion = "0.4.7",
   [switch]$StrictGit
 )
 
@@ -53,7 +53,7 @@ $steps += Invoke-VerifyStep "build" { npm run build }
 $steps += Invoke-VerifyStep "smoke:http" { powershell -NoProfile -File .\scripts\test-bridge-http.ps1 }
 $steps += Invoke-VerifyStep "test:regressions" { powershell -NoProfile -File .\scripts\test-bridge-regressions.ps1 }
 $steps += Invoke-VerifyStep "tools:list sanity" {
-  node -e "const base='http://127.0.0.1:3001/mcp'; const init={jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2024-11-05',capabilities:{},clientInfo:{name:'verify-all',version:'0.1.0'}}}; const r=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json, text/event-stream'},body:JSON.stringify(init)}); const sid=r.headers.get('mcp-session-id'); await r.text(); const rr=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json, text/event-stream','Mcp-Session-Id':sid},body:JSON.stringify({jsonrpc:'2.0',id:2,method:'tools/list',params:{}})}); const txt=await rr.text(); const names=['bridge_verify_all','read_file_lines','edit_lines','impact_analysis']; const missing=names.filter(n=>!txt.includes(n)); if(missing.length){ console.error('missing tools: '+missing.join(',')); process.exit(1); } console.log('tools present: '+names.join(','));"
+  node -e "const base='http://127.0.0.1:3001/mcp'; const init={jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2024-11-05',capabilities:{},clientInfo:{name:'verify-all',version:'0.1.0'}}}; const r=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json, text/event-stream'},body:JSON.stringify(init)}); const sid=r.headers.get('mcp-session-id'); await r.text(); const rr=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json, text/event-stream','Mcp-Session-Id':sid},body:JSON.stringify({jsonrpc:'2.0',id:2,method:'tools/list',params:{}})}); const txt=await rr.text(); const names=['system_info','run_command','git_status','bridge_self_check','bridge_metrics_status','bridge_verify_all','read_file_lines','edit_lines','impact_analysis']; const missing=names.filter(n=>!txt.includes(n)); if(missing.length){ console.error('missing tools: '+missing.join(',')); process.exit(1); } console.log('tools present: '+names.join(','));"
 }
 $steps += Invoke-VerifyStep "git status" {
   git status --short --branch

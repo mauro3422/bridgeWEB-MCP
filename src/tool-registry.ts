@@ -1,7 +1,12 @@
+import { bridgeOpsToolModule } from "./tools/bridge-ops.js";
 import { bridgeWorkflowToolModule } from "./tools/bridge-workflow.js";
 import { codeIntelligenceToolModule } from "./tools/code-intelligence.js";
+import { coreToolModule } from "./tools/core-tools.js";
 import { fileNavigationToolModule } from "./tools/file-navigation.js";
 import { fileWritingToolModule } from "./tools/file-writing.js";
+import { gitToolModule } from "./tools/git-tools.js";
+import { metricsToolModule } from "./tools/metrics-tools.js";
+import { processToolModule } from "./tools/process-tools.js";
 import type { BridgeToolModule, BridgeToolRegistry, BridgeToolSchema } from "./tools/types.js";
 
 export function createToolRegistry(modules: readonly BridgeToolModule[]): BridgeToolRegistry {
@@ -40,8 +45,13 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
 
 export function createDefaultToolRegistry(): BridgeToolRegistry {
   return createToolRegistry([
+    coreToolModule,
     fileNavigationToolModule,
     fileWritingToolModule,
+    processToolModule,
+    gitToolModule,
+    bridgeOpsToolModule,
+    metricsToolModule,
     codeIntelligenceToolModule,
     bridgeWorkflowToolModule,
   ]);

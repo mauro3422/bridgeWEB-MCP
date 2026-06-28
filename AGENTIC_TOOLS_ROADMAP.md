@@ -438,7 +438,24 @@ bridge_verify_all
 
 This closes the loop for normal bridge work: navigate code, edit safely, check impact, then run one verification workflow.
 
-### v0.4.7: TypeScript intelligence
+### v0.4.7: complete modular registry migration
+
+Status: implemented.
+
+Delivered:
+
+```txt
+src/tools/core-tools.ts
+src/tools/process-tools.ts
+src/tools/git-tools.ts
+src/tools/bridge-ops.ts
+src/tools/metrics-tools.ts
+src/tools/shared/process.ts
+```
+
+`bridge-server.ts` is now a minimal MCP dispatcher with metrics wrapping. Tool schemas and handlers live in registry modules.
+
+### v0.4.8: TypeScript intelligence
 
 Deliver:
 

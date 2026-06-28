@@ -20,9 +20,9 @@ Set-Location -LiteralPath $ProjectRoot
 Invoke-Check "version bump is consistent" {
   $packageJson = Get-Content -LiteralPath "package.json" -Raw | ConvertFrom-Json
   $configText = Get-Content -LiteralPath "src\config.ts" -Raw
-  if ($packageJson.version -ne "0.4.6") { throw "package.json version is $($packageJson.version), expected 0.4.6" }
-  if ($configText -notmatch 'SERVER_VERSION = "0\.4\.6"') { throw "src/config.ts does not report SERVER_VERSION 0.4.6" }
-  Write-Host "  OK 0.4.6"
+  if ($packageJson.version -ne "0.4.7") { throw "package.json version is $($packageJson.version), expected 0.4.7" }
+  if ($configText -notmatch 'SERVER_VERSION = "0\.4\.7"') { throw "src/config.ts does not report SERVER_VERSION 0.4.7" }
+  Write-Host "  OK 0.4.7"
 }
 
 Invoke-Check "tunnel admin default stays on HTTP profile port" {
@@ -119,8 +119,13 @@ const registryModuleUrl = pathToFileURL(process.argv[2]).href;
 const { createDefaultToolRegistry } = await import(registryModuleUrl);
 const registry = createDefaultToolRegistry();
 if (!registry.has("bridge_verify_all")) process.exit(40);
-if (!registry.modules.includes("bridge-workflow")) process.exit(41);
-console.log("  OK bridge workflow tool");
+for (const moduleName of ["core", "process", "git", "bridge-ops", "metrics", "bridge-workflow"]) {
+  if (!registry.modules.includes(moduleName)) process.exit(41);
+}
+for (const tool of ["system_info", "run_command", "git_status", "bridge_self_check", "bridge_metrics_status", "bridge_verify_all"]) {
+  if (!registry.has(tool)) process.exit(42);
+}
+console.log("  OK bridge workflow and migrated modules");
 '@
   $tmpScript = Join-Path ([System.IO.Path]::GetTempPath()) ("bridge-workflow-" + [Guid]::NewGuid().ToString("N") + ".mjs")
   try {
