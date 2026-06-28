@@ -329,7 +329,30 @@ npm run test:regressions
 bridge_self_check
 ```
 
-### v0.4.3: surgical editing and verify-all
+### v0.4.3: modular tool registry foundation
+
+Status: implemented as first modular slice.
+
+Delivered:
+
+```txt
+src/tools/types.ts
+src/tools/file-navigation.ts
+src/tool-registry.ts
+```
+
+The first registry-backed module is `file-navigation`, containing:
+
+```txt
+read_file_lines
+read_many_files
+search_files
+list_files_smart
+```
+
+The current bridge still keeps legacy/core tools inline in `bridge-server.ts`. Future work should migrate them module by module instead of doing one large risky rewrite.
+
+### v0.4.4: surgical editing and verify-all
 
 Deliver:
 

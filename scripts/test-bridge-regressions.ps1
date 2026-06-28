@@ -20,9 +20,9 @@ Set-Location -LiteralPath $ProjectRoot
 Invoke-Check "version bump is consistent" {
   $packageJson = Get-Content -LiteralPath "package.json" -Raw | ConvertFrom-Json
   $configText = Get-Content -LiteralPath "src\config.ts" -Raw
-  if ($packageJson.version -ne "0.4.2") { throw "package.json version is $($packageJson.version), expected 0.4.2" }
-  if ($configText -notmatch 'SERVER_VERSION = "0\.4\.2"') { throw "src/config.ts does not report SERVER_VERSION 0.4.2" }
-  Write-Host "  OK 0.4.2"
+  if ($packageJson.version -ne "0.4.3") { throw "package.json version is $($packageJson.version), expected 0.4.3" }
+  if ($configText -notmatch 'SERVER_VERSION = "0\.4\.3"') { throw "src/config.ts does not report SERVER_VERSION 0.4.3" }
+  Write-Host "  OK 0.4.3"
 }
 
 Invoke-Check "tunnel admin default stays on HTTP profile port" {
@@ -34,11 +34,18 @@ Invoke-Check "tunnel admin default stays on HTTP profile port" {
   Write-Host "  OK $ExpectedTunnelAdminBaseUrl"
 }
 
-Invoke-Check "agentic file tools work from dist" {
+Invoke-Check "agentic file tools work from modular registry" {
   $nodeScript = @'
 import { pathToFileURL } from "node:url";
 const fileToolsModuleUrl = pathToFileURL(process.argv[2]).href;
+const registryModuleUrl = pathToFileURL(process.argv[3]).href;
 const { listFilesSmart, readFileLines, readManyFiles, searchFiles } = await import(fileToolsModuleUrl);
+const { createDefaultToolRegistry } = await import(registryModuleUrl);
+const registry = createDefaultToolRegistry();
+for (const tool of ["read_file_lines", "read_many_files", "search_files", "list_files_smart"]) {
+  if (!registry.has(tool)) process.exit(20);
+}
+if (!registry.modules.includes("file-navigation")) process.exit(21);
 const root = process.cwd();
 const read = await readFileLines({ path: "src/config.ts", startLine: 1, maxLines: 20 });
 if (!read.lines.some((line) => line.text.includes("SERVER_VERSION"))) process.exit(11);
@@ -54,7 +61,8 @@ console.log("  OK file navigation tools");
   try {
     Set-Content -LiteralPath $tmpScript -Value $nodeScript -Encoding utf8
     $fileToolsModulePath = (Resolve-Path -LiteralPath ".\dist\file-tools.js").Path
-    node $tmpScript $fileToolsModulePath
+    $registryModulePath = (Resolve-Path -LiteralPath ".\dist\tool-registry.js").Path
+    node $tmpScript $fileToolsModulePath $registryModulePath
     if ($LASTEXITCODE -ne 0) { throw "agentic file tools regression failed" }
   }
   finally {

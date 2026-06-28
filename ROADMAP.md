@@ -6,7 +6,7 @@ Local MCP bridge for MauroPrime. The goal is to let ChatGPT operate MauroPrime t
 
 ```txt
 Project root: C:\dev\bridge-mcp
-Server: bridge-mcp v0.4.2
+Server: bridge-mcp v0.4.3
 Mode: HTTP production-candidate
 Bridge HTTP: http://127.0.0.1:3001/mcp
 Bridge status: http://127.0.0.1:3001/status
@@ -30,7 +30,7 @@ Do not commit keys, tunnel secrets, `node_modules`, `dist`, logs, SQLite metrics
 
 ## Confirmed working checks
 
-Known-good checks for v0.4.2:
+Known-good checks for v0.4.3:
 
 ```txt
 bridge_self_check -> ok true
@@ -38,7 +38,7 @@ npm run check -> OK
 npm run build -> OK
 scripts/test-bridge-http.ps1 -> OK
 scripts/test-bridge-regressions.ps1 -> OK
-http://127.0.0.1:3001/status -> bridge-mcp v0.4.2
+http://127.0.0.1:3001/status -> bridge-mcp v0.4.3
 http://127.0.0.1:8081/healthz -> live
 http://127.0.0.1:8081/readyz -> ready
 ```
@@ -148,6 +148,8 @@ If the wrapper blocks that tool, use `write_text_file` to create `.bridge-restar
 - Chat-renderable metrics visualization specs.
 - HTTP smoke test.
 - Regression test for version/defaults/BOM ack parsing.
+- Agentic file navigation tools: `read_file_lines`, `read_many_files`, `search_files`, `list_files_smart`.
+- Modular registry foundation for the first tool module: `file-navigation`.
 - Troubleshooting notes for wrapper blocks and stale `8080` context.
 
 ## Next recommended work
