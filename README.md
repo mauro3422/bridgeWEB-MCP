@@ -347,6 +347,8 @@ Mantener secretos como variables de entorno de Windows o perfiles locales fuera 
 ## Docs relacionadas
 
 ```text
+TOOLS.md
+CONNECTOR_CONTEXT.md
 HTTP_LOCAL_MCP.md
 OPENAI_TUNNEL_LOCAL_AUTH.md
 RESTART_FLOW.md
