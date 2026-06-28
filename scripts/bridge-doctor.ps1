@@ -5,7 +5,7 @@
   [int]$BridgePort = 3001,
   [string]$TunnelBaseUrl = "http://127.0.0.1:8081",
   [string]$StartupFileName = "BridgeMCP-Watchdog.cmd",
-  [string]$ExpectedServerVersion = "0.4.3"
+  [string]$ExpectedServerVersion = "0.4.4"
 )
 
 $ErrorActionPreference = "Stop"

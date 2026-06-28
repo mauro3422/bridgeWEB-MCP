@@ -352,7 +352,32 @@ list_files_smart
 
 The current bridge still keeps legacy/core tools inline in `bridge-server.ts`. Future work should migrate them module by module instead of doing one large risky rewrite.
 
-### v0.4.4: surgical editing and verify-all
+### v0.4.4: shared writing helpers and surgical editing
+
+Status: implemented for file-writing. `bridge_verify_all` remains future work.
+
+Delivered:
+
+```txt
+src/tools/shared/text-files.ts
+src/tools/shared/line-edits.ts
+src/tools/file-writing.ts
+edit_lines
+modular write_text_file
+modular apply_patch
+```
+
+Cross-cutting helpers now available:
+
+```txt
+text snapshot with bytes/hash/line count
+binary-looking file refusal
+line ending detection
+postflight hash verification
+line-range editing with context preview
+```
+
+### v0.4.5: verify-all workflow
 
 Deliver:
 
@@ -371,7 +396,7 @@ Tests:
 - invalid line range rejection
 - backup/rollback metadata
 
-### v0.4.4: TypeScript intelligence
+### v0.4.6: TypeScript intelligence
 
 Deliver:
 

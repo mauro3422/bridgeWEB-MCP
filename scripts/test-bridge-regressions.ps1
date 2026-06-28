@@ -1,4 +1,4 @@
-﻿param(
+param(
   [string]$ProjectRoot = "C:\dev\bridge-mcp",
   [string]$ExpectedTunnelAdminBaseUrl = "http://127.0.0.1:8081"
 )
@@ -20,9 +20,9 @@ Set-Location -LiteralPath $ProjectRoot
 Invoke-Check "version bump is consistent" {
   $packageJson = Get-Content -LiteralPath "package.json" -Raw | ConvertFrom-Json
   $configText = Get-Content -LiteralPath "src\config.ts" -Raw
-  if ($packageJson.version -ne "0.4.3") { throw "package.json version is $($packageJson.version), expected 0.4.3" }
-  if ($configText -notmatch 'SERVER_VERSION = "0\.4\.3"') { throw "src/config.ts does not report SERVER_VERSION 0.4.3" }
-  Write-Host "  OK 0.4.3"
+  if ($packageJson.version -ne "0.4.4") { throw "package.json version is $($packageJson.version), expected 0.4.4" }
+  if ($configText -notmatch 'SERVER_VERSION = "0\.4\.4"') { throw "src/config.ts does not report SERVER_VERSION 0.4.4" }
+  Write-Host "  OK 0.4.4"
 }
 
 Invoke-Check "tunnel admin default stays on HTTP profile port" {
@@ -42,10 +42,11 @@ const registryModuleUrl = pathToFileURL(process.argv[3]).href;
 const { listFilesSmart, readFileLines, readManyFiles, searchFiles } = await import(fileToolsModuleUrl);
 const { createDefaultToolRegistry } = await import(registryModuleUrl);
 const registry = createDefaultToolRegistry();
-for (const tool of ["read_file_lines", "read_many_files", "search_files", "list_files_smart"]) {
+for (const tool of ["read_file_lines", "read_many_files", "search_files", "list_files_smart", "write_text_file", "apply_patch", "edit_lines"]) {
   if (!registry.has(tool)) process.exit(20);
 }
 if (!registry.modules.includes("file-navigation")) process.exit(21);
+if (!registry.modules.includes("file-writing")) process.exit(22);
 const root = process.cwd();
 const read = await readFileLines({ path: "src/config.ts", startLine: 1, maxLines: 20 });
 if (!read.lines.some((line) => line.text.includes("SERVER_VERSION"))) process.exit(11);
@@ -55,7 +56,18 @@ const search = await searchFiles({ path: root, pattern: "readFileLines", filePat
 if (search.totalMatches < 1) process.exit(13);
 const listed = await listFilesSmart({ path: "src", depth: 1, pattern: "*.ts" });
 if (!listed.entries.some((entry) => entry.path === "file-tools.ts")) process.exit(14);
-console.log("  OK file navigation tools");
+const fs = await import("node:fs/promises");
+const os = await import("node:os");
+const path = await import("node:path");
+const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "bridge-file-writing-"));
+const target = path.join(tmp, "sample.txt");
+await registry.call("write_text_file", { path: target, content: "one\ntwo\nthree\n" });
+const edit = await registry.call("edit_lines", { path: target, startLine: 2, endLine: 2, newContent: "TWO", mode: "replace" });
+if (!edit.postflight?.verified || edit.edit?.lineDelta !== 0) process.exit(15);
+const patch = await registry.call("apply_patch", { path: target, oldText: "three", newText: "THREE", expectedReplacements: 1 });
+if (!patch.postflight?.verified || patch.replacements !== 1) process.exit(16);
+await fs.rm(tmp, { recursive: true, force: true });
+console.log("  OK modular file navigation and writing tools");
 '@
   $tmpScript = Join-Path ([System.IO.Path]::GetTempPath()) ("bridge-file-tools-" + [Guid]::NewGuid().ToString("N") + ".mjs")
   try {
@@ -105,4 +117,3 @@ if (status.lastAck.id !== "bom-test" || status.lastAck.action !== "restart-http"
 }
 
 Write-Host "[bridge-regression-test] all checks passed"
-

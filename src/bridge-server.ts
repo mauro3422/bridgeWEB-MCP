@@ -95,13 +95,6 @@ async function readTextFile(filePath: string, maxBytes: number) {
   return { path: resolved, bytes: stat.size, text };
 }
 
-async function writeTextFile(filePath: string, content: string, append: boolean) {
-  const resolved = resolvePath(filePath);
-  await fs.mkdir(path.dirname(resolved), { recursive: true });
-  append ? await fs.appendFile(resolved, content, "utf8") : await fs.writeFile(resolved, content, "utf8");
-  const stat = await fs.stat(resolved);
-  return { path: resolved, bytes: stat.size, append };
-}
 async function listDir(dirPath: string, depth: number) {
   const root = resolvePath(dirPath);
   const out: Array<{ type: string; path: string; size?: number }> = [];
@@ -123,23 +116,6 @@ async function listDir(dirPath: string, depth: number) {
   }
   await walk(root, 1);
   return { root, depth, entries: out };
-}
-async function applyPatch(filePath: string, oldText: string, newText: string, expected: number) {
-  const resolved = resolvePath(filePath);
-  const original = await fs.readFile(resolved, "utf8");
-  if (!oldText) throw new Error("oldText must not be empty.");
-  const count = original.split(oldText).length - 1;
-  if (count !== expected) {
-    throw new Error(`Expected ${expected} replacement(s), found ${count}.`);
-  }
-  const updated = original.split(oldText).join(newText);
-  await fs.writeFile(resolved, updated, "utf8");
-  return {
-    path: resolved,
-    replacements: count,
-    oldBytes: Buffer.byteLength(original),
-    newBytes: Buffer.byteLength(updated),
-  };
 }
 
 async function runCommand(command: string, cwd?: string, timeoutMs = DEFAULT_TIMEOUT_MS) {
@@ -418,8 +394,6 @@ const toolSchemas = [
   { name: "system_info", description: "Return basic OS, Node, CPU, memory, hostname and cwd information.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
   { name: "list_dir", description: "List a directory recursively with bounded depth and entry limits.", inputSchema: { type: "object", properties: { path: { type: "string" }, depth: { type: "number", default: 1, minimum: 1, maximum: 5 } }, required: ["path"], additionalProperties: false } },
   { name: "read_text_file", description: "Read a UTF-8 text file with a maximum byte limit.", inputSchema: { type: "object", properties: { path: { type: "string" }, maxBytes: { type: "number", default: DEFAULT_MAX_FILE_BYTES } }, required: ["path"], additionalProperties: false } },
-  { name: "write_text_file", description: "Write or append a UTF-8 text file, creating parent directories if needed.", inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" }, append: { type: "boolean", default: false } }, required: ["path", "content"], additionalProperties: false } },
-  { name: "apply_patch", description: "Exact string replacement patch for one text file. Fails if replacement count differs from expectedReplacements.", inputSchema: { type: "object", properties: { path: { type: "string" }, oldText: { type: "string" }, newText: { type: "string" }, expectedReplacements: { type: "number", default: 1 } }, required: ["path", "oldText", "newText"], additionalProperties: false } },
 ] as const;
 const processToolSchemas = [
   { name: "run_command", description: "Run a shell command in a cwd with timeout and captured stdout/stderr.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS } }, required: ["command"], additionalProperties: false } },
@@ -477,17 +451,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === "read_text_file") {
       const parsed = z.object({ path: z.string(), maxBytes: z.number().positive().default(DEFAULT_MAX_FILE_BYTES) }).parse(args);
       return complete(jsonText(await readTextFile(parsed.path, parsed.maxBytes)));
-    }
-    if (name === "write_text_file") {
-      const parsed = z.object({ path: z.string(), content: z.string(), append: z.boolean().default(false) }).parse(args);
-      return complete(jsonText(await writeTextFile(parsed.path, parsed.content, parsed.append)));
-    }
-    if (name === "apply_patch") {
-      const parsed = z.object({
-        path: z.string(), oldText: z.string(), newText: z.string(),
-        expectedReplacements: z.number().int().positive().default(1),
-      }).parse(args);
-      return complete(jsonText(await applyPatch(parsed.path, parsed.oldText, parsed.newText, parsed.expectedReplacements)));
     }
     if (name === "run_command") {
       const parsed = z.object({
