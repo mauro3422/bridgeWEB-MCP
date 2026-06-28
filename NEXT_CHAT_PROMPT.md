@@ -1,4 +1,4 @@
-﻿# Prompt for the next ChatGPT chat
+# Prompt for the next ChatGPT chat
 
 Paste this into a new ChatGPT chat after selecting the `BrigdeMCP-WEB` connector from Developer Mode/tools.
 
@@ -11,11 +11,12 @@ Project summary:
 - Repo: https://github.com/mauro3422/bridgeWEB-MCP
 - Stack: Node.js / TypeScript / @modelcontextprotocol/sdk / zod / node:sqlite metrics.
 - Current mode: HTTP production-candidate through OpenAI Secure MCP Tunnel.
-- Bridge HTTP: http://127.0.0.1:3001/mcp
+- Bridge MCP: http://127.0.0.1:3001/mcp
 - Bridge status: http://127.0.0.1:3001/status
 - Tunnel admin: http://127.0.0.1:8081
 - Tunnel profile: bridge-local-http
 - Server should report bridge-mcp v0.5.1.
+- The runtime currently exposes 36 tools.
 - CONTROL_PLANE_API_KEY is stored locally as a Windows User environment variable; do not ask me to paste it.
 
 Important state:
@@ -32,14 +33,36 @@ Start by running:
 2. bridge_restart_status if visible.
 3. git_status if visible.
 4. If needed, run_command "powershell -NoProfile -File .\scripts\bridge-doctor.ps1".
-5. Before committing any code: npm run check, npm run build, .\scripts\test-bridge-http.ps1, .\scripts\test-bridge-regressions.ps1.
+5. Before committing code: npm run check, npm run build, .\scripts\test-bridge-http.ps1, .\scripts\test-bridge-regressions.ps1.
+6. For full runtime validation: bridge_verify_all or npm run verify:all.
 
 Known good checks:
 - bridge_self_check ok true.
+- bridge_verify_all ok true.
 - tunnel.baseUrl http://127.0.0.1:8081.
 - tunnel healthz live / readyz ready.
 - test-bridge-http.ps1 passes.
 - test-bridge-regressions.ps1 passes.
+- git status is ## main...origin/main.
+
+Current tool modules:
+- core
+- file-navigation
+- file-writing
+- process
+- git
+- bridge-ops
+- metrics
+- code-intelligence
+- code-graph
+- bridge-workflow
+
+Important code-intelligence capabilities:
+- analyze_code supports engine auto|regex|typescript|semantic.
+- impact_analysis supports semantic TypeScript Program/TypeChecker.
+- find_dead_code uses semantic mode by default.
+- import_graph and dependency_graph support resolutionEngine auto|relative|typescript.
+- TypeScript resolution uses tsconfig/baseUrl/paths/barrels when available.
 
 Key files:
 - README.md
@@ -47,15 +70,30 @@ Key files:
 - AGENTS.md
 - TROUBLESHOOTING.md
 - ROADMAP.md
+- AGENTIC_TOOLS_ROADMAP.md
 - src/config.ts
 - src/http.ts
 - src/bridge-server.ts
-- src/metrics.ts
-- src/visualizations.ts
+- src/tool-registry.ts
+- src/tools/core-tools.ts
+- src/tools/file-navigation.ts
+- src/tools/file-navigation-core.ts
+- src/tools/file-writing.ts
+- src/tools/process-tools.ts
+- src/tools/git-tools.ts
+- src/tools/bridge-ops.ts
+- src/tools/metrics-tools.ts
+- src/tools/code-intelligence.ts
+- src/tools/code-graph.ts
+- src/tools/bridge-workflow.ts
+- src/tools/shared/typescript-intelligence.ts
+- src/tools/shared/typescript-program.ts
+- src/tools/shared/import-graph.ts
 - scripts/bridge-doctor.ps1
 - scripts/start-bridge-http-watchdog.ps1
 - scripts/test-bridge-http.ps1
 - scripts/test-bridge-regressions.ps1
+- scripts/verify-all.ps1
 
 Safety rules:
 - Never print or request secrets/API keys in chat.
@@ -64,5 +102,3 @@ Safety rules:
 - Keep changes small and testable.
 - Do not break stdio rollback.
 ```
-
-

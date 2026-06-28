@@ -1,21 +1,20 @@
-﻿# bridge-mcp
+# bridge-mcp
 
-MCP local propio para conectar ChatGPT/Kairos/KChat con MauroPrime y, mÃ¡s adelante, la laptop u otros clientes.
+MCP local propio para conectar ChatGPT con MauroPrime mediante OpenAI Secure MCP Tunnel.
 
-El objetivo no es depender de un runner genÃ©rico: este repo es el puente local controlado por nosotros para filesystem, shell, Git, diagnÃ³sticos, reinicio seguro y mÃ©tricas.
+El objetivo es tener un puente local controlado por nosotros para operar filesystem, shell, Git, diagnosticos, reinicio seguro, metricas e inteligencia de codigo sin depender de un runner generico.
 
 ## Estado actual
 
-VersiÃ³n esperada del servidor:
-
 ```text
 bridge-mcp v0.5.1
-```
-
-Modo recomendado actual:
-
-```text
-Production-candidate: HTTP local + OpenAI Secure MCP Tunnel
+Mode: HTTP production-candidate
+Project root: C:\dev\bridge-mcp
+Bridge MCP: http://127.0.0.1:3001/mcp
+Bridge status: http://127.0.0.1:3001/status
+Tunnel admin: http://127.0.0.1:8081
+Tunnel profile: bridge-local-http
+Rollback: stdio via scripts/start-bridge-watchdog.ps1
 ```
 
 Ruta activa recomendada:
@@ -26,72 +25,151 @@ ChatGPT
   -> tunnel-client profile bridge-local-http
   -> http://127.0.0.1:3001/mcp
   -> bridge-mcp Streamable HTTP en MauroPrime
-  -> filesystem / shell / git / procesos
+  -> filesystem / shell / git / procesos / analisis de codigo
 ```
 
-`stdio` sigue siendo el rollback estable.
+`stdio` sigue disponible solamente como rollback estable.
 
 ## Stack
 
-- Node.js / TypeScript
-- Node v24.x
-- `node:sqlite` para mÃ©tricas locales
-- `@modelcontextprotocol/sdk`
-- `zod`
-- MCP Streamable HTTP local
-- OpenAI Secure MCP Tunnel mediante `tunnel-client`
+```text
+Node.js v24.x
+TypeScript
+@modelcontextprotocol/sdk
+zod
+node:sqlite para metricas locales
+MCP Streamable HTTP local
+OpenAI Secure MCP Tunnel mediante tunnel-client
+```
 
-## Tools actuales
+## Arquitectura actual
 
-Base local:
+```text
+src/bridge-server.ts
+  Router MCP minimo:
+  - tools/list
+  - tools/call
+  - metricas begin/end
 
-- `system_info`: datos bÃ¡sicos de la mÃ¡quina.
-- `list_dir`: lista carpetas con profundidad limitada.
-- `list_files_smart`: lista archivos con lenguaje, lÃ­neas y sÃ­mbolos livianos.
-- `read_text_file`: lee texto UTF-8 con lÃ­mite de tamaÃ±o.
-- `read_file_lines`: lee archivos con lÃ­neas numeradas y paginaciÃ³n.
-- `read_many_files`: lee hasta 10 archivos o rangos en una llamada.
-- `search_files`: busca texto literal con lÃ­neas, contexto y contenedor aproximado.
-- `write_text_file`: escribe o agrega texto UTF-8 y verifica bytes/hash finales.
-- `apply_patch`: reemplazo exacto y controlado con verificaciÃ³n postflight.
-- `edit_lines`: ediciÃ³n quirÃºrgica por lÃ­neas con contexto y verificaciÃ³n postflight.
-- `analyze_code`: analisis de simbolos, imports, exports, diagnosticos y referencias; usa AST TypeScript en TS/JS cuando esta disponible.
-- `impact_analysis`: impacto de simbolo con engine regex/typescript/semantic; semantic usa Program/TypeChecker para agrupar simbolos reales por declaracion.
-- `find_duplicate_symbols`: deteccion liviana de simbolos duplicados.
-- `import_graph`: grafo de imports internos/externos con resolucion TypeScript/tsconfig o relativa.
-- `dependency_graph`: resumen de dependencias, ciclos, fan-in/fan-out y archivos huerfanos; puede resolver imports con TypeScript/tsconfig.
-- `find_dead_code`: candidatos de codigo muerto; por defecto usa engine semantic con Program/TypeChecker.
-- `bridge_verify_all`: ejecuta doctor, check, build, smoke, regressions, tools/list y git status.
-- `run_command`: ejecuta comandos con `cwd`, timeout y salida capturada.
+src/tool-registry.ts
+  Registry modular central
 
-Terminal persistente:
+src/tools/*.ts
+  Modulos de tools por dominio
 
-- `terminal_start`
-- `terminal_write`
-- `terminal_read`
-- `terminal_stop`
-- `terminal_list`
+src/tools/shared/*.ts
+  Helpers transversales
+```
 
-Git, tÃºnel y diagnÃ³stico:
+Modulos actuales:
 
-- `git_status`
-- `git_set_remote`
-- `git_commit_all`
-- `git_push_current_branch`
-- `tunnel_health`
-- `bridge_self_check`
-- `bridge_request_restart`
-- `bridge_restart_status`
+```text
+core
+file-navigation
+file-writing
+process
+git
+bridge-ops
+metrics
+code-intelligence
+code-graph
+bridge-workflow
+```
 
-MÃ©tricas de tools:
+## Tools expuestas
 
-- `bridge_metrics_status`
-- `bridge_metrics_summary`
-- `bridge_metrics_recent`
-- `bridge_visualization_catalog`
-- `bridge_visualize_metrics`
+El runtime actual expone 36 tools.
 
-Nota: puede que ChatGPT no muestre tools nuevas en una conversaciÃ³n ya abierta hasta refrescar el conector/reabrir el chat, pero el runtime ya las expone.
+### Core / lectura / navegacion
+
+```text
+system_info
+list_dir
+read_text_file
+read_file_lines
+read_many_files
+list_files_smart
+search_files
+```
+
+### Escritura segura
+
+```text
+write_text_file
+apply_patch
+edit_lines
+```
+
+`write_text_file`, `apply_patch` y `edit_lines` hacen verificacion postflight con hash/bytes/contexto cuando corresponde.
+
+### Ejecucion / terminal
+
+```text
+run_command
+terminal_start
+terminal_write
+terminal_read
+terminal_stop
+terminal_list
+```
+
+### Git
+
+```text
+git_status
+git_set_remote
+git_commit_all
+git_push_current_branch
+```
+
+### Bridge / salud / restart
+
+```text
+tunnel_health
+bridge_self_check
+bridge_verify_all
+bridge_request_restart
+bridge_restart_status
+```
+
+### Metricas / visualizaciones
+
+```text
+bridge_metrics_status
+bridge_metrics_summary
+bridge_metrics_recent
+bridge_visualization_catalog
+bridge_visualize_metrics
+```
+
+### Inteligencia de codigo
+
+```text
+analyze_code
+impact_analysis
+find_duplicate_symbols
+import_graph
+dependency_graph
+find_dead_code
+```
+
+Motores disponibles:
+
+```text
+regex       -> rapido y simple
+typescript  -> AST por archivo
+semantic    -> TypeScript Program + TypeChecker entre archivos
+```
+
+`import_graph` y `dependency_graph` aceptan:
+
+```json
+{
+  "resolutionEngine": "auto | relative | typescript"
+}
+```
+
+Con `typescript` o `auto`, el grafo usa el resolver del compilador TypeScript, incluyendo `tsconfig.json`, `baseUrl`, `paths`, barrels/index files y reescritura de extensiones cuando TypeScript puede resolverlas.
 
 ## Scripts principales
 
@@ -101,8 +179,52 @@ npm run check
 npm run build
 npm run smoke:http
 npm run test:regressions
+npm run verify:all
 npm run start
 npm run start:http
+```
+
+`npm run verify:all` ejecuta:
+
+```text
+bridge-doctor.ps1
+npm run check
+npm run build
+smoke:http
+test:regressions
+tools/list sanity
+git status
+```
+
+## Validacion rapida
+
+```powershell
+Set-Location C:\dev\bridge-mcp
+npm run check
+npm run build
+.\scripts\test-bridge-http.ps1
+.\scripts\test-bridge-regressions.ps1
+.\scripts\bridge-doctor.ps1
+```
+
+Desde MCP, usar preferentemente:
+
+```text
+bridge_self_check
+bridge_verify_all
+bridge_restart_status
+git_status
+```
+
+Estado esperado:
+
+```text
+bridge_self_check.ok = true
+server.version = 0.5.1
+tunnel.baseUrl = http://127.0.0.1:8081
+tunnel healthz = live
+tunnel readyz = ready
+git = ## main...origin/main
 ```
 
 ## HTTP local production-candidate
@@ -110,40 +232,27 @@ npm run start:http
 Endpoints locales:
 
 ```text
-http://127.0.0.1:3001/healthz
-http://127.0.0.1:3001/readyz
-http://127.0.0.1:3001/status
-http://127.0.0.1:3001/mcp
+GET  http://127.0.0.1:3001/healthz
+GET  http://127.0.0.1:3001/readyz
+GET  http://127.0.0.1:3001/status
+POST http://127.0.0.1:3001/mcp
 ```
 
-Perfil de tÃºnel:
+Perfil de tunel:
 
 ```text
 bridge-local-http -> http://127.0.0.1:3001/mcp
 ```
 
-ValidaciÃ³n:
+Admin local del tunnel-client:
 
-```powershell
-.\scripts\test-bridge-http.ps1
-Invoke-RestMethod http://127.0.0.1:3001/status
-Invoke-RestMethod http://127.0.0.1:8081/readyz
+```text
+http://127.0.0.1:8081
 ```
 
-El modo HTTP ya valida:
+Si aparece `8080`, tratarlo como contexto viejo salvo que se haya cambiado intencionalmente el perfil.
 
-- `initialize`
-- `Mcp-Session-Id`
-- `notifications/initialized` con respuesta 202
-- limpieza de sesiones idle
-- limpieza de transports anÃ³nimos
-- lÃ­mite mÃ¡ximo de sesiones
-- watchdog para reinicio de HTTP
-- watchdog para reinicio de `tunnel-client`
-
-Ver `HTTP_LOCAL_MCP.md`, `TROUBLESHOOTING.md` y `AGENTIC_TOOLS_ROADMAP.md`.
-
-## Watchdog local
+## Watchdog y restart seguro
 
 Modo HTTP recomendado:
 
@@ -152,18 +261,20 @@ Set-Location C:\dev\bridge-mcp
 .\scripts\start-bridge-http-watchdog.ps1 -ProjectRoot C:\dev\bridge-mcp -Profile bridge-local-http -TunnelBaseUrl http://127.0.0.1:8081
 ```
 
-InstalaciÃ³n al inicio de sesiÃ³n de Windows sin permisos de administrador:
+Instalacion al inicio de Windows sin admin:
 
 ```powershell
 Set-Location C:\dev\bridge-mcp
 .\scripts\install-bridge-watchdog-task.ps1 -InstallMode Startup -WatchdogMode Http
 ```
 
-Esto crea:
+Restart seguro desde MCP:
 
 ```text
-%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\BridgeMCP-Watchdog.cmd
+bridge_request_restart
 ```
+
+Ese flujo escribe `.bridge-restart-request`; el watchdog externo reinicia HTTP/tunnel y luego escribe `.bridge-restart-ack`. No matar `node.exe` ni `tunnel-client.exe` directamente desde el MCP activo.
 
 Rollback stdio:
 
@@ -172,16 +283,18 @@ Set-Location C:\dev\bridge-mcp
 .\scripts\start-bridge-watchdog.ps1 -ProjectRoot C:\dev\bridge-mcp
 ```
 
-## MÃ©tricas y logs
+## Metricas y logs
 
 Runtime local:
 
 ```text
 logs/bridge-events.jsonl
- data/bridge-metrics.sqlite
+data/bridge-metrics.sqlite
+data/bridge-metrics.sqlite-wal
+data/bridge-metrics.sqlite-shm
 ```
 
-Consultas rÃ¡pidas:
+Consultas rapidas:
 
 ```powershell
 node .\scripts\query-bridge-metrics.mjs status
@@ -190,7 +303,7 @@ node .\scripts\query-bridge-metrics.mjs recent 25
 node .\scripts\query-bridge-metrics.mjs errors 25
 ```
 
-Variables Ãºtiles:
+Variables utiles:
 
 ```text
 BRIDGE_MCP_METRICS_ENABLED=0
@@ -200,39 +313,48 @@ BRIDGE_MCP_METRICS_SQLITE=...
 BRIDGE_MCP_EVENTS_JSONL=...
 ```
 
-Las mÃ©tricas guardan nombres de tools, duraciÃ³n, Ã©xito/error, claves de input y tamaÃ±o de salida. No guardan argumentos completos.
+Las metricas guardan nombres de tools, duracion, exito/error, claves de input y tamano de salida. No guardan argumentos completos.
 
 ## Modelo de uso desde laptop
 
-Si usÃ¡s ChatGPT desde la laptop pero el conector apunta al tÃºnel que corre en MauroPrime, las tools se ejecutan en MauroPrime.
+Si ChatGPT se usa desde la laptop pero el conector apunta al tunel que corre en MauroPrime, las tools se ejecutan en MauroPrime.
 
 ```text
 Laptop con ChatGPT UI
   -> OpenAI
   -> Secure MCP Tunnel activo en MauroPrime
-  -> tools ejecutadas en MauroPrime
+  -> bridge-mcp ejecutado en MauroPrime
 ```
 
-Para que las tools se ejecuten en la laptop, la laptop necesitarÃ­a su propio bridge/tunnel/profile corriendo localmente.
+Para ejecutar tools en la laptop, la laptop necesita su propio bridge/tunnel/profile local.
 
 ## Seguridad
 
 No commitear:
 
-- `node_modules/`
-- `dist/`
-- binarios del tunnel-client
-- `.env` / claves / tokens
-- logs
-- base SQLite de mÃ©tricas
-- sandbox local
+```text
+node_modules/
+dist/
+binarios del tunnel-client
+.env / claves / tokens
+logs/
+data/*.sqlite*
+sandbox local
+```
 
-Mantener secretos como variables de entorno de Windows o en perfiles locales fuera de Git.
+Mantener secretos como variables de entorno de Windows o perfiles locales fuera de Git.
 
-## Local auth model
+## Docs relacionadas
 
-El perfil HTTP local es intencionalmente loopback-only y no-auth en el listener MCP. La barrera de seguridad real es el OpenAI Secure MCP Tunnel + runtime key + permisos del workspace.
+```text
+HTTP_LOCAL_MCP.md
+OPENAI_TUNNEL_LOCAL_AUTH.md
+RESTART_FLOW.md
+BRIDGE_WATCHDOG.md
+TROUBLESHOOTING.md
+ROADMAP.md
+AGENTIC_TOOLS_ROADMAP.md
+NEXT_CHAT_PROMPT.md
+```
 
-Ver `OPENAI_TUNNEL_LOCAL_AUTH.md`.
-
-
+Nota: ChatGPT puede cachear el catalogo de tools. Si una tool nueva no aparece en una conversacion ya abierta, refrescar/reabrir el conector o iniciar un chat nuevo.

@@ -1,6 +1,6 @@
-﻿# bridge-mcp Roadmap
+# bridge-mcp Roadmap
 
-Local MCP bridge for MauroPrime. The goal is to let ChatGPT operate MauroPrime through a controlled OpenAI Secure MCP Tunnel with explicit diagnostics, safe restart flow, Git workflow, metrics, and rollback.
+Local MCP bridge for MauroPrime. The goal is to let ChatGPT operate MauroPrime through a controlled OpenAI Secure MCP Tunnel with explicit diagnostics, safe restart flow, Git workflow, metrics, and code intelligence.
 
 ## Current status
 
@@ -8,32 +8,23 @@ Local MCP bridge for MauroPrime. The goal is to let ChatGPT operate MauroPrime t
 Project root: C:\dev\bridge-mcp
 Server: bridge-mcp v0.5.1
 Mode: HTTP production-candidate
-Bridge HTTP: http://127.0.0.1:3001/mcp
+Bridge MCP: http://127.0.0.1:3001/mcp
 Bridge status: http://127.0.0.1:3001/status
 Tunnel admin: http://127.0.0.1:8081
 Tunnel profile: bridge-local-http
 Rollback profile: stdio through scripts/start-bridge-watchdog.ps1
-```
-
-Stack:
-
-```txt
-Node.js / TypeScript
-@modelcontextprotocol/sdk
-zod
-node:sqlite metrics
-MCP Streamable HTTP local
-OpenAI Secure MCP Tunnel through tunnel-client
+Tools exposed: 36
 ```
 
 Do not commit keys, tunnel secrets, `node_modules`, `dist`, logs, SQLite metrics, sandbox files, or tunnel-client binaries.
 
-## Confirmed working checks
+## Known-good checks
 
 Known-good checks for v0.5.1:
 
 ```txt
 bridge_self_check -> ok true
+bridge_verify_all -> ok true
 npm run check -> OK
 npm run build -> OK
 scripts/test-bridge-http.ps1 -> OK
@@ -41,35 +32,68 @@ scripts/test-bridge-regressions.ps1 -> OK
 http://127.0.0.1:3001/status -> bridge-mcp v0.5.1
 http://127.0.0.1:8081/healthz -> live
 http://127.0.0.1:8081/readyz -> ready
+git -> ## main...origin/main
 ```
 
 If anything points at `8080`, treat it as stale context unless the active profile was intentionally changed.
 
+## Current architecture
+
+```txt
+src/bridge-server.ts
+  minimal MCP dispatcher with metrics wrapping
+
+src/tool-registry.ts
+  modular registry
+
+src/tools/*.ts
+  tool modules by domain
+
+src/tools/shared/*.ts
+  cross-cutting helpers
+```
+
+Current modules:
+
+```txt
+core
+file-navigation
+file-writing
+process
+git
+bridge-ops
+metrics
+code-intelligence
+code-graph
+bridge-workflow
+```
+
 ## Current tool groups
 
-Base tools:
+Core / navigation:
 
 ```txt
 system_info
 list_dir
-list_files_smart
 read_text_file
 read_file_lines
 read_many_files
+list_files_smart
 search_files
+```
+
+Writing:
+
+```txt
 write_text_file
 apply_patch
 edit_lines
-analyze_code
-impact_analysis
-find_duplicate_symbols
-bridge_verify_all
-run_command
 ```
 
-Persistent terminal tools:
+Process / terminal:
 
 ```txt
+run_command
 terminal_start
 terminal_write
 terminal_read
@@ -77,20 +101,26 @@ terminal_stop
 terminal_list
 ```
 
-Git, tunnel, restart and self-check tools:
+Git:
 
 ```txt
 git_status
 git_set_remote
 git_commit_all
 git_push_current_branch
+```
+
+Bridge ops:
+
+```txt
 tunnel_health
 bridge_self_check
+bridge_verify_all
 bridge_request_restart
 bridge_restart_status
 ```
 
-Metrics and visualization tools:
+Metrics / visualizations:
 
 ```txt
 bridge_metrics_status
@@ -100,81 +130,39 @@ bridge_visualization_catalog
 bridge_visualize_metrics
 ```
 
-Note: some ChatGPT chats may show an old cached tool catalog. Reopen/refresh the connector if tools are missing.
-
-## Git repository
+Code intelligence:
 
 ```txt
-Remote: https://github.com/mauro3422/bridgeWEB-MCP
-Expected branch: main
-Expected clean state: ## main...origin/main
+analyze_code
+impact_analysis
+find_duplicate_symbols
+import_graph
+dependency_graph
+find_dead_code
 ```
 
-Operational flow:
+Code intelligence engines:
 
 ```txt
-plan -> patch -> check -> build -> smoke -> regression -> commit -> push
+regex
+TypeScript AST
+semantic TypeScript Program/TypeChecker
+TypeScript module resolver
 ```
 
-## Watchdog and restart status
-
-Active watchdog:
-
-```powershell
-.\scripts\start-bridge-http-watchdog.ps1 -ProjectRoot C:\dev\bridge-mcp -Profile bridge-local-http -TunnelBaseUrl http://127.0.0.1:8081
-```
-
-Safe restart flow:
+`import_graph` and `dependency_graph` support:
 
 ```txt
-1. MCP writes C:\dev\bridge-mcp\.bridge-restart-request
-2. Tool returns success
-3. External watchdog sees the file
-4. Watchdog restarts HTTP MCP and/or tunnel-client
-5. Watchdog writes .bridge-restart-ack and deletes the request file
+resolutionEngine=auto|relative|typescript
 ```
 
-Preferred tool:
+`impact_analysis` and `find_dead_code` support semantic mode through TypeScript `Program` and `TypeChecker`.
 
-```txt
-bridge_request_restart
-```
+## Completed implementation history
 
-If the wrapper blocks that tool, use `write_text_file` to create `.bridge-restart-request`. Do not kill the active MCP/tunnel process directly from the same tool call.
+### v0.4.2: navigation primitives
 
-## Current completed v0.4 work
-
-- HTTP local production-candidate profile.
-- No-admin Startup launcher for the HTTP watchdog.
-- Restart request/ack flow through external watchdog.
-- BOM-tolerant restart ack parsing.
-- Tunnel health default aligned to `8081`.
-- Bridge metrics in SQLite/logs.
-- Chat-renderable metrics visualization specs.
-- HTTP smoke test.
-- Regression test for version/defaults/BOM ack parsing.
-- Agentic file navigation tools: `read_file_lines`, `read_many_files`, `search_files`, `list_files_smart`.
-- Modular registry foundation for `file-navigation` and `file-writing`.
-- Shared text-file helpers for hash verification, binary refusal, line endings, and line-range edits.
-- Surgical `edit_lines` tool with context and postflight verification.
-- Code intelligence tools: `analyze_code`, `impact_analysis`, `find_duplicate_symbols`.
-- TypeScript intelligence layer for TS/JS files: AST imports, exports, symbols, parse diagnostics, and identifier reference classification.
-- Import/dependency graph tools: `import_graph`, `dependency_graph`, `find_dead_code`.
-- Semantic TypeScript Program/TypeChecker layer for `impact_analysis engine=semantic` and `find_dead_code engine=semantic`.
-- TypeScript module resolver for `import_graph` and `dependency_graph`, including tsconfig paths/baseUrl/barrels when TypeScript can resolve them.
-- Bridge verification workflow: `bridge_verify_all`, `scripts/verify-all.ps1`, and `npm run verify:all`.
-- Complete modular registry migration: core, process, git, bridge ops, metrics, file navigation/writing, code intelligence, and workflow tools now live in modules.
-- `bridge-server.ts` reduced to a minimal MCP dispatcher with metrics wrapping.
-- Shared project scanner and lightweight symbol/reference extraction helpers.
-- Troubleshooting notes for wrapper blocks and stale `8080` context.
-
-## Next recommended work
-
-### Agentic tool evolution
-
-Detailed plan: `AGENTIC_TOOLS_ROADMAP.md`.
-
-Completed implementation package for v0.4.2:
+Delivered:
 
 ```txt
 read_file_lines
@@ -183,30 +171,184 @@ search_files
 list_files_smart
 ```
 
-These tools are inspired by K-Chat/Kairos and reduce raw shell usage by giving ChatGPT line-numbered reading, grep-like search with context, smart directory summaries, and batch file reads.
+### v0.4.3: modular registry foundation
 
-### Diagnostics hardening
+Delivered:
 
-- Keep improving `scripts/bridge-doctor.ps1` messages when a failure occurs.
-- Add stale-ack age warnings.
-- Add explicit detection of wrong tunnel profile.
-- Add a single command that runs doctor + check + build + smoke + regressions.
+```txt
+src/tools/types.ts
+src/tools/file-navigation.ts
+src/tools/file-navigation-core.ts
+src/tool-registry.ts
+```
+
+### v0.4.4: shared writing helpers and surgical editing
+
+Delivered:
+
+```txt
+src/tools/shared/text-files.ts
+src/tools/shared/line-edits.ts
+src/tools/file-writing.ts
+write_text_file
+apply_patch
+edit_lines
+```
+
+### v0.4.5: code impact intelligence
+
+Delivered:
+
+```txt
+src/tools/shared/project-scan.ts
+src/tools/shared/code-symbols.ts
+src/tools/code-intelligence.ts
+analyze_code
+impact_analysis
+find_duplicate_symbols
+```
+
+### v0.4.6: verify-all workflow
+
+Delivered:
+
+```txt
+scripts/verify-all.ps1
+npm run verify:all
+src/tools/bridge-workflow.ts
+bridge_verify_all
+```
+
+### v0.4.7: complete modular registry migration
+
+Delivered:
+
+```txt
+src/tools/core-tools.ts
+src/tools/process-tools.ts
+src/tools/git-tools.ts
+src/tools/bridge-ops.ts
+src/tools/metrics-tools.ts
+src/tools/shared/process.ts
+```
+
+`bridge-server.ts` is now a minimal MCP dispatcher. Tool schemas and handlers live in registry modules.
+
+### v0.4.8: TypeScript AST intelligence
+
+Delivered:
+
+```txt
+src/tools/shared/typescript-intelligence.ts
+analyze_code engine=auto|regex|typescript
+impact_analysis engine=auto|regex|typescript
+find_duplicate_symbols engine=auto|regex|typescript
+```
+
+### v0.4.9: import graph and dead-code candidates
+
+Delivered:
+
+```txt
+src/tools/shared/import-graph.ts
+src/tools/code-graph.ts
+import_graph
+dependency_graph
+find_dead_code
+```
+
+### v0.5.0: semantic TypeScript program engine
+
+Delivered:
+
+```txt
+src/tools/shared/typescript-program.ts
+impact_analysis engine=semantic
+find_dead_code engine=semantic
+```
+
+This builds a TypeScript `Program` and `TypeChecker`, groups symbols by actual declarations, resolves alias symbols, and separates definition/import/export/call/type/reference usages.
+
+### v0.5.1: TypeScript module resolution for dependency graph
+
+Delivered:
+
+```txt
+import_graph resolutionEngine=auto|relative|typescript
+dependency_graph resolutionEngine=auto|relative|typescript
+TypeScript tsconfig/module resolver inside src/tools/shared/import-graph.ts
+```
+
+The dependency graph now uses TypeScript module resolution when requested or in auto mode, so `tsconfig` `baseUrl`, `paths`, extension rewriting, and barrel/index files are handled by the compiler resolver instead of only relative string matching.
+
+## Operational flow
+
+Normal coding flow:
+
+```txt
+plan
+-> inspect with read/search/analyze/graph tools
+-> edit with apply_patch or edit_lines
+-> npm run check
+-> npm run build
+-> smoke/regressions
+-> bridge_verify_all when runtime is involved
+-> commit
+-> push
+```
+
+Preferred all-in-one verifier:
+
+```txt
+bridge_verify_all
+```
+
+or:
+
+```powershell
+npm run verify:all
+```
+
+## Next recommended work
+
+### Performance and caching
+
+Useful next step, but not urgent:
+
+```txt
+cache TypeScript Program by tsconfig + mtimes/hash
+cache import graph by root + engine + mtimes/hash
+cache semantic impact indexes by project root
+add cache invalidation after writes
+```
+
+Reason: `impact_analysis`, `dependency_graph`, and `find_dead_code` are now accurate enough to benefit from caching on larger repos.
+
+### Generated tool docs
+
+Generate docs from `src/tool-registry.ts` / module schemas:
+
+```txt
+scripts/generate-tool-docs.ts
+TOOLS.md
+```
 
 ### Test coverage
 
-- Add tests for duplicate watchdog/tunnel detection.
-- Add tests for restart-request lifecycle.
-- Add tests for metrics SQLite availability without leaking arguments.
+Add targeted tests for:
 
-### Workflow polish
-
-- Add a short `RELEASE.md` checklist.
-- Add npm script aliases for smoke/regression tests.
-- Consider tagging stable versions after clean push.
+```txt
+tsconfig paths/baseUrl resolution
+barrel/index resolution
+semantic alias resolution
+find_dead_code exported symbol behavior
+restart-request lifecycle
+metrics SQLite availability without leaking arguments
+```
 
 ### Later safety work
 
-Allowed roots / denied path policy is intentionally not part of this change. Keep it as a later design item so it does not destabilize the active bridge.
+Allowed roots / denied path policy is intentionally not implemented yet. Keep it as a separate design item so it does not destabilize the active bridge.
 
 ## Rollback
 
@@ -216,5 +358,3 @@ Allowed roots / denied path policy is intentionally not part of this change. Kee
 Set-Location C:\dev\bridge-mcp
 .\scripts\start-bridge-watchdog.ps1 -ProjectRoot C:\dev\bridge-mcp
 ```
-
-

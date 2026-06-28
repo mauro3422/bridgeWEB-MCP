@@ -1,17 +1,17 @@
 # Bridge MCP HTTP local mode
 
-This is the preparation path for running `bridge-mcp` as a local Streamable HTTP MCP server behind the same OpenAI Secure MCP Tunnel.
+This documents the current production-candidate local HTTP mode for running `bridge-mcp` as a Streamable HTTP MCP server behind OpenAI Secure MCP Tunnel.
 
-Current stable production path remains stdio:
+Current recommended path:
 
 ```text
-ChatGPT -> OpenAI Secure MCP Tunnel -> tunnel-client -> node dist/index.js
+ChatGPT -> OpenAI Secure MCP Tunnel -> bridge-local-http -> http://127.0.0.1:3001/mcp -> node dist/http.js
 ```
 
-Prepared HTTP path:
+Rollback path remains stdio:
 
 ```text
-ChatGPT -> OpenAI Secure MCP Tunnel -> tunnel-client -> http://127.0.0.1:3001/mcp -> node dist/http.js
+ChatGPT -> OpenAI Secure MCP Tunnel -> bridge-local -> node dist/index.js
 ```
 
 This does not require a Cloudflare Worker, VPS, public port, or external gateway. The port is local-only on `127.0.0.1`.
@@ -65,7 +65,7 @@ The startup script also refuses to start if the configured port is already in us
 
 ## Tunnel profile
 
-Prepared profile:
+Active recommended profile:
 
 ```text
 bridge-local-http
@@ -77,13 +77,13 @@ Expected target:
 http://127.0.0.1:3001/mcp
 ```
 
-Expected tunnel-client admin listener for this experimental profile:
+Expected tunnel-client admin listener for this profile:
 
 ```text
 http://127.0.0.1:8081
 ```
 
-The existing stable stdio profile remains:
+The stdio rollback profile remains:
 
 ```text
 bridge-local
@@ -91,14 +91,9 @@ bridge-local
 
 Do not run both profiles with the same tunnel id at the same time.
 
-## Current caveat
+## Local auth caveat
 
-`tunnel-client doctor --profile bridge-local-http` can reach the MCP HTTP target, but currently reports degraded OAuth metadata because the local MCP server intentionally does not expose OAuth/DCR metadata.
-
-This means the HTTP transport is implemented and locally reachable, but the tunnel profile should remain experimental until we either:
-
-1. confirm `sample_mcp_remote_no_auth` can run ready despite the doctor OAuth metadata warning, or
-2. implement the exact metadata contract expected by `tunnel-client`, without pretending to provide auth that does not exist.
+The local MCP HTTP listener intentionally stays loopback-only and no-auth. The security boundary is the OpenAI Secure MCP Tunnel plus the local runtime profile. Do not add fake OAuth/DCR metadata just to satisfy diagnostics; use the no-auth local profile family documented in `OPENAI_TUNNEL_LOCAL_AUTH.md`.
 
 ## Restart-request flow
 
