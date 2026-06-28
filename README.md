@@ -129,7 +129,7 @@ El modo HTTP ya valida:
 - watchdog para reinicio de HTTP
 - watchdog para reinicio de `tunnel-client`
 
-Ver `HTTP_LOCAL_MCP.md` y `TROUBLESHOOTING.md`.
+Ver `HTTP_LOCAL_MCP.md`, `TROUBLESHOOTING.md` y `AGENTIC_TOOLS_ROADMAP.md`.
 
 ## Watchdog local
 

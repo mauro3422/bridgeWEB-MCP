@@ -148,6 +148,21 @@ If the wrapper blocks that tool, use `write_text_file` to create `.bridge-restar
 
 ## Next recommended work
 
+### Agentic tool evolution
+
+Detailed plan: `AGENTIC_TOOLS_ROADMAP.md`.
+
+Next implementation package for v0.4.2:
+
+```txt
+read_file_lines
+read_many_files
+search_files
+list_files_smart
+```
+
+These tools are inspired by K-Chat/Kairos and should reduce raw shell usage by giving ChatGPT line-numbered reading, grep-like search with context, smart directory summaries, and batch file reads.
+
 ### Diagnostics hardening
 
 - Keep improving `scripts/bridge-doctor.ps1` messages when a failure occurs.
