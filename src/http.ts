@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createBridgeServer } from "./bridge-server.js";
 import { getBridgeHttpConfig, SERVER_NAME, SERVER_VERSION } from "./config.js";
@@ -11,6 +11,11 @@ const startedAt = new Date();
 
 let ready = false;
 let closing = false;
+
+type BridgeHttpTransport = StreamableHTTPServerTransport & { sessionId?: string };
+
+const transports = new Map<string, BridgeHttpTransport>();
+const anonymousTransports = new Set<BridgeHttpTransport>();
 
 function nowIso() {
   return new Date().toISOString();
@@ -44,6 +49,13 @@ function isMcpStreamRequest(req: IncomingMessage): boolean {
   return String(req.headers.accept || "").includes("text/event-stream");
 }
 
+function getMcpSessionId(req: IncomingMessage): string | undefined {
+  const header = req.headers["mcp-session-id"];
+  if (Array.isArray(header)) return header[0];
+  if (typeof header === "string" && header.trim().length > 0) return header.trim();
+  return undefined;
+}
+
 function getStatus() {
   return {
     server: { name: SERVER_NAME, version: SERVER_VERSION },
@@ -54,6 +66,8 @@ function getStatus() {
     allowRemote: config.allowRemote,
     ready,
     closing,
+    sessions: transports.size,
+    anonymousTransports: anonymousTransports.size,
     startedAt: startedAt.toISOString(),
     uptimeSeconds: Math.round(process.uptime()),
     pid: process.pid,
@@ -61,13 +75,83 @@ function getStatus() {
   };
 }
 
-async function main() {
+async function createTransport(requestId: string): Promise<BridgeHttpTransport> {
   const mcpServer = createBridgeServer();
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined,
-  });
+  let transport: BridgeHttpTransport;
 
+  transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: () => randomUUID(),
+    onsessioninitialized: (sessionId: string) => {
+      transports.set(sessionId, transport);
+      anonymousTransports.delete(transport);
+      log("info", "MCP HTTP session initialized", { requestId, sessionId, sessions: transports.size });
+    },
+  }) as BridgeHttpTransport;
+
+  transport.onclose = () => {
+    const sessionId = transport.sessionId;
+    anonymousTransports.delete(transport);
+    if (sessionId) transports.delete(sessionId);
+    log("info", "MCP HTTP transport closed", { requestId, sessionId, sessions: transports.size });
+  };
+
+  anonymousTransports.add(transport);
   await mcpServer.connect(transport);
+  return transport;
+}
+
+async function handleMcpRequest(req: IncomingMessage, res: ServerResponse, requestId: string) {
+  const sessionId = getMcpSessionId(req);
+  let transport: BridgeHttpTransport | undefined;
+
+  if (sessionId) {
+    transport = transports.get(sessionId);
+    if (!transport) {
+      sendJson(res, 404, {
+        error: "mcp_session_not_found",
+        requestId,
+        sessionId,
+        message: "Unknown or expired MCP session. Start a new initialize request without MCP-Session-Id.",
+      });
+      return;
+    }
+  } else if (req.method === "POST") {
+    transport = await createTransport(requestId);
+  } else {
+    sendJson(res, 400, {
+      error: "mcp_session_required",
+      requestId,
+      message: "GET and DELETE MCP requests require an MCP-Session-Id header.",
+    });
+    return;
+  }
+
+  try {
+    await transport.handleRequest(req, res);
+  } catch (error) {
+    log("error", "MCP request failed", {
+      requestId,
+      method: req.method,
+      url: req.url,
+      sessionId,
+      transportSessionId: transport.sessionId,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+
+    if (!res.headersSent) {
+      sendJson(res, 500, {
+        requestId,
+        error: "mcp_request_failed",
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    } else {
+      res.end();
+    }
+  }
+}
+
+async function main() {
   ready = true;
 
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -111,7 +195,7 @@ async function main() {
           return;
         }
 
-        await transport.handleRequest(req, res);
+        await handleMcpRequest(req, res, requestId);
         return;
       }
 
@@ -126,6 +210,7 @@ async function main() {
         method: req.method,
         url: req.url,
         error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
       });
 
       if (!res.headersSent) {
@@ -143,7 +228,10 @@ async function main() {
     log("warn", "shutdown requested", { signal });
 
     httpServer.close(async () => {
-      await transport.close();
+      await Promise.allSettled([
+        ...Array.from(transports.values()).map((transport) => transport.close()),
+        ...Array.from(anonymousTransports).map((transport) => transport.close()),
+      ]);
       log("info", "shutdown complete", { signal });
       process.exit(0);
     });
