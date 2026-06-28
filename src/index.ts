@@ -13,10 +13,12 @@ import fs from "node:fs/promises";
 import { spawn, type ChildProcess } from "node:child_process";
 
 const SERVER_NAME = "bridge-mcp";
-const SERVER_VERSION = "0.2.0";
+const SERVER_VERSION = "0.3.0";
 const DEFAULT_MAX_FILE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_CAPTURE_CHARS = 512 * 1024;
+const DEFAULT_GIT_REMOTE_URL = "https://github.com/mauro3422/bridgeWEB-MCP.git";
+const DEFAULT_TUNNEL_ADMIN_BASE_URL = "http://127.0.0.1:8080";
 
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
 type TerminalSession = {
@@ -155,6 +157,127 @@ async function runCommand(command: string, cwd?: string, timeoutMs = DEFAULT_TIM
   });
 }
 
+async function runProcess(command: string, args: string[], cwd?: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Record<string, unknown>> {
+  const resolvedCwd = cwd ? resolvePath(cwd) : process.cwd();
+  if (!(await fileExists(resolvedCwd))) throw new Error(`cwd does not exist: ${resolvedCwd}`);
+  const commandLine = [command, ...args].join(" ");
+  return await new Promise((resolve) => {
+    const startedAt = Date.now();
+    const child = spawn(command, args, { cwd: resolvedCwd, shell: false, windowsHide: true, env: process.env });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    let settled = false;
+    const finish = (result: Record<string, unknown>) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); }, timeoutMs);
+    child.stdout?.on("data", (chunk: Buffer) => { stdout = appendBounded(stdout, chunk); });
+    child.stderr?.on("data", (chunk: Buffer) => { stderr = appendBounded(stderr, chunk); });
+    child.on("error", (error) => {
+      finish({ command: commandLine, cwd: resolvedCwd, code: null, signal: null, timedOut,
+        durationMs: Date.now() - startedAt, stdout, stderr, error: error.message });
+    });
+    child.on("close", (code, signal) => {
+      finish({ command: commandLine, cwd: resolvedCwd, code, signal, timedOut,
+        durationMs: Date.now() - startedAt, stdout, stderr });
+    });
+  });
+}
+
+function assertSafeGitRemote(remote: string) {
+  if (!/^[A-Za-z0-9._-]+$/.test(remote)) throw new Error(`Unsafe git remote name: ${remote}`);
+}
+
+function assertSafeGitHubUrl(repoUrl: string) {
+  const parsed = new URL(repoUrl);
+  if (parsed.protocol !== "https:" || parsed.hostname !== "github.com") {
+    throw new Error("Only https://github.com/... remotes are allowed by bridge-mcp git tools.");
+  }
+}
+
+async function gitStatus(cwd?: string) {
+  return await runProcess("git", ["status", "--short", "--branch"], cwd);
+}
+
+async function gitSetRemote(repoUrl: string, remote = "origin", cwd?: string) {
+  assertSafeGitRemote(remote);
+  assertSafeGitHubUrl(repoUrl);
+  const current = await runProcess("git", ["remote", "get-url", remote], cwd);
+  const action = current.code === 0 ? "set-url" : "add";
+  const updated = await runProcess("git", ["remote", action, remote, repoUrl], cwd);
+  return { action, remote, repoUrl, result: updated };
+}
+
+async function gitCommitAll(message: string, cwd?: string) {
+  const add = await runProcess("git", ["add", "-A"], cwd, 120_000);
+  if (add.code !== 0) return { committed: false, add };
+  const porcelain = await runProcess("git", ["status", "--porcelain"], cwd);
+  if (String(porcelain.stdout ?? "").trim().length === 0) {
+    return { committed: false, reason: "working tree clean", status: await gitStatus(cwd) };
+  }
+  const commit = await runProcess("git", ["commit", "-m", message], cwd, 120_000);
+  return { committed: commit.code === 0, commit, status: await gitStatus(cwd) };
+}
+
+async function gitPushCurrentBranch(remote = "origin", branch?: string, cwd?: string) {
+  assertSafeGitRemote(remote);
+  const branchResult = branch
+    ? { code: 0, stdout: branch }
+    : await runProcess("git", ["rev-parse", "--abbrev-ref", "HEAD"], cwd);
+  if (branchResult.code !== 0) return { pushed: false, branchResult };
+  const resolvedBranch = String(branchResult.stdout ?? "").trim() || "main";
+  const push = await runProcess("git", ["push", "-u", remote, resolvedBranch], cwd, 120_000);
+  return { pushed: push.code === 0, remote, branch: resolvedBranch, push };
+}
+
+async function tunnelHealth(baseUrl = DEFAULT_TUNNEL_ADMIN_BASE_URL) {
+  const fetchEndpoint = async (name: string) => {
+    const url = `${baseUrl}/${name}`;
+    try {
+      const response = await fetch(url);
+      const text = await response.text();
+      return { ok: response.ok, status: response.status, text: tailText(text, 2000) };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  };
+  return { baseUrl, healthz: await fetchEndpoint("healthz"), readyz: await fetchEndpoint("readyz") };
+}
+
+function summarizeCommand(result: Record<string, unknown>) {
+  return {
+    ok: result.code === 0 && result.timedOut !== true,
+    code: result.code,
+    timedOut: result.timedOut,
+    durationMs: result.durationMs,
+    stdoutTail: tailText(String(result.stdout ?? ""), 4000),
+    stderrTail: tailText(String(result.stderr ?? ""), 4000),
+    error: result.error,
+  };
+}
+
+async function bridgeSelfCheck(cwd?: string) {
+  const root = cwd ? resolvePath(cwd) : process.cwd();
+  const typecheck = await runCommand("npm run check", root, 120_000) as Record<string, unknown>;
+  const build = await runCommand("npm run build", root, 120_000) as Record<string, unknown>;
+  const status = await gitStatus(root);
+  const tunnel = await tunnelHealth();
+  return {
+    ok: typecheck.code === 0 && build.code === 0,
+    server: { name: SERVER_NAME, version: SERVER_VERSION },
+    cwd: root,
+    node: process.version,
+    checks: { typecheck: summarizeCommand(typecheck), build: summarizeCommand(build) },
+    git: status,
+    tunnel,
+    activeTerminals: terminalList(),
+  };
+}
+
 function defaultShellCommand() {
   return process.platform === "win32" ? "powershell.exe -NoLogo -NoProfile" : "bash";
 }
@@ -244,9 +367,17 @@ const processToolSchemas = [
   { name: "terminal_stop", description: "Stop and forget a persistent terminal session.", inputSchema: { type: "object", properties: { sessionId: { type: "string" } }, required: ["sessionId"], additionalProperties: false } },
   { name: "terminal_list", description: "List active persistent terminal sessions.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
 ] as const;
+const opsToolSchemas = [
+  { name: "git_status", description: "Return short Git status for the current project.", inputSchema: { type: "object", properties: { cwd: { type: "string" } }, additionalProperties: false } },
+  { name: "git_set_remote", description: "Add or update a GitHub HTTPS remote for the current project.", inputSchema: { type: "object", properties: { repoUrl: { type: "string", default: DEFAULT_GIT_REMOTE_URL }, remote: { type: "string", default: "origin" }, cwd: { type: "string" } }, additionalProperties: false } },
+  { name: "git_commit_all", description: "Stage all changes and create a Git commit if the working tree is dirty.", inputSchema: { type: "object", properties: { message: { type: "string" }, cwd: { type: "string" } }, required: ["message"], additionalProperties: false } },
+  { name: "git_push_current_branch", description: "Push the current Git branch to a remote using local credentials.", inputSchema: { type: "object", properties: { remote: { type: "string", default: "origin" }, branch: { type: "string" }, cwd: { type: "string" } }, additionalProperties: false } },
+  { name: "tunnel_health", description: "Check tunnel-client local healthz and readyz endpoints.", inputSchema: { type: "object", properties: { baseUrl: { type: "string", default: DEFAULT_TUNNEL_ADMIN_BASE_URL } }, additionalProperties: false } },
+  { name: "bridge_self_check", description: "Run typecheck, build, Git status, tunnel health, and terminal inventory.", inputSchema: { type: "object", properties: { cwd: { type: "string" } }, additionalProperties: false } },
+] as const;
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [...toolSchemas, ...processToolSchemas],
+  tools: [...toolSchemas, ...processToolSchemas, ...opsToolSchemas],
 }));
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
@@ -304,6 +435,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
     if (name === "terminal_list") {
       return jsonText(terminalList());
+    }
+    if (name === "git_status") {
+      const parsed = z.object({ cwd: z.string().optional() }).parse(args);
+      return jsonText(await gitStatus(parsed.cwd));
+    }
+    if (name === "git_set_remote") {
+      const parsed = z.object({
+        repoUrl: z.string().default(DEFAULT_GIT_REMOTE_URL),
+        remote: z.string().default("origin"),
+        cwd: z.string().optional(),
+      }).parse(args);
+      return jsonText(await gitSetRemote(parsed.repoUrl, parsed.remote, parsed.cwd));
+    }
+    if (name === "git_commit_all") {
+      const parsed = z.object({ message: z.string().min(1).max(200), cwd: z.string().optional() }).parse(args);
+      return jsonText(await gitCommitAll(parsed.message, parsed.cwd));
+    }
+    if (name === "git_push_current_branch") {
+      const parsed = z.object({ remote: z.string().default("origin"), branch: z.string().optional(), cwd: z.string().optional() }).parse(args);
+      return jsonText(await gitPushCurrentBranch(parsed.remote, parsed.branch, parsed.cwd));
+    }
+    if (name === "tunnel_health") {
+      const parsed = z.object({ baseUrl: z.string().default(DEFAULT_TUNNEL_ADMIN_BASE_URL) }).parse(args);
+      return jsonText(await tunnelHealth(parsed.baseUrl));
+    }
+    if (name === "bridge_self_check") {
+      const parsed = z.object({ cwd: z.string().optional() }).parse(args);
+      return jsonText(await bridgeSelfCheck(parsed.cwd));
     }
     throw new Error(`Unknown tool: ${name}`);
   } catch (error) {
