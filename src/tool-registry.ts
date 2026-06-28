@@ -10,6 +10,32 @@ import { metricsToolModule } from "./tools/metrics-tools.js";
 import { processToolModule } from "./tools/process-tools.js";
 import type { BridgeToolModule, BridgeToolRegistry, BridgeToolSchema } from "./tools/types.js";
 
+const readOnlyToolNames = new Set([
+  "system_info", "list_dir", "read_text_file", "list_files_smart", "read_file_lines", "read_many_files", "search_files",
+  "git_status", "tunnel_health", "bridge_health", "bridge_self_check", "bridge_restart_status",
+  "bridge_metrics_status", "bridge_metrics_summary", "bridge_metrics_recent", "bridge_metrics_query", "bridge_visualization_catalog", "bridge_visualize_metrics",
+  "analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "find_dead_code",
+]);
+
+const destructiveToolNames = new Set([
+  "write_text_file", "apply_patch", "edit_lines", "run_command", "terminal_start", "terminal_write", "terminal_stop",
+  "git_set_remote", "git_commit_all", "git_push_current_branch", "bridge_request_restart", "bridge_verify_all",
+]);
+
+function annotateTool(tool: BridgeToolSchema): BridgeToolSchema {
+  if (readOnlyToolNames.has(tool.name)) return { ...tool, annotations: { readOnlyHint: true, destructiveHint: false, ...(tool.annotations ?? {}) } };
+  if (destructiveToolNames.has(tool.name)) return { ...tool, annotations: { readOnlyHint: false, destructiveHint: true, ...(tool.annotations ?? {}) } };
+  return { ...tool, annotations: { readOnlyHint: false, destructiveHint: false, ...(tool.annotations ?? {}) } };
+}
+
+function riskSummary(tools: BridgeToolSchema[]) {
+  return {
+    readOnly: tools.filter((tool) => tool.annotations?.readOnlyHint).map((tool) => tool.name),
+    destructive: tools.filter((tool) => tool.annotations?.destructiveHint).map((tool) => tool.name),
+    neutral: tools.filter((tool) => !tool.annotations?.readOnlyHint && !tool.annotations?.destructiveHint).map((tool) => tool.name),
+  };
+}
+
 export function createToolRegistry(modules: readonly BridgeToolModule[]): BridgeToolRegistry {
   const tools: BridgeToolSchema[] = [];
   const handlers = new Map<string, (args: Record<string, unknown>) => Promise<unknown> | unknown>();
@@ -25,7 +51,7 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
       if (!handler) {
         throw new Error(`Tool module '${module.name}' declares '${tool.name}' without a handler.`);
       }
-      tools.push({ ...tool });
+      tools.push(annotateTool(tool));
       handlers.set(tool.name, handler);
     }
   }
@@ -33,6 +59,7 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
   return {
     tools,
     modules: moduleNames,
+    riskSummary: riskSummary(tools),
     has(name: string) {
       return handlers.has(name);
     },

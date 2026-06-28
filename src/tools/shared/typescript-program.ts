@@ -1,4 +1,4 @@
-import fs from "node:fs";
+﻿import fs from "node:fs";
 import path from "node:path";
 
 type TypeScriptModule = typeof import("typescript");
@@ -35,11 +35,28 @@ export type SemanticIndex = {
   available: boolean;
   reason?: string;
   root: string;
+  cache?: { hit: boolean; key: string };
   tsconfigPath?: string;
   scannedFiles: number;
   groups: SemanticSymbolGroup[];
 };
 
+
+const semanticIndexStore = new Map<string, SemanticIndex>();
+const SEMANTIC_INDEX_STORE_MAX = 8;
+
+function fileStamp(filePath: string) {
+  try {
+    const stat = fs.statSync(filePath);
+    return `${path.resolve(filePath)}:${stat.size}:${Math.trunc(stat.mtimeMs)}`;
+  } catch {
+    return `${path.resolve(filePath)}:missing`;
+  }
+}
+
+function semanticIndexStoreKey(root: string, includeTests: boolean, maxFiles: number, name: string | undefined, tsconfigPath: string | undefined, files: string[]) {
+  return [root, String(includeTests), String(maxFiles), name ?? "", tsconfigPath ?? "", ...files.map(fileStamp)].join("|");
+}
 async function loadTypeScript(): Promise<TypeScriptModule | null> {
   try {
     return await import("typescript");
@@ -180,6 +197,9 @@ export async function buildSemanticIndex(options: { root: string; includeTests?:
   const root = path.resolve(options.root);
   if (!ts) return { available: false, reason: "typescript package is not available at runtime", root, scannedFiles: 0, groups: [] };
   const maxFiles = Math.max(1, Math.min(2000, Math.trunc(options.maxFiles ?? 500)));
+  const storeKey = [root, String(maxFiles), options.name ?? ""].join("|");
+  const stored = semanticIndexStore.get(storeKey);
+  if (stored) return { ...stored, cache: { hit: true, key: storeKey } };
   const { tsconfigPath, program, files } = createProgram(ts, root, options.includeTests === true, maxFiles);
   const checker = program.getTypeChecker();
   const groups = new Map<string, SemanticSymbolGroup>();
@@ -220,7 +240,9 @@ export async function buildSemanticIndex(options: { root: string; includeTests?:
     visit(sourceFile);
   }
 
-  return { available: true, root, tsconfigPath, scannedFiles: files.length, groups: Array.from(groups.values()) };
+  const result: SemanticIndex = { available: true, root, tsconfigPath, scannedFiles: files.length, groups: Array.from(groups.values()), cache: { hit: false, key: storeKey } };
+  semanticIndexStore.set(storeKey, result);
+  return result;
 }
 
 export async function semanticImpact(options: { root: string; name: string; includeTests?: boolean; maxFiles?: number }) {
@@ -240,6 +262,7 @@ export async function semanticImpact(options: { root: string; name: string; incl
     root: index.root,
     tsconfigPath: index.tsconfigPath,
     scannedFiles: index.scannedFiles,
+    cache: index.cache,
     semanticSymbolCount: groups.length,
     definitions,
     duplicateDefinitions: definitions.length,
@@ -280,3 +303,12 @@ export async function semanticDeadCode(options: { root: string; includeTests?: b
   }
   return { available: true, root: index.root, tsconfigPath: index.tsconfigPath, scannedFiles: index.scannedFiles, candidates };
 }
+
+
+
+
+
+
+
+
+

@@ -1,4 +1,4 @@
-﻿param(
+param(
   [string]$ProjectRoot = "C:\dev\bridge-mcp",
   [string]$ExpectedTunnelAdminBaseUrl = "http://127.0.0.1:8081"
 )
@@ -20,9 +20,9 @@ Set-Location -LiteralPath $ProjectRoot
 Invoke-Check "version bump is consistent" {
   $packageJson = Get-Content -LiteralPath "package.json" -Raw | ConvertFrom-Json
   $configText = Get-Content -LiteralPath "src\config.ts" -Raw
-  if ($packageJson.version -ne "0.5.1") { throw "package.json version is $($packageJson.version), expected 0.5.1" }
-  if ($configText -notmatch 'SERVER_VERSION = "0\.5\.1"') { throw "src/config.ts does not report SERVER_VERSION 0.5.1" }
-  Write-Host "  OK 0.5.1"
+  if ($packageJson.version -ne "0.5.2") { throw "package.json version is $($packageJson.version), expected 0.5.2" }
+  if ($configText -notmatch 'SERVER_VERSION = "0\.5\.2"') { throw "src/config.ts does not report SERVER_VERSION 0.5.2" }
+  Write-Host "  OK 0.5.2"
 }
 
 Invoke-Check "tunnel admin default stays on HTTP profile port" {
@@ -207,6 +207,56 @@ if (status.lastAck.id !== "bom-test" || status.lastAck.action !== "restart-http"
   }
 }
 
+Invoke-Check "tool annotations and compact safe tools are registered" {
+  $nodeScript = @'
+import { pathToFileURL } from "node:url";
+const registryModuleUrl = pathToFileURL(process.argv[2]).href;
+const { createDefaultToolRegistry } = await import(registryModuleUrl);
+const registry = createDefaultToolRegistry();
+const byName = new Map(registry.tools.map((tool) => [tool.name, tool]));
+for (const tool of ["bridge_health", "bridge_metrics_query"]) if (!registry.has(tool)) process.exit(60);
+for (const tool of ["read_text_file", "bridge_health", "bridge_metrics_query", "impact_analysis", "dependency_graph"]) if (byName.get(tool)?.annotations?.readOnlyHint !== true) process.exit(61);
+for (const tool of ["write_text_file", "run_command", "git_push_current_branch", "bridge_request_restart", "bridge_verify_all"]) if (byName.get(tool)?.annotations?.destructiveHint !== true) process.exit(62);
+console.log("  OK tool annotations and compact safe tools");
+'@
+  $tmpScript = Join-Path ([System.IO.Path]::GetTempPath()) ("bridge-risk-annotations-" + [Guid]::NewGuid().ToString("N") + ".mjs")
+  try {
+    Set-Content -LiteralPath $tmpScript -Value $nodeScript -Encoding utf8
+    $registryModulePath = (Resolve-Path -LiteralPath ".\dist\tool-registry.js").Path
+    node $tmpScript $registryModulePath
+    if ($LASTEXITCODE -ne 0) { throw "tool annotation regression failed" }
+  }
+  finally { Remove-Item -LiteralPath $tmpScript -Force -ErrorAction SilentlyContinue }
+}
+
+Invoke-Check "semantic and import graph stores report hits" {
+  $nodeScript = @'
+import { pathToFileURL } from "node:url";
+const registryModuleUrl = pathToFileURL(process.argv[2]).href;
+const { createDefaultToolRegistry } = await import(registryModuleUrl);
+const registry = createDefaultToolRegistry();
+const root = process.cwd();
+await registry.call("impact_analysis", { name: "createDefaultToolRegistry", projectRoot: root, engine: "semantic", maxFiles: 200 });
+const secondImpact = await registry.call("impact_analysis", { name: "createDefaultToolRegistry", projectRoot: root, engine: "semantic", maxFiles: 200 });
+if (secondImpact.cache?.hit !== true) process.exit(70);
+await registry.call("import_graph", { projectRoot: root, resolutionEngine: "typescript", maxFiles: 200 });
+const secondGraph = await registry.call("import_graph", { projectRoot: root, resolutionEngine: "typescript", maxFiles: 200 });
+if (secondGraph.memo?.hit !== true) process.exit(71);
+console.log("  OK semantic and import graph store hits");
+'@
+  $tmpScript = Join-Path ([System.IO.Path]::GetTempPath()) ("bridge-store-hit-" + [Guid]::NewGuid().ToString("N") + ".mjs")
+  try {
+    Set-Content -LiteralPath $tmpScript -Value $nodeScript -Encoding utf8
+    $registryModulePath = (Resolve-Path -LiteralPath ".\dist\tool-registry.js").Path
+    node $tmpScript $registryModulePath
+    if ($LASTEXITCODE -ne 0) { throw "store hit regression failed" }
+  }
+  finally { Remove-Item -LiteralPath $tmpScript -Force -ErrorAction SilentlyContinue }
+}
+
+
 Write-Host "[bridge-regression-test] all checks passed"
+
+
 
 

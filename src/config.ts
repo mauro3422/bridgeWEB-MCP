@@ -1,5 +1,5 @@
-export const SERVER_NAME = "bridge-mcp";
-export const SERVER_VERSION = "0.5.1";
+﻿export const SERVER_NAME = "bridge-mcp";
+export const SERVER_VERSION = "0.5.2";
 
 export const DEFAULT_MAX_FILE_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_TIMEOUT_MS = 30_000;
@@ -64,3 +64,4 @@ export function getBridgeHttpConfig(env: NodeJS.ProcessEnv = process.env): Bridg
     mcpPath: parsePath(env.BRIDGE_MCP_HTTP_PATH),
   };
 }
+

@@ -35,7 +35,7 @@ async function getRuntimeToolCatalog() {
     const { createDefaultToolRegistry } = await import("../tool-registry.js");
     const registry = createDefaultToolRegistry();
     const names = registry.tools.map((tool) => tool.name);
-    const payload = registry.tools.map((tool) => ({ name: tool.name, inputSchema: tool.inputSchema }));
+    const payload = registry.tools.map((tool) => ({ name: tool.name, inputSchema: tool.inputSchema, annotations: tool.annotations }));
     const hash = createHash("sha256").update(JSON.stringify(payload)).digest("hex").slice(0, 16);
     return {
       available: true,
@@ -43,6 +43,7 @@ async function getRuntimeToolCatalog() {
       hash,
       modules: registry.modules,
       names,
+      riskSummary: registry.riskSummary,
       refreshHint: "If the connector exposes fewer tools than this runtime catalog, reopen the connector or start a new chat.",
     };
   } catch (error) {
@@ -93,6 +94,17 @@ export async function bridgeRestartStatus(cwd?: string) {
   return { requestPath, ackPath, pending: await fileExists(requestPath), request: await readJsonIfExists(requestPath), lastAck: await readJsonIfExists(ackPath) };
 }
 
+async function bridgeHealth(check: "all" | "tunnel" | "restart" | "catalog", cwd?: string) {
+  const root = cwd ? resolveToolPath(cwd) : process.cwd();
+  const out: Record<string, unknown> = { server: { name: SERVER_NAME, version: SERVER_VERSION }, cwd: root };
+  if (check === "all" || check === "tunnel") out.tunnel = await tunnelHealth();
+  if (check === "all" || check === "restart") out.restart = await bridgeRestartStatus(root);
+  if (check === "all" || check === "catalog") out.toolCatalog = await getRuntimeToolCatalog();
+  const tunnel = out.tunnel as { healthz?: { ok?: boolean }; readyz?: { ok?: boolean } } | undefined;
+  const restart = out.restart as { pending?: boolean } | undefined;
+  return { ok: (tunnel ? tunnel.healthz?.ok === true && tunnel.readyz?.ok === true : true) && (restart ? restart.pending !== true : true), check, ...out };
+}
+
 async function bridgeSelfCheck(cwd?: string) {
   const root = cwd ? resolveToolPath(cwd) : process.cwd();
   const typecheck = await runShellCommand("npm run check", root, 120_000);
@@ -117,6 +129,7 @@ export const bridgeOpsToolModule: BridgeToolModule = {
   name: "bridge-ops",
   tools: [
     { name: "tunnel_health", description: "Check tunnel-client local healthz and readyz endpoints using the configured tunnel admin URL by default.", inputSchema: { type: "object", properties: { baseUrl: { type: "string", default: DEFAULT_TUNNEL_ADMIN_BASE_URL } }, additionalProperties: false } },
+    { name: "bridge_health", description: "Compact read-only bridge health query for tunnel, restart status, runtime tool catalog, or all lightweight checks.", inputSchema: { type: "object", properties: { check: { type: "string", enum: ["all", "tunnel", "restart", "catalog"], default: "all" }, cwd: { type: "string" } }, additionalProperties: false } },
     { name: "bridge_self_check", description: "Run typecheck, build, Git status, configured tunnel health, and terminal inventory.", inputSchema: { type: "object", properties: { cwd: { type: "string" } }, additionalProperties: false } },
     { name: "bridge_request_restart", description: "Request a bridge restart by writing a restart-request file for the external watchdog. This tool does not restart or kill processes directly.", inputSchema: { type: "object", properties: { reason: { type: "string" }, mode: { type: "string", enum: ["http", "tunnel", "full"], default: "http" }, cwd: { type: "string" } }, required: ["reason"], additionalProperties: false } },
     { name: "bridge_restart_status", description: "Return pending restart-request and last restart-ack information for the bridge watchdog.", inputSchema: { type: "object", properties: { cwd: { type: "string" } }, additionalProperties: false } },
@@ -125,6 +138,10 @@ export const bridgeOpsToolModule: BridgeToolModule = {
     tunnel_health: async (args) => {
       const parsed = z.object({ baseUrl: z.string().default(DEFAULT_TUNNEL_ADMIN_BASE_URL) }).parse(args);
       return await tunnelHealth(parsed.baseUrl);
+    },
+    bridge_health: async (args) => {
+      const parsed = z.object({ check: z.enum(["all", "tunnel", "restart", "catalog"]).default("all"), cwd: z.string().optional() }).parse(args);
+      return await bridgeHealth(parsed.check, parsed.cwd);
     },
     bridge_self_check: async (args) => {
       const parsed = z.object({ cwd: z.string().optional() }).parse(args);

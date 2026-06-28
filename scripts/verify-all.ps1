@@ -1,6 +1,6 @@
 param(
   [string]$ProjectRoot = "C:\dev\bridge-mcp",
-  [string]$ExpectedServerVersion = "0.5.1",
+  [string]$ExpectedServerVersion = "0.5.2",
   [switch]$StrictGit
 )
 
@@ -79,3 +79,4 @@ Write-Host "[bridge-verify-all] summary"
 $result | ConvertTo-Json -Depth 6
 
 if (-not $ok) { exit 1 }
+

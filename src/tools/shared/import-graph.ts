@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { collectProjectTextFiles, type ScannedTextFile } from "./project-scan.js";
 import { analyzeTypeScriptSource, findTypeScriptIdentifierReferences, type TypeScriptImport, type TypeScriptSymbol } from "./typescript-intelligence.js";
@@ -53,6 +54,7 @@ export type ImportGraphResult = {
   mostImported: Array<{ file: string; importedBy: number }>;
   mostImporting: Array<{ file: string; imports: number }>;
   orphanFiles: string[];
+  memo?: { hit: boolean; key: string };
 };
 
 export type DeadCodeCandidate = {
@@ -66,6 +68,15 @@ export type DeadCodeCandidate = {
   reason: string;
   text: string;
 };
+
+const importGraphStore = new Map<string, ImportGraphResult>();
+function importGraphStoreKey(root: string, scan: { files: ScannedTextFile[] }, options: { filePattern?: string; includeTests?: boolean; includeExternal?: boolean; maxFiles?: number; maxCycles?: number; resolutionEngine?: ImportResolutionEngine }) {
+  const stamps = scan.files.map((file) => {
+    const stat = fs.statSync(file.path);
+    return `${file.relativePath}:${stat.size}:${Math.trunc(stat.mtimeMs)}`;
+  });
+  return [root, options.filePattern ?? "*.ts", String(options.includeTests === true), String(options.includeExternal === true), String(options.maxFiles ?? 500), String(options.maxCycles ?? 20), options.resolutionEngine ?? "auto", ...stamps].join("|");
+}
 
 function normalizeRel(filePath: string) {
   return filePath.replace(/\\/g, "/");
@@ -204,6 +215,9 @@ export async function buildImportGraph(options: { root: string; filePattern?: st
   const root = path.resolve(options.root);
   const resolutionEngine = options.resolutionEngine ?? "auto";
   const scan = await collectProjectTextFiles({ root, filePattern: options.filePattern ?? "*.ts", includeTests: options.includeTests === true, maxFiles: options.maxFiles ?? 500 });
+  const storeKey = importGraphStoreKey(root, scan, options);
+  const stored = importGraphStore.get(storeKey);
+  if (stored) return { ...stored, memo: { hit: true, key: storeKey } };
   const knownFiles = new Set(scan.files.map((file) => normalizeRel(file.relativePath)));
   const knownFilesByAbs = new Map(scan.files.map((file) => [normalizeAbs(file.path), normalizeRel(file.relativePath)]));
   const tsResolver = await createTypeScriptResolver(root, resolutionEngine !== "relative");
@@ -245,7 +259,7 @@ export async function buildImportGraph(options: { root: string; filePattern?: st
   const internalEdges = edges.filter((edge) => !edge.external && edge.resolved);
   const unresolved = edges.filter((edge) => !edge.external && !edge.resolved);
   const externalImports = edges.filter((edge) => edge.external);
-  return {
+  const result: ImportGraphResult = {
     root: scan.root,
     resolutionEngine,
     resolver: { available: tsResolver.available, reason: tsResolver.reason, tsconfigPath: tsResolver.tsconfigPath },
@@ -261,7 +275,10 @@ export async function buildImportGraph(options: { root: string; filePattern?: st
     mostImported: nodes.filter((node) => node.importedBy > 0).sort((a, b) => b.importedBy - a.importedBy).slice(0, 20).map(({ file, importedBy }) => ({ file, importedBy })),
     mostImporting: nodes.filter((node) => node.imports > 0).sort((a, b) => b.imports - a.imports).slice(0, 20).map(({ file, imports }) => ({ file, imports })),
     orphanFiles: nodes.filter((node) => node.importedBy === 0 && node.imports === 0).map((node) => node.file).slice(0, 100),
+    memo: { hit: false, key: storeKey },
   };
+  importGraphStore.set(storeKey, result);
+  return result;
 }
 
 export async function findDeadCodeCandidates(options: { root: string; filePattern?: string; includeTests?: boolean; includeExported?: boolean; maxFiles?: number; maxCandidates?: number }): Promise<{ root: string; scannedFiles: number; candidates: DeadCodeCandidate[]; skipped: Array<{ path: string; reason: string }>; truncated: boolean }> {
@@ -284,3 +301,11 @@ export async function findDeadCodeCandidates(options: { root: string; filePatter
   }
   return { root: scan.root, scannedFiles: scan.files.length, candidates, skipped: scan.skipped, truncated: scan.truncated };
 }
+
+
+
+
+
+
+
+
