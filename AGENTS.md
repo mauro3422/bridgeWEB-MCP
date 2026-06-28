@@ -85,6 +85,21 @@ http://127.0.0.1:3001/readyz -> ready
 http://127.0.0.1:8081/readyz -> ready
 ```
 
+Diagnóstico seguro sin matar procesos:
+
+```powershell
+.\scripts\bridge-doctor.ps1
+```
+
+Limpieza segura de procesos dev/test, primero en modo simulación:
+
+```powershell
+.\scripts\clean-bridge-dev-processes.ps1
+.\scripts\clean-bridge-dev-processes.ps1 -Apply
+```
+
+El watchdog HTTP usa protección singleton. No arrancar otro watchdog production encima del activo salvo que se esté haciendo una prueba controlada con `-NoTunnel`, `-Once`, `-DryRun` o `-AllowDuplicate`.
+
 ## Rollback stdio
 
 Si HTTP falla, volver a stdio:

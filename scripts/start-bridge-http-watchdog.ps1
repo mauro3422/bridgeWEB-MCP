@@ -17,7 +17,8 @@ param(
   [switch]$Build,
   [switch]$NoTunnel,
   [switch]$Once,
-  [switch]$DryRun
+  [switch]$DryRun,
+  [switch]$AllowDuplicate
 )
 
 $ErrorActionPreference = "Stop"
@@ -61,6 +62,97 @@ function Get-ProcessStateFromPort {
   catch {
     return $null
   }
+}
+
+function Get-Sha256Hex {
+  param([string]$Text)
+
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+    $hash = $sha.ComputeHash($bytes)
+    return -join ($hash | ForEach-Object { $_.ToString("x2") })
+  }
+  finally {
+    $sha.Dispose()
+  }
+}
+
+function Get-CommandLineParamValue {
+  param([string]$CommandLine, [string]$Name)
+
+  $pattern = "(?i)(?:^|\s)-$([regex]::Escape($Name))\s+(?:`"([^`"]+)`"|'([^']+)'|([^\s]+))"
+  $match = [regex]::Match($CommandLine, $pattern)
+  if (-not $match.Success) { return $null }
+
+  foreach ($index in 1..3) {
+    if ($match.Groups[$index].Success) { return $match.Groups[$index].Value }
+  }
+
+  return $null
+}
+
+function Assert-NoDuplicateWatchdog {
+  if ($AllowDuplicate -or $NoTunnel -or $Once) { return }
+
+  $scriptPattern = [regex]::Escape("start-bridge-http-watchdog.ps1")
+  $candidates = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.ProcessId -ne $PID -and
+      $_.Name -like "powershell*" -and
+      [string]$_.CommandLine -match $scriptPattern
+    }
+
+  foreach ($candidate in $candidates) {
+    $cmd = [string]$candidate.CommandLine
+    if ($cmd -match "(?i)(?:^|\s)-NoTunnel(?:\s|$)") { continue }
+
+    $candidateBridgePort = Get-CommandLineParamValue -CommandLine $cmd -Name "BridgePort"
+    if ($candidateBridgePort -and [int]$candidateBridgePort -ne $BridgePort) { continue }
+    if (-not $candidateBridgePort -and $BridgePort -ne 3001) { continue }
+
+    $candidateProfile = Get-CommandLineParamValue -CommandLine $cmd -Name "Profile"
+    if ($candidateProfile -and $candidateProfile -ne $Profile) { continue }
+
+    $candidateTunnelBaseUrl = Get-CommandLineParamValue -CommandLine $cmd -Name "TunnelBaseUrl"
+    if ($candidateTunnelBaseUrl -and $candidateTunnelBaseUrl -ne $TunnelBaseUrl) { continue }
+
+    throw "Another bridge HTTP watchdog appears to be running for this production profile: pid=$($candidate.ProcessId) command=$cmd"
+  }
+}
+
+function Enter-BridgeWatchdogSingleton {
+  if ($AllowDuplicate) {
+    Write-BridgeLog "AllowDuplicate was set; singleton protection is disabled" "warn"
+    return $null
+  }
+
+  Assert-NoDuplicateWatchdog
+
+  $identity = "project=$ProjectRoot|profile=$Profile|bridge=$BridgeHost`:$BridgePort|tunnel=$TunnelBaseUrl|notunnel=$NoTunnel"
+  $hash = Get-Sha256Hex -Text $identity
+  $mutexName = "Local\BridgeMCPHttpWatchdog-$($hash.Substring(0, 32))"
+  $createdNew = $false
+  $mutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
+
+  if (-not $createdNew) {
+    $acquired = $false
+    try {
+      $acquired = $mutex.WaitOne(0)
+    }
+    catch [System.Threading.AbandonedMutexException] {
+      $acquired = $true
+      Write-BridgeLog "Recovered abandoned watchdog singleton lock: $mutexName" "warn"
+    }
+
+    if (-not $acquired) {
+      $mutex.Dispose()
+      throw "Another bridge HTTP watchdog already holds singleton lock: $mutexName identity=$identity"
+    }
+  }
+
+  Write-BridgeLog "Acquired watchdog singleton lock: $mutexName"
+  return $mutex
 }
 
 function Stop-ProcessState {
@@ -234,8 +326,11 @@ Write-BridgeLog "Restart request file=$(Join-Path $ProjectRoot $RestartRequestFi
 
 $bridgeProcess = $null
 $tunnelProcess = $null
+$watchdogMutex = $null
 
 try {
+  $watchdogMutex = Enter-BridgeWatchdogSingleton
+
   if ($Build -and -not $DryRun) {
     Write-BridgeLog "Running npm run build before startup"
     npm run build
@@ -298,5 +393,18 @@ finally {
   if ($Once -or $DryRun) {
     Stop-ProcessState -State $tunnelProcess -Name "tunnel-client"
     Stop-ProcessState -State $bridgeProcess -Name "bridge HTTP"
+  }
+
+  if ($watchdogMutex) {
+    try {
+      $watchdogMutex.ReleaseMutex() | Out-Null
+      Write-BridgeLog "Released watchdog singleton lock"
+    }
+    catch {
+      Write-BridgeLog "Failed to release watchdog singleton lock: $($_.Exception.Message)" "warn"
+    }
+    finally {
+      $watchdogMutex.Dispose()
+    }
   }
 }

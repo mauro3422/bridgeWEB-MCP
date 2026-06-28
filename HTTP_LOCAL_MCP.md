@@ -168,7 +168,17 @@ Useful checks:
 Invoke-RestMethod http://127.0.0.1:3001/status
 Invoke-RestMethod http://127.0.0.1:8081/readyz
 .\scripts\test-bridge-http.ps1
+.\scripts\bridge-doctor.ps1
 ```
+
+If dev/test processes are left behind on alternate ports, inspect first and only then apply cleanup:
+
+```powershell
+.\scripts\clean-bridge-dev-processes.ps1
+.\scripts\clean-bridge-dev-processes.ps1 -Apply
+```
+
+The HTTP watchdog is now protected by a singleton guard keyed by project root, profile, bridge port, tunnel URL, and tunnel mode. It also checks for an already-running production watchdog before launching new bridge or tunnel processes.
 
 Rollback to stdio remains available with:
 
