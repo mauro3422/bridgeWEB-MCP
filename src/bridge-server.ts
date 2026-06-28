@@ -22,6 +22,7 @@ import {
 } from "./config.js";
 
 export { SERVER_NAME, SERVER_VERSION } from "./config.js";
+import { beginToolMetric, finishToolMetric, getMetricsStatus, getMetricsSummary, getRecentMetrics } from "./metrics.js";
 
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
 type TerminalSession = {
@@ -433,71 +434,81 @@ const opsToolSchemas = [
   { name: "bridge_self_check", description: "Run typecheck, build, Git status, tunnel health, and terminal inventory.", inputSchema: { type: "object", properties: { cwd: { type: "string" } }, additionalProperties: false } },
   { name: "bridge_request_restart", description: "Request a bridge restart by writing a restart-request file for the external watchdog. This tool does not restart or kill processes directly.", inputSchema: { type: "object", properties: { reason: { type: "string" }, mode: { type: "string", enum: ["http", "tunnel", "full"], default: "http" }, cwd: { type: "string" } }, required: ["reason"], additionalProperties: false } },
   { name: "bridge_restart_status", description: "Return pending restart-request and last restart-ack information for the bridge watchdog.", inputSchema: { type: "object", properties: { cwd: { type: "string" } }, additionalProperties: false } },
+  { name: "bridge_metrics_status", description: "Return metrics storage status and paths for bridge tool telemetry.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
+  { name: "bridge_metrics_summary", description: "Return aggregated bridge tool metrics from SQLite.", inputSchema: { type: "object", properties: { limit: { type: "number", default: 50, minimum: 1, maximum: 200 } }, additionalProperties: false } },
+  { name: "bridge_metrics_recent", description: "Return recent bridge tool calls from SQLite.", inputSchema: { type: "object", properties: { limit: { type: "number", default: 25, minimum: 1, maximum: 200 } }, additionalProperties: false } },
 ] as const;
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [...toolSchemas, ...processToolSchemas, ...opsToolSchemas],
 }));
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const name = request.params.name;
+  const args = request.params.arguments ?? {};
+  const metric = beginToolMetric(name, args);
+  const complete = (result: ReturnType<typeof jsonText>, ok = true, error?: string) => {
+    const outputText = result.content.map((part) => part.text).join("\n");
+    finishToolMetric(metric, ok, outputText.length, error);
+    return result;
+  };
+
   try {
-    const name = request.params.name;
-    const args = request.params.arguments ?? {};
     if (name === "system_info") {
-      return jsonText({
+      return complete(jsonText({
         server: { name: SERVER_NAME, version: SERVER_VERSION },
         hostname: os.hostname(), platform: os.platform(), release: os.release(), arch: os.arch(),
         cpus: os.cpus().map((cpu) => cpu.model), totalMemory: os.totalmem(), freeMemory: os.freemem(),
         homedir: os.homedir(), cwd: process.cwd(), node: process.version,
-      });
+      }));
     }
     if (name === "list_dir") {
       const parsed = z.object({ path: z.string(), depth: z.number().min(1).max(5).default(1) }).parse(args);
-      return jsonText(await listDir(parsed.path, parsed.depth));
+      return complete(jsonText(await listDir(parsed.path, parsed.depth)));
     }
     if (name === "read_text_file") {
       const parsed = z.object({ path: z.string(), maxBytes: z.number().positive().default(DEFAULT_MAX_FILE_BYTES) }).parse(args);
-      return jsonText(await readTextFile(parsed.path, parsed.maxBytes));
+      return complete(jsonText(await readTextFile(parsed.path, parsed.maxBytes)));
     }
     if (name === "write_text_file") {
       const parsed = z.object({ path: z.string(), content: z.string(), append: z.boolean().default(false) }).parse(args);
-      return jsonText(await writeTextFile(parsed.path, parsed.content, parsed.append));
+      return complete(jsonText(await writeTextFile(parsed.path, parsed.content, parsed.append)));
     }
     if (name === "apply_patch") {
       const parsed = z.object({
         path: z.string(), oldText: z.string(), newText: z.string(),
         expectedReplacements: z.number().int().positive().default(1),
       }).parse(args);
-      return jsonText(await applyPatch(parsed.path, parsed.oldText, parsed.newText, parsed.expectedReplacements));
+      return complete(jsonText(await applyPatch(parsed.path, parsed.oldText, parsed.newText, parsed.expectedReplacements)));
     }
     if (name === "run_command") {
       const parsed = z.object({
         command: z.string().min(1), cwd: z.string().optional(),
         timeoutMs: z.number().positive().max(10 * 60_000).default(DEFAULT_TIMEOUT_MS),
       }).parse(args);
-      return jsonText(await runCommand(parsed.command, parsed.cwd, parsed.timeoutMs) as JsonValue);
+      return complete(jsonText(await runCommand(parsed.command, parsed.cwd, parsed.timeoutMs) as JsonValue));
     }
     if (name === "terminal_start") {
       const parsed = z.object({ command: z.string().optional(), cwd: z.string().optional() }).parse(args);
-      return jsonText(await terminalStart(parsed.command, parsed.cwd));
+      return complete(jsonText(await terminalStart(parsed.command, parsed.cwd)));
     }
     if (name === "terminal_write") {
       const parsed = z.object({ sessionId: z.string(), input: z.string() }).parse(args);
-      return jsonText(terminalWrite(parsed.sessionId, parsed.input));
+      return complete(jsonText(terminalWrite(parsed.sessionId, parsed.input)));
     }
     if (name === "terminal_read") {
       const parsed = z.object({ sessionId: z.string(), maxChars: z.number().positive().default(20000) }).parse(args);
-      return jsonText(terminalRead(parsed.sessionId, parsed.maxChars));
+      return complete(jsonText(terminalRead(parsed.sessionId, parsed.maxChars)));
     }
     if (name === "terminal_stop") {
       const parsed = z.object({ sessionId: z.string() }).parse(args);
-      return jsonText(terminalStop(parsed.sessionId));
+      return complete(jsonText(terminalStop(parsed.sessionId)));
     }
     if (name === "terminal_list") {
-      return jsonText(terminalList());
+      return complete(jsonText(terminalList()));
     }
     if (name === "git_status") {
       const parsed = z.object({ cwd: z.string().optional() }).parse(args);
-      return jsonText(await gitStatus(parsed.cwd));
+      return complete(jsonText(await gitStatus(parsed.cwd)));
     }
     if (name === "git_set_remote") {
       const parsed = z.object({
@@ -505,23 +516,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         remote: z.string().default("origin"),
         cwd: z.string().optional(),
       }).parse(args);
-      return jsonText(await gitSetRemote(parsed.repoUrl, parsed.remote, parsed.cwd));
+      return complete(jsonText(await gitSetRemote(parsed.repoUrl, parsed.remote, parsed.cwd)));
     }
     if (name === "git_commit_all") {
       const parsed = z.object({ message: z.string().min(1).max(200), cwd: z.string().optional() }).parse(args);
-      return jsonText(await gitCommitAll(parsed.message, parsed.cwd));
+      return complete(jsonText(await gitCommitAll(parsed.message, parsed.cwd)));
     }
     if (name === "git_push_current_branch") {
       const parsed = z.object({ remote: z.string().default("origin"), branch: z.string().optional(), cwd: z.string().optional() }).parse(args);
-      return jsonText(await gitPushCurrentBranch(parsed.remote, parsed.branch, parsed.cwd));
+      return complete(jsonText(await gitPushCurrentBranch(parsed.remote, parsed.branch, parsed.cwd)));
     }
     if (name === "tunnel_health") {
       const parsed = z.object({ baseUrl: z.string().default(DEFAULT_TUNNEL_ADMIN_BASE_URL) }).parse(args);
-      return jsonText(await tunnelHealth(parsed.baseUrl));
+      return complete(jsonText(await tunnelHealth(parsed.baseUrl)));
     }
     if (name === "bridge_self_check") {
       const parsed = z.object({ cwd: z.string().optional() }).parse(args);
-      return jsonText(await bridgeSelfCheck(parsed.cwd));
+      return complete(jsonText(await bridgeSelfCheck(parsed.cwd)));
     }
     if (name === "bridge_request_restart") {
       const parsed = z.object({
@@ -529,15 +540,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         mode: z.enum(["http", "tunnel", "full"]).default("http"),
         cwd: z.string().optional(),
       }).parse(args);
-      return jsonText(await bridgeRequestRestart(parsed.reason, parsed.mode, parsed.cwd));
+      return complete(jsonText(await bridgeRequestRestart(parsed.reason, parsed.mode, parsed.cwd)));
     }
     if (name === "bridge_restart_status") {
       const parsed = z.object({ cwd: z.string().optional() }).parse(args);
-      return jsonText(await bridgeRestartStatus(parsed.cwd));
+      return complete(jsonText(await bridgeRestartStatus(parsed.cwd)));
+    }
+    if (name === "bridge_metrics_status") {
+      return complete(jsonText(getMetricsStatus()));
+    }
+    if (name === "bridge_metrics_summary") {
+      const parsed = z.object({ limit: z.number().int().min(1).max(200).default(50) }).parse(args);
+      return complete(jsonText(getMetricsSummary(parsed.limit)));
+    }
+    if (name === "bridge_metrics_recent") {
+      const parsed = z.object({ limit: z.number().int().min(1).max(200).default(25) }).parse(args);
+      return complete(jsonText(getRecentMetrics(parsed.limit)));
     }
     throw new Error(`Unknown tool: ${name}`);
   } catch (error) {
-    return jsonText({ error: error instanceof Error ? error.message : String(error) });
+    const message = error instanceof Error ? error.message : String(error);
+    return complete(jsonText({ error: message }), false, message);
   }
 });
   return server;

@@ -175,3 +175,50 @@ Rollback to stdio remains available with:
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-bridge-watchdog.ps1 -ProjectRoot C:\dev\bridge-mcp
 ```
+
+## Metrics and logs
+
+Production-candidate HTTP mode now records persistent telemetry without adding extra npm dependencies.
+
+Runtime files:
+
+```text
+logs/bridge-events.jsonl          # append-only event log, redacted where possible
+data/bridge-metrics.sqlite        # SQLite metrics database
+data/bridge-metrics.sqlite-wal    # SQLite WAL file
+data/bridge-metrics.sqlite-shm    # SQLite shared memory file
+```
+
+The database is created with Node's built-in `node:sqlite` module on Node v24.
+
+Recorded per tool call:
+
+- tool name
+- start/end time
+- duration in milliseconds
+- success/error flag
+- redacted error text
+- input key names only, not raw arguments
+- output size in characters
+- server version, PID, host, platform, cwd
+
+Useful queries:
+
+```powershell
+node .\scripts\query-bridge-metrics.mjs status
+node .\scripts\query-bridge-metrics.mjs summary 50
+node .\scripts\query-bridge-metrics.mjs recent 25
+node .\scripts\query-bridge-metrics.mjs errors 25
+```
+
+Environment overrides:
+
+```text
+BRIDGE_MCP_METRICS_ENABLED=0       # disable metrics
+BRIDGE_MCP_METRICS_DIR=...         # default: ./data
+BRIDGE_MCP_LOG_DIR=...             # default: ./logs
+BRIDGE_MCP_METRICS_SQLITE=...      # default: ./data/bridge-metrics.sqlite
+BRIDGE_MCP_EVENTS_JSONL=...        # default: ./logs/bridge-events.jsonl
+```
+
+The runtime metrics database and logs are intentionally ignored by Git.

@@ -1,33 +1,45 @@
 # bridge-mcp
 
-MCP local propio para conectar ChatGPT/Kairos/KChat con MauroPrime y, después, la laptop.
+MCP local propio para conectar ChatGPT/Kairos/KChat con MauroPrime y, más adelante, la laptop u otros clientes.
 
-El objetivo no es depender de un runner genérico: este repo es el puente local controlado por nosotros para filesystem, shell, Git, diagnósticos y futuros flujos de reinicio seguro.
+El objetivo no es depender de un runner genérico: este repo es el puente local controlado por nosotros para filesystem, shell, Git, diagnósticos, reinicio seguro y métricas.
 
 ## Estado actual
 
 Versión esperada del servidor:
 
 ```text
-bridge-mcp v0.3.0
+bridge-mcp v0.4.0
 ```
 
-Stack:
-
-- Node.js / TypeScript
-- `@modelcontextprotocol/sdk`
-- `zod`
-- MCP sobre `stdio`
-- OpenAI Secure MCP Tunnel mediante `tunnel-client`
-
-Ruta principal actual:
+Modo recomendado actual:
 
 ```text
-ChatGPT Developer Mode
+Production-candidate: HTTP local + OpenAI Secure MCP Tunnel
+```
+
+Ruta activa recomendada:
+
+```text
+ChatGPT
   -> OpenAI Secure MCP Tunnel
-  -> bridge-mcp en la PC Windows
+  -> tunnel-client profile bridge-local-http
+  -> http://127.0.0.1:3001/mcp
+  -> bridge-mcp Streamable HTTP en MauroPrime
   -> filesystem / shell / git / procesos
 ```
+
+`stdio` sigue siendo el rollback estable.
+
+## Stack
+
+- Node.js / TypeScript
+- Node v24.x
+- `node:sqlite` para métricas locales
+- `@modelcontextprotocol/sdk`
+- `zod`
+- MCP Streamable HTTP local
+- OpenAI Secure MCP Tunnel mediante `tunnel-client`
 
 ## Tools actuales
 
@@ -48,7 +60,7 @@ Terminal persistente:
 - `terminal_stop`
 - `terminal_list`
 
-Git y diagnóstico agregados en `v0.3.0`:
+Git, túnel y diagnóstico:
 
 - `git_status`
 - `git_set_remote`
@@ -56,6 +68,16 @@ Git y diagnóstico agregados en `v0.3.0`:
 - `git_push_current_branch`
 - `tunnel_health`
 - `bridge_self_check`
+- `bridge_request_restart`
+- `bridge_restart_status`
+
+Métricas de tools:
+
+- `bridge_metrics_status`
+- `bridge_metrics_summary`
+- `bridge_metrics_recent`
+
+Nota: puede que ChatGPT no muestre tools nuevas en una conversación ya abierta hasta refrescar el conector/reabrir el chat, pero el runtime ya las expone.
 
 ## Scripts principales
 
@@ -64,18 +86,12 @@ npm install
 npm run check
 npm run build
 npm run start
-```
-
-## HTTP local mode experimental
-
-A local Streamable HTTP MCP entrypoint now exists in parallel to the stable `stdio` entrypoint:
-
-```powershell
-npm run build
 npm run start:http
 ```
 
-Default endpoints:
+## HTTP local production-candidate
+
+Endpoints locales:
 
 ```text
 http://127.0.0.1:3001/healthz
@@ -84,45 +100,47 @@ http://127.0.0.1:3001/status
 http://127.0.0.1:3001/mcp
 ```
 
-Prepared experimental tunnel profile:
+Perfil de túnel:
 
 ```text
 bridge-local-http -> http://127.0.0.1:3001/mcp
 ```
 
-The stable connector still uses the `bridge-local` stdio profile. Do not run both profiles with the same tunnel id at the same time. See `HTTP_LOCAL_MCP.md`.
-
-HTTP validation helper:
+Validación:
 
 ```powershell
 .\scripts\test-bridge-http.ps1
+Invoke-RestMethod http://127.0.0.1:3001/status
+Invoke-RestMethod http://127.0.0.1:8081/readyz
 ```
 
-Restart-request flow:
+El modo HTTP ya valida:
 
-```powershell
-.\scripts\test-restart-request.ps1 -Mode http
-.\scripts\start-bridge-http-watchdog.ps1 -NoTunnel -Once
-```
+- `initialize`
+- `Mcp-Session-Id`
+- `notifications/initialized` con respuesta 202
+- limpieza de sesiones idle
+- limpieza de transports anónimos
+- límite máximo de sesiones
+- watchdog para reinicio de HTTP
+- watchdog para reinicio de `tunnel-client`
 
-See `RESTART_FLOW.md`.
+Ver `HTTP_LOCAL_MCP.md`.
 
 ## Watchdog local
 
-El túnel no debe reiniciarse desde adentro de una tool MCP porque ChatGPT perdería el transporte que está usando para llamar esa tool.
-
-La solución actual es un watchdog externo:
+Modo HTTP recomendado:
 
 ```powershell
 Set-Location C:\dev\bridge-mcp
-.\scripts\start-bridge-watchdog.ps1
+.\scripts\start-bridge-http-watchdog.ps1 -ProjectRoot C:\dev\bridge-mcp -Profile bridge-local-http -TunnelBaseUrl http://127.0.0.1:8081
 ```
 
-Para instalarlo al inicio de sesión de Windows sin permisos de administrador:
+Instalación al inicio de sesión de Windows sin permisos de administrador:
 
 ```powershell
 Set-Location C:\dev\bridge-mcp
-.\scripts\install-bridge-watchdog-task.ps1 -InstallMode Startup
+.\scripts\install-bridge-watchdog-task.ps1 -InstallMode Startup -WatchdogMode Http
 ```
 
 Esto crea:
@@ -131,27 +149,55 @@ Esto crea:
 %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\BridgeMCP-Watchdog.cmd
 ```
 
-El launcher de Startup abre una ventana normal de PowerShell para que el estado quede visible por ahora. Más adelante se puede reemplazar por un gateway visual con modo verbose, bandeja de sistema, logs y controles de reinicio.
+Rollback stdio:
 
-## Mercado / alternativas MCP
+```powershell
+Set-Location C:\dev\bridge-mcp
+.\scripts\start-bridge-watchdog.ps1 -ProjectRoot C:\dev\bridge-mcp
+```
 
-La foto actual del ecosistema es esta:
+## Métricas y logs
 
-- **OpenAI Secure MCP Tunnel**: mejor opción actual para ChatGPT cuando se quiere conectar un MCP local de forma directa y oficial.
-- **mcp-remote**: proxy local para que clientes que sólo hablan `stdio` puedan conectarse a servidores MCP remotos HTTP/SSE con OAuth. Es útil del lado cliente, pero no reemplaza por sí solo nuestro puente local Windows -> ChatGPT.
-- **supergateway**: conversor entre MCP `stdio`, SSE, WebSocket y Streamable HTTP. Sirve para exponer un servidor `stdio` como HTTP/SSE o para debug/transporte alternativo. Sigue necesitando una capa segura de publicación si se expone fuera de localhost.
-- **Cloudflare Remote MCP / Workers / Agents**: buena ruta para MCP remoto hospedado, con Streamable HTTP y autenticación. Encaja mejor para servicios cloud que para controlar una PC Windows local, salvo que lo combinemos con un agente/túnel local.
-- **MCP Inspector**: herramienta visual de testing y debugging de servidores MCP. No es runner de producción; sirve para inspeccionar tools, requests y errores.
-- **Desktop Commander u otros runners locales**: útiles como bootstrap temporal, pero este repo busca reemplazarlos con una implementación propia, auditable y ajustada a nuestras reglas.
+Runtime local:
 
-Conclusión práctica: no apareció una alternativa mágica que reemplace todo el flujo local con la misma integración directa en ChatGPT. Sí hay piezas útiles para fases futuras: `supergateway` para transporte HTTP/Streamable HTTP, `mcp-remote` para clientes stdio, Cloudflare para remote MCP hospedado, e Inspector para UI/debug.
+```text
+logs/bridge-events.jsonl
+ data/bridge-metrics.sqlite
+```
 
-## Próximos pasos técnicos
+Consultas rápidas:
 
-1. Diseñar `bridge_request_restart`: la tool MCP sólo escribe un archivo de solicitud de reinicio.
-2. Hacer que el watchdog externo lea esa solicitud y reinicie túnel/MCP de forma segura.
-3. Agregar modo verbose/log estructurado.
-4. Diseñar gateway visual local para usuario: estado del túnel, health checks, logs, botón de restart y diagnóstico.
+```powershell
+node .\scripts\query-bridge-metrics.mjs status
+node .\scripts\query-bridge-metrics.mjs summary 50
+node .\scripts\query-bridge-metrics.mjs recent 25
+node .\scripts\query-bridge-metrics.mjs errors 25
+```
+
+Variables útiles:
+
+```text
+BRIDGE_MCP_METRICS_ENABLED=0
+BRIDGE_MCP_METRICS_DIR=...
+BRIDGE_MCP_LOG_DIR=...
+BRIDGE_MCP_METRICS_SQLITE=...
+BRIDGE_MCP_EVENTS_JSONL=...
+```
+
+Las métricas guardan nombres de tools, duración, éxito/error, claves de input y tamaño de salida. No guardan argumentos completos.
+
+## Modelo de uso desde laptop
+
+Si usás ChatGPT desde la laptop pero el conector apunta al túnel que corre en MauroPrime, las tools se ejecutan en MauroPrime.
+
+```text
+Laptop con ChatGPT UI
+  -> OpenAI
+  -> Secure MCP Tunnel activo en MauroPrime
+  -> tools ejecutadas en MauroPrime
+```
+
+Para que las tools se ejecuten en la laptop, la laptop necesitaría su propio bridge/tunnel/profile corriendo localmente.
 
 ## Seguridad
 
@@ -162,12 +208,13 @@ No commitear:
 - binarios del tunnel-client
 - `.env` / claves / tokens
 - logs
+- base SQLite de métricas
 - sandbox local
 
 Mantener secretos como variables de entorno de Windows o en perfiles locales fuera de Git.
 
 ## Local auth model
 
-The HTTP local profile is intentionally local-only and no-auth at the MCP listener layer.
+El perfil HTTP local es intencionalmente loopback-only y no-auth en el listener MCP. La barrera de seguridad real es el OpenAI Secure MCP Tunnel + runtime key + permisos del workspace.
 
-See `OPENAI_TUNNEL_LOCAL_AUTH.md`.
+Ver `OPENAI_TUNNEL_LOCAL_AUTH.md`.
