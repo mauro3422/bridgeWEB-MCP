@@ -1,17 +1,14 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
-import path from "node:path";
 import { DEFAULT_TIMEOUT_MS, MAX_CAPTURE_CHARS } from "../../config.js";
+import { resolveToolPath } from "./path.js";
+export { resolveToolPath } from "./path.js";
 
 const blockedCommands = new Set([
   "format", "diskpart", "shutdown", "reboot", "halt", "poweroff",
   "bcdedit", "cipher", "takeown", "runas", "reg", "sc",
 ]);
 
-export function resolveToolPath(inputPath: string): string {
-  if (!inputPath || typeof inputPath !== "string") throw new Error("Path must be a non-empty string.");
-  return path.resolve(inputPath);
-}
 
 export function appendBounded(current: string, chunk: Buffer | string, maxChars = MAX_CAPTURE_CHARS): string {
   const next = current + chunk.toString();

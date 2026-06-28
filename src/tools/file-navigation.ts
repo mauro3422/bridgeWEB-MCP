@@ -1,5 +1,5 @@
-import { z } from "zod";
-import { listFilesSmart, readFileLines, readManyFiles, searchFiles } from "../file-tools.js";
+﻿import { z } from "zod";
+import { listFilesSmart, readFileLines, readManyFiles, searchFiles } from "./file-navigation-core.js";
 import type { BridgeToolModule } from "./types.js";
 
 const tools = [
@@ -107,3 +107,4 @@ export const fileNavigationToolModule: BridgeToolModule = {
     },
   },
 };
+

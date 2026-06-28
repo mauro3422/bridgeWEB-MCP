@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { resolveToolPath } from "./path.js";
 
 export const DEFAULT_TEXT_FILE_MAX_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_EDIT_FILE_MAX_BYTES = 512 * 1024;
@@ -19,10 +20,6 @@ export type TextFileSnapshot = {
   totalLines: number;
 };
 
-export function resolveToolPath(inputPath: string): string {
-  if (!inputPath || typeof inputPath !== "string") throw new Error("Path must be a non-empty string.");
-  return path.resolve(inputPath);
-}
 
 export function sha256Text(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");

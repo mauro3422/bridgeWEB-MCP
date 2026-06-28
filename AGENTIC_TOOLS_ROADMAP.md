@@ -338,6 +338,7 @@ Delivered:
 ```txt
 src/tools/types.ts
 src/tools/file-navigation.ts
+src/tools/file-navigation-core.ts
 src/tool-registry.ts
 ```
 
@@ -350,7 +351,7 @@ search_files
 list_files_smart
 ```
 
-The current bridge still keeps legacy/core tools inline in `bridge-server.ts`. Future work should migrate them module by module instead of doing one large risky rewrite.
+`bridge-server.ts` no longer keeps tool implementations inline. Tool schemas and handlers are now loaded through the modular registry.
 
 ### v0.4.4: shared writing helpers and surgical editing
 
@@ -376,25 +377,6 @@ line ending detection
 postflight hash verification
 line-range editing with context preview
 ```
-
-### v0.4.5: verify-all workflow
-
-Deliver:
-
-```txt
-edit_lines
-bridge_verify_all
-npm run verify:all
-```
-
-Tests:
-
-- replace range
-- insert before/after
-- delete range
-- CRLF/LF preservation
-- invalid line range rejection
-- backup/rollback metadata
 
 ### v0.4.5: code impact intelligence
 

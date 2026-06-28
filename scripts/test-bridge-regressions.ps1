@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$ProjectRoot = "C:\dev\bridge-mcp",
   [string]$ExpectedTunnelAdminBaseUrl = "http://127.0.0.1:8081"
 )
@@ -50,12 +50,12 @@ if (!registry.modules.includes("file-writing")) process.exit(22);
 const root = process.cwd();
 const read = await readFileLines({ path: "src/config.ts", startLine: 1, maxLines: 20 });
 if (!read.lines.some((line) => line.text.includes("SERVER_VERSION"))) process.exit(11);
-const many = await readManyFiles({ files: ["src/config.ts:1-8", "src/file-tools.ts:1-20"], maxLinesPerFile: 20 });
+const many = await readManyFiles({ files: ["src/config.ts:1-8", "src/tools/file-navigation-core.ts:1-20"], maxLinesPerFile: 20 });
 if (many.count !== 2 || many.results.some((r) => !r.ok)) process.exit(12);
 const search = await searchFiles({ path: root, pattern: "readFileLines", filePattern: "*.ts", contextLines: 1, maxResults: 10 });
 if (search.totalMatches < 1) process.exit(13);
 const listed = await listFilesSmart({ path: "src", depth: 1, pattern: "*.ts" });
-if (!listed.entries.some((entry) => entry.path === "file-tools.ts")) process.exit(14);
+if (!listed.entries.some((entry) => entry.path === "tools\\file-navigation-core.ts" || entry.path === "tools/file-navigation-core.ts")) process.exit(14);
 const fs = await import("node:fs/promises");
 const os = await import("node:os");
 const path = await import("node:path");
@@ -72,7 +72,7 @@ console.log("  OK modular file navigation and writing tools");
   $tmpScript = Join-Path ([System.IO.Path]::GetTempPath()) ("bridge-file-tools-" + [Guid]::NewGuid().ToString("N") + ".mjs")
   try {
     Set-Content -LiteralPath $tmpScript -Value $nodeScript -Encoding utf8
-    $fileToolsModulePath = (Resolve-Path -LiteralPath ".\dist\file-tools.js").Path
+    $fileToolsModulePath = (Resolve-Path -LiteralPath ".\\dist\\tools\\file-navigation-core.js").Path
     $registryModulePath = (Resolve-Path -LiteralPath ".\dist\tool-registry.js").Path
     node $tmpScript $fileToolsModulePath $registryModulePath
     if ($LASTEXITCODE -ne 0) { throw "agentic file tools regression failed" }
@@ -174,3 +174,5 @@ if (status.lastAck.id !== "bom-test" || status.lastAck.action !== "restart-http"
 }
 
 Write-Host "[bridge-regression-test] all checks passed"
+
+
