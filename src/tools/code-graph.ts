@@ -18,6 +18,7 @@ export const codeGraphToolModule: BridgeToolModule = {
           includeExternal: { type: "boolean", default: true },
           maxFiles: { type: "number", default: 500, minimum: 1, maximum: 2000 },
           maxCycles: { type: "number", default: 20, minimum: 0, maximum: 100 },
+          resolutionEngine: { type: "string", enum: ["auto", "relative", "typescript"], default: "auto" },
         },
         additionalProperties: false,
       },
@@ -33,6 +34,7 @@ export const codeGraphToolModule: BridgeToolModule = {
           includeTests: { type: "boolean", default: false },
           maxFiles: { type: "number", default: 500, minimum: 1, maximum: 2000 },
           maxCycles: { type: "number", default: 20, minimum: 0, maximum: 100 },
+          resolutionEngine: { type: "string", enum: ["auto", "relative", "typescript"], default: "auto" },
         },
         additionalProperties: false,
       },
@@ -64,8 +66,9 @@ export const codeGraphToolModule: BridgeToolModule = {
         includeExternal: z.boolean().default(true),
         maxFiles: z.number().int().min(1).max(2000).default(500),
         maxCycles: z.number().int().min(0).max(100).default(20),
+        resolutionEngine: z.enum(["auto", "relative", "typescript"]).default("auto"),
       }).parse(args);
-      return await buildImportGraph({ root: parsed.projectRoot ?? process.cwd(), filePattern: parsed.filePattern, includeTests: parsed.includeTests, includeExternal: parsed.includeExternal, maxFiles: parsed.maxFiles, maxCycles: parsed.maxCycles });
+      return await buildImportGraph({ root: parsed.projectRoot ?? process.cwd(), filePattern: parsed.filePattern, includeTests: parsed.includeTests, includeExternal: parsed.includeExternal, maxFiles: parsed.maxFiles, maxCycles: parsed.maxCycles, resolutionEngine: parsed.resolutionEngine });
     },
     dependency_graph: async (args) => {
       const parsed = z.object({
@@ -74,8 +77,9 @@ export const codeGraphToolModule: BridgeToolModule = {
         includeTests: z.boolean().default(false),
         maxFiles: z.number().int().min(1).max(2000).default(500),
         maxCycles: z.number().int().min(0).max(100).default(20),
+        resolutionEngine: z.enum(["auto", "relative", "typescript"]).default("auto"),
       }).parse(args);
-      const graph = await buildImportGraph({ root: parsed.projectRoot ?? process.cwd(), filePattern: parsed.filePattern, includeTests: parsed.includeTests, includeExternal: false, maxFiles: parsed.maxFiles, maxCycles: parsed.maxCycles });
+      const graph = await buildImportGraph({ root: parsed.projectRoot ?? process.cwd(), filePattern: parsed.filePattern, includeTests: parsed.includeTests, includeExternal: false, maxFiles: parsed.maxFiles, maxCycles: parsed.maxCycles, resolutionEngine: parsed.resolutionEngine });
       return {
         root: graph.root,
         scannedFiles: graph.scannedFiles,
@@ -84,6 +88,8 @@ export const codeGraphToolModule: BridgeToolModule = {
         unresolvedCount: graph.unresolved.length,
         cycleCount: graph.cycles.length,
         cycles: graph.cycles,
+        resolutionEngine: graph.resolutionEngine,
+        resolver: graph.resolver,
         unresolved: graph.unresolved,
         mostImported: graph.mostImported,
         mostImporting: graph.mostImporting,

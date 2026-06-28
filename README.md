@@ -9,7 +9,7 @@ El objetivo no es depender de un runner genÃ©rico: este repo es el puente loca
 VersiÃ³n esperada del servidor:
 
 ```text
-bridge-mcp v0.5.0
+bridge-mcp v0.5.1
 ```
 
 Modo recomendado actual:
@@ -58,8 +58,8 @@ Base local:
 - `analyze_code`: analisis de simbolos, imports, exports, diagnosticos y referencias; usa AST TypeScript en TS/JS cuando esta disponible.
 - `impact_analysis`: impacto de simbolo con engine regex/typescript/semantic; semantic usa Program/TypeChecker para agrupar simbolos reales por declaracion.
 - `find_duplicate_symbols`: deteccion liviana de simbolos duplicados.
-- `import_graph`: grafo de imports internos/externos con resolucion relativa.
-- `dependency_graph`: resumen de dependencias, ciclos, fan-in/fan-out y archivos huerfanos.
+- `import_graph`: grafo de imports internos/externos con resolucion TypeScript/tsconfig o relativa.
+- `dependency_graph`: resumen de dependencias, ciclos, fan-in/fan-out y archivos huerfanos; puede resolver imports con TypeScript/tsconfig.
 - `find_dead_code`: candidatos de codigo muerto; por defecto usa engine semantic con Program/TypeChecker.
 - `bridge_verify_all`: ejecuta doctor, check, build, smoke, regressions, tools/list y git status.
 - `run_command`: ejecuta comandos con `cwd`, timeout y salida capturada.

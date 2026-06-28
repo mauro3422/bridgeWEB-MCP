@@ -20,9 +20,9 @@ Set-Location -LiteralPath $ProjectRoot
 Invoke-Check "version bump is consistent" {
   $packageJson = Get-Content -LiteralPath "package.json" -Raw | ConvertFrom-Json
   $configText = Get-Content -LiteralPath "src\config.ts" -Raw
-  if ($packageJson.version -ne "0.5.0") { throw "package.json version is $($packageJson.version), expected 0.5.0" }
-  if ($configText -notmatch 'SERVER_VERSION = "0\.5\.0"') { throw "src/config.ts does not report SERVER_VERSION 0.5.0" }
-  Write-Host "  OK 0.5.0"
+  if ($packageJson.version -ne "0.5.1") { throw "package.json version is $($packageJson.version), expected 0.5.1" }
+  if ($configText -notmatch 'SERVER_VERSION = "0\.5\.1"') { throw "src/config.ts does not report SERVER_VERSION 0.5.1" }
+  Write-Host "  OK 0.5.1"
 }
 
 Invoke-Check "tunnel admin default stays on HTTP profile port" {
@@ -126,10 +126,10 @@ for (const tool of ["import_graph", "dependency_graph", "find_dead_code"]) {
 }
 if (!registry.modules.includes("code-graph")) process.exit(51);
 const root = process.cwd();
-const graph = await registry.call("dependency_graph", { projectRoot: root, filePattern: "*.ts", maxFiles: 200, maxCycles: 20 });
-if (typeof graph.internalEdgeCount !== "number" || !Array.isArray(graph.mostImported)) process.exit(52);
-const imports = await registry.call("import_graph", { projectRoot: root, filePattern: "*.ts", maxFiles: 200, includeExternal: true });
-if (!Array.isArray(imports.edges) || imports.nodes.length < 1) process.exit(53);
+const graph = await registry.call("dependency_graph", { projectRoot: root, filePattern: "*.ts", maxFiles: 200, maxCycles: 20, resolutionEngine: "typescript" });
+if (typeof graph.internalEdgeCount !== "number" || !Array.isArray(graph.mostImported) || graph.resolver?.available !== true) process.exit(52);
+const imports = await registry.call("import_graph", { projectRoot: root, filePattern: "*.ts", maxFiles: 200, includeExternal: true, resolutionEngine: "typescript" });
+if (!Array.isArray(imports.edges) || imports.nodes.length < 1 || !imports.edges.some((edge) => edge.resolutionEngine === "typescript")) process.exit(53);
 const dead = await registry.call("find_dead_code", { projectRoot: root, filePattern: "*.ts", maxFiles: 200, maxCandidates: 20, engine: "semantic" });
 if (!Array.isArray(dead.candidates) || dead.engineUsed !== "semantic") process.exit(54);
 console.log("  OK code graph tools");

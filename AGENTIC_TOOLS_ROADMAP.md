@@ -482,6 +482,20 @@ find_dead_code engine=semantic
 
 This builds a TypeScript Program and TypeChecker, groups symbols by actual declarations, resolves alias symbols, and separates definition/import/export/call/type/reference usages. It improves cross-file impact and dead-code confidence compared with regex or per-file AST scanning.
 
+### v0.5.1: TypeScript module resolution for dependency graph
+
+Status: implemented.
+
+Delivered:
+
+```txt
+import_graph resolutionEngine=auto|relative|typescript
+dependency_graph resolutionEngine=auto|relative|typescript
+TypeScript tsconfig/module resolver inside src/tools/shared/import-graph.ts
+```
+
+The dependency graph now uses TypeScript module resolution when requested or in auto mode, so tsconfig baseUrl, paths, extension rewriting, and barrel/index files are handled by the compiler resolver instead of only relative string matching.
+
 ### v0.5+: deeper project intelligence
 
 Deliver later:
