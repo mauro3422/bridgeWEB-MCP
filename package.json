@@ -1,0 +1,24 @@
+{
+  "name": "bridge-mcp",
+  "version": "0.1.0",
+  "description": "Kairos/KChat local MCP bridge for MauroPrime and future laptop agents.",
+  "type": "module",
+  "bin": {
+    "bridge-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.9.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.24",
+    "tsx": "^4.21.0",
+    "typescript": "^5.3.3"
+  }
+}
