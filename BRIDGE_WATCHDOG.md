@@ -22,17 +22,39 @@ C:\dev\bridge-mcp\tools\tunnel-client\tunnel-client.exe run --profile bridge-loc
 
 If `tunnel-client run` exits, the watchdog waits a few seconds and starts it again.
 
-## Install as Windows Scheduled Task
+## Install at Windows logon
 
 Run PowerShell as your normal Windows user and execute:
 
 ```powershell
 Set-Location C:\dev\bridge-mcp
 .\scripts\install-bridge-watchdog-task.ps1
+```
+
+By default the installer runs in `Auto` mode. It first tries to install a Windows Scheduled Task. If Windows denies permission, it falls back to a no-admin Startup folder launcher named `BridgeMCP-Watchdog.cmd`.
+
+To force the no-admin Startup installer:
+
+```powershell
+Set-Location C:\dev\bridge-mcp
+.\scripts\install-bridge-watchdog-task.ps1 -InstallMode Startup
+```
+
+To validate without changing Windows startup settings:
+
+```powershell
+Set-Location C:\dev\bridge-mcp
+.\scripts\install-bridge-watchdog-task.ps1 -InstallMode Startup -DryRun
+.\scripts\install-bridge-watchdog-task.ps1 -InstallMode ScheduledTask -DryRun
+```
+
+If the Scheduled Task path succeeds, start it manually with:
+
+```powershell
 Start-ScheduledTask -TaskName "BridgeMCP Watchdog"
 ```
 
-The task starts at logon and restarts if Windows reports failure.
+Both install modes start the watchdog at user logon. The watchdog restarts `tunnel-client run` if it exits.
 
 ## Updating bridge-mcp code
 
