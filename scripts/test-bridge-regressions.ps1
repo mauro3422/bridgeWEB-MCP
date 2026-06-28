@@ -20,9 +20,9 @@ Set-Location -LiteralPath $ProjectRoot
 Invoke-Check "version bump is consistent" {
   $packageJson = Get-Content -LiteralPath "package.json" -Raw | ConvertFrom-Json
   $configText = Get-Content -LiteralPath "src\config.ts" -Raw
-  if ($packageJson.version -ne "0.4.8") { throw "package.json version is $($packageJson.version), expected 0.4.8" }
-  if ($configText -notmatch 'SERVER_VERSION = "0\.4\.8"') { throw "src/config.ts does not report SERVER_VERSION 0.4.8" }
-  Write-Host "  OK 0.4.8"
+  if ($packageJson.version -ne "0.4.9") { throw "package.json version is $($packageJson.version), expected 0.4.9" }
+  if ($configText -notmatch 'SERVER_VERSION = "0\.4\.9"') { throw "src/config.ts does not report SERVER_VERSION 0.4.9" }
+  Write-Host "  OK 0.4.9"
 }
 
 Invoke-Check "tunnel admin default stays on HTTP profile port" {
@@ -107,6 +107,37 @@ console.log("  OK code intelligence tools");
     $registryModulePath = (Resolve-Path -LiteralPath ".\dist\tool-registry.js").Path
     node $tmpScript $registryModulePath
     if ($LASTEXITCODE -ne 0) { throw "code intelligence regression failed" }
+  }
+  finally {
+    Remove-Item -LiteralPath $tmpScript -Force -ErrorAction SilentlyContinue
+  }
+}
+
+Invoke-Check "code graph tools work from modular registry" {
+  $nodeScript = @'
+import { pathToFileURL } from "node:url";
+const registryModuleUrl = pathToFileURL(process.argv[2]).href;
+const { createDefaultToolRegistry } = await import(registryModuleUrl);
+const registry = createDefaultToolRegistry();
+for (const tool of ["import_graph", "dependency_graph", "find_dead_code"]) {
+  if (!registry.has(tool)) process.exit(50);
+}
+if (!registry.modules.includes("code-graph")) process.exit(51);
+const root = process.cwd();
+const graph = await registry.call("dependency_graph", { projectRoot: root, filePattern: "*.ts", maxFiles: 200, maxCycles: 20 });
+if (typeof graph.internalEdgeCount !== "number" || !Array.isArray(graph.mostImported)) process.exit(52);
+const imports = await registry.call("import_graph", { projectRoot: root, filePattern: "*.ts", maxFiles: 200, includeExternal: true });
+if (!Array.isArray(imports.edges) || imports.nodes.length < 1) process.exit(53);
+const dead = await registry.call("find_dead_code", { projectRoot: root, filePattern: "*.ts", maxFiles: 200, maxCandidates: 20 });
+if (!Array.isArray(dead.candidates)) process.exit(54);
+console.log("  OK code graph tools");
+'@
+  $tmpScript = Join-Path ([System.IO.Path]::GetTempPath()) ("bridge-code-graph-" + [Guid]::NewGuid().ToString("N") + ".mjs")
+  try {
+    Set-Content -LiteralPath $tmpScript -Value $nodeScript -Encoding utf8
+    $registryModulePath = (Resolve-Path -LiteralPath ".\dist\tool-registry.js").Path
+    node $tmpScript $registryModulePath
+    if ($LASTEXITCODE -ne 0) { throw "code graph regression failed" }
   }
   finally {
     Remove-Item -LiteralPath $tmpScript -Force -ErrorAction SilentlyContinue

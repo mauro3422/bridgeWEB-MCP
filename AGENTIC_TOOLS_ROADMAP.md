@@ -452,6 +452,22 @@ find_duplicate_symbols engine=auto|regex|typescript
 
 The code-intelligence module now uses TypeScript AST for TS/JS files when available and falls back to regex when unavailable or requested. It extracts imports, exports, symbols, parse diagnostics, and identifier reference kinds.
 
+### v0.4.9: import graph and dead-code candidates
+
+Status: implemented.
+
+Delivered:
+
+```txt
+src/tools/shared/import-graph.ts
+src/tools/code-graph.ts
+import_graph
+dependency_graph
+find_dead_code
+```
+
+This adds relative import resolution, external import reporting, cycle detection, fan-in/fan-out summaries, orphan files, and conservative dead-code candidates using TypeScript AST references.
+
 ### v0.5+: deeper project intelligence
 
 Deliver later:

@@ -1,5 +1,6 @@
 import { bridgeOpsToolModule } from "./tools/bridge-ops.js";
 import { bridgeWorkflowToolModule } from "./tools/bridge-workflow.js";
+import { codeGraphToolModule } from "./tools/code-graph.js";
 import { codeIntelligenceToolModule } from "./tools/code-intelligence.js";
 import { coreToolModule } from "./tools/core-tools.js";
 import { fileNavigationToolModule } from "./tools/file-navigation.js";
@@ -53,6 +54,7 @@ export function createDefaultToolRegistry(): BridgeToolRegistry {
     bridgeOpsToolModule,
     metricsToolModule,
     codeIntelligenceToolModule,
+    codeGraphToolModule,
     bridgeWorkflowToolModule,
   ]);
 }

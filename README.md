@@ -9,7 +9,7 @@ El objetivo no es depender de un runner genÃ©rico: este repo es el puente loca
 VersiÃ³n esperada del servidor:
 
 ```text
-bridge-mcp v0.4.8
+bridge-mcp v0.4.9
 ```
 
 Modo recomendado actual:
@@ -58,6 +58,9 @@ Base local:
 - `analyze_code`: analisis de simbolos, imports, exports, diagnosticos y referencias; usa AST TypeScript en TS/JS cuando esta disponible.
 - `impact_analysis`: impacto aproximado de un simbolo en el proyecto con referencias AST TypeScript cuando esta disponible.
 - `find_duplicate_symbols`: deteccion liviana de simbolos duplicados.
+- `import_graph`: grafo de imports internos/externos con resolucion relativa.
+- `dependency_graph`: resumen de dependencias, ciclos, fan-in/fan-out y archivos huerfanos.
+- `find_dead_code`: candidatos iniciales de codigo muerto usando referencias AST.
 - `bridge_verify_all`: ejecuta doctor, check, build, smoke, regressions, tools/list y git status.
 - `run_command`: ejecuta comandos con `cwd`, timeout y salida capturada.
 
