@@ -1,15 +1,15 @@
-# bridge-mcp
+﻿# bridge-mcp
 
-MCP local propio para conectar ChatGPT/Kairos/KChat con MauroPrime y, más adelante, la laptop u otros clientes.
+MCP local propio para conectar ChatGPT/Kairos/KChat con MauroPrime y, mÃ¡s adelante, la laptop u otros clientes.
 
-El objetivo no es depender de un runner genérico: este repo es el puente local controlado por nosotros para filesystem, shell, Git, diagnósticos, reinicio seguro y métricas.
+El objetivo no es depender de un runner genÃ©rico: este repo es el puente local controlado por nosotros para filesystem, shell, Git, diagnÃ³sticos, reinicio seguro y mÃ©tricas.
 
 ## Estado actual
 
-Versión esperada del servidor:
+VersiÃ³n esperada del servidor:
 
 ```text
-bridge-mcp v0.4.4
+bridge-mcp v0.4.5
 ```
 
 Modo recomendado actual:
@@ -35,7 +35,7 @@ ChatGPT
 
 - Node.js / TypeScript
 - Node v24.x
-- `node:sqlite` para métricas locales
+- `node:sqlite` para mÃ©tricas locales
 - `@modelcontextprotocol/sdk`
 - `zod`
 - MCP Streamable HTTP local
@@ -45,16 +45,19 @@ ChatGPT
 
 Base local:
 
-- `system_info`: datos básicos de la máquina.
+- `system_info`: datos bÃ¡sicos de la mÃ¡quina.
 - `list_dir`: lista carpetas con profundidad limitada.
-- `list_files_smart`: lista archivos con lenguaje, líneas y símbolos livianos.
-- `read_text_file`: lee texto UTF-8 con límite de tamaño.
-- `read_file_lines`: lee archivos con líneas numeradas y paginación.
+- `list_files_smart`: lista archivos con lenguaje, lÃ­neas y sÃ­mbolos livianos.
+- `read_text_file`: lee texto UTF-8 con lÃ­mite de tamaÃ±o.
+- `read_file_lines`: lee archivos con lÃ­neas numeradas y paginaciÃ³n.
 - `read_many_files`: lee hasta 10 archivos o rangos en una llamada.
-- `search_files`: busca texto literal con líneas, contexto y contenedor aproximado.
+- `search_files`: busca texto literal con lÃ­neas, contexto y contenedor aproximado.
 - `write_text_file`: escribe o agrega texto UTF-8 y verifica bytes/hash finales.
-- `apply_patch`: reemplazo exacto y controlado con verificación postflight.
-- `edit_lines`: edición quirúrgica por líneas con contexto y verificación postflight.
+- `apply_patch`: reemplazo exacto y controlado con verificaciÃ³n postflight.
+- `edit_lines`: ediciÃ³n quirÃºrgica por lÃ­neas con contexto y verificaciÃ³n postflight.
+- `analyze_code`: analisis liviano de simbolos, lineas y referencias en un archivo.
+- `impact_analysis`: impacto aproximado de un simbolo en el proyecto.
+- `find_duplicate_symbols`: deteccion liviana de simbolos duplicados.
 - `run_command`: ejecuta comandos con `cwd`, timeout y salida capturada.
 
 Terminal persistente:
@@ -65,7 +68,7 @@ Terminal persistente:
 - `terminal_stop`
 - `terminal_list`
 
-Git, túnel y diagnóstico:
+Git, tÃºnel y diagnÃ³stico:
 
 - `git_status`
 - `git_set_remote`
@@ -76,7 +79,7 @@ Git, túnel y diagnóstico:
 - `bridge_request_restart`
 - `bridge_restart_status`
 
-Métricas de tools:
+MÃ©tricas de tools:
 
 - `bridge_metrics_status`
 - `bridge_metrics_summary`
@@ -84,7 +87,7 @@ Métricas de tools:
 - `bridge_visualization_catalog`
 - `bridge_visualize_metrics`
 
-Nota: puede que ChatGPT no muestre tools nuevas en una conversación ya abierta hasta refrescar el conector/reabrir el chat, pero el runtime ya las expone.
+Nota: puede que ChatGPT no muestre tools nuevas en una conversaciÃ³n ya abierta hasta refrescar el conector/reabrir el chat, pero el runtime ya las expone.
 
 ## Scripts principales
 
@@ -109,13 +112,13 @@ http://127.0.0.1:3001/status
 http://127.0.0.1:3001/mcp
 ```
 
-Perfil de túnel:
+Perfil de tÃºnel:
 
 ```text
 bridge-local-http -> http://127.0.0.1:3001/mcp
 ```
 
-Validación:
+ValidaciÃ³n:
 
 ```powershell
 .\scripts\test-bridge-http.ps1
@@ -129,8 +132,8 @@ El modo HTTP ya valida:
 - `Mcp-Session-Id`
 - `notifications/initialized` con respuesta 202
 - limpieza de sesiones idle
-- limpieza de transports anónimos
-- límite máximo de sesiones
+- limpieza de transports anÃ³nimos
+- lÃ­mite mÃ¡ximo de sesiones
 - watchdog para reinicio de HTTP
 - watchdog para reinicio de `tunnel-client`
 
@@ -145,7 +148,7 @@ Set-Location C:\dev\bridge-mcp
 .\scripts\start-bridge-http-watchdog.ps1 -ProjectRoot C:\dev\bridge-mcp -Profile bridge-local-http -TunnelBaseUrl http://127.0.0.1:8081
 ```
 
-Instalación al inicio de sesión de Windows sin permisos de administrador:
+InstalaciÃ³n al inicio de sesiÃ³n de Windows sin permisos de administrador:
 
 ```powershell
 Set-Location C:\dev\bridge-mcp
@@ -165,7 +168,7 @@ Set-Location C:\dev\bridge-mcp
 .\scripts\start-bridge-watchdog.ps1 -ProjectRoot C:\dev\bridge-mcp
 ```
 
-## Métricas y logs
+## MÃ©tricas y logs
 
 Runtime local:
 
@@ -174,7 +177,7 @@ logs/bridge-events.jsonl
  data/bridge-metrics.sqlite
 ```
 
-Consultas rápidas:
+Consultas rÃ¡pidas:
 
 ```powershell
 node .\scripts\query-bridge-metrics.mjs status
@@ -183,7 +186,7 @@ node .\scripts\query-bridge-metrics.mjs recent 25
 node .\scripts\query-bridge-metrics.mjs errors 25
 ```
 
-Variables útiles:
+Variables Ãºtiles:
 
 ```text
 BRIDGE_MCP_METRICS_ENABLED=0
@@ -193,11 +196,11 @@ BRIDGE_MCP_METRICS_SQLITE=...
 BRIDGE_MCP_EVENTS_JSONL=...
 ```
 
-Las métricas guardan nombres de tools, duración, éxito/error, claves de input y tamaño de salida. No guardan argumentos completos.
+Las mÃ©tricas guardan nombres de tools, duraciÃ³n, Ã©xito/error, claves de input y tamaÃ±o de salida. No guardan argumentos completos.
 
 ## Modelo de uso desde laptop
 
-Si usás ChatGPT desde la laptop pero el conector apunta al túnel que corre en MauroPrime, las tools se ejecutan en MauroPrime.
+Si usÃ¡s ChatGPT desde la laptop pero el conector apunta al tÃºnel que corre en MauroPrime, las tools se ejecutan en MauroPrime.
 
 ```text
 Laptop con ChatGPT UI
@@ -206,7 +209,7 @@ Laptop con ChatGPT UI
   -> tools ejecutadas en MauroPrime
 ```
 
-Para que las tools se ejecuten en la laptop, la laptop necesitaría su propio bridge/tunnel/profile corriendo localmente.
+Para que las tools se ejecuten en la laptop, la laptop necesitarÃ­a su propio bridge/tunnel/profile corriendo localmente.
 
 ## Seguridad
 
@@ -217,7 +220,7 @@ No commitear:
 - binarios del tunnel-client
 - `.env` / claves / tokens
 - logs
-- base SQLite de métricas
+- base SQLite de mÃ©tricas
 - sandbox local
 
 Mantener secretos como variables de entorno de Windows o en perfiles locales fuera de Git.
@@ -227,3 +230,4 @@ Mantener secretos como variables de entorno de Windows o en perfiles locales fue
 El perfil HTTP local es intencionalmente loopback-only y no-auth en el listener MCP. La barrera de seguridad real es el OpenAI Secure MCP Tunnel + runtime key + permisos del workspace.
 
 Ver `OPENAI_TUNNEL_LOCAL_AUTH.md`.
+

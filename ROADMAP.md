@@ -1,4 +1,4 @@
-# bridge-mcp Roadmap
+﻿# bridge-mcp Roadmap
 
 Local MCP bridge for MauroPrime. The goal is to let ChatGPT operate MauroPrime through a controlled OpenAI Secure MCP Tunnel with explicit diagnostics, safe restart flow, Git workflow, metrics, and rollback.
 
@@ -6,7 +6,7 @@ Local MCP bridge for MauroPrime. The goal is to let ChatGPT operate MauroPrime t
 
 ```txt
 Project root: C:\dev\bridge-mcp
-Server: bridge-mcp v0.4.4
+Server: bridge-mcp v0.4.5
 Mode: HTTP production-candidate
 Bridge HTTP: http://127.0.0.1:3001/mcp
 Bridge status: http://127.0.0.1:3001/status
@@ -30,7 +30,7 @@ Do not commit keys, tunnel secrets, `node_modules`, `dist`, logs, SQLite metrics
 
 ## Confirmed working checks
 
-Known-good checks for v0.4.4:
+Known-good checks for v0.4.5:
 
 ```txt
 bridge_self_check -> ok true
@@ -38,7 +38,7 @@ npm run check -> OK
 npm run build -> OK
 scripts/test-bridge-http.ps1 -> OK
 scripts/test-bridge-regressions.ps1 -> OK
-http://127.0.0.1:3001/status -> bridge-mcp v0.4.4
+http://127.0.0.1:3001/status -> bridge-mcp v0.4.5
 http://127.0.0.1:8081/healthz -> live
 http://127.0.0.1:8081/readyz -> ready
 ```
@@ -60,6 +60,9 @@ search_files
 write_text_file
 apply_patch
 edit_lines
+analyze_code
+impact_analysis
+find_duplicate_symbols
 run_command
 ```
 
@@ -153,6 +156,8 @@ If the wrapper blocks that tool, use `write_text_file` to create `.bridge-restar
 - Modular registry foundation for `file-navigation` and `file-writing`.
 - Shared text-file helpers for hash verification, binary refusal, line endings, and line-range edits.
 - Surgical `edit_lines` tool with context and postflight verification.
+- Code intelligence tools: `analyze_code`, `impact_analysis`, `find_duplicate_symbols`.
+- Shared project scanner and lightweight symbol/reference extraction helpers.
 - Troubleshooting notes for wrapper blocks and stale `8080` context.
 
 ## Next recommended work
@@ -203,3 +208,4 @@ Allowed roots / denied path policy is intentionally not part of this change. Kee
 Set-Location C:\dev\bridge-mcp
 .\scripts\start-bridge-watchdog.ps1 -ProjectRoot C:\dev\bridge-mcp
 ```
+

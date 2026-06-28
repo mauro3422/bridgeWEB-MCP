@@ -396,6 +396,33 @@ Tests:
 - invalid line range rejection
 - backup/rollback metadata
 
+### v0.4.5: code impact intelligence
+
+Status: implemented.
+
+Delivered:
+
+```txt
+src/tools/shared/project-scan.ts
+src/tools/shared/code-symbols.ts
+src/tools/code-intelligence.ts
+analyze_code
+impact_analysis
+find_duplicate_symbols
+```
+
+These tools are intentionally lightweight: regex/symbol scanning first, TypeScript compiler API later if needed. They help answer whether a new symbol duplicates an existing one, where a symbol is referenced, and what files may be affected by a refactor.
+
+Cross-cutting helpers now available:
+
+```txt
+project text-file scan with skip dirs
+symbol extraction
+reference classification: definition/import/call/reference
+duplicate definition grouping
+approximate impact risk summary
+```
+
 ### v0.4.6: TypeScript intelligence
 
 Deliver:

@@ -1,3 +1,4 @@
+import { codeIntelligenceToolModule } from "./tools/code-intelligence.js";
 import { fileNavigationToolModule } from "./tools/file-navigation.js";
 import { fileWritingToolModule } from "./tools/file-writing.js";
 import type { BridgeToolModule, BridgeToolRegistry, BridgeToolSchema } from "./tools/types.js";
@@ -40,5 +41,6 @@ export function createDefaultToolRegistry(): BridgeToolRegistry {
   return createToolRegistry([
     fileNavigationToolModule,
     fileWritingToolModule,
+    codeIntelligenceToolModule,
   ]);
 }
