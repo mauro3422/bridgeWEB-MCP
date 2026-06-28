@@ -71,6 +71,9 @@ Key files:
 - TROUBLESHOOTING.md
 - ROADMAP.md
 - AGENTIC_TOOLS_ROADMAP.md
+- TOOLS.md
+- CONNECTOR_CONTEXT.md
+- CONNECTOR_PLAYBOOK.md
 - src/config.ts
 - src/http.ts
 - src/bridge-server.ts

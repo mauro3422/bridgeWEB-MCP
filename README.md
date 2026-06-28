@@ -349,6 +349,7 @@ Mantener secretos como variables de entorno de Windows o perfiles locales fuera 
 ```text
 TOOLS.md
 CONNECTOR_CONTEXT.md
+CONNECTOR_PLAYBOOK.md
 HTTP_LOCAL_MCP.md
 OPENAI_TUNNEL_LOCAL_AUTH.md
 RESTART_FLOW.md

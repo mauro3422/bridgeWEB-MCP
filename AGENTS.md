@@ -172,7 +172,7 @@ No confundir con widgets internos de ChatGPT. La UI local sirve para MauroPrime;
 
 ## Flujo de trabajo recomendado
 
-1. Leer `README.md` y `HTTP_LOCAL_MCP.md`.
+1. Leer `README.md`, `TOOLS.md`, `CONNECTOR_CONTEXT.md` y `CONNECTOR_PLAYBOOK.md`.
 2. Verificar estado con `/status` y `/readyz`.
 3. Hacer cambios pequeños y testeables.
 4. Ejecutar `npm run check` y `npm run build`.
