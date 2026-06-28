@@ -5,7 +5,7 @@ export const DEFAULT_MAX_FILE_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_TIMEOUT_MS = 30_000;
 export const MAX_CAPTURE_CHARS = 512 * 1024;
 export const DEFAULT_GIT_REMOTE_URL = "https://github.com/mauro3422/bridgeWEB-MCP.git";
-export const DEFAULT_TUNNEL_ADMIN_BASE_URL = "http://127.0.0.1:8080";
+export const DEFAULT_TUNNEL_ADMIN_BASE_URL = "http://127.0.0.1:8081";
 export const DEFAULT_RESTART_REQUEST_FILE = ".bridge-restart-request";
 export const DEFAULT_RESTART_ACK_FILE = ".bridge-restart-ack";
 
