@@ -302,8 +302,9 @@ async function bridgeRestartStatus(cwd?: string) {
   const readJsonIfExists = async (filePath: string) => {
     if (!(await fileExists(filePath))) return null;
     const text = await fs.readFile(filePath, "utf8");
+    const parseText = text.replace(/^\uFEFF/, "");
     try {
-      return JSON.parse(text) as JsonValue;
+      return JSON.parse(parseText) as JsonValue;
     } catch {
       return { parseError: true, text: tailText(text, 4000) };
     }
