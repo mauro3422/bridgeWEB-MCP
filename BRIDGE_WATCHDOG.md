@@ -31,7 +31,7 @@ Set-Location C:\dev\bridge-mcp
 .\scripts\install-bridge-watchdog-task.ps1
 ```
 
-By default the installer runs in `Auto` mode. It first tries to install a Windows Scheduled Task. If Windows denies permission, it falls back to a no-admin Startup folder launcher named `BridgeMCP-Watchdog.cmd`.
+By default the installer runs in `Auto` mode. It first tries to install a Windows Scheduled Task. If Windows denies permission, it falls back to a no-admin Startup folder launcher named `BridgeMCP-Watchdog.cmd`. The Startup launcher intentionally opens a normal visible PowerShell window so the bridge state remains easy to inspect during development.
 
 To force the no-admin Startup installer:
 

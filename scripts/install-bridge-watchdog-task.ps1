@@ -57,7 +57,7 @@ function Install-BridgeStartupCommand {
 @echo off
 REM Starts the Bridge MCP watchdog at user logon without requiring admin rights.
 cd /d "$ProjectRoot"
-start "BridgeMCP Watchdog" /min powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$WatchdogScript" -ProjectRoot "$ProjectRoot"
+start "BridgeMCP Watchdog" powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$WatchdogScript" -ProjectRoot "$ProjectRoot"
 "@
 
   if ($DryRun) {
