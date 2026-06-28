@@ -1,7 +1,51 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
+build/
+coverage/
+
+# Local environment and secrets
 .env
 .env.*
+*.local
+*.key
+*.pem
+*.p12
+*.pfx
+id_rsa
+id_rsa.*
+
+# OpenAI Secure MCP Tunnel local artifacts
+# Keep the tunnel client binary and generated profiles out of Git.
+tools/tunnel-client/*.exe
+tools/tunnel-client/*.zip
+tools/tunnel-client/*.tar.gz
+tools/tunnel-client/*.log
+*.tunnel.log
+
+# Local test/sandbox artifacts
+sandbox/
+.smoke-test.txt
+*.smoke.log
+
+# Logs and temp files
 *.log
+logs/
+tmp/
+temp/
+.cache/
+
+# OS/editor noise
 .DS_Store
 Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Runtime crash/debug artifacts
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
