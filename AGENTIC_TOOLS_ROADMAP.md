@@ -468,6 +468,20 @@ find_dead_code
 
 This adds relative import resolution, external import reporting, cycle detection, fan-in/fan-out summaries, orphan files, and conservative dead-code candidates using TypeScript AST references.
 
+### v0.5.0: semantic TypeScript program engine
+
+Status: implemented.
+
+Delivered:
+
+```txt
+src/tools/shared/typescript-program.ts
+impact_analysis engine=semantic
+find_dead_code engine=semantic
+```
+
+This builds a TypeScript Program and TypeChecker, groups symbols by actual declarations, resolves alias symbols, and separates definition/import/export/call/type/reference usages. It improves cross-file impact and dead-code confidence compared with regex or per-file AST scanning.
+
 ### v0.5+: deeper project intelligence
 
 Deliver later:

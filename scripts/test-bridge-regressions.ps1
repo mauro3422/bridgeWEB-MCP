@@ -20,9 +20,9 @@ Set-Location -LiteralPath $ProjectRoot
 Invoke-Check "version bump is consistent" {
   $packageJson = Get-Content -LiteralPath "package.json" -Raw | ConvertFrom-Json
   $configText = Get-Content -LiteralPath "src\config.ts" -Raw
-  if ($packageJson.version -ne "0.4.9") { throw "package.json version is $($packageJson.version), expected 0.4.9" }
-  if ($configText -notmatch 'SERVER_VERSION = "0\.4\.9"') { throw "src/config.ts does not report SERVER_VERSION 0.4.9" }
-  Write-Host "  OK 0.4.9"
+  if ($packageJson.version -ne "0.5.0") { throw "package.json version is $($packageJson.version), expected 0.5.0" }
+  if ($configText -notmatch 'SERVER_VERSION = "0\.5\.0"') { throw "src/config.ts does not report SERVER_VERSION 0.5.0" }
+  Write-Host "  OK 0.5.0"
 }
 
 Invoke-Check "tunnel admin default stays on HTTP profile port" {
@@ -97,6 +97,8 @@ if (!analyze.symbolQuery || analyze.symbolQuery.count < 1 || analyze.engineUsed 
 if (!Array.isArray(analyze.imports) || analyze.imports.length < 1) process.exit(34);
 const impact = await registry.call("impact_analysis", { name: "createDefaultToolRegistry", projectRoot: root, filePattern: "*.ts", maxFiles: 200, engine: "typescript" });
 if (impact.definitions.length < 1 || impact.totalReferences < 1 || !impact.enginesUsed.includes("typescript")) process.exit(32);
+const semanticImpact = await registry.call("impact_analysis", { name: "createDefaultToolRegistry", projectRoot: root, filePattern: "*.ts", maxFiles: 200, engine: "semantic" });
+if (semanticImpact.definitions.length < 1 || semanticImpact.totalReferences < 1 || !semanticImpact.enginesUsed.includes("semantic")) process.exit(35);
 const duplicates = await registry.call("find_duplicate_symbols", { projectRoot: root, filePattern: "*.ts", maxFiles: 200, maxGroups: 20 });
 if (typeof duplicates.duplicateGroupCount !== "number") process.exit(33);
 console.log("  OK code intelligence tools");
@@ -128,8 +130,8 @@ const graph = await registry.call("dependency_graph", { projectRoot: root, fileP
 if (typeof graph.internalEdgeCount !== "number" || !Array.isArray(graph.mostImported)) process.exit(52);
 const imports = await registry.call("import_graph", { projectRoot: root, filePattern: "*.ts", maxFiles: 200, includeExternal: true });
 if (!Array.isArray(imports.edges) || imports.nodes.length < 1) process.exit(53);
-const dead = await registry.call("find_dead_code", { projectRoot: root, filePattern: "*.ts", maxFiles: 200, maxCandidates: 20 });
-if (!Array.isArray(dead.candidates)) process.exit(54);
+const dead = await registry.call("find_dead_code", { projectRoot: root, filePattern: "*.ts", maxFiles: 200, maxCandidates: 20, engine: "semantic" });
+if (!Array.isArray(dead.candidates) || dead.engineUsed !== "semantic") process.exit(54);
 console.log("  OK code graph tools");
 '@
   $tmpScript = Join-Path ([System.IO.Path]::GetTempPath()) ("bridge-code-graph-" + [Guid]::NewGuid().ToString("N") + ".mjs")

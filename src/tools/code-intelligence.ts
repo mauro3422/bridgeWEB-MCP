@@ -4,9 +4,10 @@ import type { BridgeToolModule } from "./types.js";
 import { readTextSnapshot } from "./shared/text-files.js";
 import { collectProjectTextFiles } from "./shared/project-scan.js";
 import { detectLanguage, extractCodeSymbols, findReferences, type CodeReference, type CodeSymbol } from "./shared/code-symbols.js";
+import { semanticImpact } from "./shared/typescript-program.js";
 import { analyzeTypeScriptSource, findTypeScriptIdentifierReferences, type TypeScriptReference, type TypeScriptSymbol } from "./shared/typescript-intelligence.js";
 
-type Engine = "auto" | "regex" | "typescript";
+type Engine = "auto" | "regex" | "typescript" | "semantic";
 type UnifiedSymbol = {
   name: string;
   kind: string;
@@ -30,7 +31,7 @@ function isTypeScriptLike(filePath: string) {
 
 function shouldUseTypeScript(engine: Engine, filePath: string) {
   if (engine === "regex") return false;
-  if (engine === "typescript") return true;
+  if (engine === "typescript" || engine === "semantic") return true;
   return isTypeScriptLike(filePath);
 }
 
@@ -135,22 +136,22 @@ export const codeIntelligenceToolModule: BridgeToolModule = {
     {
       name: "analyze_code",
       description: "Analyze one text/code file. Uses TypeScript AST for TS/JS when available, otherwise regex fallback. Returns symbols, imports, exports, diagnostics, duplicates, and optional symbol references.",
-      inputSchema: { type: "object", properties: { path: { type: "string" }, symbol: { type: "string" }, maxSymbols: { type: "number", default: 120, minimum: 1, maximum: 500 }, engine: { type: "string", enum: ["auto", "regex", "typescript"], default: "auto" } }, required: ["path"], additionalProperties: false },
+      inputSchema: { type: "object", properties: { path: { type: "string" }, symbol: { type: "string" }, maxSymbols: { type: "number", default: 120, minimum: 1, maximum: 500 }, engine: { type: "string", enum: ["auto", "regex", "typescript", "semantic"], default: "auto" } }, required: ["path"], additionalProperties: false },
     },
     {
       name: "impact_analysis",
       description: "Find definitions and references for a symbol across a project. Uses TypeScript AST for TS/JS files when available, with regex fallback.",
-      inputSchema: { type: "object", properties: { name: { type: "string" }, projectRoot: { type: "string" }, filePattern: { type: "string", default: "*.ts" }, includeTests: { type: "boolean", default: false }, maxFiles: { type: "number", default: 500, minimum: 1, maximum: 2000 }, maxReferencesPerFile: { type: "number", default: 20, minimum: 1, maximum: 100 }, engine: { type: "string", enum: ["auto", "regex", "typescript"], default: "auto" } }, required: ["name"], additionalProperties: false },
+      inputSchema: { type: "object", properties: { name: { type: "string" }, projectRoot: { type: "string" }, filePattern: { type: "string", default: "*.ts" }, includeTests: { type: "boolean", default: false }, maxFiles: { type: "number", default: 500, minimum: 1, maximum: 2000 }, maxReferencesPerFile: { type: "number", default: 20, minimum: 1, maximum: 100 }, engine: { type: "string", enum: ["auto", "regex", "typescript", "semantic"], default: "auto" } }, required: ["name"], additionalProperties: false },
     },
     {
       name: "find_duplicate_symbols",
       description: "Scan a project for duplicated symbol definitions by name and kind. Uses TypeScript AST for TS/JS files when available, with regex fallback.",
-      inputSchema: { type: "object", properties: { projectRoot: { type: "string" }, filePattern: { type: "string", default: "*.ts" }, includeTests: { type: "boolean", default: false }, exportedOnly: { type: "boolean", default: false }, minOccurrences: { type: "number", default: 2, minimum: 2, maximum: 20 }, maxGroups: { type: "number", default: 50, minimum: 1, maximum: 200 }, maxFiles: { type: "number", default: 500, minimum: 1, maximum: 2000 }, engine: { type: "string", enum: ["auto", "regex", "typescript"], default: "auto" } }, additionalProperties: false },
+      inputSchema: { type: "object", properties: { projectRoot: { type: "string" }, filePattern: { type: "string", default: "*.ts" }, includeTests: { type: "boolean", default: false }, exportedOnly: { type: "boolean", default: false }, minOccurrences: { type: "number", default: 2, minimum: 2, maximum: 20 }, maxGroups: { type: "number", default: 50, minimum: 1, maximum: 200 }, maxFiles: { type: "number", default: 500, minimum: 1, maximum: 2000 }, engine: { type: "string", enum: ["auto", "regex", "typescript", "semantic"], default: "auto" } }, additionalProperties: false },
     },
   ],
   handlers: {
     analyze_code: async (args) => {
-      const parsed = z.object({ path: z.string(), symbol: z.string().optional(), maxSymbols: z.number().int().min(1).max(500).default(120), engine: z.enum(["auto", "regex", "typescript"]).default("auto") }).parse(args);
+      const parsed = z.object({ path: z.string(), symbol: z.string().optional(), maxSymbols: z.number().int().min(1).max(500).default(120), engine: z.enum(["auto", "regex", "typescript", "semantic"]).default("auto") }).parse(args);
       const snapshot = await readTextSnapshot(parsed.path);
       const analysis = await analyzeSymbols(snapshot.path, snapshot.text, parsed.engine);
       const duplicateGroups = groupDuplicateSymbols(analysis.symbols.map((symbol) => ({ ...symbol, file: path.basename(snapshot.path) })), false, 2, 50);
@@ -158,7 +159,13 @@ export const codeIntelligenceToolModule: BridgeToolModule = {
       return { path: snapshot.path, language: detectLanguage(snapshot.path), engineRequested: parsed.engine, engineUsed: analysis.engineUsed, typeScriptAvailable: analysis.typeScriptAvailable, typeScriptReason: analysis.typeScriptReason, bytes: snapshot.bytes, totalLines: snapshot.totalLines, sha256: snapshot.sha256, symbolCount: analysis.symbols.length, symbols: compactSymbols(analysis.symbols, parsed.maxSymbols), imports: analysis.imports, exports: analysis.exports, diagnostics: analysis.diagnostics, duplicateSymbols: duplicateGroups, symbolQuery: parsed.symbol && references ? { name: parsed.symbol, engineUsed: references.engineUsed, references: trimReferences(references.references, 100), count: references.references.length } : null };
     },
     impact_analysis: async (args) => {
-      const parsed = z.object({ name: z.string().min(1), projectRoot: z.string().optional(), filePattern: z.string().default("*.ts"), includeTests: z.boolean().default(false), maxFiles: z.number().int().min(1).max(2000).default(500), maxReferencesPerFile: z.number().int().min(1).max(100).default(20), engine: z.enum(["auto", "regex", "typescript"]).default("auto") }).parse(args);
+      const parsed = z.object({ name: z.string().min(1), projectRoot: z.string().optional(), filePattern: z.string().default("*.ts"), includeTests: z.boolean().default(false), maxFiles: z.number().int().min(1).max(2000).default(500), maxReferencesPerFile: z.number().int().min(1).max(100).default(20), engine: z.enum(["auto", "regex", "typescript", "semantic"]).default("auto") }).parse(args);
+      if (parsed.engine === "semantic") {
+        const semantic = await semanticImpact({ root: parsed.projectRoot ?? process.cwd(), name: parsed.name, includeTests: parsed.includeTests, maxFiles: parsed.maxFiles });
+        if (!semantic.available) throw new Error(("reason" in semantic ? semantic.reason : undefined) ?? "Semantic TypeScript engine unavailable.");
+        const crossFileCount = new Set(semantic.filesWithReferences.map((item) => item.file)).size;
+        return { name: parsed.name, filePattern: parsed.filePattern, engineRequested: parsed.engine, enginesUsed: ["semantic"], ...semantic, risk: summarizeRisk(semantic.totalReferences, semantic.definitions.length, semantic.duplicateDefinitions, crossFileCount) };
+      }
       const scan = await collectProjectTextFiles({ root: parsed.projectRoot ?? process.cwd(), filePattern: parsed.filePattern, includeTests: parsed.includeTests, maxFiles: parsed.maxFiles });
       const definitions: Array<{ file: string; line: number; kind: string; exported: boolean; source: string; text: string }> = [];
       const filesWithReferences = [];
@@ -189,7 +196,7 @@ export const codeIntelligenceToolModule: BridgeToolModule = {
       return { name: parsed.name, root: scan.root, filePattern: parsed.filePattern, engineRequested: parsed.engine, enginesUsed: Array.from(enginesUsed), scannedFiles: scan.files.length, skipped: scan.skipped, truncated: scan.truncated, definitions, duplicateDefinitions, totalReferences, callReferences, importReferences, typeReferences, filesWithReferences, risk: summarizeRisk(totalReferences, definitions.length, duplicateDefinitions, crossFileCount) };
     },
     find_duplicate_symbols: async (args) => {
-      const parsed = z.object({ projectRoot: z.string().optional(), filePattern: z.string().default("*.ts"), includeTests: z.boolean().default(false), exportedOnly: z.boolean().default(false), minOccurrences: z.number().int().min(2).max(20).default(2), maxGroups: z.number().int().min(1).max(200).default(50), maxFiles: z.number().int().min(1).max(2000).default(500), engine: z.enum(["auto", "regex", "typescript"]).default("auto") }).parse(args);
+      const parsed = z.object({ projectRoot: z.string().optional(), filePattern: z.string().default("*.ts"), includeTests: z.boolean().default(false), exportedOnly: z.boolean().default(false), minOccurrences: z.number().int().min(2).max(20).default(2), maxGroups: z.number().int().min(1).max(200).default(50), maxFiles: z.number().int().min(1).max(2000).default(500), engine: z.enum(["auto", "regex", "typescript", "semantic"]).default("auto") }).parse(args);
       const scan = await collectProjectTextFiles({ root: parsed.projectRoot ?? process.cwd(), filePattern: parsed.filePattern, includeTests: parsed.includeTests, maxFiles: parsed.maxFiles });
       const allSymbols: Array<UnifiedSymbol & { file: string }> = [];
       const enginesUsed = new Set<string>();

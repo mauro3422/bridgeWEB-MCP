@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { BridgeToolModule } from "./types.js";
 import { buildImportGraph, findDeadCodeCandidates } from "./shared/import-graph.js";
+import { semanticDeadCode } from "./shared/typescript-program.js";
 
 export const codeGraphToolModule: BridgeToolModule = {
   name: "code-graph",
@@ -48,6 +49,7 @@ export const codeGraphToolModule: BridgeToolModule = {
           includeExported: { type: "boolean", default: false },
           maxFiles: { type: "number", default: 500, minimum: 1, maximum: 2000 },
           maxCandidates: { type: "number", default: 100, minimum: 1, maximum: 500 },
+          engine: { type: "string", enum: ["auto", "typescript", "semantic"], default: "semantic" },
         },
         additionalProperties: false,
       },
@@ -98,8 +100,14 @@ export const codeGraphToolModule: BridgeToolModule = {
         includeExported: z.boolean().default(false),
         maxFiles: z.number().int().min(1).max(2000).default(500),
         maxCandidates: z.number().int().min(1).max(500).default(100),
+        engine: z.enum(["auto", "typescript", "semantic"]).default("semantic"),
       }).parse(args);
-      return await findDeadCodeCandidates({ root: parsed.projectRoot ?? process.cwd(), filePattern: parsed.filePattern, includeTests: parsed.includeTests, includeExported: parsed.includeExported, maxFiles: parsed.maxFiles, maxCandidates: parsed.maxCandidates });
+      if (parsed.engine === "semantic" || parsed.engine === "auto") {
+        const semantic = await semanticDeadCode({ root: parsed.projectRoot ?? process.cwd(), includeTests: parsed.includeTests, includeExported: parsed.includeExported, maxFiles: parsed.maxFiles, maxCandidates: parsed.maxCandidates });
+        if (semantic.available) return { engineUsed: "semantic", ...semantic };
+        if (parsed.engine === "semantic") throw new Error(("reason" in semantic ? semantic.reason : undefined) ?? "Semantic TypeScript engine unavailable.");
+      }
+      return { engineUsed: "typescript", ...(await findDeadCodeCandidates({ root: parsed.projectRoot ?? process.cwd(), filePattern: parsed.filePattern, includeTests: parsed.includeTests, includeExported: parsed.includeExported, maxFiles: parsed.maxFiles, maxCandidates: parsed.maxCandidates })) };
     },
   },
 };
