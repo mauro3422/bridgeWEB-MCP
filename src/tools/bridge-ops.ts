@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
   DEFAULT_RESTART_ACK_FILE,
@@ -28,6 +28,29 @@ async function tunnelHealth(baseUrl = DEFAULT_TUNNEL_ADMIN_BASE_URL) {
     }
   };
   return { baseUrl, healthz: await fetchEndpoint("healthz"), readyz: await fetchEndpoint("readyz") };
+}
+
+async function getRuntimeToolCatalog() {
+  try {
+    const { createDefaultToolRegistry } = await import("../tool-registry.js");
+    const registry = createDefaultToolRegistry();
+    const names = registry.tools.map((tool) => tool.name);
+    const payload = registry.tools.map((tool) => ({ name: tool.name, inputSchema: tool.inputSchema }));
+    const hash = createHash("sha256").update(JSON.stringify(payload)).digest("hex").slice(0, 16);
+    return {
+      available: true,
+      count: names.length,
+      hash,
+      modules: registry.modules,
+      names,
+      refreshHint: "If the connector exposes fewer tools than this runtime catalog, reopen the connector or start a new chat.",
+    };
+  } catch (error) {
+    return {
+      available: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function getRestartRequestPath(cwd?: string) {
@@ -76,6 +99,7 @@ async function bridgeSelfCheck(cwd?: string) {
   const build = await runShellCommand("npm run build", root, 120_000);
   const status = await gitStatus(root);
   const tunnel = await tunnelHealth();
+  const toolCatalog = await getRuntimeToolCatalog();
   return {
     ok: typecheck.code === 0 && build.code === 0,
     server: { name: SERVER_NAME, version: SERVER_VERSION },
@@ -85,6 +109,7 @@ async function bridgeSelfCheck(cwd?: string) {
     git: status,
     tunnel,
     activeTerminals: terminalList(),
+    toolCatalog,
   };
 }
 
