@@ -231,3 +231,82 @@ export function getRecentMetrics(limit = 25) {
   `).all(limit);
   return { ...getMetricsStatus(), recent: rows };
 }
+
+export function getMetricsErrors(limit = 25) {
+  const sqlite = getDb();
+  if (!sqlite) return { ...getMetricsStatus(), errors: [] };
+  const rows = sqlite.prepare(`
+    SELECT started_at, duration_ms, tool, error, input_keys, output_chars, pid
+    FROM tool_calls
+    WHERE ok = 0
+    ORDER BY started_at DESC
+    LIMIT ?
+  `).all(limit);
+  return { ...getMetricsStatus(), errors: rows };
+}
+
+export function getMetricsOverview() {
+  const sqlite = getDb();
+  if (!sqlite) {
+    return {
+      ...getMetricsStatus(),
+      totals: { calls: 0, okCalls: 0, errorCalls: 0, avgDurationMs: 0, maxDurationMs: 0 },
+      slowest: [],
+    };
+  }
+
+  const totals = sqlite.prepare(`
+    SELECT
+      COUNT(*) AS calls,
+      SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END) AS okCalls,
+      SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS errorCalls,
+      ROUND(AVG(duration_ms), 2) AS avgDurationMs,
+      MAX(duration_ms) AS maxDurationMs
+    FROM tool_calls
+  `).get() ?? { calls: 0, okCalls: 0, errorCalls: 0, avgDurationMs: 0, maxDurationMs: 0 };
+
+  const slowest = sqlite.prepare(`
+    SELECT started_at, duration_ms, tool, ok, error, input_keys, output_chars, pid
+    FROM tool_calls
+    ORDER BY duration_ms DESC
+    LIMIT 10
+  `).all();
+
+  return { ...getMetricsStatus(), totals, slowest };
+}
+
+export function getMetricsTimeline(limit = 500) {
+  const sqlite = getDb();
+  if (!sqlite) return { ...getMetricsStatus(), timeline: [] };
+  const rows = sqlite.prepare(`
+    SELECT started_at, duration_ms, ok
+    FROM tool_calls
+    ORDER BY started_at DESC
+    LIMIT ?
+  `).all(limit);
+
+  const buckets = new Map<string, { bucket: string; calls: number; errors: number; totalDurationMs: number }>();
+  for (const row of rows) {
+    const startedAt = typeof row.started_at === "string" ? row.started_at : "";
+    const date = new Date(startedAt);
+    if (Number.isNaN(date.getTime())) continue;
+    date.setSeconds(0, 0);
+    const minute = date.getMinutes();
+    date.setMinutes(minute - (minute % 5));
+    const bucket = date.toISOString();
+    const existing = buckets.get(bucket) ?? { bucket, calls: 0, errors: 0, totalDurationMs: 0 };
+    existing.calls += 1;
+    existing.errors += Number(row.ok) === 1 ? 0 : 1;
+    existing.totalDurationMs += Number(row.duration_ms ?? 0);
+    buckets.set(bucket, existing);
+  }
+
+  const timeline = Array.from(buckets.values())
+    .sort((a, b) => a.bucket.localeCompare(b.bucket))
+    .map((bucket) => ({
+      ...bucket,
+      avgDurationMs: bucket.calls > 0 ? Math.round((bucket.totalDurationMs / bucket.calls) * 100) / 100 : 0,
+    }));
+
+  return { ...getMetricsStatus(), timeline };
+}

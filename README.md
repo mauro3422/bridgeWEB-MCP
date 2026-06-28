@@ -76,6 +76,8 @@ Métricas de tools:
 - `bridge_metrics_status`
 - `bridge_metrics_summary`
 - `bridge_metrics_recent`
+- `bridge_visualization_catalog`
+- `bridge_visualize_metrics`
 
 Nota: puede que ChatGPT no muestre tools nuevas en una conversación ya abierta hasta refrescar el conector/reabrir el chat, pero el runtime ya las expone.
 

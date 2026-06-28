@@ -222,3 +222,42 @@ BRIDGE_MCP_EVENTS_JSONL=...        # default: ./logs/bridge-events.jsonl
 ```
 
 The runtime metrics database and logs are intentionally ignored by Git.
+
+## Chat visualizations module
+
+The bridge now includes a reusable visualization module for ChatGPT-renderable chart specs.
+
+Files:
+
+```text
+src/visualizations.ts
+```
+
+MCP tools:
+
+```text
+bridge_visualization_catalog
+bridge_visualize_metrics
+```
+
+Supported metric chart kinds:
+
+```text
+calls_by_tool
+avg_duration_by_tool
+errors_by_tool
+activity_timeline
+success_mix
+```
+
+`bridge_visualize_metrics` returns:
+
+```json
+{
+  "renderer": "charts_widget_v2",
+  "language": "recharts-json",
+  "chartSpec": { "chartType": "bar", "meta": {}, "data": [] }
+}
+```
+
+The assistant can use `chartSpec` as the content payload for ChatGPT's chart renderer when a visual card inside the conversation is useful. This is separate from the local `/dashboard` page.

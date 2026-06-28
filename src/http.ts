@@ -5,6 +5,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createBridgeServer } from "./bridge-server.js";
 import { getBridgeHttpConfig, SERVER_NAME, SERVER_VERSION } from "./config.js";
+import { renderDashboardHtml } from "./dashboard.js";
+import { getMetricsErrors, getMetricsOverview, getMetricsStatus, getMetricsSummary, getMetricsTimeline, getRecentMetrics } from "./metrics.js";
 
 const config = getBridgeHttpConfig();
 const startedAt = new Date();
@@ -58,6 +60,19 @@ function sendJson(res: ServerResponse, statusCode: number, data: Record<string, 
     "cache-control": "no-store",
   });
   res.end(JSON.stringify(data, null, 2));
+}
+
+function sendHtml(res: ServerResponse, statusCode: number, html: string) {
+  res.writeHead(statusCode, {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+  });
+  res.end(html);
+}
+
+function getLimit(url: URL, fallback: number, max = 500): number {
+  const raw = Number.parseInt(url.searchParams.get("limit") || "", 10);
+  return Number.isFinite(raw) && raw > 0 ? Math.min(raw, max) : fallback;
 }
 
 function isMcpStreamRequest(req: IncomingMessage): boolean {
@@ -262,6 +277,42 @@ async function main() {
         return;
       }
 
+      if (req.method === "GET" && url.pathname === "/dashboard") {
+        sendHtml(res, 200, renderDashboardHtml());
+        return;
+      }
+
+
+      if (req.method === "GET" && url.pathname === "/api/metrics/status") {
+        sendJson(res, 200, getMetricsStatus());
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/metrics/overview") {
+        sendJson(res, 200, getMetricsOverview());
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/metrics/summary") {
+        sendJson(res, 200, getMetricsSummary(getLimit(url, 50, 200)));
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/metrics/recent") {
+        sendJson(res, 200, getRecentMetrics(getLimit(url, 25, 200)));
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/metrics/errors") {
+        sendJson(res, 200, getMetricsErrors(getLimit(url, 25, 200)));
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/metrics/timeline") {
+        sendJson(res, 200, getMetricsTimeline(getLimit(url, 500, 2000)));
+        return;
+      }
+
       if (url.pathname === config.mcpPath) {
         if (!["GET", "POST", "DELETE"].includes(req.method || "")) {
           sendJson(res, 405, {
@@ -288,7 +339,7 @@ async function main() {
       sendJson(res, 404, {
         error: "not_found",
         requestId,
-        routes: ["GET /healthz", "GET /readyz", "GET /status", `${config.mcpPath} MCP Streamable HTTP`],
+        routes: ["GET /healthz", "GET /readyz", "GET /status", "GET /dashboard", "GET /api/metrics/*", `${config.mcpPath} MCP Streamable HTTP`],
       });
     } catch (error) {
       log("error", "request failed", {
