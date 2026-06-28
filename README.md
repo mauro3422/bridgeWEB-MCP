@@ -66,6 +66,32 @@ npm run build
 npm run start
 ```
 
+## HTTP local mode experimental
+
+A local Streamable HTTP MCP entrypoint now exists in parallel to the stable `stdio` entrypoint:
+
+```powershell
+npm run build
+npm run start:http
+```
+
+Default endpoints:
+
+```text
+http://127.0.0.1:3001/healthz
+http://127.0.0.1:3001/readyz
+http://127.0.0.1:3001/status
+http://127.0.0.1:3001/mcp
+```
+
+Prepared experimental tunnel profile:
+
+```text
+bridge-local-http -> http://127.0.0.1:3001/mcp
+```
+
+The stable connector still uses the `bridge-local` stdio profile. Do not run both profiles with the same tunnel id at the same time. See `HTTP_LOCAL_MCP.md`.
+
 ## Watchdog local
 
 El túnel no debe reiniciarse desde adentro de una tool MCP porque ChatGPT perdería el transporte que está usando para llamar esa tool.

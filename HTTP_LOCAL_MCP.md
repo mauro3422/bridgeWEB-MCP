@@ -1,0 +1,94 @@
+# Bridge MCP HTTP local mode
+
+This is the preparation path for running `bridge-mcp` as a local Streamable HTTP MCP server behind the same OpenAI Secure MCP Tunnel.
+
+Current stable production path remains stdio:
+
+```text
+ChatGPT -> OpenAI Secure MCP Tunnel -> tunnel-client -> node dist/index.js
+```
+
+Prepared HTTP path:
+
+```text
+ChatGPT -> OpenAI Secure MCP Tunnel -> tunnel-client -> http://127.0.0.1:3001/mcp -> node dist/http.js
+```
+
+This does not require a Cloudflare Worker, VPS, public port, or external gateway. The port is local-only on `127.0.0.1`.
+
+## Local HTTP server
+
+Build and run manually:
+
+```powershell
+Set-Location C:\dev\bridge-mcp
+npm run build
+.\scripts\start-bridge-http-server.ps1
+```
+
+Or directly:
+
+```powershell
+Set-Location C:\dev\bridge-mcp
+npm run start:http
+```
+
+Default local endpoints:
+
+```text
+GET  http://127.0.0.1:3001/healthz -> live
+GET  http://127.0.0.1:3001/readyz  -> ready
+GET  http://127.0.0.1:3001/status  -> JSON status
+POST http://127.0.0.1:3001/mcp     -> MCP Streamable HTTP JSON-RPC
+GET  http://127.0.0.1:3001/mcp     -> MCP SSE stream when requested with Accept: text/event-stream
+```
+
+## Tunnel profile
+
+Prepared profile:
+
+```text
+bridge-local-http
+```
+
+Expected target:
+
+```text
+http://127.0.0.1:3001/mcp
+```
+
+Expected tunnel-client admin listener for this experimental profile:
+
+```text
+http://127.0.0.1:8081
+```
+
+The existing stable stdio profile remains:
+
+```text
+bridge-local
+```
+
+Do not run both profiles with the same tunnel id at the same time.
+
+## Current caveat
+
+`tunnel-client doctor --profile bridge-local-http` can reach the MCP HTTP target, but currently reports degraded OAuth metadata because the local MCP server intentionally does not expose OAuth/DCR metadata.
+
+This means the HTTP transport is implemented and locally reachable, but the tunnel profile should remain experimental until we either:
+
+1. confirm `sample_mcp_remote_no_auth` can run ready despite the doctor OAuth metadata warning, or
+2. implement the exact metadata contract expected by `tunnel-client`, without pretending to provide auth that does not exist.
+
+## Why this mode matters
+
+The HTTP local split lets us evolve toward:
+
+```text
+OpenAI tunnel stays up
+local MCP HTTP server restarts independently
+watchdog observes both tunnel health and local HTTP health
+ChatGPT can get clearer status about which layer failed
+```
+
+That is the base needed for safer tool iteration, local dashboard, verbose logs, and controlled restart requests.
