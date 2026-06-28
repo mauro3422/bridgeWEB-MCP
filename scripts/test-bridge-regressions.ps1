@@ -20,9 +20,9 @@ Set-Location -LiteralPath $ProjectRoot
 Invoke-Check "version bump is consistent" {
   $packageJson = Get-Content -LiteralPath "package.json" -Raw | ConvertFrom-Json
   $configText = Get-Content -LiteralPath "src\config.ts" -Raw
-  if ($packageJson.version -ne "0.4.7") { throw "package.json version is $($packageJson.version), expected 0.4.7" }
-  if ($configText -notmatch 'SERVER_VERSION = "0\.4\.7"') { throw "src/config.ts does not report SERVER_VERSION 0.4.7" }
-  Write-Host "  OK 0.4.7"
+  if ($packageJson.version -ne "0.4.8") { throw "package.json version is $($packageJson.version), expected 0.4.8" }
+  if ($configText -notmatch 'SERVER_VERSION = "0\.4\.8"') { throw "src/config.ts does not report SERVER_VERSION 0.4.8" }
+  Write-Host "  OK 0.4.8"
 }
 
 Invoke-Check "tunnel admin default stays on HTTP profile port" {
@@ -92,10 +92,11 @@ for (const tool of ["analyze_code", "impact_analysis", "find_duplicate_symbols"]
   if (!registry.has(tool)) process.exit(30);
 }
 const root = process.cwd();
-const analyze = await registry.call("analyze_code", { path: "src/tool-registry.ts", symbol: "createDefaultToolRegistry" });
-if (!analyze.symbolQuery || analyze.symbolQuery.count < 1) process.exit(31);
-const impact = await registry.call("impact_analysis", { name: "createDefaultToolRegistry", projectRoot: root, filePattern: "*.ts", maxFiles: 200 });
-if (impact.definitions.length < 1 || impact.totalReferences < 1) process.exit(32);
+const analyze = await registry.call("analyze_code", { path: "src/tool-registry.ts", symbol: "createDefaultToolRegistry", engine: "typescript" });
+if (!analyze.symbolQuery || analyze.symbolQuery.count < 1 || analyze.engineUsed !== "typescript") process.exit(31);
+if (!Array.isArray(analyze.imports) || analyze.imports.length < 1) process.exit(34);
+const impact = await registry.call("impact_analysis", { name: "createDefaultToolRegistry", projectRoot: root, filePattern: "*.ts", maxFiles: 200, engine: "typescript" });
+if (impact.definitions.length < 1 || impact.totalReferences < 1 || !impact.enginesUsed.includes("typescript")) process.exit(32);
 const duplicates = await registry.call("find_duplicate_symbols", { projectRoot: root, filePattern: "*.ts", maxFiles: 200, maxGroups: 20 });
 if (typeof duplicates.duplicateGroupCount !== "number") process.exit(33);
 console.log("  OK code intelligence tools");

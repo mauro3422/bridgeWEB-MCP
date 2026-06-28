@@ -439,14 +439,18 @@ src/tools/shared/process.ts
 
 ### v0.4.8: TypeScript intelligence
 
-Deliver:
+Status: implemented.
+
+Delivered:
 
 ```txt
-analyze_code
-impact_analysis
+src/tools/shared/typescript-intelligence.ts
+analyze_code engine=auto|regex|typescript
+impact_analysis engine=auto|regex|typescript
+find_duplicate_symbols engine=auto|regex|typescript
 ```
 
-Start with lightweight regex, then consider TypeScript compiler API.
+The code-intelligence module now uses TypeScript AST for TS/JS files when available and falls back to regex when unavailable or requested. It extracts imports, exports, symbols, parse diagnostics, and identifier reference kinds.
 
 ### v0.5+: deeper project intelligence
 
