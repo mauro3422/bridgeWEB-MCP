@@ -98,6 +98,15 @@ HTTP validation helper:
 .\scripts\test-bridge-http.ps1
 ```
 
+Restart-request flow:
+
+```powershell
+.\scripts\test-restart-request.ps1 -Mode http
+.\scripts\start-bridge-http-watchdog.ps1 -NoTunnel -Once
+```
+
+See `RESTART_FLOW.md`.
+
 ## Watchdog local
 
 El túnel no debe reiniciarse desde adentro de una tool MCP porque ChatGPT perdería el transporte que está usando para llamar esa tool.

@@ -100,6 +100,21 @@ This means the HTTP transport is implemented and locally reachable, but the tunn
 1. confirm `sample_mcp_remote_no_auth` can run ready despite the doctor OAuth metadata warning, or
 2. implement the exact metadata contract expected by `tunnel-client`, without pretending to provide auth that does not exist.
 
+## Restart-request flow
+
+The v0.4 restart path is documented in `RESTART_FLOW.md`.
+
+Safe local test:
+
+```powershell
+Set-Location C:\dev\bridge-mcp
+npm run build
+.\scripts\test-restart-request.ps1 -Mode http
+.\scripts\start-bridge-http-watchdog.ps1 -NoTunnel -Once
+```
+
+This tests request-file restart of the local HTTP MCP process without touching the active OpenAI tunnel.
+
 ## Why this mode matters
 
 The HTTP local split lets us evolve toward:

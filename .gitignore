@@ -29,6 +29,10 @@ sandbox/
 .smoke-test.txt
 *.smoke.log
 
+# Bridge runtime coordination files
+.bridge-restart-request
+.bridge-restart-ack
+
 # Logs and temp files
 *.log
 logs/

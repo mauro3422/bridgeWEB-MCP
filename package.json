@@ -1,6 +1,6 @@
 {
   "name": "bridge-mcp",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Kairos/KChat local MCP bridge for MauroPrime and future laptop agents.",
   "type": "module",
   "bin": {

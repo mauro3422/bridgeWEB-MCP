@@ -8,9 +8,12 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   DEFAULT_GIT_REMOTE_URL,
   DEFAULT_MAX_FILE_BYTES,
+  DEFAULT_RESTART_ACK_FILE,
+  DEFAULT_RESTART_REQUEST_FILE,
   DEFAULT_TIMEOUT_MS,
   DEFAULT_TUNNEL_ADMIN_BASE_URL,
   MAX_CAPTURE_CHARS,
@@ -260,6 +263,59 @@ function summarizeCommand(result: Record<string, unknown>) {
   };
 }
 
+function getRestartRequestPath(cwd?: string) {
+  return path.resolve(cwd ? resolvePath(cwd) : process.cwd(), DEFAULT_RESTART_REQUEST_FILE);
+}
+
+function getRestartAckPath(cwd?: string) {
+  return path.resolve(cwd ? resolvePath(cwd) : process.cwd(), DEFAULT_RESTART_ACK_FILE);
+}
+
+async function bridgeRequestRestart(reason: string, mode: "http" | "tunnel" | "full", cwd?: string) {
+  const requestPath = getRestartRequestPath(cwd);
+  const tempPath = `${requestPath}.${process.pid}.${Date.now()}.tmp`;
+  const request = {
+    id: randomUUID(),
+    requestedAt: new Date().toISOString(),
+    reason,
+    mode,
+    server: { name: SERVER_NAME, version: SERVER_VERSION, pid: process.pid },
+    cwd: cwd ? resolvePath(cwd) : process.cwd(),
+  };
+
+  await fs.writeFile(tempPath, JSON.stringify(request, null, 2), "utf8");
+  await fs.rename(tempPath, requestPath);
+
+  return {
+    requested: true,
+    requestPath,
+    request,
+    note: "The MCP server only wrote a restart request file. The external watchdog must perform the actual restart.",
+  };
+}
+
+async function bridgeRestartStatus(cwd?: string) {
+  const requestPath = getRestartRequestPath(cwd);
+  const ackPath = getRestartAckPath(cwd);
+  const readJsonIfExists = async (filePath: string) => {
+    if (!(await fileExists(filePath))) return null;
+    const text = await fs.readFile(filePath, "utf8");
+    try {
+      return JSON.parse(text) as JsonValue;
+    } catch {
+      return { parseError: true, text: tailText(text, 4000) };
+    }
+  };
+
+  return {
+    requestPath,
+    ackPath,
+    pending: await fileExists(requestPath),
+    request: await readJsonIfExists(requestPath),
+    lastAck: await readJsonIfExists(ackPath),
+  };
+}
+
 async function bridgeSelfCheck(cwd?: string) {
   const root = cwd ? resolvePath(cwd) : process.cwd();
   const typecheck = await runCommand("npm run check", root, 120_000) as Record<string, unknown>;
@@ -375,6 +431,8 @@ const opsToolSchemas = [
   { name: "git_push_current_branch", description: "Push the current Git branch to a remote using local credentials.", inputSchema: { type: "object", properties: { remote: { type: "string", default: "origin" }, branch: { type: "string" }, cwd: { type: "string" } }, additionalProperties: false } },
   { name: "tunnel_health", description: "Check tunnel-client local healthz and readyz endpoints.", inputSchema: { type: "object", properties: { baseUrl: { type: "string", default: DEFAULT_TUNNEL_ADMIN_BASE_URL } }, additionalProperties: false } },
   { name: "bridge_self_check", description: "Run typecheck, build, Git status, tunnel health, and terminal inventory.", inputSchema: { type: "object", properties: { cwd: { type: "string" } }, additionalProperties: false } },
+  { name: "bridge_request_restart", description: "Request a bridge restart by writing a restart-request file for the external watchdog. This tool does not restart or kill processes directly.", inputSchema: { type: "object", properties: { reason: { type: "string" }, mode: { type: "string", enum: ["http", "tunnel", "full"], default: "http" }, cwd: { type: "string" } }, required: ["reason"], additionalProperties: false } },
+  { name: "bridge_restart_status", description: "Return pending restart-request and last restart-ack information for the bridge watchdog.", inputSchema: { type: "object", properties: { cwd: { type: "string" } }, additionalProperties: false } },
 ] as const;
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -464,6 +522,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === "bridge_self_check") {
       const parsed = z.object({ cwd: z.string().optional() }).parse(args);
       return jsonText(await bridgeSelfCheck(parsed.cwd));
+    }
+    if (name === "bridge_request_restart") {
+      const parsed = z.object({
+        reason: z.string().min(1).max(500),
+        mode: z.enum(["http", "tunnel", "full"]).default("http"),
+        cwd: z.string().optional(),
+      }).parse(args);
+      return jsonText(await bridgeRequestRestart(parsed.reason, parsed.mode, parsed.cwd));
+    }
+    if (name === "bridge_restart_status") {
+      const parsed = z.object({ cwd: z.string().optional() }).parse(args);
+      return jsonText(await bridgeRestartStatus(parsed.cwd));
     }
     throw new Error(`Unknown tool: ${name}`);
   } catch (error) {
