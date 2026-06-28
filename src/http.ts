@@ -9,13 +9,28 @@ import { getBridgeHttpConfig, SERVER_NAME, SERVER_VERSION } from "./config.js";
 const config = getBridgeHttpConfig();
 const startedAt = new Date();
 
+const SESSION_IDLE_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_SESSION_IDLE_MS", 30 * 60 * 1000);
+const ANONYMOUS_TRANSPORT_TTL_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_ANON_TTL_MS", 60 * 1000);
+const MAX_SESSIONS = getPositiveIntEnv("BRIDGE_MCP_HTTP_MAX_SESSIONS", 64);
+const CLEANUP_INTERVAL_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_CLEANUP_INTERVAL_MS", 60 * 1000);
+
 let ready = false;
 let closing = false;
 
 type BridgeHttpTransport = StreamableHTTPServerTransport & { sessionId?: string };
+type SessionRecord = {
+  transport: BridgeHttpTransport;
+  createdAtMs: number;
+  lastSeenMs: number;
+};
 
-const transports = new Map<string, BridgeHttpTransport>();
-const anonymousTransports = new Set<BridgeHttpTransport>();
+const sessions = new Map<string, SessionRecord>();
+const anonymousTransports = new Map<BridgeHttpTransport, number>();
+
+function getPositiveIntEnv(name: string, fallback: number): number {
+  const value = Number.parseInt(process.env[name] || "", 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -66,8 +81,14 @@ function getStatus() {
     allowRemote: config.allowRemote,
     ready,
     closing,
-    sessions: transports.size,
+    sessions: sessions.size,
     anonymousTransports: anonymousTransports.size,
+    limits: {
+      maxSessions: MAX_SESSIONS,
+      sessionIdleMs: SESSION_IDLE_MS,
+      anonymousTransportTtlMs: ANONYMOUS_TRANSPORT_TTL_MS,
+      cleanupIntervalMs: CLEANUP_INTERVAL_MS,
+    },
     startedAt: startedAt.toISOString(),
     uptimeSeconds: Math.round(process.uptime()),
     pid: process.pid,
@@ -75,27 +96,77 @@ function getStatus() {
   };
 }
 
+async function closeTransport(transport: BridgeHttpTransport, reason: string, sessionId?: string) {
+  const effectiveSessionId = sessionId || transport.sessionId;
+  anonymousTransports.delete(transport);
+  if (effectiveSessionId) sessions.delete(effectiveSessionId);
+
+  try {
+    await transport.close();
+  } catch (error) {
+    log("warn", "MCP HTTP transport close failed", {
+      reason,
+      sessionId: effectiveSessionId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function cleanupTransports(reason = "periodic") {
+  const now = Date.now();
+  const closePromises: Promise<void>[] = [];
+
+  for (const [sessionId, record] of sessions) {
+    if (now - record.lastSeenMs > SESSION_IDLE_MS) {
+      log("info", "Closing idle MCP HTTP session", { reason, sessionId, idleMs: now - record.lastSeenMs });
+      closePromises.push(closeTransport(record.transport, "idle-session", sessionId));
+    }
+  }
+
+  const sessionEntries = Array.from(sessions.entries()).sort((a, b) => a[1].lastSeenMs - b[1].lastSeenMs);
+  while (sessionEntries.length > MAX_SESSIONS) {
+    const next = sessionEntries.shift();
+    if (!next) break;
+    const [sessionId, record] = next;
+    if (!sessions.has(sessionId)) continue;
+    log("warn", "Closing oldest MCP HTTP session over limit", { reason, sessionId, maxSessions: MAX_SESSIONS });
+    closePromises.push(closeTransport(record.transport, "session-limit", sessionId));
+  }
+
+  for (const [transport, createdAtMs] of anonymousTransports) {
+    if (now - createdAtMs > ANONYMOUS_TRANSPORT_TTL_MS) {
+      log("warn", "Closing stale anonymous MCP HTTP transport", { reason, ageMs: now - createdAtMs });
+      closePromises.push(closeTransport(transport, "stale-anonymous"));
+    }
+  }
+
+  await Promise.allSettled(closePromises);
+}
+
 async function createTransport(requestId: string): Promise<BridgeHttpTransport> {
+  await cleanupTransports("before-create");
+
   const mcpServer = createBridgeServer();
   let transport: BridgeHttpTransport;
 
   transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
     onsessioninitialized: (sessionId: string) => {
-      transports.set(sessionId, transport);
+      const now = Date.now();
+      sessions.set(sessionId, { transport, createdAtMs: now, lastSeenMs: now });
       anonymousTransports.delete(transport);
-      log("info", "MCP HTTP session initialized", { requestId, sessionId, sessions: transports.size });
+      log("info", "MCP HTTP session initialized", { requestId, sessionId, sessions: sessions.size });
     },
   }) as BridgeHttpTransport;
 
   transport.onclose = () => {
     const sessionId = transport.sessionId;
     anonymousTransports.delete(transport);
-    if (sessionId) transports.delete(sessionId);
-    log("info", "MCP HTTP transport closed", { requestId, sessionId, sessions: transports.size });
+    if (sessionId) sessions.delete(sessionId);
+    log("info", "MCP HTTP transport closed", { requestId, sessionId, sessions: sessions.size });
   };
 
-  anonymousTransports.add(transport);
+  anonymousTransports.set(transport, Date.now());
   await mcpServer.connect(transport);
   return transport;
 }
@@ -103,10 +174,11 @@ async function createTransport(requestId: string): Promise<BridgeHttpTransport> 
 async function handleMcpRequest(req: IncomingMessage, res: ServerResponse, requestId: string) {
   const sessionId = getMcpSessionId(req);
   let transport: BridgeHttpTransport | undefined;
+  let createdForThisRequest = false;
 
   if (sessionId) {
-    transport = transports.get(sessionId);
-    if (!transport) {
+    const record = sessions.get(sessionId);
+    if (!record) {
       sendJson(res, 404, {
         error: "mcp_session_not_found",
         requestId,
@@ -115,7 +187,10 @@ async function handleMcpRequest(req: IncomingMessage, res: ServerResponse, reque
       });
       return;
     }
+    record.lastSeenMs = Date.now();
+    transport = record.transport;
   } else if (req.method === "POST") {
+    createdForThisRequest = true;
     transport = await createTransport(requestId);
   } else {
     sendJson(res, 400, {
@@ -148,11 +223,22 @@ async function handleMcpRequest(req: IncomingMessage, res: ServerResponse, reque
     } else {
       res.end();
     }
+  } finally {
+    if (createdForThisRequest && !transport.sessionId && anonymousTransports.has(transport)) {
+      await closeTransport(transport, "uninitialized-request");
+    }
   }
 }
 
 async function main() {
   ready = true;
+
+  const cleanupTimer = setInterval(() => {
+    cleanupTransports().catch((error) => {
+      log("warn", "transport cleanup failed", { error: error instanceof Error ? error.message : String(error) });
+    });
+  }, CLEANUP_INTERVAL_MS);
+  cleanupTimer.unref();
 
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const requestId = randomUUID();
@@ -225,12 +311,13 @@ async function main() {
     if (closing) return;
     closing = true;
     ready = false;
+    clearInterval(cleanupTimer);
     log("warn", "shutdown requested", { signal });
 
     httpServer.close(async () => {
       await Promise.allSettled([
-        ...Array.from(transports.values()).map((transport) => transport.close()),
-        ...Array.from(anonymousTransports).map((transport) => transport.close()),
+        ...Array.from(sessions.entries()).map(([sessionId, record]) => closeTransport(record.transport, "shutdown", sessionId)),
+        ...Array.from(anonymousTransports.keys()).map((transport) => closeTransport(transport, "shutdown")),
       ]);
       log("info", "shutdown complete", { signal });
       process.exit(0);
@@ -278,6 +365,11 @@ async function main() {
       healthz: `http://${config.host}:${config.port}/healthz`,
       readyz: `http://${config.host}:${config.port}/readyz`,
       status: `http://${config.host}:${config.port}/status`,
+      limits: {
+        maxSessions: MAX_SESSIONS,
+        sessionIdleMs: SESSION_IDLE_MS,
+        anonymousTransportTtlMs: ANONYMOUS_TRANSPORT_TTL_MS,
+      },
     });
   });
 }

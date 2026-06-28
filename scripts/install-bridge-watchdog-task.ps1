@@ -1,23 +1,45 @@
 param(
   [ValidateSet("Auto", "ScheduledTask", "Startup")]
   [string]$InstallMode = "Auto",
+  [ValidateSet("Stdio", "Http")]
+  [string]$WatchdogMode = "Stdio",
   [string]$TaskName = "BridgeMCP Watchdog",
   [string]$ProjectRoot = "C:\dev\bridge-mcp",
-  [string]$WatchdogScript = "C:\dev\bridge-mcp\scripts\start-bridge-watchdog.ps1",
+  [string]$WatchdogScript = "",
   [string]$StartupFileName = "BridgeMCP-Watchdog.cmd",
+  [string]$HttpProfile = "bridge-local-http",
+  [string]$HttpTunnelBaseUrl = "http://127.0.0.1:8081",
   [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
 
+if ([string]::IsNullOrWhiteSpace($WatchdogScript)) {
+  if ($WatchdogMode -eq "Http") {
+    $WatchdogScript = Join-Path $ProjectRoot "scripts\start-bridge-http-watchdog.ps1"
+  }
+  else {
+    $WatchdogScript = Join-Path $ProjectRoot "scripts\start-bridge-watchdog.ps1"
+  }
+}
+
 if (-not (Test-Path -LiteralPath $WatchdogScript)) {
   throw "Watchdog script not found: $WatchdogScript"
 }
 
+function Get-WatchdogArgumentString {
+  if ($WatchdogMode -eq "Http") {
+    return "-NoProfile -ExecutionPolicy Bypass -File `"$WatchdogScript`" -ProjectRoot `"$ProjectRoot`" -Profile `"$HttpProfile`" -TunnelBaseUrl `"$HttpTunnelBaseUrl`""
+  }
+
+  return "-NoProfile -ExecutionPolicy Bypass -File `"$WatchdogScript`" -ProjectRoot `"$ProjectRoot`""
+}
+
 function Install-BridgeScheduledTask {
+  $arguments = Get-WatchdogArgumentString
   $action = New-ScheduledTaskAction `
     -Execute "powershell.exe" `
-    -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$WatchdogScript`" -ProjectRoot `"$ProjectRoot`""
+    -Argument $arguments
 
   $trigger = New-ScheduledTaskTrigger -AtLogOn
   $settings = New-ScheduledTaskSettingsSet `
@@ -28,7 +50,8 @@ function Install-BridgeScheduledTask {
     -StartWhenAvailable
 
   if ($DryRun) {
-    Write-Host "Dry run: would install scheduled task: $TaskName"
+    Write-Host "Dry run: would install scheduled task: $TaskName mode=$WatchdogMode"
+    Write-Host "powershell.exe $arguments"
     return
   }
 
@@ -37,10 +60,10 @@ function Install-BridgeScheduledTask {
     -Action $action `
     -Trigger $trigger `
     -Settings $settings `
-    -Description "Keeps the local OpenAI Secure MCP Tunnel bridge alive for ChatGPT." `
+    -Description "Keeps the local OpenAI Secure MCP Tunnel bridge alive for ChatGPT. Mode: $WatchdogMode." `
     -Force | Out-Null
 
-  Write-Host "Installed scheduled task: $TaskName"
+  Write-Host "Installed scheduled task: $TaskName mode=$WatchdogMode"
   Write-Host "Start now with: Start-ScheduledTask -TaskName '$TaskName'"
 }
 
@@ -52,24 +75,27 @@ function Install-BridgeStartupCommand {
 
   New-Item -ItemType Directory -Force -Path $startupFolder | Out-Null
   $startupCmd = Join-Path $startupFolder $StartupFileName
+  $arguments = Get-WatchdogArgumentString
 
   $cmd = @"
 @echo off
 REM Starts the Bridge MCP watchdog at user logon without requiring admin rights.
+REM Mode: $WatchdogMode
 cd /d "$ProjectRoot"
-start "BridgeMCP Watchdog" powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$WatchdogScript" -ProjectRoot "$ProjectRoot"
+start "BridgeMCP Watchdog ($WatchdogMode)" powershell.exe $arguments
 "@
 
   if ($DryRun) {
-    Write-Host "Dry run: would install no-admin Startup fallback: $startupCmd"
+    Write-Host "Dry run: would install no-admin Startup fallback: $startupCmd mode=$WatchdogMode"
+    Write-Host $cmd
     return
   }
 
   Set-Content -LiteralPath $startupCmd -Value $cmd -Encoding ASCII
 
-  Write-Host "Installed no-admin Startup fallback: $startupCmd"
+  Write-Host "Installed no-admin Startup fallback: $startupCmd mode=$WatchdogMode"
   Write-Host "It will start at the next user logon."
-  Write-Host "Start now with: powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$WatchdogScript`" -ProjectRoot `"$ProjectRoot`""
+  Write-Host "Start now with: powershell.exe $arguments"
 }
 
 switch ($InstallMode) {
