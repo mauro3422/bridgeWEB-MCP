@@ -1,4 +1,4 @@
-# bridge-mcp Roadmap
+﻿# bridge-mcp Roadmap
 
 Local MCP bridge for MauroPrime. The goal is to let ChatGPT operate MauroPrime through a controlled OpenAI Secure MCP Tunnel with explicit diagnostics, safe restart flow, Git workflow, metrics, and code intelligence.
 
@@ -317,7 +317,7 @@ npm run verify:all
 ```txt
 call_graph tool added to code-graph module
 semantic/import/call graph persisted cache added under data/cache
-TOOLS.md regenerated from registry and now reports 46 tools
+TOOLS.md regenerated from registry and now reports 47 tools
 bridge_verify_all now checks watchdog restart status and metrics status through MCP calls
 targeted regressions cover tsconfig paths, barrels, semantic aliases, cache hits, exported dead code, metrics privacy, and call_graph registration
 ```
@@ -344,6 +344,7 @@ Allowed roots / denied path policy is intentionally not implemented yet. Keep it
 Set-Location C:\dev\bridge-mcp
 .\scripts\start-bridge-watchdog.ps1 -ProjectRoot C:\dev\bridge-mcp
 ```
+
 
 
 

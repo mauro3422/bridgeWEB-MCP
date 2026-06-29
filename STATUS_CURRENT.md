@@ -10,7 +10,7 @@ Bridge MCP: http://127.0.0.1:3001/mcp
 Bridge status: http://127.0.0.1:3001/status
 Tunnel admin: http://127.0.0.1:8081
 Tunnel profile: bridge-local-http
-Runtime tools: 46
+Runtime tools: 47
 Git expected: ## main...origin/main
 ```
 
@@ -19,7 +19,7 @@ Git expected: ## main...origin/main
 - TypeScript typecheck passes with `npm run check`.
 - Build passes with `npm run build`.
 - Regression suite passes with `npm run test:regressions`.
-- Tool docs regenerate with `npm run docs:tools` and report 46 tools.
+- Tool docs regenerate with `npm run docs:tools` and report 47 tools.
 - Tunnel health is live/ready on `http://127.0.0.1:8081`.
 - Restart flow uses request/ack files; do not kill active bridge processes directly.
 
@@ -41,7 +41,7 @@ bridge-workflow
 
 ## Work completed in v0.5.4 cleanup
 
-- Documentation references updated from v0.5.1 / 36 tools to v0.5.4 / 46 tools.
+- Documentation references updated from v0.5.1 / 36 tools to v0.5.4 / 47 tools.
 - `TOOLS.md` regenerated from the runtime registry.
 - Semantic TypeScript cache now keys by root, includeTests, maxFiles, tsconfig path, symbol filter, and source file stamps.
 - Import graph cache now includes `tsconfig.json` stamp and bounded in-memory retention.
@@ -57,6 +57,8 @@ bridge-workflow
 - Persisted cache currently stores JSON files; future work can add pruning/TTL or move it into SQLite.
 - Call graph is semantic but intentionally conservative; deeper project-wide call signatures can be improved later.
 - Full `bridge_verify_all` passed after loading the new runtime.
+
+
 
 
 

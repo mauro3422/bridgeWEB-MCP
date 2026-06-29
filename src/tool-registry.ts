@@ -16,7 +16,7 @@ const readOnlyToolNames = new Set([
   "git_status", "tunnel_health", "bridge_health", "bridge_self_check", "bridge_restart_status",
   "bridge_metrics_status", "bridge_metrics_summary", "bridge_metrics_recent", "bridge_metrics_query", "bridge_visualization_catalog", "bridge_visualize_metrics",
   "analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code",
-  "python_validate", "python_symbols", "python_impact_analysis", "python_import_graph", "python_dead_code", "python_test_plan", "pytest_testmon",
+  "python_validate", "python_symbols", "python_impact_analysis", "python_import_graph", "python_call_graph", "python_dead_code", "python_test_plan", "pytest_testmon",
 ]);
 
 const destructiveToolNames = new Set([
@@ -88,5 +88,6 @@ export function createDefaultToolRegistry(): BridgeToolRegistry {
     bridgeWorkflowToolModule,
   ]);
 }
+
 
 

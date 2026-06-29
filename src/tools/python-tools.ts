@@ -26,6 +26,27 @@ type PythonDefinition = {
   text: string;
 };
 
+type PythonCallableNode = PythonDefinition & {
+  key: string;
+  qualifiedName: string;
+  indent: number;
+  calls: number;
+  calledBy: number;
+};
+
+type PythonCallEdge = {
+  from: string;
+  to: string;
+  caller: string;
+  callee: string;
+  file: string;
+  line: number;
+  column: number;
+  external: boolean;
+  resolved: boolean;
+  text: string;
+};
+
 type PythonGraphNode = {
   file: string;
   module: string;
@@ -71,6 +92,14 @@ function resolveRelativeModule(currentFile: string, level: number, moduleName: s
   return [base, moduleName].filter(Boolean).join(".");
 }
 
+function parseImportNames(rawNames: string) {
+  return rawNames
+    .replace(/[()]/g, "")
+    .split(",")
+    .map((item) => item.trim().split(/\s+as\s+/i)[0]?.trim() ?? "")
+    .filter(Boolean);
+}
+
 function parsePythonImports(file: ScannedTextFile): PythonImport[] {
   const imports: PythonImport[] = [];
   const lines = file.text.replace(/^\uFEFF/, "").split(/\r?\n/);
@@ -80,24 +109,15 @@ function parsePythonImports(file: ScannedTextFile): PythonImport[] {
     if (!text || text.startsWith("#")) continue;
     const importMatch = text.match(/^import\s+(.+?)(?:\s+#.*)?$/);
     if (importMatch) {
-      const names = importMatch[1]
-        .split(",")
-        .map((item) => item.trim().split(/\s+as\s+/i)[0]?.trim() ?? "")
-        .filter(Boolean);
-      for (const name of names) {
-        imports.push({ file: file.relativePath, line: index + 1, kind: "import", module: name, names: [name], level: 0, text: raw.trim() });
-      }
+      const names = parseImportNames(importMatch[1] ?? "");
+      for (const name of names) imports.push({ file: file.relativePath, line: index + 1, kind: "import", module: name, names: [name], level: 0, text: raw.trim() });
       continue;
     }
     const fromMatch = text.match(/^from\s+([.]*)([A-Za-z_][\w.]*)?\s+import\s+(.+?)(?:\s+#.*)?$/);
     if (fromMatch) {
       const level = fromMatch[1]?.length ?? 0;
       const module = fromMatch[2] ?? "";
-      const names = (fromMatch[3] ?? "")
-        .replace(/[()]/g, "")
-        .split(",")
-        .map((item) => item.trim().split(/\s+as\s+/i)[0]?.trim() ?? "")
-        .filter(Boolean);
+      const names = parseImportNames(fromMatch[3] ?? "");
       imports.push({ file: file.relativePath, line: index + 1, kind: "from", module, names, level, text: raw.trim() });
     }
   }
@@ -115,15 +135,7 @@ function parsePythonDefinitions(file: ScannedTextFile): PythonDefinition[] {
     const name = match[3];
     if (!keyword || !name) continue;
     const kind = keyword === "class" ? "class" : keyword.startsWith("async") ? "async_function" : "function";
-    definitions.push({
-      file: file.relativePath,
-      line: index + 1,
-      column: (match[1] ?? "").length + 1,
-      kind,
-      name,
-      exported: !name.startsWith("_"),
-      text: raw.trim(),
-    });
+    definitions.push({ file: file.relativePath, line: index + 1, column: (match[1] ?? "").length + 1, kind, name, exported: !name.startsWith("_"), text: raw.trim() });
   }
   return definitions;
 }
@@ -141,6 +153,51 @@ function parsePythonAssignments(file: ScannedTextFile, maxAssignments: number) {
   return assignments;
 }
 
+function indentation(raw: string) {
+  return (raw.match(/^\s*/)?.[0] ?? "").replace(/\t/g, "    ").length;
+}
+
+function parsePythonCallables(file: ScannedTextFile): PythonCallableNode[] {
+  const nodes: PythonCallableNode[] = [];
+  const lines = file.text.replace(/^\uFEFF/, "").split(/\r?\n/);
+  const stack: PythonCallableNode[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const raw = lines[index] ?? "";
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const indent = indentation(raw);
+    while (stack.length > 0 && indent <= stack[stack.length - 1]!.indent) stack.pop();
+    const match = raw.match(/^(\s*)(async\s+def|def|class)\s+([A-Za-z_]\w*)\b/);
+    if (!match) continue;
+    const keyword = match[2] ?? "";
+    const name = match[3] ?? "";
+    const kind = keyword === "class" ? "class" : keyword.startsWith("async") ? "async_function" : "function";
+    const parent = stack.at(-1);
+    const qualifiedName = parent ? `${parent.qualifiedName}.${name}` : name;
+    const node: PythonCallableNode = {
+      key: `${file.relativePath}:${index + 1}:${qualifiedName}`,
+      file: file.relativePath,
+      line: index + 1,
+      column: (match[1] ?? "").length + 1,
+      kind,
+      name,
+      qualifiedName,
+      indent,
+      exported: !name.startsWith("_"),
+      text: raw.trim(),
+      calls: 0,
+      calledBy: 0,
+    };
+    nodes.push(node);
+    stack.push(node);
+  }
+  return nodes;
+}
+
+const PYTHON_CALL_KEYWORDS = new Set([
+  "if", "elif", "for", "while", "with", "except", "return", "yield", "await", "raise", "assert", "lambda", "class", "def", "print", "len", "str", "int", "float", "bool", "list", "dict", "set", "tuple", "super", "isinstance", "hasattr", "getattr", "setattr", "range", "enumerate", "zip", "sum", "min", "max", "any", "all", "open",
+]);
+
 function buildModuleMap(files: ScannedTextFile[]) {
   const modules = new Map<string, string>();
   for (const file of files) modules.set(moduleNameFromRelative(file.relativePath), file.relativePath);
@@ -152,14 +209,10 @@ function resolveImportedModule(imported: PythonImport, modules: Map<string, stri
   if (imported.level > 0) {
     const resolved = resolveRelativeModule(imported.file, imported.level, imported.module);
     if (resolved) candidates.push({ module: resolved, resolution: "relative" });
-    for (const name of imported.names) {
-      if (name !== "*") candidates.push({ module: [resolved, name].filter(Boolean).join("."), resolution: "relative" });
-    }
+    for (const name of imported.names) if (name !== "*") candidates.push({ module: [resolved, name].filter(Boolean).join("."), resolution: "relative" });
   } else {
     candidates.push({ module: imported.module, resolution: "absolute" });
-    for (const name of imported.names) {
-      if (imported.kind === "from" && name !== "*") candidates.push({ module: `${imported.module}.${name}`, resolution: "absolute" });
-    }
+    for (const name of imported.names) if (imported.kind === "from" && name !== "*") candidates.push({ module: `${imported.module}.${name}`, resolution: "absolute" });
   }
 
   for (const candidate of candidates) {
@@ -174,14 +227,16 @@ function resolveImportedModule(imported: PythonImport, modules: Map<string, stri
 }
 
 function findCycles(nodes: string[], edges: PythonGraphEdge[], maxCycles: number) {
+  if (maxCycles <= 0) return [];
   const outgoing = new Map<string, string[]>();
   for (const node of nodes) outgoing.set(node, []);
   for (const edge of edges) outgoing.get(edge.from)?.push(edge.to);
   const cycles: string[][] = [];
   const seen = new Set<string>();
+  const completed = new Set<string>();
 
   function visit(node: string, stack: string[]) {
-    if (cycles.length >= maxCycles) return;
+    if (cycles.length >= maxCycles || completed.has(node)) return;
     const index = stack.indexOf(node);
     if (index >= 0) {
       const cycle = stack.slice(index).concat(node);
@@ -194,6 +249,37 @@ function findCycles(nodes: string[], edges: PythonGraphEdge[], maxCycles: number
     }
     if (stack.length > 50) return;
     for (const next of outgoing.get(node) ?? []) visit(next, stack.concat(node));
+    completed.add(node);
+  }
+
+  for (const node of nodes) visit(node, []);
+  return cycles;
+}
+
+function findCallCycles(nodes: string[], edges: PythonCallEdge[], maxCycles: number) {
+  if (maxCycles <= 0) return [];
+  const outgoing = new Map<string, string[]>();
+  for (const node of nodes) outgoing.set(node, []);
+  for (const edge of edges) if (edge.resolved && !edge.external) outgoing.get(edge.from)?.push(edge.to);
+  const cycles: string[][] = [];
+  const seen = new Set<string>();
+  const completed = new Set<string>();
+
+  function visit(node: string, stack: string[]) {
+    if (cycles.length >= maxCycles || completed.has(node)) return;
+    const index = stack.indexOf(node);
+    if (index >= 0) {
+      const cycle = stack.slice(index).concat(node);
+      const key = cycle.slice().sort().join("|");
+      if (!seen.has(key)) {
+        seen.add(key);
+        cycles.push(cycle);
+      }
+      return;
+    }
+    if (stack.length > 80) return;
+    for (const next of outgoing.get(node) ?? []) visit(next, stack.concat(node));
+    completed.add(node);
   }
 
   for (const node of nodes) visit(node, []);
@@ -224,7 +310,13 @@ function summarizePythonRisk(totalReferences: number, definitionCount: number, c
 function isPythonTestFile(relativePath: string) {
   const normalized = normalizeRel(relativePath).toLowerCase();
   const base = path.basename(normalized);
-  return normalized.includes("/tests/") || normalized.includes("/test/") || base.startsWith("test_") || base.endsWith("_test.py");
+  return normalized.startsWith("tests/")
+    || normalized.startsWith("test/")
+    || normalized.includes("/tests/")
+    || normalized.includes("/test/")
+    || base.startsWith("test_")
+    || base.endsWith("_test.py")
+    || base.endsWith(".test.py");
 }
 
 function scoreTestForFile(testFile: string, sourceFile: string) {
@@ -242,13 +334,102 @@ function scoreTestForFile(testFile: string, sourceFile: string) {
 function uniqueSorted(values: string[]) {
   return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
 }
+
+function resolvePythonInputPath(root: string, inputPath: string) {
+  return resolveToolPath(path.isAbsolute(inputPath) ? inputPath : path.join(root, inputPath));
+}
+
 async function removePycacheNear(filePath: string) {
   await fs.rm(path.join(path.dirname(filePath), "__pycache__"), { recursive: true, force: true });
 }
 
-
 async function getPythonFiles(root: string, filePattern: string, includeTests: boolean, maxFiles: number) {
   return await collectProjectTextFiles({ root, filePattern, includeTests, maxFiles, maxBytesPerFile: 768 * 1024 });
+}
+
+function resolvePythonCall(caller: PythonCallableNode, name: string, qualifier: string | undefined, byName: Map<string, PythonCallableNode[]>, byQualified: Map<string, PythonCallableNode>) {
+  if ((qualifier === "self" || qualifier === "cls") && caller.qualifiedName.includes(".")) {
+    const className = caller.qualifiedName.split(".").slice(0, -1).join(".");
+    const target = byQualified.get(`${caller.file}::${className}.${name}`);
+    if (target) return target;
+  }
+  const sameFile = (byName.get(name) ?? []).filter((node) => node.file === caller.file);
+  if (sameFile.length === 1) return sameFile[0];
+  const all = byName.get(name) ?? [];
+  if (all.length === 1) return all[0];
+  return null;
+}
+
+function buildPythonCallGraph(files: ScannedTextFile[], includeExternal: boolean, maxCycles: number) {
+  const nodes = files.flatMap(parsePythonCallables);
+  const byKey = new Map(nodes.map((node) => [node.key, node]));
+  const byName = new Map<string, PythonCallableNode[]>();
+  const byQualified = new Map<string, PythonCallableNode>();
+  for (const node of nodes) {
+    const list = byName.get(node.name) ?? [];
+    list.push(node);
+    byName.set(node.name, list);
+    byQualified.set(`${node.file}::${node.qualifiedName}`, node);
+  }
+
+  const edges: PythonCallEdge[] = [];
+  for (const file of files) {
+    const fileNodes = nodes.filter((node) => node.file === file.relativePath).sort((a, b) => a.line - b.line);
+    const nodesByLine = new Map(fileNodes.map((node) => [node.line, node]));
+    const stack: PythonCallableNode[] = [];
+    const lines = file.text.replace(/^\uFEFF/, "").split(/\r?\n/);
+    for (let index = 0; index < lines.length; index += 1) {
+      const raw = lines[index] ?? "";
+      const trimmed = raw.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const indent = indentation(raw);
+      while (stack.length > 0 && indent <= stack[stack.length - 1]!.indent) stack.pop();
+      const defNode = nodesByLine.get(index + 1);
+      if (defNode) {
+        stack.push(defNode);
+        continue;
+      }
+      const caller = stack.slice().reverse().find((node) => node.kind !== "class");
+      if (!caller) continue;
+      const callRegex = /(?:(?<qualifier>[A-Za-z_]\w*)\.)?(?<name>[A-Za-z_]\w*)\s*\(/g;
+      for (const match of raw.matchAll(callRegex)) {
+        const name = match.groups?.name ?? "";
+        const qualifier = match.groups?.qualifier;
+        if (!name || PYTHON_CALL_KEYWORDS.has(name)) continue;
+        const callee = resolvePythonCall(caller, name, qualifier, byName, byQualified);
+        if (!callee && !includeExternal) continue;
+        const edge: PythonCallEdge = {
+          from: caller.key,
+          to: callee?.key ?? (qualifier ? `${qualifier}.${name}` : name),
+          caller: caller.qualifiedName,
+          callee: callee?.qualifiedName ?? (qualifier ? `${qualifier}.${name}` : name),
+          file: file.relativePath,
+          line: index + 1,
+          column: (match.index ?? 0) + 1,
+          external: !callee,
+          resolved: Boolean(callee),
+          text: raw.trim().slice(0, 240),
+        };
+        edges.push(edge);
+        caller.calls += 1;
+        if (callee) callee.calledBy += 1;
+      }
+    }
+  }
+
+  const nodeList = Array.from(byKey.values()).sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.qualifiedName.localeCompare(b.qualifiedName));
+  const internalEdges = edges.filter((edge) => edge.resolved && !edge.external);
+  const externalCalls = edges.filter((edge) => edge.external);
+  return {
+    nodes: nodeList,
+    edges,
+    internalEdges,
+    externalCalls,
+    unresolvedCalls: externalCalls,
+    cycles: findCallCycles(nodeList.map((node) => node.key), internalEdges, maxCycles),
+    mostCalled: nodeList.filter((node) => node.calledBy > 0).sort((a, b) => b.calledBy - a.calledBy).slice(0, 20).map(({ key, qualifiedName, name, file, calledBy }) => ({ key, qualifiedName, name, file, calledBy })),
+    mostCalling: nodeList.filter((node) => node.calls > 0).sort((a, b) => b.calls - a.calls).slice(0, 20).map(({ key, qualifiedName, name, file, calls }) => ({ key, qualifiedName, name, file, calls })),
+  };
 }
 
 export const pythonToolModule: BridgeToolModule = {
@@ -266,6 +447,11 @@ export const pythonToolModule: BridgeToolModule = {
       description: "Build a conservative Python import graph from import/from statements, resolving internal absolute and relative imports where possible.",
       inputSchema: { type: "object", properties: { projectRoot: { type: "string" }, filePattern: { type: "string", default: "*.py" }, includeTests: { type: "boolean", default: false }, includeExternal: { type: "boolean", default: true }, maxFiles: { type: "number", default: 500, minimum: 1, maximum: 2000 }, maxCycles: { type: "number", default: 20, minimum: 0, maximum: 100 } }, additionalProperties: false },
     },
+    {
+      name: "python_call_graph",
+      description: "Build a conservative Python call graph using indentation-aware static scanning. Reports internal calls, unresolved/external calls, cycles, hot callers, and hot callees.",
+      inputSchema: { type: "object", properties: { projectRoot: { type: "string" }, filePattern: { type: "string", default: "*.py" }, includeTests: { type: "boolean", default: false }, includeExternal: { type: "boolean", default: false }, maxFiles: { type: "number", default: 500, minimum: 1, maximum: 2000 }, maxCycles: { type: "number", default: 20, minimum: 0, maximum: 100 } }, additionalProperties: false },
+    },
     { name: "python_test_plan", description: "Suggest a small Python test plan for changed files or a symbol. Designed for focused pytest/testmon runs.", inputSchema: { type: "object", properties: { projectRoot: { type: "string" }, changedFiles: { type: "array", items: { type: "string" }, default: [] }, symbol: { type: "string" }, filePattern: { type: "string", default: "*.py" }, maxFiles: { type: "number", default: 1200, minimum: 1, maximum: 3000 }, maxTests: { type: "number", default: 30, minimum: 1, maximum: 200 } }, additionalProperties: false } },
     { name: "pytest_testmon", description: "Run focused pytest using pytest-testmon when available. Defaults to python -m pytest --testmon and bounded output.", inputSchema: { type: "object", properties: { projectRoot: { type: "string" }, paths: { type: "array", items: { type: "string" }, default: [] }, extraArgs: { type: "array", items: { type: "string" }, default: [] }, timeoutMs: { type: "number", default: 120000, minimum: 1000, maximum: 600000 } }, additionalProperties: false } },
     {
@@ -279,7 +465,7 @@ export const pythonToolModule: BridgeToolModule = {
       const parsed = z.object({ path: z.string().optional(), projectRoot: z.string().optional(), filePattern: z.string().default("*.py"), includeTests: z.boolean().default(false), maxFiles: z.number().int().min(1).max(1000).default(300), timeoutMs: z.number().int().min(1000).max(120000).default(30000) }).parse(args);
       const root = resolveToolPath(parsed.projectRoot ?? process.cwd());
       const targets = parsed.path
-        ? [{ path: (await readTextSnapshot(parsed.path)).path, relativePath: path.relative(root, resolveToolPath(parsed.path)) || path.basename(parsed.path) }]
+        ? [{ path: resolvePythonInputPath(root, parsed.path), relativePath: normalizeRel(path.relative(root, resolvePythonInputPath(root, parsed.path)) || path.basename(parsed.path)) }]
         : (await getPythonFiles(root, parsed.filePattern, parsed.includeTests, parsed.maxFiles)).files.map((file) => ({ path: file.path, relativePath: file.relativePath }));
       const results = [];
       for (const target of targets) {
@@ -292,7 +478,7 @@ export const pythonToolModule: BridgeToolModule = {
     python_symbols: async (args) => {
       const parsed = z.object({ path: z.string().optional(), projectRoot: z.string().optional(), filePattern: z.string().default("*.py"), includeTests: z.boolean().default(false), maxFiles: z.number().int().min(1).max(1000).default(300), maxSymbols: z.number().int().min(1).max(2000).default(300) }).parse(args);
       const root = resolveToolPath(parsed.projectRoot ?? process.cwd());
-      const files = parsed.path ? [{ ...(await readTextSnapshot(parsed.path)), relativePath: normalizeRel(path.relative(root, resolveToolPath(parsed.path)) || path.basename(parsed.path)) }] : (await getPythonFiles(root, parsed.filePattern, parsed.includeTests, parsed.maxFiles)).files;
+      const files = parsed.path ? [{ ...(await readTextSnapshot(resolvePythonInputPath(root, parsed.path))), relativePath: normalizeRel(path.relative(root, resolvePythonInputPath(root, parsed.path)) || path.basename(parsed.path)) }] : (await getPythonFiles(root, parsed.filePattern, parsed.includeTests, parsed.maxFiles)).files;
       const imports = files.flatMap(parsePythonImports).slice(0, parsed.maxSymbols);
       const definitions = files.flatMap(parsePythonDefinitions).slice(0, parsed.maxSymbols);
       const assignments = files.flatMap((file) => parsePythonAssignments(file, parsed.maxSymbols)).slice(0, parsed.maxSymbols);
@@ -323,36 +509,33 @@ export const pythonToolModule: BridgeToolModule = {
         else unresolved.push({ file: item.file, line: item.line, module: item.module, level: item.level, importText: item.text });
       }
       const nodes: PythonGraphNode[] = scan.files.map((file) => ({ file: file.relativePath, module: moduleNameFromRelative(file.relativePath), imports: internalEdges.filter((edge) => edge.from === file.relativePath).length, importedBy: internalEdges.filter((edge) => edge.to === file.relativePath).length }));
-      const sortedNodes = nodes.slice().sort((a, b) => b.importedBy - a.importedBy || a.file.localeCompare(b.file));
-      return {
-        root: scan.root,
-        scannedFiles: scan.files.length,
-        nodeCount: nodes.length,
-        internalEdgeCount: internalEdges.length,
-        importCount: imports.length,
-        nodes,
-        edges: internalEdges,
-        external: parsed.includeExternal ? external.slice(0, 200) : [],
-        unresolved: unresolved.slice(0, 200),
-        cycles: findCycles(Array.from(byFile.keys()), internalEdges, parsed.maxCycles),
-        mostImported: sortedNodes.slice(0, 20),
-        orphanFiles: nodes.filter((node) => node.imports === 0 && node.importedBy === 0).map((node) => node.file).slice(0, 100),
-        skipped: scan.skipped,
-        truncated: scan.truncated,
-      };
+      const sortedImported = nodes.slice().sort((a, b) => b.importedBy - a.importedBy || a.file.localeCompare(b.file));
+      const sortedImporting = nodes.slice().sort((a, b) => b.imports - a.imports || a.file.localeCompare(b.file));
+      return { root: scan.root, scannedFiles: scan.files.length, nodeCount: nodes.length, internalEdgeCount: internalEdges.length, importCount: imports.length, nodes, edges: internalEdges, external: parsed.includeExternal ? external.slice(0, 200) : [], unresolved: unresolved.slice(0, 200), cycles: findCycles(Array.from(byFile.keys()), internalEdges, parsed.maxCycles), mostImported: sortedImported.slice(0, 20), mostImporting: sortedImporting.slice(0, 20), orphanFiles: nodes.filter((node) => node.imports === 0 && node.importedBy === 0).map((node) => node.file).slice(0, 100), skipped: scan.skipped, truncated: scan.truncated };
+    },
+    python_call_graph: async (args) => {
+      const parsed = z.object({ projectRoot: z.string().optional(), filePattern: z.string().default("*.py"), includeTests: z.boolean().default(false), includeExternal: z.boolean().default(false), maxFiles: z.number().int().min(1).max(2000).default(500), maxCycles: z.number().int().min(0).max(100).default(20) }).parse(args);
+      const scan = await getPythonFiles(parsed.projectRoot ?? process.cwd(), parsed.filePattern, parsed.includeTests, parsed.maxFiles);
+      const graph = buildPythonCallGraph(scan.files, parsed.includeExternal, parsed.maxCycles);
+      return { root: scan.root, scannedFiles: scan.files.length, nodeCount: graph.nodes.length, edgeCount: graph.edges.length, internalEdgeCount: graph.internalEdges.length, externalCallCount: graph.externalCalls.length, nodes: graph.nodes, edges: graph.edges, internalEdges: graph.internalEdges, externalCalls: graph.externalCalls, unresolvedCalls: graph.unresolvedCalls, cycles: graph.cycles, mostCalled: graph.mostCalled, mostCalling: graph.mostCalling, skipped: scan.skipped, truncated: scan.truncated, note: "Conservative indentation-aware scanner; dynamic dispatch, decorators, monkeypatching, and alias-heavy code may require manual review." };
     },
     python_test_plan: async (args) => {
-      const parsed = z.object({ projectRoot: z.string().optional(), changedFiles: z.array(z.string()).default([]), filePattern: z.string().default("*.py"), maxFiles: z.number().int().min(1).max(3000).default(1200), maxTests: z.number().int().min(1).max(200).default(30) }).parse(args);
+      const parsed = z.object({ projectRoot: z.string().optional(), changedFiles: z.array(z.string()).default([]), symbol: z.string().optional(), filePattern: z.string().default("*.py"), maxFiles: z.number().int().min(1).max(3000).default(1200), maxTests: z.number().int().min(1).max(200).default(30) }).parse(args);
       const root = resolveToolPath(parsed.projectRoot ?? process.cwd());
       const scan = await getPythonFiles(root, parsed.filePattern, true, parsed.maxFiles);
       const changed = parsed.changedFiles.map(normalizeRel).filter((file) => file.endsWith(".py"));
       const tests = scan.files.filter((file) => isPythonTestFile(file.relativePath)).map((file) => file.relativePath);
       const scored = new Map<string, number>();
-      for (const test of tests) { let score = 0; for (const changedFile of changed) score += scoreTestForFile(test, changedFile); if (score > 0) scored.set(test, score); }
+      for (const test of tests) {
+        let score = 0;
+        for (const changedFile of changed) score += scoreTestForFile(test, changedFile);
+        if (parsed.symbol && test.toLowerCase().includes(parsed.symbol.toLowerCase())) score += 8;
+        if (score > 0) scored.set(test, score);
+      }
       const selected = Array.from(scored.entries()).sort((a, b) => b[1] - a[1]).slice(0, parsed.maxTests).map(([file, score]) => ({ file, score }));
       const fallback = selected.length === 0 ? tests.slice(0, Math.min(parsed.maxTests, 10)).map((file) => ({ file, score: 0 })) : [];
       const testPaths = uniqueSorted([...selected.map((item) => item.file), ...fallback.map((item) => item.file)]);
-      return { root, changedFiles: changed, scannedFiles: scan.files.length, discoveredTests: tests.length, selectedTests: testPaths, ranked: selected.length ? selected : fallback };
+      return { root, changedFiles: changed, symbol: parsed.symbol, scannedFiles: scan.files.length, discoveredTests: tests.length, selectedTests: testPaths, ranked: selected.length ? selected : fallback };
     },
     pytest_testmon: async (args) => {
       const parsed = z.object({ projectRoot: z.string().optional(), paths: z.array(z.string()).default([]), extraArgs: z.array(z.string()).default([]), timeoutMs: z.number().int().min(1000).max(600000).default(120000) }).parse(args);
@@ -374,9 +557,7 @@ export const pythonToolModule: BridgeToolModule = {
         const refs = countNameReferences(scan.files, definition.name);
         const definitionRefs = refs.filesWithReferences.find((item) => item.file === definition.file)?.count ?? 0;
         const externalReferenceCount = refs.count - definitionRefs;
-        if (refs.count <= 1 || externalReferenceCount === 0) {
-          candidates.push({ ...definition, totalNameReferences: refs.count, externalReferenceCount, filesWithReferences: refs.filesWithReferences.slice(0, 20), confidence: definition.name.startsWith("_") ? "medium" : "low", note: "Name-reference heuristic only; dynamic Python usage may hide references." });
-        }
+        if (refs.count <= 1 || externalReferenceCount === 0) candidates.push({ ...definition, totalNameReferences: refs.count, externalReferenceCount, filesWithReferences: refs.filesWithReferences.slice(0, 20), confidence: definition.name.startsWith("_") ? "medium" : "low", note: "Name-reference heuristic only; dynamic Python usage may hide references." });
       }
       return { root: scan.root, scannedFiles: scan.files.length, definitionCount: definitions.length, candidateCount: candidates.length, candidates: candidates.slice(0, parsed.maxCandidates), skipped: scan.skipped, truncated: scan.truncated };
     },

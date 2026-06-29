@@ -14,7 +14,7 @@ const groupRules = [
   ["Git", ["git_status", "git_set_remote", "git_commit_all", "git_push_current_branch"]],
   ["Bridge ops", ["tunnel_health", "bridge_self_check", "bridge_verify_all", "bridge_request_restart", "bridge_restart_status"]],
   ["Metricas / visualizaciones", ["bridge_metrics_status", "bridge_metrics_summary", "bridge_metrics_recent", "bridge_visualization_catalog", "bridge_visualize_metrics"]],
-  ["Inteligencia de codigo", ["analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "find_dead_code"]],
+  ["Inteligencia de codigo", ["analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code"]],
 ];
 
 function schemaBlock(schema) {

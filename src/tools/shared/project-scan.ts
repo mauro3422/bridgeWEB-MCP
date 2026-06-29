@@ -52,7 +52,15 @@ function isLikelyBinaryPath(filePath: string): boolean {
 function isTestPath(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, "/").toLowerCase();
   const base = path.basename(normalized);
-  return normalized.includes("/test/") || normalized.includes("/tests/") || base.endsWith(".test.ts") || base.endsWith(".spec.ts");
+  return normalized.startsWith("test/")
+    || normalized.startsWith("tests/")
+    || normalized.includes("/test/")
+    || normalized.includes("/tests/")
+    || base.startsWith("test_")
+    || base.endsWith("_test.py")
+    || base.endsWith(".test.py")
+    || base.endsWith(".test.ts")
+    || base.endsWith(".spec.ts");
 }
 
 export async function collectProjectTextFiles(options: ProjectScanOptions): Promise<{ root: string; files: ScannedTextFile[]; skipped: Array<{ path: string; reason: string }>; truncated: boolean }> {
@@ -106,3 +114,6 @@ export async function collectProjectTextFiles(options: ProjectScanOptions): Prom
   await walk(root);
   return { root, files, skipped: skipped.slice(0, 100), truncated };
 }
+
+
+
