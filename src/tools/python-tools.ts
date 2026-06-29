@@ -20,7 +20,7 @@ type PythonDefinition = {
   file: string;
   line: number;
   column: number;
-  kind: "function" | "async_function" | "class";
+  kind: "function" | "async_function" | "method" | "async_method" | "class";
   name: string;
   exported: boolean;
   text: string;
@@ -347,6 +347,26 @@ async function getPythonFiles(root: string, filePattern: string, includeTests: b
   return await collectProjectTextFiles({ root, filePattern, includeTests, maxFiles, maxBytesPerFile: 768 * 1024 });
 }
 
+async function runPythonAstHelper(root: string, filePattern: string, includeTests: boolean, maxFiles: number) {
+  const helperPath = path.join(process.cwd(), "src", "tools", "shared", "python_ast_helper.py");
+  const outputDir = path.join(process.cwd(), "data", "cache", "python-ast-helper");
+  await fs.mkdir(outputDir, { recursive: true });
+  const outputPath = path.join(outputDir, `ast-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.json`);
+  const helperArgs = ["-B", helperPath, "--root", root, "--file-pattern", filePattern, "--max-files", String(maxFiles), "--output", outputPath];
+  if (includeTests) helperArgs.push("--include-tests");
+  const result = await runProcess("python", helperArgs, root, 120000);
+  if (result.code !== 0 || result.timedOut === true) {
+    await fs.rm(outputPath, { force: true });
+    throw new Error(`python AST helper failed: ${String(result.stderr || result.error || result.stdout || "unknown error")}`);
+  }
+  try {
+    const raw = await fs.readFile(outputPath, "utf8");
+    return JSON.parse(raw) as Record<string, unknown>;
+  } finally {
+    await fs.rm(outputPath, { force: true });
+  }
+}
+
 function resolvePythonCall(caller: PythonCallableNode, name: string, qualifier: string | undefined, byName: Map<string, PythonCallableNode[]>, byQualified: Map<string, PythonCallableNode>) {
   if ((qualifier === "self" || qualifier === "cls") && caller.qualifiedName.includes(".")) {
     const className = caller.qualifiedName.split(".").slice(0, -1).join(".");
@@ -432,6 +452,123 @@ function buildPythonCallGraph(files: ScannedTextFile[], includeExternal: boolean
   };
 }
 
+function recordArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null) : [];
+}
+
+function stringValue(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
+function numberValue(value: unknown, fallback = 0) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function booleanValue(value: unknown, fallback = false) {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function resolvePythonAstCall(caller: PythonCallableNode, calleeName: string, qualifiedCallee: string, byName: Map<string, PythonCallableNode[]>, byQualified: Map<string, PythonCallableNode>) {
+  const callee = qualifiedCallee || calleeName;
+  if (callee.startsWith("self.") || callee.startsWith("cls.")) {
+    const classPrefix = caller.qualifiedName.split(".").slice(0, -1).join(".");
+    const member = callee.split(".").slice(1).join(".");
+    const target = byQualified.get([classPrefix, member].filter(Boolean).join("."));
+    if (target) return target;
+  }
+
+  const exact = byQualified.get(callee);
+  if (exact) return exact;
+
+  const parts = callee.split(".").filter(Boolean);
+  for (let index = 1; index < parts.length; index += 1) {
+    const suffix = parts.slice(index).join(".");
+    const target = byQualified.get(suffix);
+    if (target) return target;
+  }
+
+  const simpleName = (calleeName.split(".").filter(Boolean).at(-1) ?? calleeName).replace(/^<dynamic>$/, "");
+  if (!simpleName) return null;
+  const sameFile = (byName.get(simpleName) ?? []).filter((node) => node.file === caller.file);
+  if (sameFile.length === 1) return sameFile[0];
+  const all = byName.get(simpleName) ?? [];
+  if (all.length === 1) return all[0];
+  return null;
+}
+
+function buildPythonAstCallGraph(payload: Record<string, unknown>, includeExternal: boolean, maxCycles: number) {
+  const astFiles = recordArray(payload.files);
+  const rawDefinitions = astFiles.flatMap((file) => recordArray(file.definitions));
+  const rawCalls = astFiles.flatMap((file) => recordArray(file.calls));
+  const nodes: PythonCallableNode[] = rawDefinitions.map((definition) => {
+    const name = stringValue(definition.name, "<anonymous>");
+    const kind = stringValue(definition.kind, "function") as PythonCallableNode["kind"];
+    return {
+      key: stringValue(definition.key, `${stringValue(definition.file)}:${numberValue(definition.line)}:${name}`),
+      file: stringValue(definition.file),
+      line: numberValue(definition.line),
+      column: numberValue(definition.column, 1),
+      kind,
+      name,
+      qualifiedName: stringValue(definition.qualifiedName, name),
+      indent: 0,
+      exported: booleanValue(definition.exported, !name.startsWith("_")),
+      text: stringValue(definition.text),
+      calls: 0,
+      calledBy: 0,
+    };
+  });
+  const byKey = new Map(nodes.map((node) => [node.key, node]));
+  const byName = new Map<string, PythonCallableNode[]>();
+  const byQualified = new Map<string, PythonCallableNode>();
+  for (const node of nodes) {
+    const list = byName.get(node.name) ?? [];
+    list.push(node);
+    byName.set(node.name, list);
+    byQualified.set(node.qualifiedName, node);
+  }
+
+  const edges: PythonCallEdge[] = [];
+  for (const call of rawCalls) {
+    const callerKey = stringValue(call.callerKey);
+    const caller = byKey.get(callerKey);
+    if (!caller) continue;
+    const calleeName = stringValue(call.callee, "<dynamic>");
+    const qualifiedCallee = stringValue(call.qualifiedCallee, calleeName);
+    const callee = resolvePythonAstCall(caller, calleeName, qualifiedCallee, byName, byQualified);
+    if (!callee && !includeExternal) continue;
+    const edge: PythonCallEdge = {
+      from: caller.key,
+      to: callee?.key ?? qualifiedCallee,
+      caller: caller.qualifiedName,
+      callee: callee?.qualifiedName ?? qualifiedCallee,
+      file: stringValue(call.file, caller.file),
+      line: numberValue(call.line),
+      column: numberValue(call.column, 1),
+      external: !callee,
+      resolved: Boolean(callee),
+      text: stringValue(call.text),
+    };
+    edges.push(edge);
+    caller.calls += 1;
+    if (callee) callee.calledBy += 1;
+  }
+
+  const nodeList = nodes.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.qualifiedName.localeCompare(b.qualifiedName));
+  const internalEdges = edges.filter((edge) => edge.resolved && !edge.external);
+  const externalCalls = edges.filter((edge) => edge.external);
+  return {
+    nodes: nodeList,
+    edges,
+    internalEdges,
+    externalCalls,
+    unresolvedCalls: externalCalls,
+    cycles: findCallCycles(nodeList.map((node) => node.key), internalEdges, maxCycles),
+    mostCalled: nodeList.filter((node) => node.calledBy > 0).sort((a, b) => b.calledBy - a.calledBy).slice(0, 20).map(({ key, qualifiedName, name, file, calledBy }) => ({ key, qualifiedName, name, file, calledBy })),
+    mostCalling: nodeList.filter((node) => node.calls > 0).sort((a, b) => b.calls - a.calls).slice(0, 20).map(({ key, qualifiedName, name, file, calls }) => ({ key, qualifiedName, name, file, calls })),
+  };
+}
+
 export const pythonToolModule: BridgeToolModule = {
   name: "python-analysis",
   tools: [
@@ -449,7 +586,7 @@ export const pythonToolModule: BridgeToolModule = {
     },
     {
       name: "python_call_graph",
-      description: "Build a conservative Python call graph using indentation-aware static scanning. Reports internal calls, unresolved/external calls, cycles, hot callers, and hot callees.",
+      description: "Build a Python call graph using the stdlib ast parser. Reports internal calls, unresolved/external calls, cycles, hot callers, and hot callees without importing project code.",
       inputSchema: { type: "object", properties: { projectRoot: { type: "string" }, filePattern: { type: "string", default: "*.py" }, includeTests: { type: "boolean", default: false }, includeExternal: { type: "boolean", default: false }, maxFiles: { type: "number", default: 500, minimum: 1, maximum: 2000 }, maxCycles: { type: "number", default: 20, minimum: 0, maximum: 100 } }, additionalProperties: false },
     },
     { name: "python_test_plan", description: "Suggest a small Python test plan for changed files or a symbol. Designed for focused pytest/testmon runs.", inputSchema: { type: "object", properties: { projectRoot: { type: "string" }, changedFiles: { type: "array", items: { type: "string" }, default: [] }, symbol: { type: "string" }, filePattern: { type: "string", default: "*.py" }, maxFiles: { type: "number", default: 1200, minimum: 1, maximum: 3000 }, maxTests: { type: "number", default: 30, minimum: 1, maximum: 200 } }, additionalProperties: false } },
@@ -515,9 +652,11 @@ export const pythonToolModule: BridgeToolModule = {
     },
     python_call_graph: async (args) => {
       const parsed = z.object({ projectRoot: z.string().optional(), filePattern: z.string().default("*.py"), includeTests: z.boolean().default(false), includeExternal: z.boolean().default(false), maxFiles: z.number().int().min(1).max(2000).default(500), maxCycles: z.number().int().min(0).max(100).default(20) }).parse(args);
-      const scan = await getPythonFiles(parsed.projectRoot ?? process.cwd(), parsed.filePattern, parsed.includeTests, parsed.maxFiles);
-      const graph = buildPythonCallGraph(scan.files, parsed.includeExternal, parsed.maxCycles);
-      return { root: scan.root, scannedFiles: scan.files.length, nodeCount: graph.nodes.length, edgeCount: graph.edges.length, internalEdgeCount: graph.internalEdges.length, externalCallCount: graph.externalCalls.length, nodes: graph.nodes, edges: graph.edges, internalEdges: graph.internalEdges, externalCalls: graph.externalCalls, unresolvedCalls: graph.unresolvedCalls, cycles: graph.cycles, mostCalled: graph.mostCalled, mostCalling: graph.mostCalling, skipped: scan.skipped, truncated: scan.truncated, note: "Conservative indentation-aware scanner; dynamic dispatch, decorators, monkeypatching, and alias-heavy code may require manual review." };
+      const root = resolveToolPath(parsed.projectRoot ?? process.cwd());
+      const astPayload = await runPythonAstHelper(root, parsed.filePattern, parsed.includeTests, parsed.maxFiles);
+      const graph = buildPythonAstCallGraph(astPayload, parsed.includeExternal, parsed.maxCycles);
+      const errors = recordArray(astPayload.errors);
+      return { root: stringValue(astPayload.root, root), scannedFiles: numberValue(astPayload.scannedFiles), nodeCount: graph.nodes.length, edgeCount: graph.edges.length, internalEdgeCount: graph.internalEdges.length, externalCallCount: graph.externalCalls.length, parseErrorCount: errors.length, parseErrors: errors.slice(0, 50), nodes: graph.nodes, edges: graph.edges, internalEdges: graph.internalEdges, externalCalls: graph.externalCalls, unresolvedCalls: graph.unresolvedCalls, cycles: graph.cycles, mostCalled: graph.mostCalled, mostCalling: graph.mostCalling, truncated: booleanValue(astPayload.truncated), note: "AST-based scan using Python stdlib ast; dynamic dispatch, monkeypatching, and runtime imports may still require manual review." };
     },
     python_test_plan: async (args) => {
       const parsed = z.object({ projectRoot: z.string().optional(), changedFiles: z.array(z.string()).default([]), symbol: z.string().optional(), filePattern: z.string().default("*.py"), maxFiles: z.number().int().min(1).max(3000).default(1200), maxTests: z.number().int().min(1).max(200).default(30) }).parse(args);
@@ -563,5 +702,3 @@ export const pythonToolModule: BridgeToolModule = {
     },
   },
 };
-
-

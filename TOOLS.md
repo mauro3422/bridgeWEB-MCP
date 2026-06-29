@@ -1801,7 +1801,7 @@ Build a conservative Python import graph from import/from statements, resolving 
 
 #### `python_call_graph`
 
-Build a conservative Python call graph using indentation-aware static scanning. Reports internal calls, unresolved/external calls, cycles, hot callers, and hot callees.
+Build a Python call graph using the stdlib ast parser. Reports internal calls, unresolved/external calls, cycles, hot callers, and hot callees without importing project code.
 
 ```json
 {
