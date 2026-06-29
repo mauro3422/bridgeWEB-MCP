@@ -1,4 +1,4 @@
-# Agentic tools roadmap
+﻿# Agentic tools roadmap
 
 This document captures the tool ideas extracted from `C:\dev\Kairos` / K-Chat so the bridge can evolve without re-investigating Kairos every time.
 
@@ -10,9 +10,9 @@ The goal is not to copy Kairos exactly. Kairos is Python-first and has its own m
 
 ## Current bridge baseline
 
-Current bridge version: `v0.5.1`.
+Current bridge version: `v0.5.4`.
 
-The bridge now exposes 36 modular tools and covers the full normal loop:
+The bridge now exposes 45 modular tools and covers the full normal loop:
 
 ```txt
 navigate files
@@ -572,3 +572,5 @@ C:\dev\Kairos\src\context\templates.py
 ```
 
 Do not read or copy Kairos secrets such as `.env`.
+
+

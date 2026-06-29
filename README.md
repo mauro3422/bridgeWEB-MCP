@@ -7,7 +7,7 @@ El objetivo es tener un puente local controlado por nosotros para operar filesys
 ## Estado actual
 
 ```text
-bridge-mcp v0.5.1
+bridge-mcp v0.5.4
 Mode: HTTP production-candidate
 Project root: C:\dev\bridge-mcp
 Bridge MCP: http://127.0.0.1:3001/mcp
@@ -73,12 +73,13 @@ bridge-ops
 metrics
 code-intelligence
 code-graph
+python-analysis
 bridge-workflow
 ```
 
 ## Tools expuestas
 
-El runtime actual expone 36 tools.
+El runtime actual expone 45 tools.
 
 ### Core / lectura / navegacion
 
@@ -221,7 +222,7 @@ Estado esperado:
 
 ```text
 bridge_self_check.ok = true
-server.version = 0.5.1
+server.version = 0.5.4
 tunnel.baseUrl = http://127.0.0.1:8081
 tunnel healthz = live
 tunnel readyz = ready
@@ -348,6 +349,7 @@ Mantener secretos como variables de entorno de Windows o perfiles locales fuera 
 ## Docs relacionadas
 
 ```text
+STATUS_CURRENT.md
 TOOLS.md
 CONNECTOR_CONTEXT.md
 CONNECTOR_PLAYBOOK.md
@@ -362,3 +364,6 @@ NEXT_CHAT_PROMPT.md
 ```
 
 Nota: ChatGPT puede cachear el catalogo de tools. Si una tool nueva no aparece en una conversacion ya abierta, refrescar/reabrir el conector o iniciar un chat nuevo.
+
+
+

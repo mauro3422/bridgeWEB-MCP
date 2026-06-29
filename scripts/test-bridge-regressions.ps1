@@ -1,4 +1,4 @@
-﻿param(
+param(
   [string]$ProjectRoot = "C:\dev\bridge-mcp",
   [string]$ExpectedTunnelAdminBaseUrl = "http://127.0.0.1:8081"
 )
@@ -292,7 +292,133 @@ console.log("  OK semantic and import graph store hits");
 }
 
 
+Invoke-Check "TypeScript resolver handles tsconfig paths and barrels" {
+  $nodeScript = @'
+import { mkdir, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+const registryModuleUrl = pathToFileURL(process.argv[2]).href;
+const { createDefaultToolRegistry } = await import(registryModuleUrl);
+const registry = createDefaultToolRegistry();
+const root = path.join(tmpdir(), `bridge-ts-resolver-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+try {
+  await mkdir(path.join(root, "src", "lib"), { recursive: true });
+  await writeFile(path.join(root, "tsconfig.json"), JSON.stringify({ compilerOptions: { target: "ES2022", module: "NodeNext", moduleResolution: "NodeNext", baseUrl: ".", paths: { "@lib/*": ["src/lib/*"] } }, include: ["src/**/*.ts"] }, null, 2));
+  await writeFile(path.join(root, "src", "lib", "foo.ts"), "export const foo = 1;\n");
+  await writeFile(path.join(root, "src", "lib", "index.ts"), "export const barrel = 2;\n");
+  await writeFile(path.join(root, "src", "main.ts"), "import { foo } from '@lib/foo';\nimport { barrel } from './lib';\nconsole.log(foo, barrel);\n");
+  const graph = await registry.call("import_graph", { projectRoot: root, resolutionEngine: "typescript", maxFiles: 20 });
+  const pathEdge = graph.edges.find((edge) => edge.module === "@lib/foo");
+  const barrelEdge = graph.edges.find((edge) => edge.module === "./lib");
+  if (!pathEdge?.resolved || pathEdge.to !== "src/lib/foo.ts" || pathEdge.resolutionEngine !== "typescript") process.exit(90);
+  if (!barrelEdge?.resolved || barrelEdge.to !== "src/lib/index.ts" || barrelEdge.resolutionEngine !== "typescript") process.exit(91);
+  console.log("  OK tsconfig paths and barrel resolution");
+} finally {
+  await rm(root, { recursive: true, force: true });
+}
+'@
+  $tmpScript = Join-Path ([System.IO.Path]::GetTempPath()) ("bridge-ts-resolver-" + [Guid]::NewGuid().ToString("N") + ".mjs")
+  try {
+    Set-Content -LiteralPath $tmpScript -Value $nodeScript -Encoding utf8
+    $registryModulePath = (Resolve-Path -LiteralPath ".\dist\tool-registry.js").Path
+    node $tmpScript $registryModulePath
+    if ($LASTEXITCODE -ne 0) { throw "TypeScript resolver regression failed" }
+  }
+  finally { Remove-Item -LiteralPath $tmpScript -Force -ErrorAction SilentlyContinue }
+}
+
+Invoke-Check "semantic aliases and cache invalidation work" {
+  $nodeScript = @'
+import { mkdir, writeFile, appendFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+const registryModuleUrl = pathToFileURL(process.argv[2]).href;
+const { createDefaultToolRegistry } = await import(registryModuleUrl);
+const registry = createDefaultToolRegistry();
+const root = path.join(tmpdir(), `bridge-semantic-cache-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+try {
+  await mkdir(path.join(root, "src"), { recursive: true });
+  await writeFile(path.join(root, "tsconfig.json"), JSON.stringify({ compilerOptions: { target: "ES2022", module: "NodeNext", moduleResolution: "NodeNext" }, include: ["src/**/*.ts"] }, null, 2));
+  await writeFile(path.join(root, "src", "a.ts"), "export function target() { return 1; }\n");
+  await writeFile(path.join(root, "src", "b.ts"), "import { target as alias } from './a';\nexport const value = alias();\n");
+  const first = await registry.call("impact_analysis", { name: "target", projectRoot: root, engine: "semantic", maxFiles: 20 });
+  if (!first.filesWithReferences.some((file) => file.references.some((ref) => ref.kind === "call" && ref.text.includes("alias()")))) process.exit(92);
+  const second = await registry.call("impact_analysis", { name: "target", projectRoot: root, engine: "semantic", maxFiles: 20 });
+  if (second.cache?.hit !== true) process.exit(93);
+  await appendFile(path.join(root, "src", "b.ts"), "// cache invalidation size change\n");
+  const third = await registry.call("impact_analysis", { name: "target", projectRoot: root, engine: "semantic", maxFiles: 20 });
+  if (third.cache?.hit !== false) process.exit(94);
+  console.log("  OK semantic aliases and cache invalidation");
+} finally {
+  await rm(root, { recursive: true, force: true });
+}
+'@
+  $tmpScript = Join-Path ([System.IO.Path]::GetTempPath()) ("bridge-semantic-cache-" + [Guid]::NewGuid().ToString("N") + ".mjs")
+  try {
+    Set-Content -LiteralPath $tmpScript -Value $nodeScript -Encoding utf8
+    $registryModulePath = (Resolve-Path -LiteralPath ".\dist\tool-registry.js").Path
+    node $tmpScript $registryModulePath
+    if ($LASTEXITCODE -ne 0) { throw "semantic alias/cache regression failed" }
+  }
+  finally { Remove-Item -LiteralPath $tmpScript -Force -ErrorAction SilentlyContinue }
+}
+
+Invoke-Check "semantic dead code exported behavior is explicit" {
+  $nodeScript = @'
+import { mkdir, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+const registryModuleUrl = pathToFileURL(process.argv[2]).href;
+const { createDefaultToolRegistry } = await import(registryModuleUrl);
+const registry = createDefaultToolRegistry();
+const root = path.join(tmpdir(), `bridge-dead-code-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+try {
+  await mkdir(path.join(root, "src"), { recursive: true });
+  await writeFile(path.join(root, "tsconfig.json"), JSON.stringify({ compilerOptions: { target: "ES2022", module: "NodeNext", moduleResolution: "NodeNext" }, include: ["src/**/*.ts"] }, null, 2));
+  await writeFile(path.join(root, "src", "index.ts"), "export function exportedUnused() { return 1; }\nfunction localUnused() { return 2; }\nexport const live = 3;\n");
+  const hiddenExport = await registry.call("find_dead_code", { projectRoot: root, engine: "semantic", includeExported: false, maxFiles: 20, maxCandidates: 20 });
+  if (hiddenExport.candidates.some((candidate) => candidate.name === "exportedUnused")) process.exit(95);
+  if (!hiddenExport.candidates.some((candidate) => candidate.name === "localUnused")) process.exit(96);
+  const visibleExport = await registry.call("find_dead_code", { projectRoot: root, engine: "semantic", includeExported: true, maxFiles: 20, maxCandidates: 20 });
+  if (!visibleExport.candidates.some((candidate) => candidate.name === "exportedUnused" && candidate.confidence === "low")) process.exit(97);
+  console.log("  OK semantic dead-code exported behavior");
+} finally {
+  await rm(root, { recursive: true, force: true });
+}
+'@
+  $tmpScript = Join-Path ([System.IO.Path]::GetTempPath()) ("bridge-dead-code-" + [Guid]::NewGuid().ToString("N") + ".mjs")
+  try {
+    Set-Content -LiteralPath $tmpScript -Value $nodeScript -Encoding utf8
+    $registryModulePath = (Resolve-Path -LiteralPath ".\dist\tool-registry.js").Path
+    node $tmpScript $registryModulePath
+    if ($LASTEXITCODE -ne 0) { throw "semantic dead-code regression failed" }
+  }
+  finally { Remove-Item -LiteralPath $tmpScript -Force -ErrorAction SilentlyContinue }
+}
+
+Invoke-Check "metrics store only input keys and redact sensitive errors" {
+  $nodeScript = @'
+import { beginToolMetric, finishToolMetric } from "./dist/metrics.js";
+const metric = beginToolMetric("metrics_regression", { token: "secret-value", path: "sample.txt" });
+if (metric.inputKeys !== "path,token") process.exit(98);
+if (JSON.stringify(metric).includes("secret-value")) process.exit(99);
+finishToolMetric(metric, false, 0, "token=abc123secret password: hunter2");
+console.log("  OK metrics input key storage and redaction");
+'@
+  $tmpScript = Join-Path (Get-Location) (".tmp-metrics-regression-" + [Guid]::NewGuid().ToString("N") + ".mjs")
+  try {
+    Set-Content -LiteralPath $tmpScript -Value $nodeScript -Encoding utf8
+    node $tmpScript
+    if ($LASTEXITCODE -ne 0) { throw "metrics privacy regression failed" }
+  }
+  finally { Remove-Item -LiteralPath $tmpScript -Force -ErrorAction SilentlyContinue }
+}
+
 Write-Host "[bridge-regression-test] all checks passed"
+
 
 
 

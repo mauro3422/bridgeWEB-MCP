@@ -6,21 +6,21 @@ Local MCP bridge for MauroPrime. The goal is to let ChatGPT operate MauroPrime t
 
 ```txt
 Project root: C:\dev\bridge-mcp
-Server: bridge-mcp v0.5.1
+Server: bridge-mcp v0.5.4
 Mode: HTTP production-candidate
 Bridge MCP: http://127.0.0.1:3001/mcp
 Bridge status: http://127.0.0.1:3001/status
 Tunnel admin: http://127.0.0.1:8081
 Tunnel profile: bridge-local-http
 Rollback profile: stdio through scripts/start-bridge-watchdog.ps1
-Tools exposed: 36
+Tools exposed: 45
 ```
 
 Do not commit keys, tunnel secrets, `node_modules`, `dist`, logs, SQLite metrics, sandbox files, or tunnel-client binaries.
 
 ## Known-good checks
 
-Known-good checks for v0.5.1:
+Known-good checks for v0.5.4:
 
 ```txt
 bridge_self_check -> ok true
@@ -29,7 +29,7 @@ npm run check -> OK
 npm run build -> OK
 scripts/test-bridge-http.ps1 -> OK
 scripts/test-bridge-regressions.ps1 -> OK
-http://127.0.0.1:3001/status -> bridge-mcp v0.5.1
+http://127.0.0.1:3001/status -> bridge-mcp v0.5.4
 http://127.0.0.1:8081/healthz -> live
 http://127.0.0.1:8081/readyz -> ready
 git -> ## main...origin/main
@@ -65,6 +65,7 @@ bridge-ops
 metrics
 code-intelligence
 code-graph
+python-analysis
 bridge-workflow
 ```
 
@@ -358,3 +359,5 @@ Allowed roots / denied path policy is intentionally not implemented yet. Keep it
 Set-Location C:\dev\bridge-mcp
 .\scripts\start-bridge-watchdog.ps1 -ProjectRoot C:\dev\bridge-mcp
 ```
+
+

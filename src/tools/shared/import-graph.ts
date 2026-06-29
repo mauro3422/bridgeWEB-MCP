@@ -70,12 +70,29 @@ export type DeadCodeCandidate = {
 };
 
 const importGraphStore = new Map<string, ImportGraphResult>();
+const IMPORT_GRAPH_STORE_MAX = 8;
+
+function fileStamp(filePath: string) {
+  try {
+    const stat = fs.statSync(filePath);
+    return `${path.resolve(filePath)}:${stat.size}:${Math.trunc(stat.mtimeMs)}`;
+  } catch {
+    return `${path.resolve(filePath)}:missing`;
+  }
+}
+
+function rememberImportGraph(key: string, graph: ImportGraphResult) {
+  if (!importGraphStore.has(key) && importGraphStore.size >= IMPORT_GRAPH_STORE_MAX) {
+    const oldest = importGraphStore.keys().next().value;
+    if (oldest) importGraphStore.delete(oldest);
+  }
+  importGraphStore.set(key, graph);
+}
+
 function importGraphStoreKey(root: string, scan: { files: ScannedTextFile[] }, options: { filePattern?: string; includeTests?: boolean; includeExternal?: boolean; maxFiles?: number; maxCycles?: number; resolutionEngine?: ImportResolutionEngine }) {
-  const stamps = scan.files.map((file) => {
-    const stat = fs.statSync(file.path);
-    return `${file.relativePath}:${stat.size}:${Math.trunc(stat.mtimeMs)}`;
-  });
-  return [root, options.filePattern ?? "*.ts", String(options.includeTests === true), String(options.includeExternal === true), String(options.maxFiles ?? 500), String(options.maxCycles ?? 20), options.resolutionEngine ?? "auto", ...stamps].join("|");
+  const tsconfigStamp = fileStamp(path.join(root, "tsconfig.json"));
+  const stamps = scan.files.map((file) => fileStamp(file.path));
+  return [root, tsconfigStamp, options.filePattern ?? "*.ts", String(options.includeTests === true), String(options.includeExternal === true), String(options.maxFiles ?? 500), String(options.maxCycles ?? 20), options.resolutionEngine ?? "auto", ...stamps].join("|");
 }
 
 function normalizeRel(filePath: string) {
@@ -277,7 +294,7 @@ export async function buildImportGraph(options: { root: string; filePattern?: st
     orphanFiles: nodes.filter((node) => node.importedBy === 0 && node.imports === 0).map((node) => node.file).slice(0, 100),
     memo: { hit: false, key: storeKey },
   };
-  importGraphStore.set(storeKey, result);
+  rememberImportGraph(storeKey, result);
   return result;
 }
 
@@ -301,6 +318,8 @@ export async function findDeadCodeCandidates(options: { root: string; filePatter
   }
   return { root: scan.root, scannedFiles: scan.files.length, candidates, skipped: scan.skipped, truncated: scan.truncated };
 }
+
+
 
 
 
