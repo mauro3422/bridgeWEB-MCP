@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$ProjectRoot = "C:\dev\bridge-mcp",
   [string]$ExpectedTunnelAdminBaseUrl = "http://127.0.0.1:8081"
 )
@@ -20,9 +20,9 @@ Set-Location -LiteralPath $ProjectRoot
 Invoke-Check "version bump is consistent" {
   $packageJson = Get-Content -LiteralPath "package.json" -Raw | ConvertFrom-Json
   $configText = Get-Content -LiteralPath "src\config.ts" -Raw
-  if ($packageJson.version -ne "0.5.3") { throw "package.json version is $($packageJson.version), expected 0.5.3" }
-  if ($configText -notmatch 'SERVER_VERSION = "0\.5\.3"') { throw "src/config.ts does not report SERVER_VERSION 0.5.3" }
-  Write-Host "  OK 0.5.3"
+  if ($packageJson.version -ne "0.5.4") { throw "package.json version is $($packageJson.version), expected 0.5.4" }
+  if ($configText -notmatch 'SERVER_VERSION = "0\.5\.4"') { throw "src/config.ts does not report SERVER_VERSION 0.5.4" }
+  Write-Host "  OK 0.5.4"
 }
 
 Invoke-Check "tunnel admin default stays on HTTP profile port" {
@@ -152,11 +152,17 @@ import { pathToFileURL } from "node:url";
 const registryModuleUrl = pathToFileURL(process.argv[2]).href;
 const { createDefaultToolRegistry } = await import(registryModuleUrl);
 const registry = createDefaultToolRegistry();
-for (const tool of ["python_validate", "python_import_graph", "python_dead_code"]) if (!registry.has(tool)) process.exit(80);
+for (const tool of ["python_validate", "python_symbols", "python_impact_analysis", "python_import_graph", "python_dead_code", "python_test_plan", "pytest_testmon"]) if (!registry.has(tool)) process.exit(80);
 if (!registry.modules.includes("python-analysis")) process.exit(81);
 const root = process.cwd();
-const validate = await registry.call("python_validate", { path: "sandbox/python-tool-sample.py", projectRoot: root });
+const validate = await registry.call("python_validate", { path: "python-tool-sample.py", projectRoot: root });
 if (validate.ok !== true || validate.checked !== 1) process.exit(82);
+const symbols = await registry.call("python_symbols", { path: "python-tool-sample.py", projectRoot: root });
+if (symbols.definitionCount < 2) process.exit(85);
+const impact = await registry.call("python_impact_analysis", { name: "used", projectRoot: root, filePattern: "*.py", maxFiles: 20 });
+if (impact.totalReferences < 1) process.exit(86);
+const plan = await registry.call("python_test_plan", { projectRoot: root, changedFiles: ["python-tool-sample.py"], maxTests: 5 });
+if (!Array.isArray(plan.selectedTests)) process.exit(87);
 const graph = await registry.call("python_import_graph", { projectRoot: root, filePattern: "*.py", maxFiles: 20, includeExternal: false });
 if (typeof graph.nodeCount !== "number" || !Array.isArray(graph.edges)) process.exit(83);
 const dead = await registry.call("python_dead_code", { projectRoot: root, filePattern: "*.py", maxFiles: 20, maxCandidates: 20, includeExported: true });
@@ -165,7 +171,7 @@ console.log("  OK python analysis tools");
 '@
   $tmpScript = Join-Path ([System.IO.Path]::GetTempPath()) ("bridge-python-tools-" + [Guid]::NewGuid().ToString("N") + ".mjs")
   try {
-    Set-Content -LiteralPath "sandbox/python-tool-sample.py" -Value "import os`nfrom pathlib import Path`n`ndef used():`n    return Path(os.getcwd()).name`n`ndef _unused():`n    return 42`n`nclass Sample:`n    pass`n`nVALUE = used()`n" -Encoding utf8
+    Set-Content -LiteralPath "python-tool-sample.py" -Value "import os`nfrom pathlib import Path`n`ndef used():`n    return Path(os.getcwd()).name`n`ndef _unused():`n    return 42`n`nclass Sample:`n    pass`n`nVALUE = used()`n" -Encoding utf8
     Set-Content -LiteralPath $tmpScript -Value $nodeScript -Encoding utf8
     $registryModulePath = (Resolve-Path -LiteralPath ".\dist\tool-registry.js").Path
     node $tmpScript $registryModulePath
@@ -173,7 +179,7 @@ console.log("  OK python analysis tools");
   }
   finally {
     Remove-Item -LiteralPath $tmpScript -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath "sandbox/python-tool-sample.py" -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath "python-tool-sample.py" -Force -ErrorAction SilentlyContinue
   }
 }
 
@@ -287,6 +293,8 @@ console.log("  OK semantic and import graph store hits");
 
 
 Write-Host "[bridge-regression-test] all checks passed"
+
+
 
 
 

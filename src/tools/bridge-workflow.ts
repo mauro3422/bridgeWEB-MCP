@@ -58,7 +58,7 @@ export const bridgeWorkflowToolModule: BridgeToolModule = {
         type: "object",
         properties: {
           cwd: { type: "string" },
-          expectedServerVersion: { type: "string", default: "0.5.3" },
+          expectedServerVersion: { type: "string", default: "0.5.4" },
           strictGit: { type: "boolean", default: false },
           timeoutMs: { type: "number", default: 180000, minimum: 30000, maximum: 600000 },
         },
@@ -70,7 +70,7 @@ export const bridgeWorkflowToolModule: BridgeToolModule = {
     bridge_verify_all: async (args) => {
       const parsed = z.object({
         cwd: z.string().optional(),
-        expectedServerVersion: z.string().default("0.5.3"),
+        expectedServerVersion: z.string().default("0.5.4"),
         strictGit: z.boolean().default(false),
         timeoutMs: z.number().int().min(30000).max(600000).default(180000),
       }).parse(args);
@@ -78,5 +78,6 @@ export const bridgeWorkflowToolModule: BridgeToolModule = {
     },
   },
 };
+
 
 
