@@ -79,7 +79,7 @@ bridge-workflow
 
 ## Tools expuestas
 
-El runtime actual expone 45 tools.
+El runtime actual expone 46 tools.
 
 ### Core / lectura / navegacion
 

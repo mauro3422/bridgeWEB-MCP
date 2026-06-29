@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { readPersistentCache, writePersistentCache, type PersistentCacheMeta } from "./persistent-cache.js";
 
 type TypeScriptModule = typeof import("typescript");
 
@@ -35,7 +36,7 @@ export type SemanticIndex = {
   available: boolean;
   reason?: string;
   root: string;
-  cache?: { hit: boolean; key: string };
+  cache?: { hit: boolean; key: string; persistent?: PersistentCacheMeta };
   tsconfigPath?: string;
   scannedFiles: number;
   groups: SemanticSymbolGroup[];
@@ -210,6 +211,12 @@ export async function buildSemanticIndex(options: { root: string; includeTests?:
   const storeKey = semanticIndexStoreKey(root, includeTests, maxFiles, options.name, tsconfigPath, files);
   const stored = semanticIndexStore.get(storeKey);
   if (stored) return { ...stored, cache: { hit: true, key: storeKey } };
+  const persisted = readPersistentCache<SemanticIndex>("semantic-index", storeKey);
+  if (persisted.value) {
+    const result: SemanticIndex = { ...persisted.value, cache: { hit: true, key: storeKey, persistent: persisted.meta } };
+    rememberSemanticIndex(storeKey, result);
+    return result;
+  }
   const checker = program.getTypeChecker();
   const groups = new Map<string, SemanticSymbolGroup>();
 
@@ -250,6 +257,9 @@ export async function buildSemanticIndex(options: { root: string; includeTests?:
   }
 
   const result: SemanticIndex = { available: true, root, tsconfigPath, scannedFiles: files.length, groups: Array.from(groups.values()), cache: { hit: false, key: storeKey } };
+  result.cache = { hit: false, key: storeKey };
+  const persistedWrite = writePersistentCache("semantic-index", storeKey, result);
+  result.cache = { hit: false, key: storeKey, persistent: persistedWrite };
   rememberSemanticIndex(storeKey, result);
   return result;
 }
@@ -312,6 +322,9 @@ export async function semanticDeadCode(options: { root: string; includeTests?: b
   }
   return { available: true, root: index.root, tsconfigPath: index.tsconfigPath, scannedFiles: index.scannedFiles, candidates };
 }
+
+
+
 
 
 

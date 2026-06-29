@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { BridgeToolModule } from "./types.js";
+import { buildCallGraph } from "./shared/call-graph.js";
 import { buildImportGraph, findDeadCodeCandidates } from "./shared/import-graph.js";
 import { semanticDeadCode } from "./shared/typescript-program.js";
 
@@ -35,6 +36,21 @@ export const codeGraphToolModule: BridgeToolModule = {
           maxFiles: { type: "number", default: 500, minimum: 1, maximum: 2000 },
           maxCycles: { type: "number", default: 20, minimum: 0, maximum: 100 },
           resolutionEngine: { type: "string", enum: ["auto", "relative", "typescript"], default: "auto" },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "call_graph",
+      description: "Build a TypeScript semantic call graph showing which project functions/methods call each other, plus external/unresolved calls.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectRoot: { type: "string" },
+          includeTests: { type: "boolean", default: false },
+          includeExternal: { type: "boolean", default: false },
+          maxFiles: { type: "number", default: 500, minimum: 1, maximum: 2000 },
+          maxCycles: { type: "number", default: 20, minimum: 0, maximum: 100 },
         },
         additionalProperties: false,
       },
@@ -98,6 +114,16 @@ export const codeGraphToolModule: BridgeToolModule = {
         skipped: graph.skipped,
       };
     },
+    call_graph: async (args) => {
+      const parsed = z.object({
+        projectRoot: z.string().optional(),
+        includeTests: z.boolean().default(false),
+        includeExternal: z.boolean().default(false),
+        maxFiles: z.number().int().min(1).max(2000).default(500),
+        maxCycles: z.number().int().min(0).max(100).default(20),
+      }).parse(args);
+      return await buildCallGraph({ root: parsed.projectRoot ?? process.cwd(), includeTests: parsed.includeTests, includeExternal: parsed.includeExternal, maxFiles: parsed.maxFiles, maxCycles: parsed.maxCycles });
+    },
     find_dead_code: async (args) => {
       const parsed = z.object({
         projectRoot: z.string().optional(),
@@ -117,3 +143,13 @@ export const codeGraphToolModule: BridgeToolModule = {
     },
   },
 };
+
+
+
+
+
+
+
+
+
+

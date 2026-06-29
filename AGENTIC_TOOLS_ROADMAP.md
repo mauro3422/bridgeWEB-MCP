@@ -12,7 +12,7 @@ The goal is not to copy Kairos exactly. Kairos is Python-first and has its own m
 
 Current bridge version: `v0.5.4`.
 
-The bridge now exposes 45 modular tools and covers the full normal loop:
+The bridge now exposes 46 modular tools and covers the full normal loop:
 
 ```txt
 navigate files

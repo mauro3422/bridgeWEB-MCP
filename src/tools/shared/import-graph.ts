@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { readPersistentCache, writePersistentCache, type PersistentCacheMeta } from "./persistent-cache.js";
 import { collectProjectTextFiles, type ScannedTextFile } from "./project-scan.js";
 import { analyzeTypeScriptSource, findTypeScriptIdentifierReferences, type TypeScriptImport, type TypeScriptSymbol } from "./typescript-intelligence.js";
 
@@ -54,7 +55,7 @@ export type ImportGraphResult = {
   mostImported: Array<{ file: string; importedBy: number }>;
   mostImporting: Array<{ file: string; imports: number }>;
   orphanFiles: string[];
-  memo?: { hit: boolean; key: string };
+  memo?: { hit: boolean; key: string; persistent?: PersistentCacheMeta };
 };
 
 export type DeadCodeCandidate = {
@@ -181,11 +182,13 @@ function resolveWithTypeScript(resolver: TypeScriptResolver, fromAbs: string, mo
 }
 
 function findCycles(nodes: string[], edges: ImportGraphEdge[], maxCycles: number) {
+  if (maxCycles <= 0) return [];
   const graph = new Map<string, string[]>();
   for (const node of nodes) graph.set(node, []);
   for (const edge of edges) if (!edge.external && edge.resolved) graph.get(edge.from)?.push(edge.to);
   const cycles: string[][] = [];
   const seen = new Set<string>();
+  const completed = new Set<string>();
   const stack: string[] = [];
   const visiting = new Set<string>();
   function canonical(cycle: string[]) {
@@ -195,10 +198,12 @@ function findCycles(nodes: string[], edges: ImportGraphEdge[], maxCycles: number
   }
   function dfs(node: string) {
     if (cycles.length >= maxCycles) return;
+    if (completed.has(node) || visiting.has(node)) return;
     visiting.add(node);
     stack.push(node);
     for (const next of graph.get(node) ?? []) {
       if (cycles.length >= maxCycles) break;
+      if (next === node) continue;
       if (!visiting.has(next)) dfs(next);
       else {
         const start = stack.indexOf(next);
@@ -212,12 +217,13 @@ function findCycles(nodes: string[], edges: ImportGraphEdge[], maxCycles: number
         }
       }
     }
+    completed.add(node);
     stack.pop();
     visiting.delete(node);
   }
   for (const node of nodes) {
     if (cycles.length >= maxCycles) break;
-    dfs(node);
+    if (!completed.has(node)) dfs(node);
   }
   return cycles;
 }
@@ -235,6 +241,12 @@ export async function buildImportGraph(options: { root: string; filePattern?: st
   const storeKey = importGraphStoreKey(root, scan, options);
   const stored = importGraphStore.get(storeKey);
   if (stored) return { ...stored, memo: { hit: true, key: storeKey } };
+  const persisted = readPersistentCache<ImportGraphResult>("import-graph", storeKey);
+  if (persisted.value) {
+    const result: ImportGraphResult = { ...persisted.value, memo: { hit: true, key: storeKey, persistent: persisted.meta } };
+    rememberImportGraph(storeKey, result);
+    return result;
+  }
   const knownFiles = new Set(scan.files.map((file) => normalizeRel(file.relativePath)));
   const knownFilesByAbs = new Map(scan.files.map((file) => [normalizeAbs(file.path), normalizeRel(file.relativePath)]));
   const tsResolver = await createTypeScriptResolver(root, resolutionEngine !== "relative");
@@ -294,6 +306,9 @@ export async function buildImportGraph(options: { root: string; filePattern?: st
     orphanFiles: nodes.filter((node) => node.importedBy === 0 && node.imports === 0).map((node) => node.file).slice(0, 100),
     memo: { hit: false, key: storeKey },
   };
+  result.memo = { hit: false, key: storeKey };
+  const persistedWrite = writePersistentCache("import-graph", storeKey, result);
+  result.memo = { hit: false, key: storeKey, persistent: persistedWrite };
   rememberImportGraph(storeKey, result);
   return result;
 }
@@ -318,6 +333,14 @@ export async function findDeadCodeCandidates(options: { root: string; filePatter
   }
   return { root: scan.root, scannedFiles: scan.files.length, candidates, skipped: scan.skipped, truncated: scan.truncated };
 }
+
+
+
+
+
+
+
+
 
 
 

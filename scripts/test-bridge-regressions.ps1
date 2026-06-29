@@ -121,7 +121,7 @@ import { pathToFileURL } from "node:url";
 const registryModuleUrl = pathToFileURL(process.argv[2]).href;
 const { createDefaultToolRegistry } = await import(registryModuleUrl);
 const registry = createDefaultToolRegistry();
-for (const tool of ["import_graph", "dependency_graph", "find_dead_code"]) {
+for (const tool of ["import_graph", "dependency_graph", "call_graph", "find_dead_code"]) {
   if (!registry.has(tool)) process.exit(50);
 }
 if (!registry.modules.includes("code-graph")) process.exit(51);
@@ -132,6 +132,8 @@ const imports = await registry.call("import_graph", { projectRoot: root, filePat
 if (!Array.isArray(imports.edges) || imports.nodes.length < 1 || !imports.edges.some((edge) => edge.resolutionEngine === "typescript")) process.exit(53);
 const dead = await registry.call("find_dead_code", { projectRoot: root, filePattern: "*.ts", maxFiles: 200, maxCandidates: 20, engine: "semantic" });
 if (!Array.isArray(dead.candidates) || dead.engineUsed !== "semantic") process.exit(54);
+const calls = await registry.call("call_graph", { projectRoot: root, maxFiles: 200, maxCycles: 20 });
+if (!Array.isArray(calls.nodes) || !Array.isArray(calls.edges) || typeof calls.nodes.length !== "number") process.exit(55);
 console.log("  OK code graph tools");
 '@
   $tmpScript = Join-Path ([System.IO.Path]::GetTempPath()) ("bridge-code-graph-" + [Guid]::NewGuid().ToString("N") + ".mjs")

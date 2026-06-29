@@ -53,7 +53,7 @@ export const bridgeWorkflowToolModule: BridgeToolModule = {
   tools: [
     {
       name: "bridge_verify_all",
-      description: "Run the full bridge verification workflow: doctor, check, build, HTTP smoke, regressions, tools/list sanity, and Git status.",
+      description: "Run the full bridge verification workflow: doctor, check, build, HTTP smoke, regressions, docs/tools checks, watchdog/metrics sanity, tools/list sanity, and Git status.",
       inputSchema: {
         type: "object",
         properties: {

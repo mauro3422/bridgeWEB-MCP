@@ -312,40 +312,25 @@ npm run verify:all
 
 ## Next recommended work
 
-### Performance and caching
-
-Useful next step, but not urgent:
+### Completed in latest pass
 
 ```txt
-cache TypeScript Program by tsconfig + mtimes/hash
-cache import graph by root + engine + mtimes/hash
-cache semantic impact indexes by project root
-add cache invalidation after writes
+call_graph tool added to code-graph module
+semantic/import/call graph persisted cache added under data/cache
+TOOLS.md regenerated from registry and now reports 46 tools
+bridge_verify_all now checks watchdog restart status and metrics status through MCP calls
+targeted regressions cover tsconfig paths, barrels, semantic aliases, cache hits, exported dead code, metrics privacy, and call_graph registration
 ```
 
-Reason: `impact_analysis`, `dependency_graph`, and `find_dead_code` are now accurate enough to benefit from caching on larger repos.
-
-### Generated tool docs
-
-Generate docs from `src/tool-registry.ts` / module schemas:
+### Next implementation work
 
 ```txt
-scripts/generate-tool-docs.ts
-TOOLS.md
+allowed roots / denied path policy
+cache pruning/TTL or SQLite-backed persistent cache
+richer call graph signatures and class/member call attribution
 ```
 
-### Test coverage
-
-Add targeted tests for:
-
-```txt
-tsconfig paths/baseUrl resolution
-barrel/index resolution
-semantic alias resolution
-find_dead_code exported symbol behavior
-restart-request lifecycle
-metrics SQLite availability without leaking arguments
-```
+Reason: the bridge now has enough code intelligence for normal agentic work; the next high-value step is reducing blast radius and making long-lived cache maintenance explicit.
 
 ### Later safety work
 
@@ -359,5 +344,6 @@ Allowed roots / denied path policy is intentionally not implemented yet. Keep it
 Set-Location C:\dev\bridge-mcp
 .\scripts\start-bridge-watchdog.ps1 -ProjectRoot C:\dev\bridge-mcp
 ```
+
 
 
