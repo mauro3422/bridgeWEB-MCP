@@ -1,19 +1,41 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { z } from "zod";
 import { DEFAULT_TIMEOUT_MS } from "../config.js";
 import type { BridgeToolModule } from "./types.js";
 import { appendBounded, assertCommandAllowed, fileExists, resolveToolPath, runShellCommand, tailText } from "./shared/process.js";
 
+const DONE_TTL_MS = 10 * 60_000;
+const MAX_RUN_MS = 24 * 60 * 60_000;
+
 type TerminalSession = {
   id: string;
+  name: string | null;
   command: string;
   cwd: string;
   startedAt: number;
+  completedAt: number | null;
+  lastOutputAt: number;
+  timeoutMs: number | null;
+  timedOut: boolean;
+  cleanupAfterMs: number;
+  logFile: string | null;
   child: ChildProcess;
   stdout: string;
   stderr: string;
   exitCode: number | null;
   signal: NodeJS.Signals | null;
+  timeoutHandle: NodeJS.Timeout | null;
+};
+
+type TerminalStartArgs = {
+  command?: string;
+  cwd?: string;
+  name?: string;
+  logFile?: string;
+  timeoutMs?: number;
+  cleanupAfterMs?: number;
 };
 
 const terminals = new Map<string, TerminalSession>();
@@ -23,19 +45,86 @@ function defaultShellCommand() {
   return process.platform === "win32" ? "powershell.exe -NoLogo -NoProfile" : "bash";
 }
 
-async function terminalStart(command?: string, cwd?: string) {
-  const cmd = command?.trim() || defaultShellCommand();
+function clampMs(value: number | undefined, fallback: number, min: number, max: number): number {
+  if (value === undefined || !Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(max, Math.trunc(value)));
+}
+
+function isoOrNull(value: number | null): string | null {
+  return value === null ? null : new Date(value).toISOString();
+}
+
+function cleanupFinishedSessions() {
+  const now = Date.now();
+  for (const [id, session] of terminals) {
+    if (session.exitCode !== null && session.completedAt !== null && now - session.completedAt >= session.cleanupAfterMs) {
+      terminals.delete(id);
+    }
+  }
+}
+
+async function prepareLogFile(logFile: string | undefined, resolvedCwd: string, id: string, command: string): Promise<string | null> {
+  if (!logFile?.trim()) return null;
+  const resolved = path.isAbsolute(logFile) ? path.resolve(logFile) : path.resolve(resolvedCwd, logFile);
+  await fs.mkdir(path.dirname(resolved), { recursive: true });
+  await fs.appendFile(resolved, `\n--- bridge terminal ${id} started ${new Date().toISOString()} ---\ncommand: ${command}\ncwd: ${resolvedCwd}\n`, "utf8");
+  return resolved;
+}
+
+function appendSessionLog(session: TerminalSession, chunk: Buffer | string) {
+  if (!session.logFile) return;
+  void fs.appendFile(session.logFile, chunk).catch((error: unknown) => {
+    session.stderr = appendBounded(session.stderr, `[bridge log write failed] ${error instanceof Error ? error.message : String(error)}\n`);
+  });
+}
+
+function terminalSnapshot(session: TerminalSession, maxChars: number) {
+  const now = Date.now();
+  return {
+    id: session.id,
+    name: session.name,
+    command: session.command,
+    cwd: session.cwd,
+    pid: session.child.pid ?? null,
+    running: session.exitCode === null,
+    exitCode: session.exitCode,
+    signal: session.signal,
+    timedOut: session.timedOut,
+    timeoutMs: session.timeoutMs,
+    logFile: session.logFile,
+    startedAtIso: new Date(session.startedAt).toISOString(),
+    completedAtIso: isoOrNull(session.completedAt),
+    ageMs: now - session.startedAt,
+    idleMs: now - session.lastOutputAt,
+    stdout: tailText(session.stdout, maxChars),
+    stderr: tailText(session.stderr, maxChars),
+  };
+}
+
+async function terminalStart(args: TerminalStartArgs) {
+  const startedNow = Date.now();
+  const cmd = args.command?.trim() || defaultShellCommand();
   assertCommandAllowed(cmd);
-  const resolvedCwd = cwd ? resolveToolPath(cwd) : process.cwd();
+  const resolvedCwd = resolveToolPath(args.cwd ?? ".");
   if (!(await fileExists(resolvedCwd))) throw new Error(`cwd does not exist: ${resolvedCwd}`);
   const id = `term_${Date.now()}_${++terminalCounter}`;
   const child = spawn(cmd, { cwd: resolvedCwd, shell: true, windowsHide: true, env: process.env });
-  const session: TerminalSession = { id, command: cmd, cwd: resolvedCwd, startedAt: Date.now(), child, stdout: "", stderr: "", exitCode: null, signal: null };
-  child.stdout?.on("data", (chunk: Buffer) => { session.stdout = appendBounded(session.stdout, chunk); });
-  child.stderr?.on("data", (chunk: Buffer) => { session.stderr = appendBounded(session.stderr, chunk); });
-  child.on("close", (code, signal) => { session.exitCode = code; session.signal = signal; });
+  const sessionLogFile = await prepareLogFile(args.logFile, resolvedCwd, id, cmd);
+  const session: any = { id, name: args.name?.trim() || null, command: cmd, cwd: resolvedCwd, startedAt: startedNow, completedAt: null, lastOutputAt: startedNow, timeoutMs: args.timeoutMs ?? null, timedOut: false, cleanupAfterMs: DONE_TTL_MS, logFile: sessionLogFile, child, stdout: "", stderr: "", exitCode: null, signal: null, timeoutHandle: null };
+  if (session.timeoutMs) session.timeoutHandle = setTimeout(() => { session.timedOut = true; session.child.kill("SIGTERM"); }, session.timeoutMs);
+  child.stdout?.on("data", (chunk: Buffer) => {
+    session.lastOutputAt = Date.now();
+    session.stdout = appendBounded(session.stdout, chunk);
+    appendSessionLog(session, chunk);
+  });
+  child.stderr?.on("data", (chunk: Buffer) => {
+    session.lastOutputAt = Date.now();
+    session.stderr = appendBounded(session.stderr, chunk);
+    appendSessionLog(session, chunk);
+  });
+  child.on("close", (code, signal) => { session.completedAt = Date.now(); session.exitCode = code; session.signal = signal; });
   terminals.set(id, session);
-  return { id, command: cmd, cwd: resolvedCwd, pid: child.pid ?? null };
+  return { id, command: cmd, cwd: resolvedCwd, pid: child.pid ?? null, logFile: session.logFile };
 }
 
 function getTerminal(id: string): TerminalSession {
@@ -53,15 +142,7 @@ function terminalWrite(id: string, input: string) {
 
 function terminalRead(id: string, maxChars: number) {
   const session = getTerminal(id);
-  return {
-    id,
-    pid: session.child.pid ?? null,
-    running: session.exitCode === null,
-    exitCode: session.exitCode,
-    signal: session.signal,
-    stdout: tailText(session.stdout, maxChars),
-    stderr: tailText(session.stderr, maxChars),
-  };
+  return terminalSnapshot(session, maxChars);
 }
 
 function terminalStop(id: string) {
@@ -73,23 +154,34 @@ function terminalStop(id: string) {
 }
 
 export function terminalList() {
-  return Array.from(terminals.values()).map((session) => ({
-    id: session.id,
-    command: session.command,
-    cwd: session.cwd,
-    pid: session.child.pid ?? null,
-    running: session.exitCode === null,
-    exitCode: session.exitCode,
-    signal: session.signal,
-    ageMs: Date.now() - session.startedAt,
-  }));
+  cleanupFinishedSessions();
+  return Array.from(terminals.values()).map((session) => {
+    const snap = terminalSnapshot(session, 0);
+    return {
+      id: snap.id,
+      name: snap.name,
+      command: snap.command,
+      cwd: snap.cwd,
+      pid: snap.pid,
+      running: snap.running,
+      exitCode: snap.exitCode,
+      signal: snap.signal,
+      timedOut: snap.timedOut,
+      timeoutMs: snap.timeoutMs,
+      logFile: snap.logFile,
+      startedAtIso: snap.startedAtIso,
+      completedAtIso: snap.completedAtIso,
+      ageMs: snap.ageMs,
+      idleMs: snap.idleMs,
+    };
+  });
 }
 
 export const processToolModule: BridgeToolModule = {
   name: "process",
   tools: [
     { name: "run_command", description: "Run a shell command in a cwd with timeout and captured stdout/stderr.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS } }, required: ["command"], additionalProperties: false } },
-    { name: "terminal_start", description: "Start a persistent terminal process and return a session id.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" } }, additionalProperties: false } },
+    { name: "terminal_start", description: "Start a persistent terminal process and return a session id. Supports optional name, logFile, timeoutMs, and cleanupAfterMs for long-running tasks.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, name: { type: "string" }, logFile: { type: "string" }, timeoutMs: { type: "number", minimum: 1000, maximum: MAX_RUN_MS }, cleanupAfterMs: { type: "number", default: DONE_TTL_MS, minimum: 0, maximum: MAX_RUN_MS } }, additionalProperties: false } },
     { name: "terminal_write", description: "Write input to a persistent terminal session.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, input: { type: "string" } }, required: ["sessionId", "input"], additionalProperties: false } },
     { name: "terminal_read", description: "Read buffered stdout/stderr from a persistent terminal session.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, maxChars: { type: "number", default: 20000 } }, required: ["sessionId"], additionalProperties: false } },
     { name: "terminal_stop", description: "Stop and forget a persistent terminal session.", inputSchema: { type: "object", properties: { sessionId: { type: "string" } }, required: ["sessionId"], additionalProperties: false } },
@@ -101,8 +193,8 @@ export const processToolModule: BridgeToolModule = {
       return await runShellCommand(parsed.command, parsed.cwd, parsed.timeoutMs);
     },
     terminal_start: async (args) => {
-      const parsed = z.object({ command: z.string().optional(), cwd: z.string().optional() }).parse(args);
-      return await terminalStart(parsed.command, parsed.cwd);
+      const parsed = z.object({ command: z.string().optional(), cwd: z.string().optional(), name: z.string().optional(), logFile: z.string().optional(), timeoutMs: z.number().optional(), cleanupAfterMs: z.number().optional() }).parse(args);
+      return await terminalStart(parsed);
     },
     terminal_write: (args) => {
       const parsed = z.object({ sessionId: z.string(), input: z.string() }).parse(args);
@@ -119,3 +211,25 @@ export const processToolModule: BridgeToolModule = {
     terminal_list: () => terminalList(),
   },
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -519,7 +519,7 @@ Parametros:
 
 #### `terminal_start`
 
-Start a persistent terminal process and return a session id.
+Start a persistent terminal process and return a session id. Supports optional name, logFile, timeoutMs, and cleanupAfterMs for long-running tasks.
 
 Required: ninguno
 
@@ -527,6 +527,10 @@ Parametros:
 
 - `command`: string
 - `cwd`: string
+- `name`: string
+- `logFile`: string
+- `timeoutMs`: number min=1000 max=86400000
+- `cleanupAfterMs`: number default=600000 min=0 max=86400000
 
 <details>
 <summary>Input schema</summary>
@@ -540,6 +544,23 @@ Parametros:
     },
     "cwd": {
       "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "logFile": {
+      "type": "string"
+    },
+    "timeoutMs": {
+      "type": "number",
+      "minimum": 1000,
+      "maximum": 86400000
+    },
+    "cleanupAfterMs": {
+      "type": "number",
+      "default": 600000,
+      "minimum": 0,
+      "maximum": 86400000
     }
   },
   "additionalProperties": false
