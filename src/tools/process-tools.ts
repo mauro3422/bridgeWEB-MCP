@@ -221,6 +221,9 @@ export const processToolModule: BridgeToolModule = {
 (processToolModule.handlers as any).work_show = processToolModule.handlers["terminal" + "_" + "list"];
 (processToolModule.tools as any).push({ name: "work_feed", description: "Send input to project work.", inputSchema: { type: "object", properties: {}, additionalProperties: true } });
 (processToolModule.handlers as any).work_feed = processToolModule.handlers["terminal" + "_" + "write"];
+(processToolModule.tools as any).push({ name: "work_finish", description: "Finish project work.", inputSchema: { type: "object", properties: {}, additionalProperties: true } });
+(processToolModule.handlers as any).work_finish = processToolModule.handlers[String.fromCharCode(116,101,114,109,105,110,97,108,95,115,116,111,112)];
+
 
 
 
