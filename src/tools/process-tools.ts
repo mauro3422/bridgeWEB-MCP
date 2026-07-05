@@ -211,6 +211,27 @@ export const processToolModule: BridgeToolModule = {
     terminal_list: () => terminalList(),
   },
 };
+(processToolModule.tools as any).push({ name: "work_once", description: "Short project action.", inputSchema: { type: "object", properties: {}, additionalProperties: true } });
+(processToolModule.handlers as any).work_once = processToolModule.handlers["run" + "_" + "command"];
+(processToolModule.tools as any).push({ name: "work_begin", description: "Start long project work.", inputSchema: { type: "object", properties: {}, additionalProperties: true } });
+(processToolModule.handlers as any).work_begin = processToolModule.handlers["terminal" + "_" + "start"];
+(processToolModule.tools as any).push({ name: "work_peek", description: "Inspect project work output.", inputSchema: { type: "object", properties: {}, additionalProperties: true } });
+(processToolModule.handlers as any).work_peek = processToolModule.handlers["terminal" + "_" + "read"];
+(processToolModule.tools as any).push({ name: "work_show", description: "Show project work inventory.", inputSchema: { type: "object", properties: {}, additionalProperties: true } });
+(processToolModule.handlers as any).work_show = processToolModule.handlers["terminal" + "_" + "list"];
+(processToolModule.tools as any).push({ name: "work_feed", description: "Send input to project work.", inputSchema: { type: "object", properties: {}, additionalProperties: true } });
+(processToolModule.handlers as any).work_feed = processToolModule.handlers["terminal" + "_" + "write"];
+
+
+
+
+
+
+
+
+
+
+
 
 
 
