@@ -15,9 +15,11 @@ const SESSION_IDLE_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_SESSION_IDLE_MS", 30 
 const ANONYMOUS_TRANSPORT_TTL_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_ANON_TTL_MS", 60 * 1000);
 const MAX_SESSIONS = getPositiveIntEnv("BRIDGE_MCP_HTTP_MAX_SESSIONS", 64);
 const CLEANUP_INTERVAL_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_CLEANUP_INTERVAL_MS", 60 * 1000);
+const MAX_REQUEST_BODY_BYTES = getPositiveIntEnv("BRIDGE_MCP_HTTP_MAX_BODY_BYTES", 1024 * 1024);
 
 let ready = false;
 let closing = false;
+let transportsCreating = 0;
 
 type BridgeHttpTransport = StreamableHTTPServerTransport & { sessionId?: string };
 type SessionRecord = {
@@ -70,6 +72,31 @@ function sendHtml(res: ServerResponse, statusCode: number, html: string) {
   res.end(html);
 }
 
+async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const contentLength = Number.parseInt(String(req.headers["content-length"] || ""), 10);
+  if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BODY_BYTES) {
+    throw Object.assign(new Error(`Request body exceeds ${MAX_REQUEST_BODY_BYTES} bytes.`), { statusCode: 413 });
+  }
+
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += buffer.length;
+    if (totalBytes > MAX_REQUEST_BODY_BYTES) {
+      throw Object.assign(new Error(`Request body exceeds ${MAX_REQUEST_BODY_BYTES} bytes.`), { statusCode: 413 });
+    }
+    chunks.push(buffer);
+  }
+
+  if (totalBytes === 0) return undefined;
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    throw Object.assign(new Error("Invalid JSON request body."), { statusCode: 400 });
+  }
+}
+
 function getLimit(url: URL, fallback: number, max = 500): number {
   const raw = Number.parseInt(url.searchParams.get("limit") || "", 10);
   return Number.isFinite(raw) && raw > 0 ? Math.min(raw, max) : fallback;
@@ -98,11 +125,13 @@ function getStatus() {
     closing,
     sessions: sessions.size,
     anonymousTransports: anonymousTransports.size,
+    transportsCreating,
     limits: {
       maxSessions: MAX_SESSIONS,
       sessionIdleMs: SESSION_IDLE_MS,
       anonymousTransportTtlMs: ANONYMOUS_TRANSPORT_TTL_MS,
       cleanupIntervalMs: CLEANUP_INTERVAL_MS,
+      maxRequestBodyBytes: MAX_REQUEST_BODY_BYTES,
     },
     startedAt: startedAt.toISOString(),
     uptimeSeconds: Math.round(process.uptime()),
@@ -160,36 +189,62 @@ async function cleanupTransports(reason = "periodic") {
 
 async function createTransport(requestId: string): Promise<BridgeHttpTransport> {
   await cleanupTransports("before-create");
+  const allocated = sessions.size + anonymousTransports.size + transportsCreating;
+  if (allocated >= MAX_SESSIONS) {
+    throw Object.assign(new Error(`MCP session capacity reached (${MAX_SESSIONS}).`), { statusCode: 503 });
+  }
 
-  const mcpServer = createBridgeServer();
-  let transport: BridgeHttpTransport;
+  transportsCreating += 1;
+  try {
+    const mcpServer = createBridgeServer();
+    let transport: BridgeHttpTransport;
 
-  transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => randomUUID(),
-    onsessioninitialized: (sessionId: string) => {
-      const now = Date.now();
-      sessions.set(sessionId, { transport, createdAtMs: now, lastSeenMs: now });
+    transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      onsessioninitialized: (sessionId: string) => {
+        const now = Date.now();
+        sessions.set(sessionId, { transport, createdAtMs: now, lastSeenMs: now });
+        anonymousTransports.delete(transport);
+        log("info", "MCP HTTP session initialized", { requestId, sessionId, sessions: sessions.size });
+      },
+    }) as BridgeHttpTransport;
+
+    transport.onclose = () => {
+      const sessionId = transport.sessionId;
       anonymousTransports.delete(transport);
-      log("info", "MCP HTTP session initialized", { requestId, sessionId, sessions: sessions.size });
-    },
-  }) as BridgeHttpTransport;
+      if (sessionId) sessions.delete(sessionId);
+      log("info", "MCP HTTP transport closed", { requestId, sessionId, sessions: sessions.size });
+    };
 
-  transport.onclose = () => {
-    const sessionId = transport.sessionId;
-    anonymousTransports.delete(transport);
-    if (sessionId) sessions.delete(sessionId);
-    log("info", "MCP HTTP transport closed", { requestId, sessionId, sessions: sessions.size });
-  };
-
-  anonymousTransports.set(transport, Date.now());
-  await mcpServer.connect(transport);
-  return transport;
+    anonymousTransports.set(transport, Date.now());
+    await mcpServer.connect(transport);
+    return transport;
+  } finally {
+    transportsCreating -= 1;
+  }
 }
 
 async function handleMcpRequest(req: IncomingMessage, res: ServerResponse, requestId: string) {
   const sessionId = getMcpSessionId(req);
   let transport: BridgeHttpTransport | undefined;
   let createdForThisRequest = false;
+  let parsedBody: unknown;
+
+  if (req.method === "POST") {
+    try {
+      parsedBody = await readJsonBody(req);
+    } catch (error) {
+      const statusCode = typeof error === "object" && error && "statusCode" in error
+        ? Number((error as { statusCode?: unknown }).statusCode)
+        : 400;
+      sendJson(res, Number.isInteger(statusCode) ? statusCode : 400, {
+        error: statusCode === 413 ? "request_body_too_large" : "invalid_request_body",
+        requestId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+  }
 
   if (sessionId) {
     const record = sessions.get(sessionId);
@@ -206,7 +261,19 @@ async function handleMcpRequest(req: IncomingMessage, res: ServerResponse, reque
     transport = record.transport;
   } else if (req.method === "POST") {
     createdForThisRequest = true;
-    transport = await createTransport(requestId);
+    try {
+      transport = await createTransport(requestId);
+    } catch (error) {
+      const statusCode = typeof error === "object" && error && "statusCode" in error
+        ? Number((error as { statusCode?: unknown }).statusCode)
+        : 500;
+      sendJson(res, Number.isInteger(statusCode) ? statusCode : 500, {
+        requestId,
+        error: statusCode === 503 ? "mcp_capacity_reached" : "mcp_transport_create_failed",
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
   } else {
     sendJson(res, 400, {
       error: "mcp_session_required",
@@ -217,7 +284,7 @@ async function handleMcpRequest(req: IncomingMessage, res: ServerResponse, reque
   }
 
   try {
-    await transport.handleRequest(req, res);
+    await transport.handleRequest(req, res, parsedBody);
   } catch (error) {
     log("error", "MCP request failed", {
       requestId,
@@ -230,9 +297,12 @@ async function handleMcpRequest(req: IncomingMessage, res: ServerResponse, reque
     });
 
     if (!res.headersSent) {
-      sendJson(res, 500, {
+      const statusCode = typeof error === "object" && error && "statusCode" in error
+        ? Number((error as { statusCode?: unknown }).statusCode)
+        : 500;
+      sendJson(res, Number.isInteger(statusCode) ? statusCode : 500, {
         requestId,
-        error: "mcp_request_failed",
+        error: statusCode === 503 ? "mcp_capacity_reached" : "mcp_request_failed",
         detail: error instanceof Error ? error.message : String(error),
       });
     } else {

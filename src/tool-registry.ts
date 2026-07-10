@@ -13,6 +13,7 @@ import type { BridgeToolModule, BridgeToolRegistry, BridgeToolSchema } from "./t
 
 const readOnlyToolNames = new Set([
   "system_info", "list_dir", "read_text_file", "list_files_smart", "read_file_lines", "read_many_files", "search_files",
+  "terminal_read", "terminal_list", "work_peek", "work_show",
   "git_status", "tunnel_health", "bridge_health", "bridge_self_check", "bridge_restart_status",
   "bridge_metrics_status", "bridge_metrics_summary", "bridge_metrics_recent", "bridge_metrics_query", "bridge_visualization_catalog", "bridge_visualize_metrics",
   "analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code",
@@ -21,6 +22,7 @@ const readOnlyToolNames = new Set([
 
 const destructiveToolNames = new Set([
   "write_text_file", "apply_patch", "edit_lines", "run_command", "terminal_start", "terminal_write", "terminal_stop",
+  "work_once", "work_begin", "work_feed", "work_finish",
   "git_set_remote", "git_commit_all", "git_push_current_branch", "bridge_request_restart", "bridge_verify_all",
 ]);
 
@@ -88,6 +90,3 @@ export function createDefaultToolRegistry(): BridgeToolRegistry {
     bridgeWorkflowToolModule,
   ]);
 }
-
-
-

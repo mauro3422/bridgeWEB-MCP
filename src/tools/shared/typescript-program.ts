@@ -150,6 +150,18 @@ function resolveAlias(ts: TypeScriptModule, checker: import("typescript").TypeCh
   return symbol;
 }
 
+function symbolAtIdentifier(
+  ts: TypeScriptModule,
+  checker: import("typescript").TypeChecker,
+  node: import("typescript").Identifier,
+): import("typescript").Symbol | undefined {
+  const parent = node.parent;
+  if (parent && ts.isShorthandPropertyAssignment(parent) && parent.name === node) {
+    return checker.getShorthandAssignmentValueSymbol(parent) ?? checker.getSymbolAtLocation(node);
+  }
+  return checker.getSymbolAtLocation(node);
+}
+
 function modifierExported(ts: TypeScriptModule, node: import("typescript").Node) {
   const modifiers = ts.canHaveModifiers(node) ? ts.getModifiers(node) ?? [] : [];
   return modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword || modifier.kind === ts.SyntaxKind.DefaultKeyword);
@@ -232,7 +244,7 @@ export async function buildSemanticIndex(options: { root: string; includeTests?:
     if (!files.includes(sourceFile.fileName)) continue;
     const visit = (node: import("typescript").Node) => {
       if (ts.isIdentifier(node) && (!options.name || node.text === options.name)) {
-        const rawSymbol = checker.getSymbolAtLocation(node);
+        const rawSymbol = symbolAtIdentifier(ts, checker, node);
         if (rawSymbol) {
           const symbol = resolveAlias(ts, checker, rawSymbol);
           const key = symbolKey(root, symbol);
@@ -322,16 +334,3 @@ export async function semanticDeadCode(options: { root: string; includeTests?: b
   }
   return { available: true, root: index.root, tsconfigPath: index.tsconfigPath, scannedFiles: index.scannedFiles, candidates };
 }
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -1,11 +1,11 @@
-﻿param(
+param(
   [string]$ProjectRoot = "C:\dev\bridge-mcp",
   [string]$Profile = "bridge-local-http",
   [string]$BridgeHost = "127.0.0.1",
   [int]$BridgePort = 3001,
   [string]$TunnelBaseUrl = "http://127.0.0.1:8081",
   [string]$StartupFileName = "BridgeMCP-Watchdog.cmd",
-  [string]$ExpectedServerVersion = "0.5.4"
+  [string]$ExpectedServerVersion = "0.5.5"
 )
 
 $ErrorActionPreference = "Stop"
@@ -195,9 +195,3 @@ if ($warnings.Count -eq 0) {
 Write-Host "WARNINGS:"
 foreach ($warning in $warnings) { Write-Host "- $warning" }
 exit 1
-
-
-
-
-
-

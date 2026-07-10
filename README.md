@@ -7,7 +7,7 @@ El objetivo es tener un puente local controlado por nosotros para operar filesys
 ## Estado actual
 
 ```text
-bridge-mcp v0.5.4
+bridge-mcp v0.5.5
 Mode: HTTP production-candidate
 Project root: C:\dev\bridge-mcp
 Bridge MCP: http://127.0.0.1:3001/mcp
@@ -79,7 +79,7 @@ bridge-workflow
 
 ## Tools expuestas
 
-El runtime actual expone 47 tools.
+El runtime actual expone 53 tools.
 
 ### Core / lectura / navegacion
 
@@ -112,7 +112,20 @@ terminal_write
 terminal_read
 terminal_stop
 terminal_list
+work_once
+work_begin
+work_peek
+work_show
+work_feed
+work_finish
 ```
+
+Robustez de procesos:
+
+- Los timeouts terminan el arbol completo del proceso en Windows, no solamente el shell intermediario.
+- Una sesion finalizada por senal se informa como `running: false` y respeta `cleanupAfterMs`, incluso cuando vale `0`.
+- Los aliases `work_*` tienen esquemas tipados y las mismas anotaciones de riesgo que sus tools equivalentes.
+- La lista de comandos bloqueados es una barrera contra accidentes, no una sandbox. El Bridge debe mantenerse en un entorno confiable.
 
 ### Git
 
@@ -222,7 +235,7 @@ Estado esperado:
 
 ```text
 bridge_self_check.ok = true
-server.version = 0.5.4
+server.version = 0.5.5
 tunnel.baseUrl = http://127.0.0.1:8081
 tunnel healthz = live
 tunnel readyz = ready
@@ -239,6 +252,17 @@ GET  http://127.0.0.1:3001/readyz
 GET  http://127.0.0.1:3001/status
 POST http://127.0.0.1:3001/mcp
 ```
+
+Limites y seguridad HTTP:
+
+```text
+BRIDGE_MCP_HTTP_MAX_SESSIONS=64
+BRIDGE_MCP_HTTP_MAX_BODY_BYTES=1048576
+BRIDGE_MCP_HTTP_SESSION_IDLE_MS=1800000
+BRIDGE_MCP_HTTP_ANON_TTL_MS=60000
+```
+
+Las inicializaciones reservan capacidad de forma atomica y responden `503` al alcanzar el limite. Los cuerpos JSON que superan `BRIDGE_MCP_HTTP_MAX_BODY_BYTES` responden `413`. El servidor sigue limitado a loopback por defecto.
 
 Perfil de tunel:
 
@@ -277,6 +301,8 @@ bridge_request_restart
 ```
 
 Ese flujo escribe `.bridge-restart-request`; el watchdog externo reinicia HTTP/tunnel y luego escribe `.bridge-restart-ack`. No matar `node.exe` ni `tunnel-client.exe` directamente desde el MCP activo.
+
+Antes de adoptar o detener un proceso, el watchdog verifica el nombre/version del Bridge, el transporte, el puerto y la linea de comando esperada. Si el puerto pertenece a un proceso desconocido, aborta en vez de matarlo.
 
 Rollback stdio:
 
@@ -364,6 +390,3 @@ NEXT_CHAT_PROMPT.md
 ```
 
 Nota: ChatGPT puede cachear el catalogo de tools. Si una tool nueva no aparece en una conversacion ya abierta, refrescar/reabrir el conector o iniciar un chat nuevo.
-
-
-

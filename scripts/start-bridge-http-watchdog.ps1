@@ -14,6 +14,7 @@ param(
   [int]$AnonymousTransportTtlMs = 60000,
   [int]$CleanupIntervalMs = 60000,
   [int]$MaxSessions = 64,
+  [int]$MaxBodyBytes = 1048576,
   [switch]$Build,
   [switch]$NoTunnel,
   [switch]$Once,
@@ -37,6 +38,26 @@ function Test-HttpText {
   }
   catch {
     return $false
+  }
+}
+
+function Get-BridgeStatus {
+  param([string]$BaseUrl)
+  try {
+    return Invoke-RestMethod -Uri "$BaseUrl/status" -TimeoutSec 3
+  }
+  catch {
+    return $null
+  }
+}
+
+function Get-ProcessCommandLine {
+  param([int]$ProcessId)
+  try {
+    return [string](Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction Stop).CommandLine
+  }
+  catch {
+    return ""
   }
 }
 
@@ -179,36 +200,50 @@ function Stop-ProcessState {
 }
 
 function Stop-PortOwner {
-  param([int]$Port, [string]$Name)
+  param([int]$Port, [string]$Name, [string]$ExpectedCommandPattern)
   $pidFromPort = Get-ListenPid -Port $Port
   if (-not $pidFromPort) { return }
 
-  Write-BridgeLog "Stopping $Name listener pid=$pidFromPort port=$Port"
+  $commandLine = Get-ProcessCommandLine -ProcessId $pidFromPort
+  if (-not $ExpectedCommandPattern -or -not $commandLine -or $commandLine -notmatch $ExpectedCommandPattern) {
+    throw "Refusing to stop unknown $Name listener pid=$pidFromPort port=$Port command=$commandLine"
+  }
+
+  Write-BridgeLog "Stopping verified $Name listener pid=$pidFromPort port=$Port"
   try {
-    Stop-Process -Id $pidFromPort -Force -ErrorAction SilentlyContinue
+    Stop-Process -Id $pidFromPort -Force -ErrorAction Stop
     Start-Sleep -Milliseconds 500
   }
   catch {
     Write-BridgeLog "Failed to stop $Name listener pid=$pidFromPort port=${Port}: $($_.Exception.Message)" "warn"
+    throw
   }
 }
 
 function Start-BridgeHttp {
   $readyUrl = "http://$BridgeHost`:$BridgePort/readyz"
   if (Test-HttpText -Url $readyUrl -Expected "ready") {
+    $status = Get-BridgeStatus -BaseUrl "http://$BridgeHost`:$BridgePort"
+    if (-not $status -or [string]$status.server.name -ne "bridge-mcp" -or [string]$status.server.version -ne $expectedServerVersion -or [int]$status.port -ne $BridgePort -or [string]$status.transport -ne "streamable-http") {
+      throw "Port $BridgePort reports ready but does not identify as the expected bridge-mcp service."
+    }
+
     $state = Get-ProcessStateFromPort -Port $BridgePort -Name "bridge HTTP"
     if ($state) {
-      Write-BridgeLog "Bridge HTTP already ready on port $BridgePort pid=$($state.Process.Id); adopting external process"
+      $commandLine = Get-ProcessCommandLine -ProcessId $state.Process.Id
+      if (-not $commandLine -or $commandLine -notmatch $bridgeCommandPattern) {
+        throw "Bridge endpoint identity matched, but process identity did not: pid=$($state.Process.Id) command=$commandLine"
+      }
+      Write-BridgeLog "Bridge HTTP already ready on port $BridgePort pid=$($state.Process.Id); adopting verified process"
       return $state
     }
-    Write-BridgeLog "Bridge HTTP already ready on port $BridgePort; owner pid unavailable"
-    return $null
+    throw "Bridge HTTP reports ready on port $BridgePort, but its owner pid is unavailable."
   }
 
   $existingPid = Get-ListenPid -Port $BridgePort
   if ($existingPid) {
     Write-BridgeLog "Bridge HTTP port $BridgePort is occupied but not ready; replacing pid=$existingPid" "warn"
-    Stop-PortOwner -Port $BridgePort -Name "bridge HTTP"
+    Stop-PortOwner -Port $BridgePort -Name "bridge HTTP" -ExpectedCommandPattern $bridgeCommandPattern
   }
 
   if ($DryRun) {
@@ -230,6 +265,7 @@ function Start-BridgeHttp {
   $psi.Environment["BRIDGE_MCP_HTTP_ANON_TTL_MS"] = [string]$AnonymousTransportTtlMs
   $psi.Environment["BRIDGE_MCP_HTTP_CLEANUP_INTERVAL_MS"] = [string]$CleanupIntervalMs
   $psi.Environment["BRIDGE_MCP_HTTP_MAX_SESSIONS"] = [string]$MaxSessions
+  $psi.Environment["BRIDGE_MCP_HTTP_MAX_BODY_BYTES"] = [string]$MaxBodyBytes
 
   $process = [System.Diagnostics.Process]::Start($psi)
   Write-BridgeLog "Started bridge HTTP pid=$($process.Id)"
@@ -244,17 +280,20 @@ function Start-TunnelClient {
   if (Test-HttpText -Url "$TunnelBaseUrl/readyz" -Expected "ready") {
     $state = Get-ProcessStateFromPort -Port $tunnelPort -Name "tunnel-client"
     if ($state) {
-      Write-BridgeLog "Tunnel already ready on port $tunnelPort pid=$($state.Process.Id); adopting external process"
+      $commandLine = Get-ProcessCommandLine -ProcessId $state.Process.Id
+      if ($state.Process.Name -notlike "tunnel-client*" -or -not $commandLine -or $commandLine -notmatch $tunnelCommandPattern) {
+        throw "Tunnel admin endpoint is ready, but process identity did not match: pid=$($state.Process.Id) command=$commandLine"
+      }
+      Write-BridgeLog "Tunnel already ready on port $tunnelPort pid=$($state.Process.Id); adopting verified process"
       return $state
     }
-    Write-BridgeLog "Tunnel already ready on port $tunnelPort; owner pid unavailable"
-    return $null
+    throw "Tunnel reports ready on port $tunnelPort, but its owner pid is unavailable."
   }
 
   $existingPid = Get-ListenPid -Port $tunnelPort
   if ($existingPid) {
     Write-BridgeLog "Tunnel admin port $tunnelPort is occupied but not ready; replacing pid=$existingPid" "warn"
-    Stop-PortOwner -Port $tunnelPort -Name "tunnel-client"
+    Stop-PortOwner -Port $tunnelPort -Name "tunnel-client" -ExpectedCommandPattern $tunnelCommandPattern
   }
 
   if ($DryRun) {
@@ -317,11 +356,15 @@ if (-not [System.IO.Path]::IsPathRooted($TunnelClient)) {
   $TunnelClient = Join-Path $ProjectRoot $TunnelClient
 }
 $bridgeBaseUrl = "http://$BridgeHost`:$BridgePort"
+$expectedServerVersion = [string](Get-Content -LiteralPath (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json).version
+$bridgeCommandPattern = '(?i)(?:^|\s)"?(?:node|node\.exe)"?.*?[\\/]dist[\\/]http\.js(?:\s|$)'
+$escapedProfile = [regex]::Escape($Profile)
+$tunnelCommandPattern = '(?i)tunnel-client(?:\.exe)?.*\brun\b.*--profile\s+.*' + $escapedProfile + '(?:\s|$)'
 
 Write-BridgeLog "ProjectRoot=$ProjectRoot"
 Write-BridgeLog "Bridge HTTP=$bridgeBaseUrl$McpPath"
 Write-BridgeLog "Tunnel profile=$Profile admin=$TunnelBaseUrl"
-Write-BridgeLog "Session limits: max=$MaxSessions idleMs=$SessionIdleMs anonymousTtlMs=$AnonymousTransportTtlMs cleanupMs=$CleanupIntervalMs"
+Write-BridgeLog "Session limits: max=$MaxSessions idleMs=$SessionIdleMs anonymousTtlMs=$AnonymousTransportTtlMs cleanupMs=$CleanupIntervalMs maxBodyBytes=$MaxBodyBytes"
 Write-BridgeLog "Restart request file=$(Join-Path $ProjectRoot $RestartRequestFile)"
 
 $bridgeProcess = $null
@@ -352,7 +395,7 @@ try {
 
       if ($mode -eq "http" -or $mode -eq "full") {
         Stop-ProcessState -State $bridgeProcess -Name "bridge HTTP" -ForceExternal
-        Stop-PortOwner -Port $BridgePort -Name "bridge HTTP"
+        Stop-PortOwner -Port $BridgePort -Name "bridge HTTP" -ExpectedCommandPattern $bridgeCommandPattern
         Start-Sleep -Seconds $RestartDelaySeconds
         $bridgeProcess = Start-BridgeHttp
       }
@@ -360,7 +403,7 @@ try {
       if (($mode -eq "tunnel" -or $mode -eq "full") -and -not $NoTunnel) {
         $tunnelPort = ([Uri]$TunnelBaseUrl).Port
         Stop-ProcessState -State $tunnelProcess -Name "tunnel-client" -ForceExternal
-        Stop-PortOwner -Port $tunnelPort -Name "tunnel-client"
+        Stop-PortOwner -Port $tunnelPort -Name "tunnel-client" -ExpectedCommandPattern $tunnelCommandPattern
         Start-Sleep -Seconds $RestartDelaySeconds
         $tunnelProcess = Start-TunnelClient
       }
@@ -370,7 +413,7 @@ try {
     elseif (-not $bridgeReady) {
       Write-BridgeLog "Bridge HTTP not ready; restarting local bridge" "warn"
       Stop-ProcessState -State $bridgeProcess -Name "bridge HTTP" -ForceExternal
-      Stop-PortOwner -Port $BridgePort -Name "bridge HTTP"
+      Stop-PortOwner -Port $BridgePort -Name "bridge HTTP" -ExpectedCommandPattern $bridgeCommandPattern
       Start-Sleep -Seconds $RestartDelaySeconds
       $bridgeProcess = Start-BridgeHttp
       Write-RestartAck -Request $null -Action "auto-restart-http-not-ready"
@@ -379,7 +422,7 @@ try {
       Write-BridgeLog "Tunnel not ready; restarting tunnel-client" "warn"
       $tunnelPort = ([Uri]$TunnelBaseUrl).Port
       Stop-ProcessState -State $tunnelProcess -Name "tunnel-client" -ForceExternal
-      Stop-PortOwner -Port $tunnelPort -Name "tunnel-client"
+      Stop-PortOwner -Port $tunnelPort -Name "tunnel-client" -ExpectedCommandPattern $tunnelCommandPattern
       Start-Sleep -Seconds $RestartDelaySeconds
       $tunnelProcess = Start-TunnelClient
       Write-RestartAck -Request $null -Action "auto-restart-tunnel-not-ready"

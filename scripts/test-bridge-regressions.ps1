@@ -20,9 +20,9 @@ Set-Location -LiteralPath $ProjectRoot
 Invoke-Check "version bump is consistent" {
   $packageJson = Get-Content -LiteralPath "package.json" -Raw | ConvertFrom-Json
   $configText = Get-Content -LiteralPath "src\config.ts" -Raw
-  if ($packageJson.version -ne "0.5.4") { throw "package.json version is $($packageJson.version), expected 0.5.4" }
-  if ($configText -notmatch 'SERVER_VERSION = "0\.5\.4"') { throw "src/config.ts does not report SERVER_VERSION 0.5.4" }
-  Write-Host "  OK 0.5.4"
+  if ($packageJson.version -ne "0.5.5") { throw "package.json version is $($packageJson.version), expected 0.5.5" }
+  if ($configText -notmatch 'SERVER_VERSION = "0\.5\.5"') { throw "src/config.ts does not report SERVER_VERSION 0.5.5" }
+  Write-Host "  OK 0.5.5"
 }
 
 Invoke-Check "tunnel admin default stays on HTTP profile port" {
@@ -254,8 +254,9 @@ const { createDefaultToolRegistry } = await import(registryModuleUrl);
 const registry = createDefaultToolRegistry();
 const byName = new Map(registry.tools.map((tool) => [tool.name, tool]));
 for (const tool of ["bridge_health", "bridge_metrics_query"]) if (!registry.has(tool)) process.exit(60);
-for (const tool of ["read_text_file", "bridge_health", "bridge_metrics_query", "impact_analysis", "dependency_graph"]) if (byName.get(tool)?.annotations?.readOnlyHint !== true) process.exit(61);
-for (const tool of ["write_text_file", "run_command", "git_push_current_branch", "bridge_request_restart", "bridge_verify_all"]) if (byName.get(tool)?.annotations?.destructiveHint !== true) process.exit(62);
+for (const tool of ["read_text_file", "terminal_read", "terminal_list", "work_peek", "work_show", "bridge_health", "bridge_metrics_query", "impact_analysis", "dependency_graph"]) if (byName.get(tool)?.annotations?.readOnlyHint !== true) process.exit(61);
+for (const tool of ["write_text_file", "run_command", "terminal_start", "terminal_write", "terminal_stop", "work_once", "work_begin", "work_feed", "work_finish", "git_push_current_branch", "bridge_request_restart", "bridge_verify_all"]) if (byName.get(tool)?.annotations?.destructiveHint !== true) process.exit(62);
+if (!byName.get("work_once")?.inputSchema?.required?.includes("command")) process.exit(63);
 console.log("  OK tool annotations and compact safe tools");
 '@
   $tmpScript = Join-Path ([System.IO.Path]::GetTempPath()) ("bridge-risk-annotations-" + [Guid]::NewGuid().ToString("N") + ".mjs")
@@ -380,10 +381,11 @@ const root = path.join(tmpdir(), `bridge-dead-code-${Date.now()}-${Math.random()
 try {
   await mkdir(path.join(root, "src"), { recursive: true });
   await writeFile(path.join(root, "tsconfig.json"), JSON.stringify({ compilerOptions: { target: "ES2022", module: "NodeNext", moduleResolution: "NodeNext" }, include: ["src/**/*.ts"] }, null, 2));
-  await writeFile(path.join(root, "src", "index.ts"), "export function exportedUnused() { return 1; }\nfunction localUnused() { return 2; }\nexport const live = 3;\n");
+  await writeFile(path.join(root, "src", "index.ts"), "export function exportedUnused() { return 1; }\nfunction localUnused() { return 2; }\nconst shorthandUsed = 3;\nexport const live = { shorthandUsed };\n");
   const hiddenExport = await registry.call("find_dead_code", { projectRoot: root, engine: "semantic", includeExported: false, maxFiles: 20, maxCandidates: 20 });
   if (hiddenExport.candidates.some((candidate) => candidate.name === "exportedUnused")) process.exit(95);
   if (!hiddenExport.candidates.some((candidate) => candidate.name === "localUnused")) process.exit(96);
+  if (hiddenExport.candidates.some((candidate) => candidate.name === "shorthandUsed")) process.exit(98);
   const visibleExport = await registry.call("find_dead_code", { projectRoot: root, engine: "semantic", includeExported: true, maxFiles: 20, maxCandidates: 20 });
   if (!visibleExport.candidates.some((candidate) => candidate.name === "exportedUnused" && candidate.confidence === "low")) process.exit(97);
   console.log("  OK semantic dead-code exported behavior");
@@ -399,6 +401,106 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "semantic dead-code regression failed" }
   }
   finally { Remove-Item -LiteralPath $tmpScript -Force -ErrorAction SilentlyContinue }
+}
+
+Invoke-Check "persistent terminal timeout kills trees and cleans sessions" {
+  $nodeScript = @'
+import { pathToFileURL } from "node:url";
+const registryModuleUrl = pathToFileURL(process.argv[2]).href;
+const { createDefaultToolRegistry } = await import(registryModuleUrl);
+const registry = createDefaultToolRegistry();
+const command = `"${process.execPath}" -e "setTimeout(() => {}, 10000)"`;
+const started = await registry.call("terminal_start", { command, timeoutMs: 1000, cleanupAfterMs: 0, name: "regression-timeout" });
+await new Promise((resolve) => setTimeout(resolve, 3000));
+const snapshot = await registry.call("terminal_read", { sessionId: started.id, maxChars: 2000 });
+if (snapshot.running !== false || snapshot.timedOut !== true || snapshot.completedAtIso === null) {
+  console.error(JSON.stringify(snapshot, null, 2));
+  process.exit(110);
+}
+const sessions = await registry.call("terminal_list", {});
+if (sessions.some((session) => session.id === started.id)) process.exit(111);
+let blocked = false;
+try {
+  await registry.call("work_once", { command: "cmd /c shutdown /?", timeoutMs: 1000 });
+} catch (error) {
+  blocked = String(error).includes("blocked by bridge-mcp policy");
+}
+if (!blocked) process.exit(112);
+console.log("  OK terminal lifecycle, process-tree timeout, cleanup, and wrapped-command policy");
+'@
+  $tmpScript = Join-Path ([System.IO.Path]::GetTempPath()) ("bridge-terminal-regression-" + [Guid]::NewGuid().ToString("N") + ".mjs")
+  try {
+    Set-Content -LiteralPath $tmpScript -Value $nodeScript -Encoding utf8
+    $registryModulePath = (Resolve-Path -LiteralPath ".\dist\tool-registry.js").Path
+    node $tmpScript $registryModulePath
+    if ($LASTEXITCODE -ne 0) { throw "terminal lifecycle regression failed" }
+  }
+  finally { Remove-Item -LiteralPath $tmpScript -Force -ErrorAction SilentlyContinue }
+}
+
+Invoke-Check "HTTP body and session limits reject excess work" {
+  $port = Get-Random -Minimum 32000 -Maximum 45000
+  $baseUrl = "http://127.0.0.1:$port"
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = "node"
+  $psi.Arguments = ".\dist\http.js"
+  $psi.WorkingDirectory = $ProjectRoot
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+  $psi.Environment["BRIDGE_MCP_HTTP_HOST"] = "127.0.0.1"
+  $psi.Environment["BRIDGE_MCP_HTTP_PORT"] = [string]$port
+  $psi.Environment["BRIDGE_MCP_HTTP_MAX_SESSIONS"] = "1"
+  $psi.Environment["BRIDGE_MCP_HTTP_MAX_BODY_BYTES"] = "1024"
+  $process = [System.Diagnostics.Process]::Start($psi)
+  try {
+    $ready = $false
+    foreach ($attempt in 1..50) {
+      if (Test-Path -LiteralPath ".\dist\http.js") {
+        try {
+          if ([string](Invoke-RestMethod -Uri "$baseUrl/readyz" -TimeoutSec 1) -eq "ready") { $ready = $true; break }
+        }
+        catch {}
+      }
+      Start-Sleep -Milliseconds 100
+    }
+    if (-not $ready) { throw "temporary HTTP bridge did not become ready" }
+
+    $headers = @{ Accept = "application/json, text/event-stream" }
+    $initialize = @{
+      jsonrpc = "2.0"
+      id = 1
+      method = "initialize"
+      params = @{ protocolVersion = "2024-11-05"; capabilities = @{}; clientInfo = @{ name = "regression"; version = "0.1.0" } }
+    } | ConvertTo-Json -Depth 10 -Compress
+    $first = Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/mcp" -Method Post -Headers $headers -ContentType "application/json" -Body $initialize
+    if ([int]$first.StatusCode -ne 200) { throw "first initialize failed with $($first.StatusCode)" }
+
+    $capacityStatus = 0
+    try {
+      Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/mcp" -Method Post -Headers $headers -ContentType "application/json" -Body $initialize | Out-Null
+    }
+    catch {
+      $capacityStatus = [int]$_.Exception.Response.StatusCode
+    }
+    if ($capacityStatus -ne 503) { throw "expected session capacity 503, got $capacityStatus" }
+
+    $oversized = '{"jsonrpc":"2.0","id":2,"method":"tools/list","padding":"' + ('x' * 2048) + '"}'
+    $bodyStatus = 0
+    try {
+      Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/mcp" -Method Post -Headers $headers -ContentType "application/json" -Body $oversized | Out-Null
+    }
+    catch {
+      $bodyStatus = [int]$_.Exception.Response.StatusCode
+    }
+    if ($bodyStatus -ne 413) { throw "expected oversized body 413, got $bodyStatus" }
+    Write-Host "  OK HTTP body and capacity limits"
+  }
+  finally {
+    if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+    if ($process) { $process.Dispose() }
+  }
 }
 
 Invoke-Check "metrics store only input keys and redact sensitive errors" {
@@ -420,12 +522,3 @@ console.log("  OK metrics input key storage and redaction");
 }
 
 Write-Host "[bridge-regression-test] all checks passed"
-
-
-
-
-
-
-
-
-

@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs/promises";
 import { DEFAULT_TIMEOUT_MS, MAX_CAPTURE_CHARS } from "../../config.js";
 import { resolveToolPath } from "./path.js";
@@ -9,6 +9,39 @@ const blockedCommands = new Set([
   "bcdedit", "cipher", "takeown", "runas", "reg", "sc",
 ]);
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function blockedCommandInShellText(command: string): string | null {
+  for (const blocked of blockedCommands) {
+    const pattern = new RegExp(`(^|[^A-Za-z0-9_.-])${escapeRegExp(blocked)}(?:\\.exe)?(?=$|[^A-Za-z0-9_.-])`, "i");
+    if (pattern.test(command)) return blocked;
+  }
+  return null;
+}
+
+export async function terminateProcessTree(child: ChildProcess, graceMs = 1500): Promise<void> {
+  const pid = child.pid;
+  if (!pid || child.exitCode !== null || child.signalCode !== null) return;
+
+  if (process.platform === "win32") {
+    await new Promise<void>((resolve) => {
+      const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
+        shell: false,
+        windowsHide: true,
+        stdio: "ignore",
+      });
+      killer.once("error", () => resolve());
+      killer.once("close", () => resolve());
+    });
+    return;
+  }
+
+  child.kill("SIGTERM");
+  await new Promise((resolve) => setTimeout(resolve, graceMs));
+  if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+}
 
 export function appendBounded(current: string, chunk: Buffer | string, maxChars = MAX_CAPTURE_CHARS): string {
   const next = current + chunk.toString();
@@ -37,7 +70,8 @@ function getBaseCommand(command: string): string {
 
 export function assertCommandAllowed(command: string) {
   const base = getBaseCommand(command);
-  if (blockedCommands.has(base)) throw new Error(`Command blocked by bridge-mcp policy: ${base}`);
+  const blocked = blockedCommands.has(base) ? base : blockedCommandInShellText(command);
+  if (blocked) throw new Error(`Command blocked by bridge-mcp policy: ${blocked}`);
 }
 
 export async function runShellCommand(command: string, cwd?: string, timeoutMs = DEFAULT_TIMEOUT_MS) {
@@ -50,7 +84,10 @@ export async function runShellCommand(command: string, cwd?: string, timeoutMs =
     let stdout = "";
     let stderr = "";
     let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); }, timeoutMs);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      void terminateProcessTree(child);
+    }, timeoutMs);
     child.stdout?.on("data", (chunk: Buffer) => { stdout = appendBounded(stdout, chunk); });
     child.stderr?.on("data", (chunk: Buffer) => { stderr = appendBounded(stderr, chunk); });
     child.on("close", (code, signal) => {
@@ -77,7 +114,10 @@ export async function runProcess(command: string, args: string[], cwd?: string, 
       clearTimeout(timer);
       resolve(result);
     };
-    const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); }, timeoutMs);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      void terminateProcessTree(child);
+    }, timeoutMs);
     child.stdout?.on("data", (chunk: Buffer) => { stdout = appendBounded(stdout, chunk); });
     child.stderr?.on("data", (chunk: Buffer) => { stderr = appendBounded(stderr, chunk); });
     child.on("error", (error) => finish({ command: commandLine, cwd: resolvedCwd, code: null, signal: null, timedOut, durationMs: Date.now() - startedAt, stdout, stderr, error: error.message }));

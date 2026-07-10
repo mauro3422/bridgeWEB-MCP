@@ -191,3 +191,13 @@ No confundir con widgets internos de ChatGPT. La UI local sirve para MauroPrime;
 ## Notas para agentes futuros
 
 Mauro usa este bridge como “mini-Codex” local. Priorizar estabilidad sobre features rápidas. Si hay duda entre probar y asumir, probar. Si el puente se cae, recuperar primero el acceso y recién después seguir programando.
+
+
+## Alias mentales para procesos
+
+- tarea_corta -> run_command
+- tarea_larga -> terminal_start
+- revisar_tarea -> terminal_read
+- listar_tareas -> terminal_list
+- enviar_entrada -> terminal_write
+- cerrar_tarea -> terminal_stop
