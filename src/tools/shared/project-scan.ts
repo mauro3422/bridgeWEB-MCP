@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { readTextSnapshot } from "./text-files.js";
+import { resolveToolPath } from "./path.js";
 
 const DEFAULT_MAX_FILES = 500;
 const DEFAULT_MAX_BYTES_PER_FILE = 512 * 1024;
@@ -64,7 +65,7 @@ function isTestPath(filePath: string): boolean {
 }
 
 export async function collectProjectTextFiles(options: ProjectScanOptions): Promise<{ root: string; files: ScannedTextFile[]; skipped: Array<{ path: string; reason: string }>; truncated: boolean }> {
-  const root = path.resolve(options.root);
+  const root = resolveToolPath(options.root, { access: "read" });
   const maxFiles = Math.max(1, Math.min(2000, Math.trunc(options.maxFiles ?? DEFAULT_MAX_FILES)));
   const maxBytesPerFile = Math.max(1, Math.min(5 * 1024 * 1024, Math.trunc(options.maxBytesPerFile ?? DEFAULT_MAX_BYTES_PER_FILE)));
   const files: ScannedTextFile[] = [];

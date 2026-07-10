@@ -69,7 +69,7 @@ function cleanupFinishedSessions() {
 
 async function prepareLogFile(logFile: string | undefined, resolvedCwd: string, id: string, command: string): Promise<string | null> {
   if (!logFile?.trim()) return null;
-  const resolved = path.isAbsolute(logFile) ? path.resolve(logFile) : path.resolve(resolvedCwd, logFile);
+  const resolved = resolveToolPath(logFile, { access: "write", baseDir: resolvedCwd });
   await fs.mkdir(path.dirname(resolved), { recursive: true });
   await fs.appendFile(resolved, `\n--- bridge terminal ${id} started ${new Date().toISOString()} ---\ncommand: ${command}\ncwd: ${resolvedCwd}\n`, "utf8");
   return resolved;

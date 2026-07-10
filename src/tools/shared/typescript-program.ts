@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { readPersistentCache, writePersistentCache, type PersistentCacheMeta } from "./persistent-cache.js";
+import { resolveToolPath } from "./path.js";
 
 type TypeScriptModule = typeof import("typescript");
 
@@ -215,7 +216,7 @@ function declarationFromNode(ts: TypeScriptModule, root: string, sourceFile: imp
 
 export async function buildSemanticIndex(options: { root: string; includeTests?: boolean; maxFiles?: number; name?: string }): Promise<SemanticIndex> {
   const ts = await loadTypeScript();
-  const root = path.resolve(options.root);
+  const root = resolveToolPath(options.root, { access: "read" });
   if (!ts) return { available: false, reason: "typescript package is not available at runtime", root, scannedFiles: 0, groups: [] };
   const maxFiles = Math.max(1, Math.min(2000, Math.trunc(options.maxFiles ?? 500)));
   const includeTests = options.includeTests === true;

@@ -6,21 +6,21 @@ Local MCP bridge for MauroPrime. The goal is to let ChatGPT operate MauroPrime t
 
 ```txt
 Project root: C:\dev\bridge-mcp
-Server: bridge-mcp v0.5.5
+Server: bridge-mcp v0.6.0
 Mode: HTTP production-candidate
 Bridge MCP: http://127.0.0.1:3001/mcp
 Bridge status: http://127.0.0.1:3001/status
 Tunnel admin: http://127.0.0.1:8081
 Tunnel profile: bridge-local-http
 Rollback profile: stdio through scripts/start-bridge-watchdog.ps1
-Tools exposed: 45
+Tools exposed: 68
 ```
 
 Do not commit keys, tunnel secrets, `node_modules`, `dist`, logs, SQLite metrics, sandbox files, or tunnel-client binaries.
 
 ## Known-good checks
 
-Known-good checks for v0.5.5:
+Known-good checks for v0.6.0:
 
 ```txt
 bridge_self_check -> ok true
@@ -29,7 +29,7 @@ npm run check -> OK
 npm run build -> OK
 scripts/test-bridge-http.ps1 -> OK
 scripts/test-bridge-regressions.ps1 -> OK
-http://127.0.0.1:3001/status -> bridge-mcp v0.5.5
+http://127.0.0.1:3001/status -> bridge-mcp v0.6.0
 http://127.0.0.1:8081/healthz -> live
 http://127.0.0.1:8081/readyz -> ready
 git -> ## main...origin/main
@@ -61,6 +61,9 @@ file-navigation
 file-writing
 process
 git
+project
+workspace
+cache
 bridge-ops
 metrics
 code-intelligence
@@ -106,15 +109,46 @@ Git:
 
 ```txt
 git_status
+git_diff
+git_log
+git_show_commit
+git_compare_branches
+git_create_branch
+git_restore_file
 git_set_remote
 git_commit_all
 git_push_current_branch
+```
+
+Project / safety:
+
+```txt
+path_policy_status
+project_profile
+project_profile_save
+```
+
+Workspace recovery:
+
+```txt
+workspace_snapshot
+workspace_diff
+workspace_rollback
+workspace_snapshot_list
+```
+
+Persistent cache:
+
+```txt
+cache_status
+cache_prune
 ```
 
 Bridge ops:
 
 ```txt
 tunnel_health
+bridge_health
 bridge_self_check
 bridge_verify_all
 bridge_request_restart
@@ -124,6 +158,7 @@ bridge_restart_status
 Metrics / visualizations:
 
 ```txt
+bridge_metrics_query
 bridge_metrics_status
 bridge_metrics_summary
 bridge_metrics_recent
@@ -139,6 +174,7 @@ impact_analysis
 find_duplicate_symbols
 import_graph
 dependency_graph
+call_graph
 find_dead_code
 ```
 
@@ -312,29 +348,30 @@ npm run verify:all
 
 ## Next recommended work
 
-### Completed in latest pass
+### Completed in v0.6.0
 
 ```txt
-call_graph tool added to code-graph module
-semantic/import/call graph persisted cache added under data/cache
-TOOLS.md regenerated from registry and now reports 47 tools
-bridge_verify_all now checks watchdog restart status and metrics status through MCP calls
-targeted regressions cover tsconfig paths, barrels, semantic aliases, cache hits, exported dead code, metrics privacy, and call_graph registration
+68 tools across 14 modules
+allowed-root / denied-path policy with canonical-path and sensitive-file checks
+bounded Git diff/log/show/compare/create/restore tools with secret filtering
+project profile detection and saved overrides
+workspace snapshot/diff/list/rollback with hash and traversal protection
+persistent cache TTL, size/count limits and dry-run pruning
+obsolete regex Python call-graph implementation removed
+TOOLS.md regenerated from the runtime registry
+regressions expanded for the full safety and workflow surface
 ```
 
 ### Next implementation work
 
 ```txt
-allowed roots / denied path policy
-cache pruning/TTL or SQLite-backed persistent cache
-richer call graph signatures and class/member call attribution
+exercise v0.6.0 on real projects and add only evidence-driven tools
+richer call graph signatures and class/member attribution
+optional snapshot/cache retention policies if storage usage warrants them
+consider SQLite cache storage only if JSON-file scale becomes measurable
 ```
 
-Reason: the bridge now has enough code intelligence for normal agentic work; the next high-value step is reducing blast radius and making long-lived cache maintenance explicit.
-
-### Later safety work
-
-Allowed roots / denied path policy is intentionally not implemented yet. Keep it as a separate design item so it does not destabilize the active bridge.
+The bridge now covers the normal inspect/edit/verify/Git loop plus bounded recovery primitives. Avoid another broad architecture rewrite until real project work exposes a concrete gap.
 
 ## Rollback
 

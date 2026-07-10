@@ -7,7 +7,7 @@ El objetivo es tener un puente local controlado por nosotros para operar filesys
 ## Estado actual
 
 ```text
-bridge-mcp v0.5.5
+bridge-mcp v0.6.0
 Mode: HTTP production-candidate
 Project root: C:\dev\bridge-mcp
 Bridge MCP: http://127.0.0.1:3001/mcp
@@ -69,6 +69,9 @@ file-navigation
 file-writing
 process
 git
+project
+workspace
+cache
 bridge-ops
 metrics
 code-intelligence
@@ -79,7 +82,7 @@ bridge-workflow
 
 ## Tools expuestas
 
-El runtime actual expone 53 tools.
+El runtime actual expone 68 tools.
 
 ### Core / lectura / navegacion
 
@@ -131,15 +134,54 @@ Robustez de procesos:
 
 ```text
 git_status
+git_diff
+git_log
+git_show_commit
+git_compare_branches
+git_create_branch
+git_restore_file
 git_set_remote
 git_commit_all
 git_push_current_branch
 ```
 
+Los comandos Git validan refs y rutas, limitan la salida y filtran archivos sensibles. `git_commit_all` hace preflight de archivos modificados, staged y untracked antes de ejecutar `git add`.
+
+### Proyecto / politica de rutas
+
+```text
+path_policy_status
+project_profile
+project_profile_save
+```
+
+`project_profile` detecta lenguajes, frameworks, package manager, scripts, comandos utiles, archivos importantes y estado Git. `project_profile_save` guarda overrides separados de los datos detectados en `.bridge-project.json`.
+
+### Snapshots de workspace
+
+```text
+workspace_snapshot
+workspace_diff
+workspace_rollback
+workspace_snapshot_list
+```
+
+Los snapshots se guardan fuera del proyecto, excluyen carpetas generadas y archivos sensibles, verifican hashes y rutas antes del rollback y rechazan restauraciones desde snapshots truncados.
+
+### Cache persistente
+
+```text
+cache_status
+cache_prune
+```
+
+El cache JSON tiene TTL, limites de bytes/entradas, poda automatica y `dryRun` para revisar eliminaciones antes de aplicarlas.
+
 ### Bridge / salud / restart
 
 ```text
 tunnel_health
+bridge_health
 bridge_self_check
 bridge_verify_all
 bridge_request_restart
@@ -149,6 +191,7 @@ bridge_restart_status
 ### Metricas / visualizaciones
 
 ```text
+bridge_metrics_query
 bridge_metrics_status
 bridge_metrics_summary
 bridge_metrics_recent
@@ -164,6 +207,7 @@ impact_analysis
 find_duplicate_symbols
 import_graph
 dependency_graph
+call_graph
 find_dead_code
 ```
 
@@ -235,7 +279,7 @@ Estado esperado:
 
 ```text
 bridge_self_check.ok = true
-server.version = 0.5.5
+server.version = 0.6.0
 tunnel.baseUrl = http://127.0.0.1:8081
 tunnel healthz = live
 tunnel readyz = ready
@@ -371,6 +415,10 @@ sandbox local
 ```
 
 Mantener secretos como variables de entorno de Windows o perfiles locales fuera de Git.
+
+La politica de rutas limita las tools explicitas a roots permitidos y bloquea rutas sensibles, enlaces simbolicos que escapen y archivos como `.env*`, credenciales de Git, claves SSH y tokens. Se configura con `BRIDGE_MCP_ALLOWED_ROOTS`, `BRIDGE_MCP_DENIED_PATHS` y `BRIDGE_MCP_DENIED_NAMES`; `path_policy_status` muestra la politica efectiva.
+
+Las tools Git filtran archivos sensibles de diffs y commits mostrados. `git_commit_all` se niega a stagear o commitear si detecta una ruta sensible pendiente. Esta politica reduce el blast radius, pero `run_command` y las terminales siguen siendo shell confiable dentro de un cwd permitido, no una sandbox del sistema operativo.
 
 ## Docs relacionadas
 

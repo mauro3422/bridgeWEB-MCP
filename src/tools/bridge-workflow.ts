@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import path from "node:path";
+import { resolveToolPath } from "./shared/path.js";
 import { z } from "zod";
 import type { BridgeToolModule } from "./types.js";
 
@@ -8,7 +8,7 @@ function tailText(text: string, maxChars: number) {
 }
 
 function runVerifyAll(projectRoot: string, expectedServerVersion: string, strictGit: boolean, timeoutMs: number) {
-  const resolvedRoot = path.resolve(projectRoot);
+  const resolvedRoot = resolveToolPath(projectRoot, { access: "cwd" });
   const args = [
     "-NoProfile",
     "-File",

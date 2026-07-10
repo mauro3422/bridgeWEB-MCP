@@ -1,5 +1,6 @@
 import { bridgeOpsToolModule } from "./tools/bridge-ops.js";
 import { bridgeWorkflowToolModule } from "./tools/bridge-workflow.js";
+import { cacheToolModule } from "./tools/cache-tools.js";
 import { codeGraphToolModule } from "./tools/code-graph.js";
 import { codeIntelligenceToolModule } from "./tools/code-intelligence.js";
 import { coreToolModule } from "./tools/core-tools.js";
@@ -8,14 +9,18 @@ import { fileWritingToolModule } from "./tools/file-writing.js";
 import { gitToolModule } from "./tools/git-tools.js";
 import { metricsToolModule } from "./tools/metrics-tools.js";
 import { processToolModule } from "./tools/process-tools.js";
+import { projectToolModule } from "./tools/project-tools.js";
 import { pythonToolModule } from "./tools/python-tools.js";
+import { workspaceToolModule } from "./tools/workspace-tools.js";
 import type { BridgeToolModule, BridgeToolRegistry, BridgeToolSchema } from "./tools/types.js";
 
 const readOnlyToolNames = new Set([
   "system_info", "list_dir", "read_text_file", "list_files_smart", "read_file_lines", "read_many_files", "search_files",
   "terminal_read", "terminal_list", "work_peek", "work_show",
-  "git_status", "tunnel_health", "bridge_health", "bridge_self_check", "bridge_restart_status",
+  "git_status", "git_diff", "git_log", "git_show_commit", "git_compare_branches",
+  "tunnel_health", "bridge_health", "bridge_self_check", "bridge_restart_status",
   "bridge_metrics_status", "bridge_metrics_summary", "bridge_metrics_recent", "bridge_metrics_query", "bridge_visualization_catalog", "bridge_visualize_metrics",
+  "path_policy_status", "project_profile", "workspace_diff", "workspace_snapshot_list", "cache_status",
   "analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code",
   "python_validate", "python_symbols", "python_impact_analysis", "python_import_graph", "python_call_graph", "python_dead_code", "python_test_plan", "pytest_testmon",
 ]);
@@ -23,7 +28,9 @@ const readOnlyToolNames = new Set([
 const destructiveToolNames = new Set([
   "write_text_file", "apply_patch", "edit_lines", "run_command", "terminal_start", "terminal_write", "terminal_stop",
   "work_once", "work_begin", "work_feed", "work_finish",
-  "git_set_remote", "git_commit_all", "git_push_current_branch", "bridge_request_restart", "bridge_verify_all",
+  "git_create_branch", "git_restore_file", "git_set_remote", "git_commit_all", "git_push_current_branch",
+  "project_profile_save", "workspace_snapshot", "workspace_rollback", "cache_prune",
+  "bridge_request_restart", "bridge_verify_all",
 ]);
 
 function annotateTool(tool: BridgeToolSchema): BridgeToolSchema {
@@ -48,13 +55,9 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
   for (const module of modules) {
     moduleNames.push(module.name);
     for (const tool of module.tools) {
-      if (handlers.has(tool.name)) {
-        throw new Error(`Duplicate bridge tool registered: ${tool.name}`);
-      }
+      if (handlers.has(tool.name)) throw new Error(`Duplicate bridge tool registered: ${tool.name}`);
       const handler = module.handlers[tool.name];
-      if (!handler) {
-        throw new Error(`Tool module '${module.name}' declares '${tool.name}' without a handler.`);
-      }
+      if (!handler) throw new Error(`Tool module '${module.name}' declares '${tool.name}' without a handler.`);
       tools.push(annotateTool(tool));
       handlers.set(tool.name, handler);
     }
@@ -64,9 +67,7 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
     tools,
     modules: moduleNames,
     riskSummary: riskSummary(tools),
-    has(name: string) {
-      return handlers.has(name);
-    },
+    has(name: string) { return handlers.has(name); },
     async call(name: string, args: Record<string, unknown>) {
       const handler = handlers.get(name);
       if (!handler) throw new Error(`Unknown modular tool: ${name}`);
@@ -82,6 +83,9 @@ export function createDefaultToolRegistry(): BridgeToolRegistry {
     fileWritingToolModule,
     processToolModule,
     gitToolModule,
+    projectToolModule,
+    workspaceToolModule,
+    cacheToolModule,
     bridgeOpsToolModule,
     metricsToolModule,
     codeIntelligenceToolModule,

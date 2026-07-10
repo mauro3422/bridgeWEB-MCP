@@ -70,7 +70,7 @@ export async function readTextSnapshot(filePath: string, maxBytes = DEFAULT_TEXT
 }
 
 export async function writeTextAndVerify(filePath: string, content: string, append = false) {
-  const resolved = resolveToolPath(filePath);
+  const resolved = resolveToolPath(filePath, { access: "write" });
   await fs.mkdir(path.dirname(resolved), { recursive: true });
   const before = await fs.stat(resolved).then(
     async () => await readTextSnapshot(resolved),

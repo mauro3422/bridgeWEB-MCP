@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { readPersistentCache, writePersistentCache, type PersistentCacheMeta } from "./persistent-cache.js";
+import { resolveToolPath } from "./path.js";
 import { collectProjectTextFiles, type ScannedTextFile } from "./project-scan.js";
 import { analyzeTypeScriptSource, findTypeScriptIdentifierReferences, type TypeScriptImport, type TypeScriptSymbol } from "./typescript-intelligence.js";
 
@@ -235,7 +236,7 @@ async function analyzeFile(file: ScannedTextFile) {
 }
 
 export async function buildImportGraph(options: { root: string; filePattern?: string; includeTests?: boolean; includeExternal?: boolean; maxFiles?: number; maxCycles?: number; resolutionEngine?: ImportResolutionEngine }): Promise<ImportGraphResult> {
-  const root = path.resolve(options.root);
+  const root = resolveToolPath(options.root, { access: "read" });
   const resolutionEngine = options.resolutionEngine ?? "auto";
   const scan = await collectProjectTextFiles({ root, filePattern: options.filePattern ?? "*.ts", includeTests: options.includeTests === true, maxFiles: options.maxFiles ?? 500 });
   const storeKey = importGraphStoreKey(root, scan, options);

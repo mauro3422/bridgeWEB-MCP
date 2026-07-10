@@ -76,7 +76,7 @@ export function assertCommandAllowed(command: string) {
 
 export async function runShellCommand(command: string, cwd?: string, timeoutMs = DEFAULT_TIMEOUT_MS) {
   assertCommandAllowed(command);
-  const resolvedCwd = cwd ? resolveToolPath(cwd) : process.cwd();
+  const resolvedCwd = resolveToolPath(cwd ?? process.cwd(), { access: "cwd" });
   if (!(await fileExists(resolvedCwd))) throw new Error(`cwd does not exist: ${resolvedCwd}`);
   return await new Promise<Record<string, unknown>>((resolve) => {
     const startedAt = Date.now();
@@ -98,7 +98,7 @@ export async function runShellCommand(command: string, cwd?: string, timeoutMs =
 }
 
 export async function runProcess(command: string, args: string[], cwd?: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Record<string, unknown>> {
-  const resolvedCwd = cwd ? resolveToolPath(cwd) : process.cwd();
+  const resolvedCwd = resolveToolPath(cwd ?? process.cwd(), { access: "cwd" });
   if (!(await fileExists(resolvedCwd))) throw new Error(`cwd does not exist: ${resolvedCwd}`);
   const commandLine = [command, ...args].join(" ");
   return await new Promise((resolve) => {

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { readPersistentCache, writePersistentCache, type PersistentCacheMeta } from "./persistent-cache.js";
+import { resolveToolPath } from "./path.js";
 
 type TypeScriptModule = typeof import("typescript");
 
@@ -242,7 +243,7 @@ function cacheKey(root: string, tsconfigPath: string | undefined, includeTests: 
 
 export async function buildCallGraph(options: { root: string; includeTests?: boolean; includeExternal?: boolean; maxFiles?: number; maxCycles?: number }): Promise<CallGraphResult> {
   const ts = await loadTypeScript();
-  const root = path.resolve(options.root);
+  const root = resolveToolPath(options.root, { access: "read" });
   if (!ts) return { available: false, reason: "typescript package is not available at runtime", root, scannedFiles: 0, truncated: false, nodes: [], edges: [], internalEdges: [], externalCalls: [], unresolvedCalls: [], cycles: [], mostCalled: [], mostCalling: [] };
 
   const includeTests = options.includeTests === true;

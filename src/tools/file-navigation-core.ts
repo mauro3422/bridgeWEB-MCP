@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { resolveToolPath } from "./shared/path.js";
 
 const MAX_ANALYZE_BYTES = 512 * 1024;
 const MAX_FILE_LIST = 200;
@@ -41,8 +42,7 @@ export type SearchFilesArgs = {
 export type ListFilesSmartArgs = { path: string; depth?: number; pattern?: string; showImports?: boolean };
 
 function resolveInputPath(inputPath: string): string {
-  if (!inputPath || typeof inputPath !== "string") throw new Error("Path must be a non-empty string.");
-  return path.resolve(inputPath);
+  return resolveToolPath(inputPath, { access: "read" });
 }
 
 function clampInt(value: unknown, fallback: number, min: number, max: number): number {
