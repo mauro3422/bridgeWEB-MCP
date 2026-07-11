@@ -29,10 +29,14 @@ try {
     }),
   });
   sessionId = initResponse.headers.get("mcp-session-id") ?? undefined;
-  await initResponse.text();
+  const initText = await initResponse.text();
   if (!initResponse.ok || !sessionId) {
     failureCode = 3;
     throw new Error(`initialize failed status=${initResponse.status} session=${sessionId ?? "missing"}`);
+  }
+  if (!initText.includes("workflow_guide_recommend") || !initText.includes("repeatable multi-step process")) {
+    failureCode = 7;
+    throw new Error("initialize response is missing the reusable workflow-guide instructions");
   }
 
   const listResponse = await fetch(base, {

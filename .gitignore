@@ -54,4 +54,7 @@ yarn-error.log*
 pnpm-debug.log*
 # Runtime metrics database
 /data/
-`n# Python bytecode`n__pycache__/`n*.pyc
+
+# Python bytecode
+__pycache__/
+*.pyc

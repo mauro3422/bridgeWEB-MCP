@@ -159,7 +159,7 @@ Current bridge assumptions:
 
 ```txt
 Project root: C:\dev\bridge-mcp
-Server: bridge-mcp v0.6.1
+Server: bridge-mcp v0.6.2
 Active profile: bridge-local-http
 Bridge MCP: http://127.0.0.1:3001/mcp
 Tunnel admin: http://127.0.0.1:8081

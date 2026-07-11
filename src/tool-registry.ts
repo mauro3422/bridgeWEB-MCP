@@ -8,11 +8,13 @@ import { coreToolModule } from "./tools/core-tools.js";
 import { fileNavigationToolModule } from "./tools/file-navigation.js";
 import { fileWritingToolModule } from "./tools/file-writing.js";
 import { gitToolModule } from "./tools/git-tools.js";
+import { imageToolModule } from "./tools/image-tools.js";
 import { metricsToolModule } from "./tools/metrics-tools.js";
 import { processToolModule } from "./tools/process-tools.js";
 import { projectToolModule } from "./tools/project-tools.js";
 import { pythonToolModule } from "./tools/python-tools.js";
 import { workspaceToolModule } from "./tools/workspace-tools.js";
+import { workflowGuideToolModule } from "./tools/workflow-guide-tools.js";
 import type { BridgeToolModule, BridgeToolRegistry, BridgeToolSchema } from "./tools/types.js";
 
 const readOnlyToolNames = new Set([
@@ -23,7 +25,8 @@ const readOnlyToolNames = new Set([
   "bridge_metrics_status", "bridge_metrics_summary", "bridge_metrics_recent", "bridge_metrics_query", "bridge_visualization_catalog", "bridge_visualize_metrics",
   "path_policy_status", "project_profile", "workspace_diff", "workspace_snapshot_list", "cache_status",
   "analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code",
-  "blender_status", "blender_scene_info",
+  "workflow_guide_recommend", "workflow_guide_load",
+  "blender_status", "blender_scene_info", "blender_character_loop_status",
   "python_validate", "python_symbols", "python_impact_analysis", "python_import_graph", "python_call_graph", "python_dead_code", "python_test_plan", "pytest_testmon",
 ]);
 
@@ -32,8 +35,9 @@ const destructiveToolNames = new Set([
   "work_once", "work_begin", "work_feed", "work_finish",
   "git_create_branch", "git_restore_file", "git_set_remote", "git_commit_all", "git_push_current_branch",
   "project_profile_save", "workspace_snapshot", "workspace_rollback", "cache_prune",
-  "bridge_request_restart", "bridge_verify_all",
-  "blender_open", "blender_viewport_screenshot", "blender_execute_code", "blender_batch_script",
+  "bridge_request_restart", "bridge_verify_all", "workflow_guide_create",
+  "image_asset_save", "image_character_views_prepare",
+  "blender_open", "blender_viewport_screenshot", "blender_execute_code", "blender_batch_script", "blender_store_reference_image", "blender_setup_character_references",
 ]);
 
 function annotateTool(tool: BridgeToolSchema): BridgeToolSchema {
@@ -84,6 +88,8 @@ export function createDefaultToolRegistry(): BridgeToolRegistry {
     coreToolModule,
     fileNavigationToolModule,
     fileWritingToolModule,
+    workflowGuideToolModule,
+    imageToolModule,
     processToolModule,
     gitToolModule,
     projectToolModule,

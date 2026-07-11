@@ -7,7 +7,7 @@ El objetivo es tener un puente local controlado por nosotros para operar filesys
 ## Estado actual
 
 ```text
-bridge-mcp v0.6.1
+bridge-mcp v0.6.2
 Mode: HTTP production-candidate
 Project root: C:\dev\bridge-mcp
 Bridge MCP: http://127.0.0.1:3001/mcp
@@ -279,7 +279,7 @@ Estado esperado:
 
 ```text
 bridge_self_check.ok = true
-server.version = 0.6.1
+server.version = 0.6.2
 tunnel.baseUrl = http://127.0.0.1:8081
 tunnel healthz = live
 tunnel readyz = ready
@@ -301,7 +301,7 @@ Limites y seguridad HTTP:
 
 ```text
 BRIDGE_MCP_HTTP_MAX_SESSIONS=64
-BRIDGE_MCP_HTTP_MAX_BODY_BYTES=1048576
+BRIDGE_MCP_HTTP_MAX_BODY_BYTES=16777216
 BRIDGE_MCP_HTTP_SESSION_IDLE_MS=1800000
 BRIDGE_MCP_HTTP_CAPACITY_RECLAIM_IDLE_MS=15000
 BRIDGE_MCP_HTTP_ANON_TTL_MS=60000

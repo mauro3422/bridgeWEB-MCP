@@ -61,3 +61,16 @@ BRIDGE_BLENDER_PORT
 - `blender_execute_code`, `blender_open`, screenshot writes and batch scripts
   are marked destructive in MCP tool annotations.
 - Save important `.blend` files before large automated operations.
+
+## Character concept loop
+
+The image and Blender tools now form a resumable pipeline:
+
+1. Generate one image or a batch in ChatGPT.
+2. Persist the results with `image_asset_save`.
+3. Build and open the four-view scene with `blender_setup_character_references`.
+4. Resume or diagnose the pipeline with `blender_character_loop_status`.
+
+`image_asset_save` accepts between one and eight PNG/JPEG/WebP items in the same call. It validates file signatures, records hashes and dimensions, writes atomically, and can create a JSON manifest containing roles, prompts, sources and arbitrary metadata.
+
+`blender_setup_character_references` validates front, side, back and three-quarter paths, creates a `.blend` scene through the versioned `setup_character_references.py` script, writes a `.loop.json` checkpoint, opens Blender on an available local port, and verifies the socket connection before returning.

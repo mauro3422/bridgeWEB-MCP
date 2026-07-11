@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "name": "character-concept-blender",
+  "title": "Character Concept to Blender",
+  "description": "Create consistent front, side, back, and three-quarter character concept views, persist and normalize the images, and prepare a resumable Blender reference scene for low-poly game-character modeling.",
+  "activation": {
+    "keywords": [
+      "character concept",
+      "personaje",
+      "turnaround",
+      "front side back",
+      "blender reference",
+      "modelo 3d",
+      "low poly",
+      "image to 3d",
+      "boceto personaje",
+      "riggable character"
+    ],
+    "phrases": [
+      "crear un personaje para blender",
+      "hacer las vistas del personaje",
+      "pasar el personaje a blender",
+      "crear frente costado espalda",
+      "generar el modelo low poly"
+    ],
+    "negativeKeywords": [
+      "paisaje",
+      "logo",
+      "arquitectura",
+      "producto"
+    ],
+    "examples": [
+      "Generemos cuatro vistas consistentes de este personaje y abramos las referencias en Blender.",
+      "Quiero crear un furry low poly para el juego usando imágenes y Blender.",
+      "Arreglá la vista lateral para que coincida con el frente y después prepará el blend."
+    ]
+  },
+  "entrypoint": "GUIDE.md",
+  "phases": {
+    "brief": "templates/character-brief.example.json",
+    "front": "prompts/front.md",
+    "derived-view": "prompts/derived-view.md",
+    "repair-view": "prompts/repair-view.md",
+    "save": "GUIDE.md",
+    "prepare": "GUIDE.md",
+    "blender": "GUIDE.md",
+    "resume": "GUIDE.md"
+  },
+  "recommendedTools": [
+    "image_asset_save",
+    "image_character_views_prepare",
+    "blender_setup_character_references",
+    "blender_viewport_screenshot",
+    "blender_character_loop_status"
+  ],
+  "scopeNotes": "Global Bridge MCP guide. A project-specific guide with the same name may override it when projectRoot is supplied."
+}

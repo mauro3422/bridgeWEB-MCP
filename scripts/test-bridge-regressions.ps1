@@ -20,9 +20,9 @@ Set-Location -LiteralPath $ProjectRoot
 Invoke-Check "version bump is consistent" {
   $packageJson = Get-Content -LiteralPath "package.json" -Raw | ConvertFrom-Json
   $configText = Get-Content -LiteralPath "src\config.ts" -Raw
-  if ($packageJson.version -ne "0.6.1") { throw "package.json version is $($packageJson.version), expected 0.6.1" }
-  if ($configText -notmatch 'SERVER_VERSION = "0\.6\.1"') { throw "src/config.ts does not report SERVER_VERSION 0.6.1" }
-  Write-Host "  OK 0.6.1"
+  if ($packageJson.version -ne "0.6.2") { throw "package.json version is $($packageJson.version), expected 0.6.2" }
+  if ($configText -notmatch 'SERVER_VERSION = "0\.6\.2"') { throw "src/config.ts does not report SERVER_VERSION 0.6.2" }
+  Write-Host "  OK 0.6.2"
 }
 
 Invoke-Check "tunnel admin default stays on HTTP profile port" {

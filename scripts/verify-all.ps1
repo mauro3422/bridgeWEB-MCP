@@ -1,6 +1,6 @@
 param(
   [string]$ProjectRoot = "C:\dev\bridge-mcp",
-  [string]$ExpectedServerVersion = "0.6.1",
+  [string]$ExpectedServerVersion = "0.6.2",
   [switch]$StrictGit
 )
 
@@ -60,7 +60,7 @@ $steps += Invoke-VerifyStep "metrics status" {
   node .\scripts\verify-mcp-call.mjs bridge_metrics_status "{}" sqliteAvailable jsonlPath
 }
 $steps += Invoke-VerifyStep "tools:list sanity" {
-  node .\scripts\verify-mcp-tools-list.mjs system_info run_command git_status bridge_self_check bridge_metrics_status bridge_verify_all read_file_lines edit_lines impact_analysis dependency_graph import_graph call_graph find_dead_code python_validate python_symbols python_impact_analysis python_import_graph python_dead_code python_test_plan pytest_testmon blender_status blender_open blender_scene_info blender_viewport_screenshot blender_execute_code blender_batch_script
+  node .\scripts\verify-mcp-tools-list.mjs system_info run_command git_status bridge_self_check bridge_metrics_status bridge_verify_all read_file_lines edit_lines impact_analysis dependency_graph import_graph call_graph find_dead_code python_validate python_symbols python_impact_analysis python_import_graph python_dead_code python_test_plan pytest_testmon workflow_guide_recommend workflow_guide_load workflow_guide_create image_asset_save image_character_views_prepare blender_status blender_open blender_scene_info blender_viewport_screenshot blender_execute_code blender_batch_script blender_store_reference_image blender_setup_character_references blender_character_loop_status
 }
 $steps += Invoke-VerifyStep "git status" {
   git status --short --branch

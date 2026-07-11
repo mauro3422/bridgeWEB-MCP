@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "name": "workflow-guide-builder",
+  "title": "Workflow Guide Builder",
+  "description": "Design, create, validate, and maintain reusable skill-like workflow guides for ChatGPT through Mauro's Bridge MCP. Use when a repeated process should become a reusable guide with activation triggers, phases, recommended tools, and resumable verification.",
+  "activation": {
+    "keywords": [
+      "skill",
+      "workflow guide",
+      "guia reutilizable",
+      "pipeline reutilizable",
+      "plantilla de proceso",
+      "activar automaticamente",
+      "cuando detecte un patron",
+      "crear una skill",
+      "guardar este proceso",
+      "usar esto a futuro"
+    ],
+    "phrases": [
+      "crea esto como una skill",
+      "guarda este proceso para futuras veces",
+      "cuando detectes este patron",
+      "recomienda crear una skill",
+      "converti este workflow en una guia"
+    ],
+    "negativeKeywords": [
+      "una sola vez",
+      "no guardar",
+      "solo ejemplo"
+    ],
+    "examples": [
+      "Cada vez que hagamos un personaje usá este pipeline y recomendá guardarlo como skill.",
+      "Creá una guía reutilizable para este proceso de pruebas y despliegue.",
+      "Cuando detectes una tarea repetitiva, buscá una guía existente o proponé crear una nueva."
+    ]
+  },
+  "entrypoint": "GUIDE.md",
+  "phases": {
+    "detect": "phases/detect.md",
+    "design": "phases/design.md",
+    "create": "phases/create.md",
+    "validate": "phases/validate.md",
+    "maintain": "phases/maintain.md"
+  },
+  "recommendedTools": [
+    "workflow_guide_recommend",
+    "workflow_guide_load",
+    "workflow_guide_create"
+  ],
+  "scopeNotes": "Global meta-guide for creating and maintaining other global or project-scoped workflow guides."
+}

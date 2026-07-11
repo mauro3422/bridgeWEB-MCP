@@ -15,7 +15,7 @@ param(
   [int]$AnonymousTransportTtlMs = 60000,
   [int]$CleanupIntervalMs = 60000,
   [int]$MaxSessions = 64,
-  [int]$MaxBodyBytes = 1048576,
+  [int]$MaxBodyBytes = 16777216,
   [switch]$Build,
   [switch]$NoTunnel,
   [switch]$Once,

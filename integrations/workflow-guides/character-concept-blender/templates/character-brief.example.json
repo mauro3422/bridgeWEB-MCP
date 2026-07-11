@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "character": {
+    "name": "chat-fox",
+    "species": "anthropomorphic fox",
+    "designMode": "stylized low-poly friendly",
+    "bodyProportions": {
+      "headToBodyRatio": "1:5.5",
+      "build": "slim mascot humanoid",
+      "shoulders": "narrow",
+      "hips": "moderate",
+      "hands": "four rounded digits",
+      "feet": "compact digitigrade paws"
+    },
+    "identityLock": {
+      "furPrimary": "teal/cyan",
+      "furSecondary": "white muzzle, cheeks, chest, belly, inner ears, tail tip",
+      "eyes": "large teal eyes",
+      "ears": "two large pointed fox ears",
+      "muzzle": "short rounded fox muzzle",
+      "tail": "one large fluffy tail, teal with white tip",
+      "markings": [
+        "glowing geometric forehead glyph",
+        "glowing circuit lines on forearms",
+        "glowing circuit lines on lower legs",
+        "glowing constellation-like tail markings"
+      ],
+      "clothing": "none",
+      "accessories": "none"
+    },
+    "modeling": {
+      "pose": "relaxed A-pose",
+      "targetTriangles": 10000,
+      "textureResolution": 1024,
+      "maxMaterials": 2,
+      "rigFamily": "shared humanoid biped with optional tail chain",
+      "rootMotion": false
+    }
+  },
+  "generation": {
+    "mode": "quality",
+    "background": "pure white",
+    "renderStyle": "clean soft 3D-like concept render",
+    "views": ["front", "side", "back", "three-quarter"],
+    "negativeConstraints": [
+      "no extra limbs",
+      "no extra tail",
+      "no alternate outfit",
+      "no props",
+      "no text",
+      "no labels",
+      "no cropped feet",
+      "no cropped ears",
+      "no dramatic perspective",
+      "no environment"
+    ]
+  }
+}
