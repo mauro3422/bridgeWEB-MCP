@@ -1,3 +1,4 @@
+import { blenderToolModule } from "./tools/blender-tools.js";
 import { bridgeOpsToolModule } from "./tools/bridge-ops.js";
 import { bridgeWorkflowToolModule } from "./tools/bridge-workflow.js";
 import { cacheToolModule } from "./tools/cache-tools.js";
@@ -22,6 +23,7 @@ const readOnlyToolNames = new Set([
   "bridge_metrics_status", "bridge_metrics_summary", "bridge_metrics_recent", "bridge_metrics_query", "bridge_visualization_catalog", "bridge_visualize_metrics",
   "path_policy_status", "project_profile", "workspace_diff", "workspace_snapshot_list", "cache_status",
   "analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code",
+  "blender_status", "blender_scene_info",
   "python_validate", "python_symbols", "python_impact_analysis", "python_import_graph", "python_call_graph", "python_dead_code", "python_test_plan", "pytest_testmon",
 ]);
 
@@ -31,6 +33,7 @@ const destructiveToolNames = new Set([
   "git_create_branch", "git_restore_file", "git_set_remote", "git_commit_all", "git_push_current_branch",
   "project_profile_save", "workspace_snapshot", "workspace_rollback", "cache_prune",
   "bridge_request_restart", "bridge_verify_all",
+  "blender_open", "blender_viewport_screenshot", "blender_execute_code", "blender_batch_script",
 ]);
 
 function annotateTool(tool: BridgeToolSchema): BridgeToolSchema {
@@ -91,6 +94,7 @@ export function createDefaultToolRegistry(): BridgeToolRegistry {
     codeIntelligenceToolModule,
     codeGraphToolModule,
     pythonToolModule,
+    blenderToolModule,
     bridgeWorkflowToolModule,
   ]);
 }

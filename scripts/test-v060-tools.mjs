@@ -15,9 +15,10 @@ const root = path.join(sandbox, 'project');
 fs.mkdirSync(root, {recursive:true});
 
 try {
-  if (registry.tools.length !== 68) throw new Error(`expected 68 tools, got ${registry.tools.length}`);
+  if (registry.tools.length !== 74) throw new Error(`expected 74 tools, got ${registry.tools.length}`);
   if (registry.riskSummary.neutral.length !== 0) throw new Error(`neutral tools remain: ${registry.riskSummary.neutral.join(', ')}`);
-  for (const moduleName of ['project','workspace','cache']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
+  for (const moduleName of ['project','workspace','cache','blender']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
+  for (const toolName of ['blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_execute_code','blender_batch_script']) if (!registry.has(toolName)) throw new Error(`missing Blender tool ${toolName}`);
 
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({name:'fixture-project',scripts:{build:'tsc',test:'node test.js'},devDependencies:{typescript:'1.0.0'}}, null, 2));
   fs.writeFileSync(path.join(root, 'app.txt'), 'original\n');
