@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-v060-regression-'));
 process.env.BRIDGE_MCP_CACHE_DIR = path.join(sandbox, 'cache-store');
 process.env.BRIDGE_MCP_SNAPSHOT_DIR = path.join(sandbox, 'snapshot-store');
+process.env.BRIDGE_MCP_BINARY_UPLOAD_DIR = path.join(sandbox, 'binary-upload-store');
 
 const { createDefaultToolRegistry } = await import('../dist/tool-registry.js');
 const { writePersistentCache } = await import('../dist/tools/shared/persistent-cache.js');
@@ -15,10 +17,10 @@ const root = path.join(sandbox, 'project');
 fs.mkdirSync(root, {recursive:true});
 
 try {
-  if (registry.tools.length !== 83) throw new Error(`expected 83 tools, got ${registry.tools.length}`);
+  if (registry.tools.length !== 91) throw new Error(`expected 91 tools, got ${registry.tools.length}`);
   if (registry.riskSummary.neutral.length !== 0) throw new Error(`neutral tools remain: ${registry.riskSummary.neutral.join(', ')}`);
-  for (const moduleName of ['project','workspace','cache','workflow-guides','images','blender']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
-  for (const toolName of ['project_context_load','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','image_asset_save','image_character_views_prepare','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_execute_code','blender_batch_script','blender_setup_character_references','blender_character_loop_status']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/image/Blender tool ${toolName}`);
+  for (const moduleName of ['project','workspace','cache','workflow-guides','binary-files','images','blender']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
+  for (const toolName of ['project_context_load','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_asset_save','image_character_views_prepare','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_execute_code','blender_batch_script','blender_setup_character_references','blender_character_loop_status']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/binary/image/Blender tool ${toolName}`);
 
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({name:'fixture-project',scripts:{build:'tsc',test:'node test.js'},devDependencies:{typescript:'1.0.0'}}, null, 2));
   fs.writeFileSync(path.join(root, 'app.txt'), 'original\n');
@@ -109,6 +111,53 @@ try {
   });
   if (preparedViews.stage !== 'views_normalized' || !fs.existsSync(preparedManifest) || !fs.existsSync(path.join(preparedDir,'fixture_front.jpg')) || preparedViews.manifest.items.length !== 4) throw new Error('character view preparation failed');
 
+  const directBytes = Buffer.from('binary-direct-\u0000-data', 'utf8');
+  const directSha256 = crypto.createHash('sha256').update(directBytes).digest('hex');
+  const directPath = path.join(root, 'binary', 'direct.bin');
+  const directWrite = await call('binary_file_write', {
+    outputPath:directPath,
+    data:directBytes.toString('base64url'),
+    encoding:'base64url',
+    expectedBytes:directBytes.length,
+    expectedSha256:directSha256,
+  });
+  if (directWrite.bytes !== directBytes.length || directWrite.sha256 !== directSha256 || !fs.readFileSync(directPath).equals(directBytes)) throw new Error('direct binary write failed');
+  let malformedBase64Rejected = false;
+  try { await call('binary_file_write', {outputPath:path.join(root,'binary','invalid.bin'),data:'AB==',encoding:'base64'}); } catch (error) { malformedBase64Rejected = /truncated|non-canonical|invalid/i.test(String(error)); }
+  if (!malformedBase64Rejected) throw new Error('malformed base64 was not rejected');
+  const directInfo = await call('binary_file_info', {path:directPath});
+  if (directInfo.bytes !== directBytes.length || directInfo.sha256 !== directSha256 || directInfo.mime !== 'application/octet-stream') throw new Error('binary file info failed');
+  const directChunk = await call('binary_file_read_chunk', {path:directPath,offset:2,maxBytes:7,encoding:'hex'});
+  if (directChunk.bytesRead !== 7 || directChunk.nextOffset !== 9 || Buffer.from(directChunk.data,'hex').toString('utf8') !== directBytes.subarray(2,9).toString('utf8')) throw new Error('binary chunk read failed');
+
+  const uploadBytes = Buffer.alloc(50000);
+  for (let index = 0; index < uploadBytes.length; index += 1) uploadBytes[index] = index % 251;
+  const uploadSha256 = crypto.createHash('sha256').update(uploadBytes).digest('hex');
+  const uploadPath = path.join(root, 'binary', 'resumable.bin');
+  const upload = await call('binary_upload_begin', {
+    outputPath:uploadPath,
+    encoding:'base64',
+    expectedBytes:uploadBytes.length,
+    expectedSha256:uploadSha256,
+  });
+  const uploadText = uploadBytes.toString('base64');
+  let sequence = 0;
+  for (let offset = 0; offset < uploadText.length; offset += 4096) {
+    const appended = await call('binary_upload_append', {uploadId:upload.uploadId,sequence,chunk:uploadText.slice(offset,offset+4096)});
+    sequence += 1;
+    if (appended.nextSequence !== sequence) throw new Error('binary upload sequence did not advance');
+  }
+  const uploadStatus = await call('binary_upload_status', {uploadId:upload.uploadId});
+  if (uploadStatus.nextSequence !== sequence || uploadStatus.encodedChars !== uploadText.length) throw new Error('binary upload status failed');
+  const uploadFinished = await call('binary_upload_finish', {uploadId:upload.uploadId});
+  if (uploadFinished.sha256 !== uploadSha256 || !fs.readFileSync(uploadPath).equals(uploadBytes)) throw new Error('resumable binary upload failed');
+
+  const abortUpload = await call('binary_upload_begin', {outputPath:path.join(root,'binary','abort.bin'),encoding:'hex'});
+  let sequenceRejected = false;
+  try { await call('binary_upload_append', {uploadId:abortUpload.uploadId,sequence:1,chunk:'00'}); } catch (error) { sequenceRejected = /sequence mismatch/i.test(String(error)); }
+  if (!sequenceRejected) throw new Error('binary upload sequence guard failed');
+  const aborted = await call('binary_upload_abort', {uploadId:abortUpload.uploadId});
+  if (!aborted.aborted || fs.existsSync(path.join(root,'binary','abort.bin'))) throw new Error('binary upload abort failed');
 
   for (const sensitiveName of ['.env', '.env.development']) {
     let denied = false;

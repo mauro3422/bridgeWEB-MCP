@@ -25,6 +25,7 @@ export function createBridgeServer() {
         "This server controls MauroPrime. When substantial work begins in a known repository, call project_context_load once with the project root and current task so project rules, context, state, and workflow guides become active.",
         "When a user describes a repeatable multi-step process, says it should happen every time or in future, asks for a skill/pipeline/template/hook, or an existing reusable workflow may apply, call workflow_guide_recommend. Load a strong match with workflow_guide_load. Recommend creating a new guide when a repeatable pattern is detected without a strong match, but call workflow_guide_create only when the user asks or approves.",
         "For character concept-to-Blender work, load the character-concept-blender guide, use ChatGPT image generation for visual creation or editing, persist images with image_asset_save, normalize four views with image_character_views_prepare, create the Blender reference scene with blender_setup_character_references, and verify through tool results.",
+        "For arbitrary binary payloads, never route base64 through write_text_file. Use binary_file_write for small files or binary_upload_begin/append/status/finish for resumable large transfers, then verify with binary_file_info.",
         "Never claim that a guide, file, image, build, Blender scene, or other side effect exists until a tool result confirms it.",
       ].join(" "),
     },

@@ -348,30 +348,33 @@ npm run verify:all
 
 ## Next recommended work
 
-### Completed in v0.6.0
+### Completed through v0.6.4
 
 ```txt
-68 tools across 14 modules
+91 tools across 18 modules
+project context bootstrap and reusable workflow guides
+image asset persistence and character-view normalization
+interactive/batch Blender control and character reference scenes
+safe binary file info/read/write tools
+resumable binary uploads with ordered chunks, status, finish and abort
+byte/SHA-256 validation, atomic commits and stale-session cleanup
 allowed-root / denied-path policy with canonical-path and sensitive-file checks
-bounded Git diff/log/show/compare/create/restore tools with secret filtering
-project profile detection and saved overrides
-workspace snapshot/diff/list/rollback with hash and traversal protection
-persistent cache TTL, size/count limits and dry-run pruning
-obsolete regex Python call-graph implementation removed
-TOOLS.md regenerated from the runtime registry
-regressions expanded for the full safety and workflow surface
+bounded Git, workspace recovery, cache, metrics and code-analysis tools
+TOOLS.md generated from the runtime registry
+regressions and live HTTP verification expanded for the full surface
 ```
 
 ### Next implementation work
 
 ```txt
-exercise v0.6.0 on real projects and add only evidence-driven tools
-richer call graph signatures and class/member attribution
-optional snapshot/cache retention policies if storage usage warrants them
-consider SQLite cache storage only if JSON-file scale becomes measurable
+resume the CBAnimal character pipeline using the binary upload tools
+exercise v0.6.4 on real image, ZIP and GLB transfers
+add evidence-driven convenience tools only when repeated friction appears
+consider native connector file parameters if the MCP/client surface exposes them
+continue improving code graphs only from real project failures
 ```
 
-The bridge now covers the normal inspect/edit/verify/Git loop plus bounded recovery primitives. Avoid another broad architecture rewrite until real project work exposes a concrete gap.
+The bridge covers the normal inspect/edit/verify/Git loop, project workflow guides, image/Blender work and resumable binary transport. Avoid broad architecture rewrites until real project usage exposes a concrete gap.
 
 ## Rollback
 

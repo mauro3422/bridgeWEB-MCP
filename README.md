@@ -7,7 +7,7 @@ El objetivo es tener un puente local controlado por nosotros para operar filesys
 ## Estado actual
 
 ```text
-bridge-mcp v0.6.3
+bridge-mcp v0.6.4
 Mode: HTTP production-candidate
 Project root: C:\dev\bridge-mcp
 Bridge MCP: http://127.0.0.1:3001/mcp
@@ -101,7 +101,7 @@ Las guias globales viven en `integrations/workflow-guides/`. Las guias del proye
 
 ## Tools expuestas
 
-El runtime actual expone 83 tools.
+El runtime actual expone 91 tools.
 
 ### Core / lectura / navegacion
 
@@ -124,6 +124,21 @@ edit_lines
 ```
 
 `write_text_file`, `apply_patch` y `edit_lines` hacen verificacion postflight con hash/bytes/contexto cuando corresponde.
+
+### Archivos binarios
+
+```text
+binary_file_info
+binary_file_read_chunk
+binary_file_write
+binary_upload_begin
+binary_upload_append
+binary_upload_status
+binary_upload_finish
+binary_upload_abort
+```
+
+`binary_file_write` cubre payloads pequenos. Para imagenes, ZIP, GLB u otros binarios grandes, usar el flujo reanudable `begin -> append -> status -> finish`, con secuencias, validacion de bytes/SHA-256 y escritura atomica. No enviar base64 a `write_text_file`.
 
 ### Ejecucion / terminal
 
@@ -298,7 +313,7 @@ Estado esperado:
 
 ```text
 bridge_self_check.ok = true
-server.version = 0.6.3
+server.version = 0.6.4
 tunnel.baseUrl = http://127.0.0.1:8081
 tunnel healthz = live
 tunnel readyz = ready

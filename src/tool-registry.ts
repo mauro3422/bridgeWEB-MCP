@@ -1,3 +1,4 @@
+import { binaryFileToolModule } from "./tools/binary-file-tools.js";
 import { blenderToolModule } from "./tools/blender-tools.js";
 import { bridgeOpsToolModule } from "./tools/bridge-ops.js";
 import { bridgeWorkflowToolModule } from "./tools/bridge-workflow.js";
@@ -26,6 +27,7 @@ const readOnlyToolNames = new Set([
   "path_policy_status", "project_profile", "workspace_diff", "workspace_snapshot_list", "cache_status",
   "analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code",
   "project_context_load", "workflow_guide_recommend", "workflow_guide_load",
+  "binary_file_info", "binary_file_read_chunk", "binary_upload_status",
   "blender_status", "blender_scene_info", "blender_character_loop_status",
   "python_validate", "python_symbols", "python_impact_analysis", "python_import_graph", "python_call_graph", "python_dead_code", "python_test_plan", "pytest_testmon",
 ]);
@@ -37,6 +39,7 @@ const destructiveToolNames = new Set([
   "project_profile_save", "workspace_snapshot", "workspace_rollback", "cache_prune",
   "bridge_request_restart", "bridge_verify_all", "workflow_guide_create",
   "image_asset_save", "image_character_views_prepare",
+  "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_finish", "binary_upload_abort",
   "blender_open", "blender_viewport_screenshot", "blender_execute_code", "blender_batch_script", "blender_store_reference_image", "blender_setup_character_references",
 ]);
 
@@ -89,6 +92,7 @@ export function createDefaultToolRegistry(): BridgeToolRegistry {
     fileNavigationToolModule,
     fileWritingToolModule,
     workflowGuideToolModule,
+    binaryFileToolModule,
     imageToolModule,
     processToolModule,
     gitToolModule,
