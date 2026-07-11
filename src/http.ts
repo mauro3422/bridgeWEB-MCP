@@ -12,6 +12,7 @@ const config = getBridgeHttpConfig();
 const startedAt = new Date();
 
 const SESSION_IDLE_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_SESSION_IDLE_MS", 30 * 60 * 1000);
+const SESSION_CAPACITY_RECLAIM_IDLE_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_CAPACITY_RECLAIM_IDLE_MS", 15 * 1000);
 const ANONYMOUS_TRANSPORT_TTL_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_ANON_TTL_MS", 60 * 1000);
 const MAX_SESSIONS = getPositiveIntEnv("BRIDGE_MCP_HTTP_MAX_SESSIONS", 64);
 const CLEANUP_INTERVAL_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_CLEANUP_INTERVAL_MS", 60 * 1000);
@@ -21,11 +22,15 @@ let ready = false;
 let closing = false;
 let transportsCreating = 0;
 
-type BridgeHttpTransport = StreamableHTTPServerTransport & { sessionId?: string };
+type BridgeHttpTransport = StreamableHTTPServerTransport & {
+  sessionId?: string;
+  bridgeActiveRequests: number;
+};
 type SessionRecord = {
   transport: BridgeHttpTransport;
   createdAtMs: number;
   lastSeenMs: number;
+  activeRequests: number;
 };
 
 const sessions = new Map<string, SessionRecord>();
@@ -114,6 +119,7 @@ function getMcpSessionId(req: IncomingMessage): string | undefined {
 }
 
 function getStatus() {
+  const activeSessions = Array.from(sessions.values()).filter((record) => record.activeRequests > 0).length;
   return {
     server: { name: SERVER_NAME, version: SERVER_VERSION },
     transport: "streamable-http",
@@ -124,11 +130,14 @@ function getStatus() {
     ready,
     closing,
     sessions: sessions.size,
+    activeSessions,
+    idleSessions: sessions.size - activeSessions,
     anonymousTransports: anonymousTransports.size,
     transportsCreating,
     limits: {
       maxSessions: MAX_SESSIONS,
       sessionIdleMs: SESSION_IDLE_MS,
+      capacityReclaimIdleMs: SESSION_CAPACITY_RECLAIM_IDLE_MS,
       anonymousTransportTtlMs: ANONYMOUS_TRANSPORT_TTL_MS,
       cleanupIntervalMs: CLEANUP_INTERVAL_MS,
       maxRequestBodyBytes: MAX_REQUEST_BODY_BYTES,
@@ -161,24 +170,26 @@ async function cleanupTransports(reason = "periodic") {
   const closePromises: Promise<void>[] = [];
 
   for (const [sessionId, record] of sessions) {
-    if (now - record.lastSeenMs > SESSION_IDLE_MS) {
+    if (record.activeRequests === 0 && now - record.lastSeenMs > SESSION_IDLE_MS) {
       log("info", "Closing idle MCP HTTP session", { reason, sessionId, idleMs: now - record.lastSeenMs });
       closePromises.push(closeTransport(record.transport, "idle-session", sessionId));
     }
   }
 
-  const sessionEntries = Array.from(sessions.entries()).sort((a, b) => a[1].lastSeenMs - b[1].lastSeenMs);
-  while (sessionEntries.length > MAX_SESSIONS) {
+  const sessionEntries = Array.from(sessions.entries())
+    .filter(([, record]) => record.activeRequests === 0)
+    .sort((a, b) => a[1].lastSeenMs - b[1].lastSeenMs);
+  while (sessions.size + anonymousTransports.size + transportsCreating > MAX_SESSIONS) {
     const next = sessionEntries.shift();
     if (!next) break;
     const [sessionId, record] = next;
     if (!sessions.has(sessionId)) continue;
-    log("warn", "Closing oldest MCP HTTP session over limit", { reason, sessionId, maxSessions: MAX_SESSIONS });
+    log("warn", "Closing oldest inactive MCP HTTP session over limit", { reason, sessionId, maxSessions: MAX_SESSIONS });
     closePromises.push(closeTransport(record.transport, "session-limit", sessionId));
   }
 
   for (const [transport, createdAtMs] of anonymousTransports) {
-    if (now - createdAtMs > ANONYMOUS_TRANSPORT_TTL_MS) {
+    if (transport.bridgeActiveRequests === 0 && now - createdAtMs > ANONYMOUS_TRANSPORT_TTL_MS) {
       log("warn", "Closing stale anonymous MCP HTTP transport", { reason, ageMs: now - createdAtMs });
       closePromises.push(closeTransport(transport, "stale-anonymous"));
     }
@@ -187,11 +198,37 @@ async function cleanupTransports(reason = "periodic") {
   await Promise.allSettled(closePromises);
 }
 
-async function createTransport(requestId: string): Promise<BridgeHttpTransport> {
+async function reclaimCapacity(requestId: string): Promise<number> {
   await cleanupTransports("before-create");
-  const allocated = sessions.size + anonymousTransports.size + transportsCreating;
+  let allocated = sessions.size + anonymousTransports.size + transportsCreating;
+  if (allocated < MAX_SESSIONS) return allocated;
+
+  const now = Date.now();
+  const reclaimable = Array.from(sessions.entries())
+    .filter(([, record]) => record.activeRequests === 0 && now - record.lastSeenMs >= SESSION_CAPACITY_RECLAIM_IDLE_MS)
+    .sort((a, b) => a[1].lastSeenMs - b[1].lastSeenMs);
+
+  for (const [sessionId, record] of reclaimable) {
+    if (allocated < MAX_SESSIONS) break;
+    if (!sessions.has(sessionId)) continue;
+    log("warn", "Reclaiming inactive MCP HTTP session for capacity", {
+      requestId,
+      sessionId,
+      idleMs: now - record.lastSeenMs,
+      reclaimIdleMs: SESSION_CAPACITY_RECLAIM_IDLE_MS,
+      maxSessions: MAX_SESSIONS,
+    });
+    await closeTransport(record.transport, "capacity-reclaim", sessionId);
+    allocated = sessions.size + anonymousTransports.size + transportsCreating;
+  }
+
+  return allocated;
+}
+
+async function createTransport(requestId: string): Promise<BridgeHttpTransport> {
+  const allocated = await reclaimCapacity(requestId);
   if (allocated >= MAX_SESSIONS) {
-    throw Object.assign(new Error(`MCP session capacity reached (${MAX_SESSIONS}).`), { statusCode: 503 });
+    throw Object.assign(new Error(`MCP session capacity reached (${MAX_SESSIONS}); all remaining sessions are active or too recent to reclaim.`), { statusCode: 503 });
   }
 
   transportsCreating += 1;
@@ -203,11 +240,17 @@ async function createTransport(requestId: string): Promise<BridgeHttpTransport> 
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (sessionId: string) => {
         const now = Date.now();
-        sessions.set(sessionId, { transport, createdAtMs: now, lastSeenMs: now });
+        sessions.set(sessionId, {
+          transport,
+          createdAtMs: now,
+          lastSeenMs: now,
+          activeRequests: transport.bridgeActiveRequests,
+        });
         anonymousTransports.delete(transport);
         log("info", "MCP HTTP session initialized", { requestId, sessionId, sessions: sessions.size });
       },
     }) as BridgeHttpTransport;
+    transport.bridgeActiveRequests = 0;
 
     transport.onclose = () => {
       const sessionId = transport.sessionId;
@@ -283,6 +326,13 @@ async function handleMcpRequest(req: IncomingMessage, res: ServerResponse, reque
     return;
   }
 
+
+  transport.bridgeActiveRequests += 1;
+  const activeSessionId = transport.sessionId;
+  if (activeSessionId) {
+    const activeRecord = sessions.get(activeSessionId);
+    if (activeRecord) activeRecord.activeRequests = transport.bridgeActiveRequests;
+  }
   try {
     await transport.handleRequest(req, res, parsedBody);
   } catch (error) {
@@ -309,6 +359,15 @@ async function handleMcpRequest(req: IncomingMessage, res: ServerResponse, reque
       res.end();
     }
   } finally {
+    transport.bridgeActiveRequests = Math.max(0, transport.bridgeActiveRequests - 1);
+    const finishedSessionId = transport.sessionId;
+    if (finishedSessionId) {
+      const finishedRecord = sessions.get(finishedSessionId);
+      if (finishedRecord?.transport === transport) {
+        finishedRecord.activeRequests = transport.bridgeActiveRequests;
+        finishedRecord.lastSeenMs = Date.now();
+      }
+    }
     if (createdForThisRequest && !transport.sessionId && anonymousTransports.has(transport)) {
       await closeTransport(transport, "uninitialized-request");
     }

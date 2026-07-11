@@ -47,6 +47,7 @@ bridge-workflow
 - Persistent terminal state treats signal exits as completed, honors `cleanupAfterMs=0`, and terminates full process trees on Windows timeouts/stops.
 - `work_*` aliases are statically typed and carry the correct read-only/destructive annotations.
 - HTTP request bodies are bounded, session creation reserves capacity atomically, and the watchdog validates endpoint/process identity.
+- HTTP session accounting distinguishes active requests from idle sessions; local verification clients send `DELETE /mcp`, and capacity pressure can reclaim only sufficiently old inactive sessions instead of locking the service at 64 abandoned sessions.
 - Semantic dead-code analysis resolves shorthand assignments; the obsolete regex Python call-graph implementation was removed in favor of the AST helper.
 - Allowed-root and denied-path enforcement covers explicit file, project, analysis, process-cwd and Git tools, including symlink/canonical-path checks and `.env*`/credential blocking.
 - Git gained bounded diff/log/show/branch comparison, validated branch creation and file restore; diff/show/commit flows filter or reject sensitive paths.

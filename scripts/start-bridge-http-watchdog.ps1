@@ -11,6 +11,7 @@ param(
   [int]$CheckIntervalSeconds = 5,
   [int]$RestartDelaySeconds = 2,
   [int]$SessionIdleMs = 1800000,
+  [int]$CapacityReclaimIdleMs = 15000,
   [int]$AnonymousTransportTtlMs = 60000,
   [int]$CleanupIntervalMs = 60000,
   [int]$MaxSessions = 64,
@@ -262,6 +263,7 @@ function Start-BridgeHttp {
   $psi.Environment["BRIDGE_MCP_HTTP_PORT"] = [string]$BridgePort
   $psi.Environment["BRIDGE_MCP_HTTP_PATH"] = $McpPath
   $psi.Environment["BRIDGE_MCP_HTTP_SESSION_IDLE_MS"] = [string]$SessionIdleMs
+  $psi.Environment["BRIDGE_MCP_HTTP_CAPACITY_RECLAIM_IDLE_MS"] = [string]$CapacityReclaimIdleMs
   $psi.Environment["BRIDGE_MCP_HTTP_ANON_TTL_MS"] = [string]$AnonymousTransportTtlMs
   $psi.Environment["BRIDGE_MCP_HTTP_CLEANUP_INTERVAL_MS"] = [string]$CleanupIntervalMs
   $psi.Environment["BRIDGE_MCP_HTTP_MAX_SESSIONS"] = [string]$MaxSessions
@@ -364,7 +366,7 @@ $tunnelCommandPattern = '(?i)tunnel-client(?:\.exe)?.*\brun\b.*--profile\s+.*' +
 Write-BridgeLog "ProjectRoot=$ProjectRoot"
 Write-BridgeLog "Bridge HTTP=$bridgeBaseUrl$McpPath"
 Write-BridgeLog "Tunnel profile=$Profile admin=$TunnelBaseUrl"
-Write-BridgeLog "Session limits: max=$MaxSessions idleMs=$SessionIdleMs anonymousTtlMs=$AnonymousTransportTtlMs cleanupMs=$CleanupIntervalMs maxBodyBytes=$MaxBodyBytes"
+Write-BridgeLog "Session limits: max=$MaxSessions idleMs=$SessionIdleMs reclaimIdleMs=$CapacityReclaimIdleMs anonymousTtlMs=$AnonymousTransportTtlMs cleanupMs=$CleanupIntervalMs maxBodyBytes=$MaxBodyBytes"
 Write-BridgeLog "Restart request file=$(Join-Path $ProjectRoot $RestartRequestFile)"
 
 $bridgeProcess = $null

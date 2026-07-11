@@ -303,10 +303,11 @@ Limites y seguridad HTTP:
 BRIDGE_MCP_HTTP_MAX_SESSIONS=64
 BRIDGE_MCP_HTTP_MAX_BODY_BYTES=1048576
 BRIDGE_MCP_HTTP_SESSION_IDLE_MS=1800000
+BRIDGE_MCP_HTTP_CAPACITY_RECLAIM_IDLE_MS=15000
 BRIDGE_MCP_HTTP_ANON_TTL_MS=60000
 ```
 
-Las inicializaciones reservan capacidad de forma atomica y responden `503` al alcanzar el limite. Los cuerpos JSON que superan `BRIDGE_MCP_HTTP_MAX_BODY_BYTES` responden `413`. El servidor sigue limitado a loopback por defecto.
+Las inicializaciones reservan capacidad de forma atomica. Si se alcanza el limite, el Bridge conserva todas las sesiones con requests activos y puede reciclar la sesion inactiva mas antigua que ya supere `BRIDGE_MCP_HTTP_CAPACITY_RECLAIM_IDLE_MS`; si todas siguen activas o son demasiado recientes, responde `503`. Los clientes locales de smoke/verificacion cierran sus sesiones mediante `DELETE /mcp`. Los cuerpos JSON que superan `BRIDGE_MCP_HTTP_MAX_BODY_BYTES` responden `413`. El servidor sigue limitado a loopback por defecto.
 
 Perfil de tunel:
 

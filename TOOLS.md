@@ -897,7 +897,7 @@ Required: ninguno
 Parametros:
 
 - `cwd`: string
-- `expectedServerVersion`: string default="0.5.5"
+- `expectedServerVersion`: string default="0.6.0"
 - `strictGit`: boolean default=false
 - `timeoutMs`: number default=180000 min=30000 max=600000
 
@@ -913,7 +913,7 @@ Parametros:
     },
     "expectedServerVersion": {
       "type": "string",
-      "default": "0.5.5"
+      "default": "0.6.0"
     },
     "strictGit": {
       "type": "boolean",

@@ -1,11 +1,10 @@
-const [toolName, rawArgs = "{}", ...expectedFragments] = process.argv.slice(2);
-if (!toolName) {
-  console.error("usage: node scripts/verify-mcp-call.mjs <toolName> <jsonArgs> [expectedFragment...]");
+const expectedTools = process.argv.slice(2);
+if (expectedTools.length === 0) {
+  console.error("usage: node scripts/verify-mcp-tools-list.mjs <toolName...>");
   process.exit(2);
 }
 
 const base = "http://127.0.0.1:3001/mcp";
-const args = JSON.parse(rawArgs);
 const commonHeaders = {
   "Content-Type": "application/json",
   Accept: "application/json, text/event-stream",
@@ -15,21 +14,19 @@ let sessionId;
 let failureCode = 0;
 
 try {
-  const init = {
-    jsonrpc: "2.0",
-    id: 1,
-    method: "initialize",
-    params: {
-      protocolVersion: "2024-11-05",
-      capabilities: {},
-      clientInfo: { name: "verify-mcp-call", version: "0.1.0" },
-    },
-  };
-
   const initResponse = await fetch(base, {
     method: "POST",
     headers: commonHeaders,
-    body: JSON.stringify(init),
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "verify-mcp-tools-list", version: "0.1.0" },
+      },
+    }),
   });
   sessionId = initResponse.headers.get("mcp-session-id") ?? undefined;
   await initResponse.text();
@@ -38,29 +35,24 @@ try {
     throw new Error(`initialize failed status=${initResponse.status} session=${sessionId ?? "missing"}`);
   }
 
-  const callResponse = await fetch(base, {
+  const listResponse = await fetch(base, {
     method: "POST",
     headers: { ...commonHeaders, "Mcp-Session-Id": sessionId },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 2,
-      method: "tools/call",
-      params: { name: toolName, arguments: args },
-    }),
+    body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
   });
-  const text = await callResponse.text();
-  if (!callResponse.ok) {
+  const text = await listResponse.text();
+  if (!listResponse.ok) {
     failureCode = 4;
-    throw new Error(text || `tool call failed status=${callResponse.status}`);
+    throw new Error(text || `tools/list failed status=${listResponse.status}`);
   }
 
-  const missing = expectedFragments.filter((fragment) => !text.includes(fragment));
+  const missing = expectedTools.filter((name) => !text.includes(`\"name\":\"${name}\"`) && !text.includes(`\"name\": \"${name}\"`));
   if (missing.length > 0) {
     failureCode = 5;
-    throw new Error(`missing fragments: ${missing.join(",")}\n${text.slice(-4000)}`);
+    throw new Error(`missing tools: ${missing.join(",")}`);
   }
 
-  console.log(`${toolName} reachable`);
+  console.log(`tools present: ${expectedTools.join(",")}`);
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = failureCode || 1;

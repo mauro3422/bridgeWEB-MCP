@@ -452,6 +452,7 @@ Invoke-Check "HTTP body and session limits reject excess work" {
   $psi.Environment["BRIDGE_MCP_HTTP_HOST"] = "127.0.0.1"
   $psi.Environment["BRIDGE_MCP_HTTP_PORT"] = [string]$port
   $psi.Environment["BRIDGE_MCP_HTTP_MAX_SESSIONS"] = "1"
+  $psi.Environment["BRIDGE_MCP_HTTP_CAPACITY_RECLAIM_IDLE_MS"] = "100"
   $psi.Environment["BRIDGE_MCP_HTTP_MAX_BODY_BYTES"] = "1024"
   $process = [System.Diagnostics.Process]::Start($psi)
   try {
@@ -476,6 +477,8 @@ Invoke-Check "HTTP body and session limits reject excess work" {
     } | ConvertTo-Json -Depth 10 -Compress
     $first = Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/mcp" -Method Post -Headers $headers -ContentType "application/json" -Body $initialize
     if ([int]$first.StatusCode -ne 200) { throw "first initialize failed with $($first.StatusCode)" }
+    $firstSessionId = [string]$first.Headers["Mcp-Session-Id"]
+    if (-not $firstSessionId) { throw "first initialize did not return Mcp-Session-Id" }
 
     $capacityStatus = 0
     try {
@@ -484,7 +487,18 @@ Invoke-Check "HTTP body and session limits reject excess work" {
     catch {
       $capacityStatus = [int]$_.Exception.Response.StatusCode
     }
-    if ($capacityStatus -ne 503) { throw "expected session capacity 503, got $capacityStatus" }
+    if ($capacityStatus -ne 503) { throw "expected recent session capacity 503, got $capacityStatus" }
+
+    Start-Sleep -Milliseconds 250
+    $reclaimed = Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/mcp" -Method Post -Headers $headers -ContentType "application/json" -Body $initialize
+    if ([int]$reclaimed.StatusCode -ne 200) { throw "initialize after reclaim delay failed with $($reclaimed.StatusCode)" }
+    $reclaimedSessionId = [string]$reclaimed.Headers["Mcp-Session-Id"]
+    if (-not $reclaimedSessionId -or $reclaimedSessionId -eq $firstSessionId) { throw "capacity reclaim did not create a fresh session" }
+
+    $statusAfterReclaim = Invoke-RestMethod -Uri "$baseUrl/status" -TimeoutSec 2
+    if ([int]$statusAfterReclaim.sessions -ne 1 -or [int]$statusAfterReclaim.activeSessions -ne 0) {
+      throw "unexpected session state after capacity reclaim: $($statusAfterReclaim | ConvertTo-Json -Compress)"
+    }
 
     $oversized = '{"jsonrpc":"2.0","id":2,"method":"tools/list","padding":"' + ('x' * 2048) + '"}'
     $bodyStatus = 0
@@ -495,7 +509,13 @@ Invoke-Check "HTTP body and session limits reject excess work" {
       $bodyStatus = [int]$_.Exception.Response.StatusCode
     }
     if ($bodyStatus -ne 413) { throw "expected oversized body 413, got $bodyStatus" }
-    Write-Host "  OK HTTP body and capacity limits"
+
+    $closed = Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/mcp" -Method Delete -Headers @{ Accept = "application/json, text/event-stream"; "Mcp-Session-Id" = $reclaimedSessionId }
+    if (@(200, 202, 204) -notcontains [int]$closed.StatusCode) { throw "session DELETE failed with $($closed.StatusCode)" }
+    $statusAfterDelete = Invoke-RestMethod -Uri "$baseUrl/status" -TimeoutSec 2
+    if ([int]$statusAfterDelete.sessions -ne 0) { throw "session DELETE did not release capacity" }
+
+    Write-Host "  OK HTTP body, recent-session protection, inactive-session reclaim, and DELETE lifecycle"
   }
   finally {
     if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
