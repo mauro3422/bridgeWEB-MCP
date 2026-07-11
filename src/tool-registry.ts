@@ -25,7 +25,7 @@ const readOnlyToolNames = new Set([
   "bridge_metrics_status", "bridge_metrics_summary", "bridge_metrics_recent", "bridge_metrics_query", "bridge_visualization_catalog", "bridge_visualize_metrics",
   "path_policy_status", "project_profile", "workspace_diff", "workspace_snapshot_list", "cache_status",
   "analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code",
-  "workflow_guide_recommend", "workflow_guide_load",
+  "project_context_load", "workflow_guide_recommend", "workflow_guide_load",
   "blender_status", "blender_scene_info", "blender_character_loop_status",
   "python_validate", "python_symbols", "python_impact_analysis", "python_import_graph", "python_call_graph", "python_dead_code", "python_test_plan", "pytest_testmon",
 ]);

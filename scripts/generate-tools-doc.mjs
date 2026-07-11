@@ -10,7 +10,7 @@ const registry = createDefaultToolRegistry();
 const groupRules = [
   ["Core / navegacion", ["system_info", "list_dir", "read_text_file", "read_file_lines", "read_many_files", "list_files_smart", "search_files"]],
   ["Escritura segura", ["write_text_file", "apply_patch", "edit_lines"]],
-  ["Guias reutilizables", ["workflow_guide_recommend", "workflow_guide_load", "workflow_guide_create"]],
+  ["Guias reutilizables", ["project_context_load", "workflow_guide_recommend", "workflow_guide_load", "workflow_guide_create"]],
   ["Imagenes", ["image_asset_save", "image_character_views_prepare"]],
   ["Ejecucion / terminal", ["run_command", "terminal_start", "terminal_write", "terminal_read", "terminal_stop", "terminal_list"]],
   ["Blender", ["blender_status", "blender_open", "blender_scene_info", "blender_viewport_screenshot", "blender_execute_code", "blender_batch_script", "blender_store_reference_image", "blender_setup_character_references", "blender_character_loop_status"]],

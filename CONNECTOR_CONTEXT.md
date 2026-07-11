@@ -159,7 +159,7 @@ Current bridge assumptions:
 
 ```txt
 Project root: C:\dev\bridge-mcp
-Server: bridge-mcp v0.6.2
+Server: bridge-mcp v0.6.3
 Active profile: bridge-local-http
 Bridge MCP: http://127.0.0.1:3001/mcp
 Tunnel admin: http://127.0.0.1:8081
@@ -171,5 +171,3 @@ Important: the connector executes tools on the machine where the bridge and tunn
 ## References to keep in mind
 
 OpenAI's MCP/connectors docs describe connectors and remote MCP servers as tools that give models new capabilities by connecting to external services. The same docs show that the API lists tools from MCP servers and that listed tools include descriptions and input schemas. They also recommend caution, approvals for sensitive actions, and review of data shared with MCP servers.
-
-

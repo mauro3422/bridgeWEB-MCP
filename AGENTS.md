@@ -201,3 +201,13 @@ Mauro usa este bridge como “mini-Codex” local. Priorizar estabilidad sobre f
 - listar_tareas -> terminal_list
 - enviar_entrada -> terminal_write
 - cerrar_tarea -> terminal_stop
+
+
+## Context loading and reusable workflow guides
+
+- `AGENTS.md` is the Codex-facing repository instruction file.
+- ChatGPT web receives repository context through the Bridge MCP tool `project_context_load`; keep durable project information in `.bridge/PROJECT_CONTEXT.md` and mutable progress in `.bridge/PROJECT_STATE.md`.
+- Reusable procedures live in `integrations/workflow-guides/<name>/` globally or `<project>/.bridge/workflow-guides/<name>/` per project.
+- When adding or changing a tool, update its description, schema, annotations, regression coverage, generated `TOOLS.md`, server version, and `tools/list` verification.
+- Keep MCP server instructions concise. Put detailed procedures in workflow guides and load them only when relevant.
+- Never claim a file, process, scene, build, or remote update exists until a tool result verifies it.

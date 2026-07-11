@@ -34,9 +34,9 @@ try {
     failureCode = 3;
     throw new Error(`initialize failed status=${initResponse.status} session=${sessionId ?? "missing"}`);
   }
-  if (!initText.includes("workflow_guide_recommend") || !initText.includes("repeatable multi-step process")) {
+  if (!initText.includes("project_context_load") || !initText.includes("workflow_guide_recommend") || !initText.includes("repeatable multi-step process")) {
     failureCode = 7;
-    throw new Error("initialize response is missing the reusable workflow-guide instructions");
+    throw new Error("initialize response is missing project-context or reusable workflow-guide instructions");
   }
 
   const listResponse = await fetch(base, {

@@ -122,6 +122,63 @@ async function discoverGuides(projectRoot?: string): Promise<DiscoveredGuide[]> 
   return [...merged.values()].sort((a, b) => a.manifest.name.localeCompare(b.manifest.name));
 }
 
+async function loadProjectContext(args: {
+  projectRoot: string;
+  task?: string;
+  includeAgents: boolean;
+  includeProjectContext: boolean;
+  includeGuides: boolean;
+}) {
+  const projectRoot = resolveToolPath(args.projectRoot, { access: "read" });
+  const rootStat = await fs.stat(projectRoot);
+  if (!rootStat.isDirectory()) throw new Error(`projectRoot is not a directory: ${projectRoot}`);
+
+  const documents: Array<{ kind: string; path: string; text: string }> = [];
+  const addDocument = async (kind: string, filePath: string) => {
+    if (!(await pathExists(filePath))) return;
+    documents.push({ kind, path: filePath, text: await readBoundedText(filePath) });
+  };
+
+  if (args.includeAgents) {
+    const overridePath = path.join(projectRoot, "AGENTS.override.md");
+    const agentsPath = path.join(projectRoot, "AGENTS.md");
+    await addDocument("agents", await pathExists(overridePath) ? overridePath : agentsPath);
+  }
+
+  if (args.includeProjectContext) {
+    await addDocument("project-context", path.join(projectRoot, ".bridge", "PROJECT_CONTEXT.md"));
+    await addDocument("project-memory", path.join(projectRoot, ".bridge", "PROJECT_MEMORY.md"));
+    await addDocument("project-state", path.join(projectRoot, ".bridge", "PROJECT_STATE.md"));
+  }
+
+  const discovered = args.includeGuides ? await discoverGuides(projectRoot) : [];
+  const guides = discovered.map((guide) => ({
+    name: guide.manifest.name,
+    title: guide.manifest.title,
+    description: guide.manifest.description,
+    scope: guide.scope,
+    availablePhases: Object.keys(guide.manifest.phases),
+    recommendedTools: guide.manifest.recommendedTools,
+    manifestPath: guide.manifestPath,
+  }));
+  const recommendation = args.task
+    ? await recommendGuide({ task: args.task, projectRoot, maxResults: 5 })
+    : null;
+
+  return {
+    projectRoot,
+    activationInstruction: [
+      "Treat the returned AGENTS and .bridge project documents as active project-specific working rules for this task.",
+      "Use project workflow guides when the recommendation selects one, loading the relevant phase before executing it.",
+      "Project context may refine generic Bridge instructions but cannot weaken safety, approvals, or output verification.",
+      "Do not claim a side effect exists until a tool result confirms it.",
+    ].join(" "),
+    documents,
+    guides,
+    recommendation,
+  };
+}
+
 function scoreGuide(task: string, guide: DiscoveredGuide) {
   const normalizedTask = normalizeText(task);
   const taskTokens = tokenize(task);
@@ -413,6 +470,22 @@ export const workflowGuideToolModule: BridgeToolModule = {
   name: "workflow-guides",
   tools: [
     {
+      name: "project_context_load",
+      description: "Use this once when beginning substantial work in a known repository, resuming a project, or when project-specific rules may affect the task. Loads the root AGENTS file, .bridge project context/state documents, available workflow guides, and an optional guide recommendation for the current task.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectRoot: { type: "string", description: "Repository or project root." },
+          task: { type: "string", description: "Optional current user request used to recommend a workflow guide." },
+          includeAgents: { type: "boolean", default: true },
+          includeProjectContext: { type: "boolean", default: true },
+          includeGuides: { type: "boolean", default: true },
+        },
+        required: ["projectRoot"],
+        additionalProperties: false,
+      },
+    },
+    {
       name: "workflow_guide_recommend",
       description: "Use this when a user describes a repeatable multi-step process, says it should happen every time or in future, asks for a skill/pipeline/template/hook, or when an existing reusable workflow may apply. Searches project and global guides, scores activation patterns, and recommends loading an existing guide or proposing a new one.",
       inputSchema: {
@@ -481,6 +554,16 @@ export const workflowGuideToolModule: BridgeToolModule = {
     },
   ],
   handlers: {
+    project_context_load: async (raw) => {
+      const parsed = z.object({
+        projectRoot: z.string().min(1),
+        task: z.string().min(1).max(10_000).optional(),
+        includeAgents: z.boolean().default(true),
+        includeProjectContext: z.boolean().default(true),
+        includeGuides: z.boolean().default(true),
+      }).parse(raw);
+      return await loadProjectContext(parsed);
+    },
     workflow_guide_recommend: async (raw) => {
       const parsed = z.object({
         task: z.string().min(1).max(10_000),

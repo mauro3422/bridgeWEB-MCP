@@ -15,20 +15,31 @@ const root = path.join(sandbox, 'project');
 fs.mkdirSync(root, {recursive:true});
 
 try {
-  if (registry.tools.length !== 82) throw new Error(`expected 82 tools, got ${registry.tools.length}`);
+  if (registry.tools.length !== 83) throw new Error(`expected 83 tools, got ${registry.tools.length}`);
   if (registry.riskSummary.neutral.length !== 0) throw new Error(`neutral tools remain: ${registry.riskSummary.neutral.join(', ')}`);
   for (const moduleName of ['project','workspace','cache','workflow-guides','images','blender']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
-  for (const toolName of ['workflow_guide_recommend','workflow_guide_load','workflow_guide_create','image_asset_save','image_character_views_prepare','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_execute_code','blender_batch_script','blender_setup_character_references','blender_character_loop_status']) if (!registry.has(toolName)) throw new Error(`missing workflow/image/Blender tool ${toolName}`);
+  for (const toolName of ['project_context_load','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','image_asset_save','image_character_views_prepare','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_execute_code','blender_batch_script','blender_setup_character_references','blender_character_loop_status']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/image/Blender tool ${toolName}`);
 
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({name:'fixture-project',scripts:{build:'tsc',test:'node test.js'},devDependencies:{typescript:'1.0.0'}}, null, 2));
   fs.writeFileSync(path.join(root, 'app.txt'), 'original\n');
   fs.writeFileSync(path.join(root, '.env'), 'SECRET=test\n');
   fs.writeFileSync(path.join(root, '.env.development'), 'SECRET=dev\n');
+  fs.writeFileSync(path.join(root, 'AGENTS.md'), '# Fixture agents\n\n- Verify project rules.\n');
+  fs.mkdirSync(path.join(root, '.bridge'), {recursive:true});
+  fs.writeFileSync(path.join(root, '.bridge', 'PROJECT_CONTEXT.md'), '# Fixture context\n\nProject-specific durable context.\n');
+  fs.writeFileSync(path.join(root, '.bridge', 'PROJECT_STATE.md'), '# Fixture state\n\nCurrent milestone.\n');
   execFileSync('git', ['init', '-b', 'main'], {cwd:root,stdio:'ignore'});
   execFileSync('git', ['config', 'user.email', 'bridge@example.test'], {cwd:root});
   execFileSync('git', ['config', 'user.name', 'Bridge Test'], {cwd:root});
   execFileSync('git', ['add', 'package.json', 'app.txt', '.env.development'], {cwd:root,stdio:'ignore'});
   execFileSync('git', ['commit', '-m', 'initial'], {cwd:root,stdio:'ignore'});
+
+  const projectContext = await call('project_context_load', {
+    projectRoot:root,
+    task:'Crear un personaje low poly y preparar las vistas para Blender',
+  });
+  if (projectContext.documents.length !== 3 || !projectContext.documents.some((item) => item.kind === 'agents') || !projectContext.documents.some((item) => item.kind === 'project-context') || !projectContext.documents.some((item) => item.kind === 'project-state')) throw new Error('project context documents failed');
+  if (!projectContext.guides.some((item) => item.name === 'character-concept-blender') || projectContext.recommendation?.recommendation?.action !== 'load_existing') throw new Error('project context guide recommendation failed');
 
   const characterRecommendation = await call('workflow_guide_recommend', {
     task:'Cada vez que creemos un personaje furry low poly quiero generar frente costado espalda y pasarlo a Blender',

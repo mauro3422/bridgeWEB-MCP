@@ -7,7 +7,7 @@ El objetivo es tener un puente local controlado por nosotros para operar filesys
 ## Estado actual
 
 ```text
-bridge-mcp v0.6.2
+bridge-mcp v0.6.3
 Mode: HTTP production-candidate
 Project root: C:\dev\bridge-mcp
 Bridge MCP: http://127.0.0.1:3001/mcp
@@ -67,6 +67,8 @@ Modulos actuales:
 core
 file-navigation
 file-writing
+workflow-guides
+images
 process
 git
 project
@@ -77,12 +79,29 @@ metrics
 code-intelligence
 code-graph
 python-analysis
+blender
 bridge-workflow
 ```
 
+## Contexto de proyecto y guias reutilizables
+
+Para trabajo sustancial en un repositorio, ChatGPT debe llamar una vez a `project_context_load` con `projectRoot` y la tarea actual. La tool puede cargar:
+
+```text
+<project>/AGENTS.override.md o AGENTS.md
+<project>/.bridge/PROJECT_CONTEXT.md
+<project>/.bridge/PROJECT_MEMORY.md
+<project>/.bridge/PROJECT_STATE.md
+<project>/.bridge/workflow-guides/*
+```
+
+`AGENTS.md` sigue siendo la entrada nativa para Codex. En ChatGPT web, la carga ocurre por instrucciones MCP y `project_context_load`; las guias aplicables se detectan con `workflow_guide_recommend` y se incorporan con `workflow_guide_load`.
+
+Las guias globales viven en `integrations/workflow-guides/`. Las guias del proyecto tienen prioridad sobre una global con el mismo nombre.
+
 ## Tools expuestas
 
-El runtime actual expone 68 tools.
+El runtime actual expone 83 tools.
 
 ### Core / lectura / navegacion
 
@@ -279,7 +298,7 @@ Estado esperado:
 
 ```text
 bridge_self_check.ok = true
-server.version = 0.6.2
+server.version = 0.6.3
 tunnel.baseUrl = http://127.0.0.1:8081
 tunnel healthz = live
 tunnel readyz = ready
