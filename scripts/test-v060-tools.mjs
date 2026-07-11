@@ -17,10 +17,13 @@ const root = path.join(sandbox, 'project');
 fs.mkdirSync(root, {recursive:true});
 
 try {
-  if (registry.tools.length !== 91) throw new Error(`expected 91 tools, got ${registry.tools.length}`);
+  if (registry.tools.length !== 94) throw new Error(`expected 94 tools, got ${registry.tools.length}`);
   if (registry.riskSummary.neutral.length !== 0) throw new Error(`neutral tools remain: ${registry.riskSummary.neutral.join(', ')}`);
   for (const moduleName of ['project','workspace','cache','workflow-guides','binary-files','images','blender']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
-  for (const toolName of ['project_context_load','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_asset_save','image_character_views_prepare','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_execute_code','blender_batch_script','blender_setup_character_references','blender_character_loop_status']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/binary/image/Blender tool ${toolName}`);
+  for (const toolName of ['project_context_load','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_asset_save','image_character_views_prepare','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_review_bundle','blender_execute_code','blender_batch_script','blender_setup_character_references','blender_character_loop_status']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/binary/image/Blender tool ${toolName}`);
+  const reviewTool = registry.tools.find((tool) => tool.name === 'blender_review_bundle');
+  if (!reviewTool || !registry.riskSummary.destructive.includes('blender_review_bundle')) throw new Error('Blender review bundle classification failed');
+  if (!reviewTool.inputSchema?.properties?.views || !reviewTool.inputSchema?.properties?.outputDir) throw new Error('Blender review bundle schema failed');
 
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({name:'fixture-project',scripts:{build:'tsc',test:'node test.js'},devDependencies:{typescript:'1.0.0'}}, null, 2));
   fs.writeFileSync(path.join(root, 'app.txt'), 'original\n');

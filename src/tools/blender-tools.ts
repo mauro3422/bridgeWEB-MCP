@@ -15,6 +15,17 @@ const MAX_SOCKET_RESPONSE_BYTES = 20 * 1024 * 1024;
 const MAX_CODE_CHARS = 100_000;
 const MAX_REFERENCE_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_REFERENCE_BASE64_CHARS = 12 * 1024 * 1024;
+const MAX_REVIEW_PREVIEW_BYTES = 4 * 1024 * 1024;
+const REVIEW_VIEW_NAMES = [
+  "front",
+  "right",
+  "back",
+  "left",
+  "three-quarter",
+  "three-quarter-left",
+  "rear-three-quarter",
+  "top",
+] as const;
 
 function blenderExecutable(): string {
   return path.resolve(process.env.BRIDGE_BLENDER_EXE || DEFAULT_BLENDER_EXE);
@@ -340,7 +351,9 @@ async function setupCharacterReferences(args: {
     "--opacity", String(args.opacity),
   ];
   const processResult = await runProcess(executable, processArgs, path.dirname(outputBlend), 240_000);
-  if (processResult.code !== 0 || processResult.timedOut) {
+  const processOutput = `${processResult.stdout ?? ""}\n${processResult.stderr ?? ""}`;
+  const pythonFailed = /Traceback \(most recent call last\):|Error: Python:/i.test(processOutput);
+  if (processResult.code !== 0 || processResult.timedOut || pythonFailed) {
     throw new Error(`Blender reference setup failed: ${processResult.stderr || processResult.stdout || processResult.error || "unknown error"}`);
   }
 
@@ -381,6 +394,109 @@ async function characterLoopStatus(manifestPathInput: string) {
     }
   }));
   return { manifestPath, stage: manifest.stage ?? "unknown", characterName: manifest.characterName ?? null, files, manifest };
+}
+
+function generatedReviewPrefix(): string {
+  return `blender-review-${new Date().toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-")}`;
+}
+
+async function createReviewBundle(args: {
+  outputDir: string;
+  filePrefix?: string;
+  views: Array<(typeof REVIEW_VIEW_NAMES)[number]>;
+  targetCollections: string[];
+  targetObjects: string[];
+  resolution: number;
+  margin: number;
+  transparentBackground: boolean;
+  createContactSheet: boolean;
+  includePreview: boolean;
+  overwrite: boolean;
+  port: number;
+  timeoutMs: number;
+}) {
+  const outputDir = resolveToolPath(args.outputDir, { access: "write" });
+  await fs.mkdir(outputDir, { recursive: true });
+  const scriptPath = bridgeIntegrationPath("create_review_bundle.py");
+  await ensureFile(scriptPath, "Blender review-bundle script");
+
+  const filePrefix = args.filePrefix?.trim() || generatedReviewPrefix();
+  const config = {
+    output_dir: outputDir,
+    file_prefix: filePrefix,
+    views: args.views,
+    target_collections: args.targetCollections,
+    target_objects: args.targetObjects,
+    resolution: args.resolution,
+    margin: args.margin,
+    transparent_background: args.transparentBackground,
+    create_contact_sheet: args.createContactSheet,
+    overwrite: args.overwrite,
+  };
+  const encodedConfig = Buffer.from(JSON.stringify(config), "utf8").toString("base64");
+  const code = [
+    "import base64, json, runpy",
+    `config = json.loads(base64.b64decode(${JSON.stringify(encodedConfig)}).decode('utf-8'))`,
+    `result = runpy.run_path(${JSON.stringify(scriptPath)})['create_review_bundle'](config)`,
+  ].join("\n");
+
+  const commandResult = await sendBlenderCommand(
+    "execute_code",
+    { code },
+    { port: args.port, timeoutMs: args.timeoutMs },
+  );
+  const commandObject = commandResult && typeof commandResult === "object"
+    ? commandResult as Record<string, unknown>
+    : null;
+  const bundle = commandObject?.result && typeof commandObject.result === "object"
+    ? commandObject.result as Record<string, unknown>
+    : null;
+  if (!bundle || bundle.stage !== "review_bundle_created") {
+    throw new Error("Blender did not return a valid review bundle");
+  }
+
+  const manifest = bundle.manifest && typeof bundle.manifest === "object"
+    ? bundle.manifest as Record<string, unknown>
+    : null;
+  const manifestPath = typeof manifest?.path === "string" ? manifest.path : null;
+  if (!manifestPath) throw new Error("Review bundle did not return a manifest path");
+  await ensureFile(manifestPath, "Blender review manifest");
+
+  const contact = bundle.contact_sheet && typeof bundle.contact_sheet === "object"
+    ? bundle.contact_sheet as Record<string, unknown>
+    : null;
+  const contactPath = typeof contact?.path === "string" ? contact.path : null;
+  let preview: Record<string, unknown> | null = null;
+  let imageAttachment: Record<string, unknown> | null = null;
+  if (args.includePreview && contactPath) {
+    await ensureFile(contactPath, "Blender review contact sheet");
+    const stat = await fs.stat(contactPath);
+    if (stat.size <= MAX_REVIEW_PREVIEW_BYTES) {
+      const data = await fs.readFile(contactPath);
+      preview = {
+        path: contactPath,
+        mimeType: "image/png",
+        bytes: data.length,
+        sha256: sha256(data),
+        attachedToToolResult: true,
+      };
+      imageAttachment = { type: "image", mimeType: "image/png", data: data.toString("base64") };
+    } else {
+      preview = {
+        path: contactPath,
+        mimeType: "image/png",
+        bytes: stat.size,
+        attachedToToolResult: false,
+        warning: `Preview exceeds ${MAX_REVIEW_PREVIEW_BYTES} bytes`,
+      };
+    }
+  }
+
+  return {
+    bundle,
+    preview,
+    __bridgeImages: imageAttachment ? [imageAttachment] : [],
+  };
 }
 
 export const blenderToolModule: BridgeToolModule = {
@@ -432,6 +548,36 @@ export const blenderToolModule: BridgeToolModule = {
           port: { type: "number", default: DEFAULT_BLENDER_PORT, minimum: 1024, maximum: 65535 },
         },
         required: ["outputPath"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "blender_review_bundle",
+      description: "Create a multi-view Blender review package in one call: orthographic renders, a contact sheet, and a manifest with geometry, materials, visibility, collections, rig, animation, diagnostics, hashes, and restored-scene confirmation.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          outputDir: { type: "string", description: "Allowed directory where review images and the JSON manifest will be written." },
+          filePrefix: { type: "string", description: "Optional stable prefix. When omitted, a timestamped prefix is generated." },
+          views: {
+            type: "array",
+            items: { type: "string", enum: [...REVIEW_VIEW_NAMES] },
+            default: ["front", "right", "back", "three-quarter"],
+            minItems: 1,
+            maxItems: 8,
+          },
+          targetCollections: { type: "array", items: { type: "string" }, default: [], maxItems: 20 },
+          targetObjects: { type: "array", items: { type: "string" }, default: [], maxItems: 200 },
+          resolution: { type: "number", default: 800, minimum: 320, maximum: 2048 },
+          margin: { type: "number", default: 1.18, minimum: 1.01, maximum: 2 },
+          transparentBackground: { type: "boolean", default: false },
+          createContactSheet: { type: "boolean", default: true },
+          includePreview: { type: "boolean", default: true },
+          overwrite: { type: "boolean", default: false },
+          port: { type: "number", default: DEFAULT_BLENDER_PORT, minimum: 1024, maximum: 65535 },
+          timeoutMs: { type: "number", default: 300000, minimum: 1000, maximum: 600000 },
+        },
+        required: ["outputDir"],
         additionalProperties: false,
       },
     },
@@ -546,6 +692,25 @@ export const blenderToolModule: BridgeToolModule = {
       }, { port: parsed.port });
       const stat = await fs.stat(outputPath);
       return { result, outputPath, bytes: stat.size };
+    },
+    blender_review_bundle: async (raw) => {
+      const parsed = z.object({
+        outputDir: z.string(),
+        filePrefix: z.string().min(1).max(96).optional(),
+        views: z.array(z.enum(REVIEW_VIEW_NAMES)).min(1).max(8).default(["front", "right", "back", "three-quarter"]),
+        targetCollections: z.array(z.string().min(1).max(180)).max(20).default([]),
+        targetObjects: z.array(z.string().min(1).max(180)).max(200).default([]),
+        resolution: z.number().int().min(320).max(2048).default(800),
+        margin: z.number().min(1.01).max(2).default(1.18),
+        transparentBackground: z.boolean().default(false),
+        createContactSheet: z.boolean().default(true),
+        includePreview: z.boolean().default(true),
+        overwrite: z.boolean().default(false),
+        port: z.number().int().min(1024).max(65535).default(DEFAULT_BLENDER_PORT),
+        timeoutMs: z.number().int().min(1000).max(600000).default(300000),
+      }).parse(raw);
+      if (new Set(parsed.views).size !== parsed.views.length) throw new Error("views must not contain duplicates");
+      return await createReviewBundle(parsed);
     },
     blender_execute_code: async (raw) => {
       const parsed = z.object({

@@ -15,8 +15,8 @@ Project summary:
 - Bridge status: http://127.0.0.1:3001/status
 - Tunnel admin: http://127.0.0.1:8081
 - Tunnel profile: bridge-local-http
-- Server should report bridge-mcp v0.6.4.
-- The runtime currently exposes 91 tools across 18 modules.
+- Server should report bridge-mcp v0.6.5.
+- The runtime currently exposes 94 tools across 18 modules.
 - CONTROL_PLANE_API_KEY is stored locally as a Windows User environment variable; do not ask me to paste it.
 
 Important state:

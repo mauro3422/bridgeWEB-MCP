@@ -26,7 +26,7 @@ const readOnlyToolNames = new Set([
   "bridge_metrics_status", "bridge_metrics_summary", "bridge_metrics_recent", "bridge_metrics_query", "bridge_visualization_catalog", "bridge_visualize_metrics",
   "path_policy_status", "project_profile", "workspace_diff", "workspace_snapshot_list", "cache_status",
   "analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code",
-  "project_context_load", "workflow_guide_recommend", "workflow_guide_load",
+  "project_context_load", "workflow_guide_recommend", "workflow_guide_load", "bridge_tool_query",
   "binary_file_info", "binary_file_read_chunk", "binary_upload_status",
   "blender_status", "blender_scene_info", "blender_character_loop_status",
   "python_validate", "python_symbols", "python_impact_analysis", "python_import_graph", "python_call_graph", "python_dead_code", "python_test_plan", "pytest_testmon",
@@ -37,10 +37,10 @@ const destructiveToolNames = new Set([
   "work_once", "work_begin", "work_feed", "work_finish",
   "git_create_branch", "git_restore_file", "git_set_remote", "git_commit_all", "git_push_current_branch",
   "project_profile_save", "workspace_snapshot", "workspace_rollback", "cache_prune",
-  "bridge_request_restart", "bridge_verify_all", "workflow_guide_create",
+  "bridge_request_restart", "bridge_verify_all", "workflow_guide_create", "bridge_tool_action",
   "image_asset_save", "image_character_views_prepare",
   "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_finish", "binary_upload_abort",
-  "blender_open", "blender_viewport_screenshot", "blender_execute_code", "blender_batch_script", "blender_store_reference_image", "blender_setup_character_references",
+  "blender_open", "blender_viewport_screenshot", "blender_review_bundle", "blender_execute_code", "blender_batch_script", "blender_store_reference_image", "blender_setup_character_references",
 ]);
 
 function annotateTool(tool: BridgeToolSchema): BridgeToolSchema {
@@ -72,6 +72,63 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
       handlers.set(tool.name, handler);
     }
   }
+
+  const proxyToolNames = new Set(["bridge_tool_query", "bridge_tool_action"]);
+  const delegatedArguments = (value: unknown): Record<string, unknown> => {
+    if (value === undefined) return {};
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("arguments must be a JSON object.");
+    return value as Record<string, unknown>;
+  };
+  const delegatedToolName = (value: unknown): string => {
+    if (typeof value !== "string" || !value.trim()) throw new Error("toolName must be a non-empty string.");
+    const name = value.trim();
+    if (proxyToolNames.has(name)) throw new Error(`Recursive delegation to '${name}' is not allowed.`);
+    if (!handlers.has(name)) throw new Error(`Unknown modular tool: ${name}`);
+    return name;
+  };
+
+  moduleNames.push("tool-dispatch");
+  const queryTool: BridgeToolSchema = {
+    name: "bridge_tool_query",
+    description: "Use this read-only fallback when a runtime Bridge tool exists but its dedicated schema is missing from the current connector catalog. Delegates only to tools classified read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        toolName: { type: "string", description: "Exact runtime tool name to invoke." },
+        arguments: { type: "object", description: "Arguments for the delegated tool.", additionalProperties: true, default: {} },
+      },
+      required: ["toolName"],
+      additionalProperties: false,
+    },
+  };
+  const actionTool: BridgeToolSchema = {
+    name: "bridge_tool_action",
+    description: "Use this explicit destructive fallback when a runtime Bridge tool exists but its dedicated schema is missing from the current connector catalog. Delegates only to tools classified destructive and requires exact target-name confirmation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        toolName: { type: "string", description: "Exact runtime tool name to invoke." },
+        confirmToolName: { type: "string", description: "Must exactly match toolName to confirm the delegated destructive action." },
+        arguments: { type: "object", description: "Arguments for the delegated tool.", additionalProperties: true, default: {} },
+      },
+      required: ["toolName", "confirmToolName"],
+      additionalProperties: false,
+    },
+  };
+  tools.push(annotateTool(queryTool), annotateTool(actionTool));
+  handlers.set("bridge_tool_query", async (args) => {
+    const name = delegatedToolName(args.toolName);
+    if (!readOnlyToolNames.has(name)) throw new Error(`Tool '${name}' is not classified read-only; use its direct schema or bridge_tool_action.`);
+    const handler = handlers.get(name)!;
+    return { delegatedTool: name, classification: "read-only", result: await handler(delegatedArguments(args.arguments)) };
+  });
+  handlers.set("bridge_tool_action", async (args) => {
+    const name = delegatedToolName(args.toolName);
+    if (!destructiveToolNames.has(name)) throw new Error(`Tool '${name}' is not classified destructive; use its direct schema or bridge_tool_query.`);
+    if (args.confirmToolName !== name) throw new Error(`confirmToolName must exactly match '${name}'.`);
+    const handler = handlers.get(name)!;
+    return { delegatedTool: name, classification: "destructive", result: await handler(delegatedArguments(args.arguments)) };
+  });
 
   return {
     tools,

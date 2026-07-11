@@ -20,9 +20,9 @@ Set-Location -LiteralPath $ProjectRoot
 Invoke-Check "version bump is consistent" {
   $packageJson = Get-Content -LiteralPath "package.json" -Raw | ConvertFrom-Json
   $configText = Get-Content -LiteralPath "src\config.ts" -Raw
-  if ($packageJson.version -ne "0.6.4") { throw "package.json version is $($packageJson.version), expected 0.6.4" }
-  if ($configText -notmatch 'SERVER_VERSION = "0\.6\.4"') { throw "src/config.ts does not report SERVER_VERSION 0.6.4" }
-  Write-Host "  OK 0.6.4"
+  if ($packageJson.version -ne "0.6.5") { throw "package.json version is $($packageJson.version), expected 0.6.5" }
+  if ($configText -notmatch 'SERVER_VERSION = "0\.6\.5"') { throw "src/config.ts does not report SERVER_VERSION 0.6.5" }
+  Write-Host "  OK 0.6.5"
 }
 
 Invoke-Check "tunnel admin default stays on HTTP profile port" {
@@ -452,7 +452,7 @@ Invoke-Check "HTTP body and session limits reject excess work" {
   $psi.Environment["BRIDGE_MCP_HTTP_HOST"] = "127.0.0.1"
   $psi.Environment["BRIDGE_MCP_HTTP_PORT"] = [string]$port
   $psi.Environment["BRIDGE_MCP_HTTP_MAX_SESSIONS"] = "1"
-  $psi.Environment["BRIDGE_MCP_HTTP_CAPACITY_RECLAIM_IDLE_MS"] = "100"
+  $psi.Environment["BRIDGE_MCP_HTTP_CAPACITY_RECLAIM_IDLE_MS"] = "1000"
   $psi.Environment["BRIDGE_MCP_HTTP_MAX_BODY_BYTES"] = "1024"
   $process = [System.Diagnostics.Process]::Start($psi)
   try {
@@ -489,7 +489,7 @@ Invoke-Check "HTTP body and session limits reject excess work" {
     }
     if ($capacityStatus -ne 503) { throw "expected recent session capacity 503, got $capacityStatus" }
 
-    Start-Sleep -Milliseconds 250
+    Start-Sleep -Milliseconds 1250
     $reclaimed = Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/mcp" -Method Post -Headers $headers -ContentType "application/json" -Body $initialize
     if ([int]$reclaimed.StatusCode -ne 200) { throw "initialize after reclaim delay failed with $($reclaimed.StatusCode)" }
     $reclaimedSessionId = [string]$reclaimed.Headers["Mcp-Session-Id"]

@@ -193,7 +193,7 @@ Expected result:
 - Blender opened on a free local port
 - bridge connection verified before returning
 
-Then capture a viewport image and inspect alignment before beginning geometry.
+Then capture a viewport image and inspect alignment before beginning geometry. Once geometry exists, prefer `blender_review_bundle` over separate screenshot calls: target the model collection, request front/right/back/three-quarter views, inspect the attached contact sheet, and use the returned bounds, geometry, material, visibility, rig, animation, warning, hash, and restoration data as the editing context.
 
 ## Phase 7 — Iteration loop
 

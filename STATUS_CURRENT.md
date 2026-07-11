@@ -4,13 +4,13 @@ Snapshot verified against the live HTTP bridge runtime.
 
 ```text
 Project root: C:\dev\bridge-mcp
-Server: bridge-mcp v0.6.4
+Server: bridge-mcp v0.6.5
 Mode: HTTP production-candidate
 Bridge MCP: http://127.0.0.1:3001/mcp
 Bridge status: http://127.0.0.1:3001/status
 Tunnel admin: http://127.0.0.1:8081
 Tunnel profile: bridge-local-http
-Runtime tools: 91
+Runtime tools: 94
 Runtime modules: 18
 Git expected: ## main...origin/main
 ```
@@ -21,10 +21,11 @@ Git expected: ## main...origin/main
 - Build passes with `npm run build`.
 - Regression suite passes with `npm run test:regressions`.
 - HTTP health, readiness, MCP initialize, session lifecycle and `tools/list` pass.
-- `TOOLS.md` is generated from the registry and reports 91 tools with no neutral risk annotations.
+- `TOOLS.md` is generated from the registry and reports 94 tools with no neutral risk annotations.
 - Tunnel health is live/ready on `http://127.0.0.1:8081`.
 - Restart flow uses request/ack files; do not kill active bridge processes directly.
-- `bridge_verify_all` passes against live server v0.6.4.
+- `bridge_verify_all` passes against live server v0.6.5.
+- Live `blender_review_bundle` testing against the CBAnimal fox returned four renders, structured scene context, completed restoration, and mixed MCP content containing both JSON text and an attached `image/png` contact sheet.
 
 ## Tool modules
 
@@ -60,7 +61,7 @@ bridge-workflow
 - Git inspection and controlled mutations with sensitive-path filtering.
 - Workspace snapshots, diff and guarded rollback.
 - TypeScript/JavaScript and Python static analysis.
-- Blender 5.1.2 interactive and batch control.
+- Blender 5.1.2 interactive and batch control, including multi-view review bundles with attached contact-sheet previews and structured model/rig/animation diagnostics.
 - Metrics, visualization specs, health checks and watchdog-coordinated restart.
 
 ## Binary transfer rule

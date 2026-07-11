@@ -3,6 +3,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import sys
 
 import bpy
 
@@ -40,10 +41,10 @@ def add_reference(
     obj.empty_image_side = "DOUBLE_SIDED"
     obj.show_in_front = True
     obj.hide_render = True
-    obj.hide_set(hidden)
     obj["reference_role"] = name.lower()
     obj["source_path"] = str(image_path)
     collection.objects.link(obj)
+    obj.hide_set(hidden)
     return obj
 
 
@@ -58,7 +59,8 @@ def main() -> None:
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--height", type=float, default=6.0)
     parser.add_argument("--opacity", type=float, default=0.55)
-    args = parser.parse_args()
+    script_args = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
+    args = parser.parse_args(script_args)
 
     images = {
         "FRONT": Path(args.front).expanduser().resolve(),

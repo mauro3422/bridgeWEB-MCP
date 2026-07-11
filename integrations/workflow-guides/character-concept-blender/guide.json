@@ -51,6 +51,7 @@
     "image_character_views_prepare",
     "blender_setup_character_references",
     "blender_viewport_screenshot",
+    "blender_review_bundle",
     "blender_character_loop_status"
   ],
   "scopeNotes": "Global Bridge MCP guide. A project-specific guide with the same name may override it when projectRoot is supplied."

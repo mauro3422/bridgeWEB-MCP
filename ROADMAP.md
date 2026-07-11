@@ -348,13 +348,14 @@ npm run verify:all
 
 ## Next recommended work
 
-### Completed through v0.6.4
+### Completed through v0.6.5
 
 ```txt
-91 tools across 18 modules
+94 tools across 18 modules
 project context bootstrap and reusable workflow guides
 image asset persistence and character-view normalization
 interactive/batch Blender control and character reference scenes
+multi-view Blender review bundles with contact-sheet image results and structured geometry/rig/animation diagnostics
 safe binary file info/read/write tools
 resumable binary uploads with ordered chunks, status, finish and abort
 byte/SHA-256 validation, atomic commits and stale-session cleanup
@@ -367,9 +368,9 @@ regressions and live HTTP verification expanded for the full surface
 ### Next implementation work
 
 ```txt
-resume the CBAnimal character pipeline using the binary upload tools
-exercise v0.6.4 on real image, ZIP and GLB transfers
-add evidence-driven convenience tools only when repeated friction appears
+use `blender_review_bundle` to drive evidence-based CBAnimal character refinements
+exercise v0.6.5 mixed text/image tool results through the live connector
+add further convenience tools only when repeated friction is observed
 consider native connector file parameters if the MCP/client surface exposes them
 continue improving code graphs only from real project failures
 ```
