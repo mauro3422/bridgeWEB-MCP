@@ -6,20 +6,36 @@
       "phase": "discovery",
       "domains": [
         "agent-orchestration",
-        "roblox"
+        "roblox",
+        "github",
+        "git",
+        "filesystem"
       ],
       "actions": [
         "coordinate",
-        "recover"
+        "recover",
+        "move",
+        "verify",
+        "version",
+        "publish",
+        "document"
       ],
       "artifacts": [
         "mcp",
         "code",
-        "game"
+        "game",
+        "project",
+        "repository",
+        "place-file",
+        "backup",
+        "document"
       ],
       "needs": [
         "cross-agent",
-        "history-recovery"
+        "history-recovery",
+        "backup",
+        "integrity-verification",
+        "version-control"
       ],
       "requires": [],
       "complements": [
@@ -28,7 +44,13 @@
       "excludes": [],
       "negativeIntents": [],
       "priority": 78,
-      "activation": "on-demand"
+      "activation": "on-demand",
+      "coversPhases": [
+        "discovery",
+        "safety",
+        "implementation",
+        "verification"
+      ]
     },
     "shared-skill-governance": {
       "phase": "discovery",
@@ -487,19 +509,30 @@
     "roblox-save-backup-recovery": {
       "phase": "persistence",
       "domains": [
-        "roblox"
+        "roblox",
+        "git",
+        "filesystem"
       ],
       "actions": [
         "save",
-        "recover"
+        "recover",
+        "move",
+        "verify",
+        "version"
       ],
       "artifacts": [
         "game",
-        "code"
+        "code",
+        "project",
+        "repository",
+        "place-file",
+        "backup"
       ],
       "needs": [
         "backup",
-        "history-recovery"
+        "history-recovery",
+        "integrity-verification",
+        "version-control"
       ],
       "requires": [
         "mauroprime-bridge-collaboration"
@@ -510,7 +543,10 @@
         "read-only"
       ],
       "priority": 98,
-      "activation": "on-demand"
+      "activation": "on-demand",
+      "coversPhases": [
+        "persistence"
+      ]
     },
     "roblox-asset-review": {
       "phase": "discovery",
@@ -881,6 +917,17 @@
       "match": {
         "domains": [
           "roblox"
+        ],
+        "artifacts": [
+          "code",
+          "game",
+          "ui",
+          "animation",
+          "model-3d",
+          "asset",
+          "placement-system",
+          "network-system",
+          "resource-system"
         ]
       },
       "phases": [

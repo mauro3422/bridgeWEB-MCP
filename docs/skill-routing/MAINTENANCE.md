@@ -6,7 +6,7 @@
 2. Ejecutar `skill_route_audit`.
 3. Revisar la metadata inferida sugerida.
 4. Añadir una entrada explícita a `config/skill-routing/skill-routing-overrides.json` para skills propias.
-5. Definir fase, dominios, acciones, artefactos, necesidades, dependencias y activación.
+5. Definir fase principal, `coversPhases` cuando el mismo procedimiento cubra fases adicionales, dominios, acciones, artefactos, necesidades, dependencias y activación. No uses `coversPhases` para ocultar varias responsabilidades independientes dentro de una sola skill.
 6. Añadir un fixture positivo, uno negativo cercano y variantes de continuación cuando el flujo pueda retomarse con respuestas breves como “dale”, “sí”, “mandale”, “seguí”, “de una” o “hacé eso”.
 7. Ejecutar `npm run test:skill-routing` y `npm run verify:all`.
 
@@ -63,6 +63,19 @@ Cuando una tool cambia qué workflows son posibles:
 - **Fase incorrecta:** corregir `phase`, workflow y `completedPhases` del caso.
 - **Una continuación breve pierde el plan:** el caller debe enviar siempre un `context` resuelto y acotado para trabajos multi-turno, no depender de detectar una frase literal.
 - **Dos skills compiten:** establecer roles complementarios, dependencia o exclusión; evitar duplicar procedimientos.
+
+## Incidentes confirmados
+
+Cuando una activación incorrecta sea reproducible, no la corrijas sólo con una condición ad hoc. Registra el caso en `docs/skill-routing/INCIDENTS.md` con:
+
+- tarea y contexto mínimos;
+- selección incorrecta observable;
+- causa ubicada en vocabulario, fallback, metadata, workflow, scoring, dependencias o fases;
+- corrección general aplicada;
+- fixture positivo y negativo que bloquea la regresión;
+- resultado de la suite completa.
+
+Un exit code exitoso de un script de mantenimiento no prueba que el contrato cambió: lee de vuelta el archivo y ejecuta el fixture que debía fallar antes de continuar.
 
 ## Loop recomendado
 

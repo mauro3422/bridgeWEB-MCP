@@ -9,20 +9,20 @@ export const SKILL_STAGES = ["start", "implement", "verify", "persist", "close",
 export type SkillStage = typeof SKILL_STAGES[number];
 
 export const SKILL_DOMAINS = [
-  "roblox", "blender", "figma", "github", "google-workspace", "openai-development", "artifacts",
+  "roblox", "blender", "figma", "github", "git", "filesystem", "google-workspace", "openai-development", "artifacts",
   "browser", "coding", "opencode", "agent-orchestration", "skill-system", "other",
 ] as const;
 export const SKILL_ACTIONS = [
-  "discover", "design", "create", "edit", "review", "test", "debug", "optimize", "save", "recover",
-  "publish", "coordinate", "maintain", "document", "analyze",
+  "discover", "design", "create", "edit", "move", "review", "verify", "test", "debug", "optimize", "save", "recover",
+  "version", "publish", "coordinate", "maintain", "document", "analyze",
 ] as const;
 export const SKILL_ARTIFACTS = [
-  "code", "game", "ui", "animation", "model-3d", "asset", "document", "spreadsheet", "presentation",
-  "diagram", "website", "skill", "mcp", "placement-system", "network-system", "resource-system",
+  "code", "game", "project", "repository", "place-file", "backup", "ui", "animation", "model-3d", "asset", "document",
+  "spreadsheet", "presentation", "diagram", "website", "skill", "mcp", "placement-system", "network-system", "resource-system",
 ] as const;
 export const SKILL_NEEDS = [
   "official-docs", "safe-editing", "unit-tests", "playtest", "visual-qa", "device-testing", "performance",
-  "scene-analysis", "backup", "history-recovery", "cross-agent", "human-approval",
+  "scene-analysis", "backup", "integrity-verification", "version-control", "history-recovery", "cross-agent", "human-approval",
 ] as const;
 export const SKILL_RISKS = ["read-only", "write", "destructive", "external-side-effect"] as const;
 
@@ -48,6 +48,7 @@ export type StructuredSkillIntent = z.infer<typeof structuredSkillIntentSchema>;
 
 const routeMetadataSchema = z.object({
   phase: z.enum(SKILL_PHASES).optional(),
+  coversPhases: z.array(z.enum(SKILL_PHASES)).default([]),
   domains: z.array(z.string()).default([]),
   actions: z.array(z.string()).default([]),
   artifacts: z.array(z.string()).default([]),
@@ -237,8 +238,10 @@ function inferredMetadata(skill: SkillEntry): RouteMetadata {
     ["analyze", /analysis|analytics|inspect|audit/],
   ];
   for (const [action, pattern] of actionPatterns) if (pattern.test(text)) actions.push(action);
+  const phase = inferredPhase(skill);
   return {
-    phase: inferredPhase(skill),
+    phase,
+    coversPhases: [phase],
     domains: inferredDomain(skill),
     actions: actions.length ? actions : ["create"],
     artifacts: [],
@@ -258,6 +261,7 @@ function mergeMetadata(base: RouteMetadata, override: RouteMetadata | undefined)
   return {
     ...base,
     ...override,
+    coversPhases: override.coversPhases.length ? override.coversPhases : override.phase ? [override.phase] : base.coversPhases,
     domains: override.domains.length ? override.domains : base.domains,
     actions: override.actions.length ? override.actions : base.actions,
     artifacts: override.artifacts.length ? override.artifacts : base.artifacts,
@@ -354,6 +358,7 @@ export async function auditSkillRouting(skills: SkillEntry[]) {
       path: entry.path,
       suggestedMetadata: {
         phase: entry.phase,
+        coversPhases: entry.coversPhases,
         domains: entry.domains,
         actions: entry.actions,
         artifacts: entry.artifacts,
@@ -435,7 +440,9 @@ function fallbackIntent(task: string): StructuredSkillIntent {
   if (/roblox|studio|luau|rbxl/.test(text)) domains.push("roblox");
   if (/blender|blend|modelado 3d/.test(text)) domains.push("blender");
   if (/figma/.test(text)) domains.push("figma");
-  if (/github|pull request|\bpr\b|git/.test(text)) domains.push("github");
+  if (/github|pull request|\bpr\b/.test(text)) domains.push("github");
+  if (/\bgit\b|repositorio|repository|\brepo\b|commit|\btag\b/.test(text)) domains.push("git");
+  if (/filesystem|sistema de archivos|carpeta|folder|ruta|\bpath\b|archivo|\bfile\b|mover|move|migrar|relocate/.test(text)) domains.push("filesystem");
   if (/google drive|google docs|google sheets|google slides/.test(text)) domains.push("google-workspace");
   if (/openai|chatgpt app|agents sdk/.test(text)) domains.push("openai-development");
   if (/opencode/.test(text)) domains.push("opencode");
@@ -446,30 +453,36 @@ function fallbackIntent(task: string): StructuredSkillIntent {
   const actions: StructuredSkillIntent["actions"] = [];
   const mapping: Array<[StructuredSkillIntent["actions"][number], RegExp]> = [
     ["discover", /buscar|search|discover|listar|leer|inspect/], ["design", /disenar|design|arquitect|plan/],
-    ["create", /crear|create|build|generar|author/], ["edit", /editar|modificar|update|arreglar|fix|refactor/],
-    ["review", /revisar|review|auditar|audit/], ["test", /probar|test|playtest|cobertura/],
+    ["create", /crear|create|build|generar|author/], ["edit", /editar|modificar|update|actualizar rutas|arreglar|fix|refactor/],
+    ["move", /mover|trasladar|migrar|move|relocate/], ["review", /revisar|review|auditar|audit/],
+    ["verify", /verificar|comprobar|comparar|hash|sha ?256|checksum|integridad|verify/], ["test", /probar|test|playtest|cobertura/],
     ["debug", /debug|fall|error|bug/], ["optimize", /optimizar|performance|rendimiento|profil/],
     ["save", /guardar|save|backup|respaldo/], ["recover", /recuperar|recovery|rollback|restore/],
-    ["publish", /publicar|publish|deploy|push/], ["coordinate", /coordinar|codex.*chatgpt|bridge|agentes/],
-    ["maintain", /mantener|actualizar skill|mejorar skill|governance/], ["document", /documentar|docs|informe|report/],
-    ["analyze", /analizar|analysis|auditar|medir/],
+    ["version", /versionar|versionado|git init|commit|\btag\b|version control/], ["publish", /publicar|publish|deploy|push/],
+    ["coordinate", /coordinar|codex.*chatgpt|bridge|agentes/], ["maintain", /mantener|actualizar skill|mejorar skill|governance/],
+    ["document", /documentar|documentacion|docs|readme|roadmap|changelog|informe|report/], ["analyze", /analizar|analysis|auditar|medir/],
   ];
   for (const [action, pattern] of mapping) if (pattern.test(text)) actions.push(action);
   if (!actions.length) actions.push("analyze");
 
   const artifacts: StructuredSkillIntent["artifacts"] = [];
+  if (/proyecto|project/.test(text)) artifacts.push("project");
+  if (/repositorio|repository|\brepo\b|\bgit\b/.test(text)) artifacts.push("repository");
+  if (/rbxlx?|place file|archivo de roblox/.test(text)) artifacts.push("place-file");
+  if (/backup|respaldo|copia de seguridad/.test(text)) artifacts.push("backup");
+  if (/documentacion|docs|readme|roadmap|changelog/.test(text)) artifacts.push("document");
   if (/\b(?:ui|interfaz|hud)\b/.test(text)) artifacts.push("ui");
   if (/animacion|animation|keyframe/.test(text)) artifacts.push("animation");
   if (/modelo|model|mesh|3d/.test(text)) artifacts.push("model-3d");
   if (/placement|colocar|construir|build mode|grilla/.test(text)) artifacts.push("placement-system");
-  if (/cable|conexion|puerto|network|red/.test(text)) artifacts.push("network-system");
+  if (/cable|conexion|puerto|network|\bred\b/.test(text)) artifacts.push("network-system");
   if (/recurso|resource|nutriente|energia|logistica/.test(text)) artifacts.push("resource-system");
   if (/skill/.test(text)) artifacts.push("skill");
   if (/mcp|bridge/.test(text)) artifacts.push("mcp");
   if (!artifacts.length) artifacts.push(domains.includes("roblox") ? "game" : "code");
 
   const needs: StructuredSkillIntent["needs"] = [];
-  if (/docs|documentacion|api|referencia/.test(text)) needs.push("official-docs");
+  if (/documentacion oficial|official docs|api reference|referencia de api|roblox docs|documentacion de roblox/.test(text)) needs.push("official-docs");
   if (/unit test|prueba unitaria|cobertura/.test(text)) needs.push("unit-tests");
   if (/playtest|probar el juego|gameplay/.test(text)) needs.push("playtest");
   if (/visual|captura|screenshot|vista/.test(text)) needs.push("visual-qa");
@@ -477,16 +490,29 @@ function fallbackIntent(task: string): StructuredSkillIntent {
   if (/performance|rendimiento|fps|cpu|gpu/.test(text)) needs.push("performance");
   if (/scene analysis|memoria|memory|leak/.test(text)) needs.push("scene-analysis");
   if (/guardar|backup|respaldo|save/.test(text)) needs.push("backup");
+  if (/hash|sha ?256|checksum|integridad|comparar archivos|verify/.test(text)) needs.push("integrity-verification");
+  if (/\bgit\b|commit|\btag\b|repositorio|repository|\brepo\b/.test(text)) needs.push("version-control");
   if (/historial|recuperar sesion|recovery/.test(text)) needs.push("history-recovery");
   if (/codex.*chatgpt|chatgpt.*codex|bridge|coordinar agentes/.test(text)) needs.push("cross-agent");
 
   const risk: StructuredSkillIntent["risk"] = /borrar|delete|destruct|rollback/.test(text)
     ? "destructive"
-    : /crear|editar|modificar|guardar|publicar|write|update|fix/.test(text) ? "write" : "read-only";
+    : /crear|editar|modificar|mover|trasladar|migrar|guardar|publicar|push|commit|versionar|write|update|fix/.test(text) ? "write" : "read-only";
   return { summary: task.slice(0, 600), domains: [...new Set(domains)], actions: [...new Set(actions)], artifacts: [...new Set(artifacts)], needs: [...new Set(needs)], risk, ambiguity: "high" };
 }
 
 const phaseOrder = new Map<SkillPhase, number>(SKILL_PHASES.map((phase, index) => [phase, index]));
+
+function skillPhases(skill: Pick<RouteMetadata, "phase" | "coversPhases">): SkillPhase[] {
+  const phases = skill.coversPhases.length ? [...skill.coversPhases] : [skill.phase ?? "implementation"];
+  if (skill.phase && !phases.includes(skill.phase)) phases.unshift(skill.phase);
+  return [...new Set(phases)].sort((a, b) => (phaseOrder.get(a) ?? 0) - (phaseOrder.get(b) ?? 0));
+}
+
+function skillCoversPhase(skill: Pick<RouteMetadata, "phase" | "coversPhases">, phase: SkillPhase): boolean {
+  return skillPhases(skill).includes(phase);
+}
+
 const stagePhases: Record<SkillStage, SkillPhase[]> = {
   start: ["discovery", "safety", "implementation"],
   implement: ["safety", "implementation"],
@@ -560,9 +586,9 @@ function inferredRequiredPhases(intent: StructuredSkillIntent, stage: SkillStage
   const phases = new Set<SkillPhase>();
   if (!intent.domains.includes("other")) phases.add("discovery");
   if (intent.risk !== "read-only") phases.add("safety");
-  if (intent.actions.some((action) => ["design", "create", "edit"].includes(action))) phases.add("implementation");
-  if (intent.risk !== "read-only" || intent.actions.some((action) => ["review", "test", "debug", "optimize", "analyze"].includes(action))) phases.add("verification");
-  if (intent.actions.some((action) => ["save", "recover", "publish"].includes(action)) || intent.needs.some((need) => ["backup", "history-recovery"].includes(need))) phases.add("persistence");
+  if (intent.actions.some((action) => ["design", "create", "edit", "move", "version"].includes(action))) phases.add("implementation");
+  if (intent.risk !== "read-only" || intent.actions.some((action) => ["review", "verify", "test", "debug", "optimize", "analyze"].includes(action))) phases.add("verification");
+  if (intent.actions.some((action) => ["save", "recover", "version", "publish"].includes(action)) || intent.needs.some((need) => ["backup", "integrity-verification", "version-control", "history-recovery"].includes(need))) phases.add("persistence");
   if (intent.domains.includes("roblox") && intent.risk !== "read-only") phases.add("persistence");
   if (stage === "close") phases.add("maintenance");
   return [...phases].sort((a, b) => (phaseOrder.get(a) ?? 0) - (phaseOrder.get(b) ?? 0));
@@ -688,7 +714,7 @@ export async function planSkillRoute(args: {
   const ordered = dependencyOrder(selected, byName);
   const activePhases = new Set(stagePhases[stage].filter((phase) => !completedPhases.includes(phase)));
   const activeNames = new Set(ordered.order
-    .filter((skill) => rootSelectedNames.has(skill.name) && activePhases.has(skill.phase ?? "implementation"))
+    .filter((skill) => rootSelectedNames.has(skill.name) && [...activePhases].some((phase) => skillCoversPhase(skill, phase)))
     .map((skill) => skill.name));
   const addActiveDependencies = (skillName: string) => {
     const skill = byName.get(skillName);
@@ -705,13 +731,13 @@ export async function planSkillRoute(args: {
   const deferredSkills = ordered.order.filter((skill) => !activeNames.has(skill.name));
 
   const phasePlan = SKILL_PHASES.map((phase) => {
-    const skills = ordered.order.filter((skill) => (skill.phase ?? "implementation") === phase);
+    const skills = ordered.order.filter((skill) => skillCoversPhase(skill, phase));
     const required = requiredPhases.has(phase);
     const status = completedPhases.includes(phase) ? "completed" : activePhases.has(phase) ? "active" : required ? "pending" : skills.length ? "optional" : "not-required";
     return { phase, required, status, skills: skills.map((skill) => ({ name: skill.name, source: skill.source, score: skill.score, required: skill.required, reasons: [...skill.requiredBy, ...skill.reasons] })) };
   });
 
-  const coveredPhases = new Set(ordered.order.map((skill) => skill.phase ?? "implementation"));
+  const coveredPhases = new Set<SkillPhase>(ordered.order.flatMap((skill) => skillPhases(skill)));
   const missingRequiredPhases = [...requiredPhases].filter((phase) => !completedPhases.includes(phase) && !coveredPhases.has(phase));
   const inferredActiveWarnings = activeSkills
     .filter((skill) => skill.routingMetadataSource === "inferred")

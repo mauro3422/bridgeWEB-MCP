@@ -33,7 +33,8 @@ Cada caso puede exigir:
 - skills que no deben estar activas;
 - skills que deben quedar diferidas;
 - modo estructurado o fallback;
-- uso del contexto previo.
+- uso del contexto previo;
+- fases requeridas que deben quedar sin cobertura, normalmente ninguna mediante `missingRequiredPhases`.
 
 ### 2. Auditoría estructural
 
@@ -74,3 +75,5 @@ Para cada activación importante agregar:
 4. fases posteriores cuando existan verificación o persistencia.
 
 Los fixtures deben describir comportamiento observable, no detalles internos del algoritmo de puntaje.
+
+Para un falso positivo o falso negativo confirmado, conserva primero la salida que falla, añade el incidente a `INCIDENTS.md` y crea un fixture que exija tanto la selección correcta como la exclusión explícita de las ramas incorrectas. Después de modificar código o contrato, lee de vuelta los archivos: un exit code exitoso de un script no demuestra por sí solo que la configuración cambió.

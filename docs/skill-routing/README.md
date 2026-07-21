@@ -35,6 +35,7 @@ La intención estructurada contiene únicamente el resultado de clasificación (
 | Fuente Git de skills propias | `C:\Dev\mauroprime-skills\skills` |
 | Montaje runtime de Codex | `~/.codex/skills/<name>` como junction |
 | Skill mantenedora | `C:\Dev\mauroprime-skills\skills\skill-routing-maintainer\SKILL.md` |
+| Incidentes y regresiones confirmadas | `docs/skill-routing/INCIDENTS.md` |
 
 `C:\Dev\bridge-mcp` versiona el motor y el contrato de routing. `C:\Dev\mauroprime-skills` versiona los procedimientos propios. La carpeta `~/.codex/skills/_dashboard` contiene salidas generadas para inspección; no es una fuente editable.
 
@@ -51,6 +52,8 @@ La intención estructurada contiene únicamente el resultado de clasificación (
 
 El plan distingue entre skills requeridas por un workflow o dependencia, skills opcionales seleccionadas por relevancia y skills diferidas para fases posteriores. El agente puede descartar una skill opcional si resulta claramente irrelevante o impráctica para la fase actual, usando el conjunto mínimo suficiente. Una skill requerida sólo debe omitirse cuando una regla superior de seguridad o una capacidad realmente ausente lo impida, y el motivo debe reportarse. Las diferidas no se cargan antes de tiempo.
 
+`phase` indica la fase principal de carga. `coversPhases` permite que un único procedimiento coherente cubra varias fases sin crear skills artificiales. Cuando `coversPhases` no se declara, la cobertura es únicamente la `phase` explícita; la fase inferida por descripción nunca debe reemplazar una fase explícita.
+
 ## Contexto conversacional
 
 El Bridge no puede leer por sí solo todo el historial de ChatGPT. El agente que ve la conversación debe enviar:
@@ -62,6 +65,14 @@ El Bridge no puede leer por sí solo todo el historial de ChatGPT. El agente que
 La política recomendada es enviar normalmente entre 500 y 2000 caracteres de contexto, con un máximo de 4000. Debe cubrir el objetivo aceptado, restricciones relevantes, trabajo ya realizado o fase actual y referencias todavía abiertas. Se aplica tanto a “dale”, “sí”, “mandale”, “seguí”, “de una” o “hacé eso” como a mensajes más completos que dependen de decisiones anteriores. Sólo se omite en un primer turno realmente independiente.
 
 `context` no debe ser una transcripción completa, conversación irrelevante ni cadena de pensamiento. Es evidencia adicional: el mensaje actual, las instrucciones superiores y la intención explícita conservan prioridad.
+
+## Vocabulario estructurado
+
+El vocabulario debe describir tanto cambios dentro de una aplicación como trabajo administrativo alrededor del proyecto. Además de gameplay y código, MSSR reconoce dominios `git` y `filesystem`; acciones `move`, `verify` y `version`; artefactos `project`, `repository`, `place-file` y `backup`; y necesidades `integrity-verification` y `version-control`.
+
+Usa estos conceptos para migraciones de carpeta, bootstrap de repositorios, comparación de hashes, actualización de rutas absolutas y versionado. No clasifiques automáticamente una operación de archivos como edición de gameplay sólo porque contiene un `.rbxl` o la palabra Roblox.
+
+La documentación local (`README`, roadmap, changelog, notas) es el artefacto `document`. `official-docs` se reserva para documentación oficial o referencias de API explícitas.
 
 ## Descubrimiento de skills nuevas
 

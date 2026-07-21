@@ -34,6 +34,7 @@
       "additionalProperties": false,
       "properties": {
         "phase": { "enum": ["discovery", "safety", "implementation", "verification", "persistence", "maintenance"] },
+        "coversPhases": { "type": "array", "items": { "enum": ["discovery", "safety", "implementation", "verification", "persistence", "maintenance"] }, "uniqueItems": true },
         "domains": { "type": "array", "items": { "type": "string" } },
         "actions": { "type": "array", "items": { "type": "string" } },
         "artifacts": { "type": "array", "items": { "type": "string" } },

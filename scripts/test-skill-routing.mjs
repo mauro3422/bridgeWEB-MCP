@@ -54,12 +54,20 @@ for (const testCase of expandedCases) {
   rejectMembers(testCase.name, 'active', route.loadOrder, expected.activeExcludes);
   requireMembers(testCase.name, 'deferred', route.deferredLoadOrder, expected.deferredIncludes);
   rejectMembers(testCase.name, 'deferred', route.deferredLoadOrder, expected.deferredExcludes);
+  if (Array.isArray(expected.missingRequiredPhases)) {
+    const actualMissing = [...(route.coverage?.missingRequiredPhases ?? [])].sort();
+    const expectedMissing = [...expected.missingRequiredPhases].sort();
+    if (JSON.stringify(actualMissing) !== JSON.stringify(expectedMissing)) {
+      failures.push(`${testCase.name}: expected missingRequiredPhases=${expectedMissing.join(', ') || 'none'}, got ${actualMissing.join(', ') || 'none'}`);
+    }
+  }
   results.push({
     name: testCase.name,
     mode: route.classificationMode,
     contextUsed: route.contextUsed,
     active: route.loadOrder,
     deferred: route.deferredLoadOrder,
+    missingRequiredPhases: route.coverage?.missingRequiredPhases ?? [],
     warnings: route.warnings,
   });
 }

@@ -308,6 +308,97 @@
           "opencode-cli-audit"
         ]
       }
+    },
+    {
+      "name": "roblox-project-repository-migration-structured",
+      "task": "Mover un proyecto local de Roblox a otra carpeta, conservar el archivo rbxl, backups, assets y documentación, verificar hashes, actualizar rutas antiguas, crear su repositorio Git y hacer push.",
+      "stage": "start",
+      "sources": [
+        "codex-local"
+      ],
+      "intent": {
+        "summary": "Migrar y versionar de forma segura la raíz local de un proyecto Roblox.",
+        "domains": [
+          "roblox",
+          "git",
+          "filesystem"
+        ],
+        "actions": [
+          "move",
+          "verify",
+          "version",
+          "save",
+          "publish",
+          "document"
+        ],
+        "artifacts": [
+          "project",
+          "repository",
+          "place-file",
+          "backup",
+          "document"
+        ],
+        "needs": [
+          "backup",
+          "integrity-verification",
+          "version-control",
+          "cross-agent"
+        ],
+        "risk": "write",
+        "ambiguity": "low"
+      },
+      "expect": {
+        "classificationMode": "structured-semantic",
+        "activeIncludes": [
+          "mauroprime-bridge-collaboration"
+        ],
+        "activeExcludes": [
+          "roblox-mcp-skill-router",
+          "roblox-safe-editing",
+          "rbx-docs-search",
+          "roblox-connection-network-authoring",
+          "roblox-placement-system-authoring",
+          "roblox-technique-animation-authoring",
+          "roblox-ui-ux",
+          "roblox-playtest",
+          "roblox-studio-qa",
+          "roblox-resource-network-test"
+        ],
+        "deferredIncludes": [
+          "roblox-save-backup-recovery"
+        ],
+        "missingRequiredPhases": []
+      }
+    },
+    {
+      "name": "roblox-project-repository-migration-fallback",
+      "task": "Mové la carpeta del proyecto Roblox, compará los SHA-256, actualizá README y rutas viejas, inicializá Git, creá el repo y hacé push con un backup del rbxl.",
+      "stage": "start",
+      "sources": [
+        "codex-local"
+      ],
+      "expect": {
+        "classificationMode": "lexical-fallback",
+        "activeIncludes": [
+          "mauroprime-bridge-collaboration"
+        ],
+        "activeExcludes": [
+          "roblox-mcp-skill-router",
+          "roblox-safe-editing",
+          "rbx-docs-search",
+          "roblox-connection-network-authoring",
+          "roblox-placement-system-authoring",
+          "roblox-technique-animation-authoring",
+          "roblox-ui-ux",
+          "roblox-playtest",
+          "roblox-studio-qa",
+          "roblox-resource-network-test"
+        ],
+        "deferredIncludes": [
+          "roblox-save-backup-recovery"
+        ],
+        "missingRequiredPhases": []
+      }
     }
   ]
 }

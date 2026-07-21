@@ -36,7 +36,8 @@
               "activeIncludes": { "type": "array", "items": { "type": "string" } },
               "activeExcludes": { "type": "array", "items": { "type": "string" } },
               "deferredIncludes": { "type": "array", "items": { "type": "string" } },
-              "deferredExcludes": { "type": "array", "items": { "type": "string" } }
+              "deferredExcludes": { "type": "array", "items": { "type": "string" } },
+              "missingRequiredPhases": { "type": "array", "items": { "enum": ["discovery", "safety", "implementation", "verification", "persistence", "maintenance"] }, "uniqueItems": true }
             },
             "additionalProperties": false
           }
