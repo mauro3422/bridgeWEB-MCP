@@ -8,6 +8,45 @@ const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-v060-regression-')
 process.env.BRIDGE_MCP_CACHE_DIR = path.join(sandbox, 'cache-store');
 process.env.BRIDGE_MCP_SNAPSHOT_DIR = path.join(sandbox, 'snapshot-store');
 process.env.BRIDGE_MCP_BINARY_UPLOAD_DIR = path.join(sandbox, 'binary-upload-store');
+const fixtureCodexHome = path.join(sandbox, 'codex-home');
+process.env.CODEX_HOME = fixtureCodexHome;
+const fixtureSkillRoot = path.join(fixtureCodexHome, 'skills');
+const writeFixtureSkill = (name, description) => {
+  const directory = path.join(fixtureSkillRoot, name);
+  fs.mkdirSync(directory, {recursive:true});
+  fs.writeFileSync(path.join(directory, 'SKILL.md'), `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n\nFixture guidance.\n`);
+};
+writeFixtureSkill('roblox-mcp-skill-router', 'Route substantial Roblox work through local and live Roblox skills.');
+writeFixtureSkill('roblox-safe-editing', 'Apply safe ordered Roblox mutations.');
+writeFixtureSkill('roblox-connection-network-authoring', 'Create reusable port and cable networks in Roblox.');
+writeFixtureSkill('roblox-playtest', 'Run focused Roblox gameplay tests.');
+writeFixtureSkill('roblox-studio-qa', 'Inspect Roblox structure, visuals, and console output.');
+writeFixtureSkill('roblox-save-backup-recovery', 'Save and back up local Roblox places.');
+const linkedSkillSource = path.join(sandbox, 'linked-skill-source', 'linked-junction-skill');
+fs.mkdirSync(linkedSkillSource, {recursive:true});
+fs.writeFileSync(path.join(linkedSkillSource, 'SKILL.md'), '---\nname: linked-junction-skill\ndescription: Verify safe discovery through a directory junction.\n---\n\n# linked-junction-skill\n\nFixture guidance.\n');
+fs.symlinkSync(linkedSkillSource, path.join(fixtureSkillRoot, 'linked-junction-skill'), process.platform === 'win32' ? 'junction' : 'dir');
+fs.mkdirSync(path.join(fixtureSkillRoot, '_dashboard'), {recursive:true});
+fs.writeFileSync(path.join(fixtureSkillRoot, '_dashboard', 'skill-routing-overrides.json'), JSON.stringify({
+  schemaVersion: 1,
+  skills: {
+    'roblox-mcp-skill-router': {phase:'discovery',domains:['roblox'],actions:['discover','coordinate'],artifacts:['game','mcp'],needs:[],requires:[],complements:[],excludes:[],negativeIntents:[],priority:96,activation:'always'},
+    'roblox-safe-editing': {phase:'safety',domains:['roblox'],actions:['create','edit'],artifacts:['game','network-system'],needs:['safe-editing'],requires:['roblox-mcp-skill-router'],complements:[],excludes:[],negativeIntents:['read-only'],priority:95,activation:'on-demand'},
+    'roblox-connection-network-authoring': {phase:'implementation',domains:['roblox'],actions:['design','create','edit'],artifacts:['network-system','resource-system'],needs:['safe-editing'],requires:['roblox-safe-editing'],complements:[],excludes:[],negativeIntents:[],priority:90,activation:'on-demand'},
+    'roblox-playtest': {phase:'verification',domains:['roblox'],actions:['test','debug'],artifacts:['game','network-system','resource-system'],needs:['playtest'],requires:['roblox-mcp-skill-router'],complements:[],excludes:[],negativeIntents:[],priority:91,activation:'on-demand'},
+    'roblox-studio-qa': {phase:'verification',domains:['roblox'],actions:['review','test'],artifacts:['game'],needs:['visual-qa'],requires:['roblox-mcp-skill-router'],complements:[],excludes:[],negativeIntents:[],priority:89,activation:'on-demand'},
+    'roblox-save-backup-recovery': {phase:'persistence',domains:['roblox'],actions:['save','recover'],artifacts:['game'],needs:['backup'],requires:[],complements:[],excludes:[],negativeIntents:['read-only'],priority:98,activation:'on-demand'},
+    'linked-junction-skill': {phase:'discovery',domains:['skill-system'],actions:['discover'],artifacts:['skill'],needs:[],requires:[],complements:[],excludes:[],negativeIntents:[],priority:10,activation:'on-demand'},
+  },
+  workflows: [{name:'roblox-development',match:{domains:['roblox']},phases:[
+    {phase:'discovery',skills:['roblox-mcp-skill-router'],required:true},
+    {phase:'safety',skills:['roblox-safe-editing'],required:true,when:{risks:['write','destructive']}},
+    {phase:'verification',skills:['roblox-playtest','roblox-studio-qa'],required:true,when:{actions:['create','edit','test','debug']}},
+    {phase:'persistence',skills:['roblox-save-backup-recovery'],required:true,when:{risks:['write','destructive']}},
+  ]}],
+}, null, 2));
+process.env.BRIDGE_MCP_SKILL_ROUTING_PATH = path.join(fixtureSkillRoot, '_dashboard', 'skill-routing-overrides.json');
+process.env.BRIDGE_MCP_SKILL_ROUTING_FIXTURES_PATH = path.join(fixtureSkillRoot, '_dashboard', 'skill-routing-fixtures.json');
 
 const { createDefaultToolRegistry } = await import('../dist/tool-registry.js');
 const { writePersistentCache } = await import('../dist/tools/shared/persistent-cache.js');
@@ -17,13 +56,75 @@ const root = path.join(sandbox, 'project');
 fs.mkdirSync(root, {recursive:true});
 
 try {
-  if (registry.tools.length !== 94) throw new Error(`expected 94 tools, got ${registry.tools.length}`);
+  if (registry.tools.length !== 105) throw new Error(`expected 105 tools, got ${registry.tools.length}`);
   if (registry.riskSummary.neutral.length !== 0) throw new Error(`neutral tools remain: ${registry.riskSummary.neutral.join(', ')}`);
-  for (const moduleName of ['project','workspace','cache','workflow-guides','binary-files','images','blender']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
-  for (const toolName of ['project_context_load','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_asset_save','image_character_views_prepare','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_review_bundle','blender_execute_code','blender_batch_script','blender_setup_character_references','blender_character_loop_status']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/binary/image/Blender tool ${toolName}`);
+  for (const moduleName of ['project','workspace','cache','workflow-guides','skill-catalog-and-roblox-proxy','roblox-studio-ops','binary-files','images','blender']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
+  for (const toolName of ['project_context_load','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','skill_catalog','skill_recommend','skill_route_audit','skill_route_plan','skill_bootstrap','skill_load','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_query','roblox_mcp_action','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_asset_save','image_character_views_prepare','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_review_bundle','blender_execute_code','blender_batch_script','blender_setup_character_references','blender_character_loop_status']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/Blender tool ${toolName}`);
+  if (!registry.riskSummary.destructive.includes('roblox_mcp_action') || !registry.riskSummary.destructive.includes('roblox_place_save')) throw new Error('Roblox action/save risk classification failed');
   const reviewTool = registry.tools.find((tool) => tool.name === 'blender_review_bundle');
   if (!reviewTool || !registry.riskSummary.destructive.includes('blender_review_bundle')) throw new Error('Blender review bundle classification failed');
   if (!reviewTool.inputSchema?.properties?.views || !reviewTool.inputSchema?.properties?.outputDir) throw new Error('Blender review bundle schema failed');
+
+  const junctionCatalog = await call('skill_catalog', {sources:['codex-local'],maxResults:50});
+  if (!junctionCatalog.skills.some((skill) => skill.name === 'linked-junction-skill')) throw new Error('skill catalog did not follow an allowed directory junction');
+
+  const structuredRoute = await call('skill_route_plan', {
+    task:'Diseñar máquinas conectables por puertos, transportar recursos y guardar el proyecto',
+    sources:['codex-local'],
+    stage:'start',
+    maxSkills:8,
+    intent:{
+      summary:'Sistema Roblox de conexiones y recursos con cambios persistentes',
+      domains:['roblox'],
+      actions:['design','create','edit'],
+      artifacts:['network-system','resource-system','game'],
+      needs:['safe-editing','playtest','backup'],
+      risk:'write',
+      ambiguity:'low',
+    },
+  });
+  if (structuredRoute.classificationMode !== 'structured-semantic') throw new Error('structured skill routing mode failed');
+  for (const name of ['roblox-mcp-skill-router','roblox-safe-editing','roblox-connection-network-authoring']) {
+    if (!structuredRoute.loadOrder.includes(name)) throw new Error(`structured route missing active skill ${name}`);
+  }
+  for (const name of ['roblox-playtest','roblox-studio-qa','roblox-save-backup-recovery']) {
+    if (!structuredRoute.deferredLoadOrder.includes(name)) throw new Error(`structured route missing deferred skill ${name}`);
+  }
+  if (!structuredRoute.coverage.requiredPhases.includes('verification') || !structuredRoute.coverage.requiredPhases.includes('persistence')) throw new Error('structured route phase coverage failed');
+
+  const verificationRoute = await call('skill_route_plan', {
+    task:'Verificar el mismo sistema Roblox',
+    sources:['codex-local'],
+    stage:'verify',
+    completedPhases:['discovery','safety','implementation'],
+    intent:{
+      summary:'Verificación del sistema Roblox ya implementado',
+      domains:['roblox'],
+      actions:['test','review'],
+      artifacts:['network-system','resource-system','game'],
+      needs:['playtest','visual-qa'],
+      risk:'write',
+      ambiguity:'low',
+    },
+  });
+  for (const name of ['roblox-mcp-skill-router','roblox-playtest','roblox-studio-qa']) {
+    if (!verificationRoute.loadOrder.includes(name)) throw new Error(`verification route missing ${name}`);
+  }
+  if (verificationRoute.loadOrder.includes('roblox-save-backup-recovery')) throw new Error('verification route loaded persistence skill too early');
+
+  const fallbackRoute = await call('skill_route_plan', {task:'conectar cositas en roblox y probarlas',sources:['codex-local'],stage:'start'});
+  if (fallbackRoute.classificationMode !== 'lexical-fallback' || fallbackRoute.intent.ambiguity !== 'high') throw new Error('lexical fallback routing failed');
+
+  const continuationRoute = await call('skill_route_plan', {
+    task:'ok, hacelo',
+    context:'La propuesta aceptada fue crear en Roblox una red conectable por puertos, editarla de forma segura, probarla y guardarla.',
+    sources:['codex-local'],
+    stage:'start',
+  });
+  if (!continuationRoute.contextUsed || !continuationRoute.loadOrder.includes('roblox-connection-network-authoring')) throw new Error('conversation continuation routing failed');
+
+  const routeAudit = await call('skill_route_audit', {sources:['codex-local']});
+  if (!routeAudit.ok || routeAudit.maintenanceRequired) throw new Error(`fixture routing audit failed: ${JSON.stringify({errors:routeAudit.errors,maintenance:routeAudit.maintenanceReasons})}`);
 
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({name:'fixture-project',scripts:{build:'tsc',test:'node test.js'},devDependencies:{typescript:'1.0.0'}}, null, 2));
   fs.writeFileSync(path.join(root, 'app.txt'), 'original\n');

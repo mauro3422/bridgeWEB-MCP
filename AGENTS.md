@@ -211,3 +211,15 @@ Mauro usa este bridge como “mini-Codex” local. Priorizar estabilidad sobre f
 - When adding or changing a tool, update its description, schema, annotations, regression coverage, generated `TOOLS.md`, server version, and `tools/list` verification.
 - Keep MCP server instructions concise. Put detailed procedures in workflow guides and load them only when relevant.
 - Never claim a file, process, scene, build, or remote update exists until a tool result verifies it.
+
+
+## MauroPrime Structured Skill Router (MSSR)
+
+- Canonical documentation: `docs/skill-routing/README.md`.
+- Custom skill Git source: `C:\Dev\mauroprime-skills\skills`; Codex runtime paths under `~/.codex/skills/<name>` are junctions to that repository.
+- Canonical Git-tracked contract and fixtures: `config/skill-routing/`.
+- Before substantial specialized work, infer compact structured intent and use `skill_route_plan` or `skill_bootstrap`.
+- For every multi-turn specialized `skill_route_plan` or `skill_bootstrap` call, pass a bounded resolved `context` summary—normally 500–2000 characters covering the accepted goal, relevant constraints, completed work/current phase, and unresolved references. This applies to any short continuation or acceptance such as “dale”, “ok”, “sí”, “mandale”, “seguí”, “de una”, “hacé eso”, or equivalent wording. Omit context only for a genuinely standalone first turn; never pass chain-of-thought, irrelevant history, or a full transcript.
+- After creating, renaming, deleting, splitting, or materially changing a skill, load `skill-routing-maintainer`, run `skill_route_audit`, update positive/negative/continuation fixtures, and execute `npm run test:skill-routing`.
+- A new local skill may be discovered with inferred metadata, but it is not routing-stable until the audit is clean and its explicit entry and fixtures are committed.
+- Automated checks may detect drift and block verification. Do not silently autoedit skills or routing configuration in the background.

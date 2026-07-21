@@ -1,6 +1,6 @@
 param(
   [string]$ProjectRoot = "C:\dev\bridge-mcp",
-  [string]$ExpectedServerVersion = "0.6.2",
+  [string]$ExpectedServerVersion = "0.6.5",
   [switch]$StrictGit
 )
 
@@ -51,7 +51,8 @@ $steps += Invoke-VerifyStep "doctor" { powershell -NoProfile -File .\scripts\bri
 $steps += Invoke-VerifyStep "check" { npm run check }
 $steps += Invoke-VerifyStep "build" { npm run build }
 $steps += Invoke-VerifyStep "smoke:http" { powershell -NoProfile -File .\scripts\test-bridge-http.ps1 }
-$steps += Invoke-VerifyStep "test:regressions" { powershell -NoProfile -File .\scripts\test-bridge-regressions.ps1 }
+$steps += Invoke-VerifyStep "test:regressions" { npm run test:regressions }
+$steps += Invoke-VerifyStep "test:skill-routing" { npm run test:skill-routing }
 $steps += Invoke-VerifyStep "docs:tools:check" { npm run docs:tools:check }
 $steps += Invoke-VerifyStep "watchdog restart status" {
   node .\scripts\verify-mcp-call.mjs bridge_restart_status "{}" lastAck pending
@@ -60,7 +61,7 @@ $steps += Invoke-VerifyStep "metrics status" {
   node .\scripts\verify-mcp-call.mjs bridge_metrics_status "{}" sqliteAvailable jsonlPath
 }
 $steps += Invoke-VerifyStep "tools:list sanity" {
-  node .\scripts\verify-mcp-tools-list.mjs system_info run_command git_status bridge_self_check bridge_metrics_status bridge_verify_all read_file_lines edit_lines impact_analysis dependency_graph import_graph call_graph find_dead_code python_validate python_symbols python_impact_analysis python_import_graph python_dead_code python_test_plan pytest_testmon project_context_load workflow_guide_recommend workflow_guide_load workflow_guide_create binary_file_info binary_file_read_chunk binary_file_write binary_upload_begin binary_upload_append binary_upload_status binary_upload_finish binary_upload_abort image_asset_save image_character_views_prepare blender_status blender_open blender_scene_info blender_viewport_screenshot blender_execute_code blender_batch_script blender_store_reference_image blender_setup_character_references blender_character_loop_status
+  node .\scripts\verify-mcp-tools-list.mjs system_info run_command git_status bridge_self_check bridge_metrics_status bridge_verify_all read_file_lines edit_lines impact_analysis dependency_graph import_graph call_graph find_dead_code python_validate python_symbols python_impact_analysis python_import_graph python_dead_code python_test_plan pytest_testmon project_context_load workflow_guide_recommend workflow_guide_load workflow_guide_create skill_catalog skill_route_audit skill_route_plan skill_bootstrap binary_file_info binary_file_read_chunk binary_file_write binary_upload_begin binary_upload_append binary_upload_status binary_upload_finish binary_upload_abort image_asset_save image_character_views_prepare blender_status blender_open blender_scene_info blender_viewport_screenshot blender_execute_code blender_batch_script blender_store_reference_image blender_setup_character_references blender_character_loop_status
 }
 $steps += Invoke-VerifyStep "git status" {
   git status --short --branch

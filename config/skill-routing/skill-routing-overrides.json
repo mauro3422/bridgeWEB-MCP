@@ -1,0 +1,1033 @@
+{
+  "$schema": "./skill-routing.schema.json",
+  "schemaVersion": 1,
+  "skills": {
+    "mauroprime-bridge-collaboration": {
+      "phase": "discovery",
+      "domains": [
+        "agent-orchestration",
+        "roblox"
+      ],
+      "actions": [
+        "coordinate",
+        "recover"
+      ],
+      "artifacts": [
+        "mcp",
+        "code",
+        "game"
+      ],
+      "needs": [
+        "cross-agent",
+        "history-recovery"
+      ],
+      "requires": [],
+      "complements": [
+        "shared-skill-governance"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 78,
+      "activation": "on-demand"
+    },
+    "shared-skill-governance": {
+      "phase": "discovery",
+      "domains": [
+        "skill-system"
+      ],
+      "actions": [
+        "design",
+        "create",
+        "edit",
+        "review",
+        "maintain",
+        "document"
+      ],
+      "artifacts": [
+        "skill",
+        "mcp"
+      ],
+      "needs": [
+        "cross-agent"
+      ],
+      "requires": [],
+      "complements": [
+        "skill-maintenance-loop"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 82,
+      "activation": "on-demand"
+    },
+    "skill-maintenance-loop": {
+      "phase": "maintenance",
+      "domains": [
+        "skill-system",
+        "agent-orchestration",
+        "coding",
+        "roblox",
+        "blender"
+      ],
+      "actions": [
+        "review",
+        "maintain",
+        "document"
+      ],
+      "artifacts": [
+        "skill"
+      ],
+      "needs": [],
+      "requires": [
+        "shared-skill-governance"
+      ],
+      "complements": [],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 88,
+      "activation": "closing"
+    },
+    "roblox-mcp-skill-router": {
+      "phase": "discovery",
+      "domains": [
+        "roblox"
+      ],
+      "actions": [
+        "discover",
+        "coordinate"
+      ],
+      "artifacts": [
+        "game",
+        "mcp",
+        "skill"
+      ],
+      "needs": [
+        "official-docs",
+        "cross-agent"
+      ],
+      "requires": [],
+      "complements": [
+        "mauroprime-bridge-collaboration"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 96,
+      "activation": "on-demand"
+    },
+    "roblox-safe-editing": {
+      "phase": "safety",
+      "domains": [
+        "roblox"
+      ],
+      "actions": [
+        "create",
+        "edit",
+        "debug"
+      ],
+      "artifacts": [
+        "code",
+        "game",
+        "ui",
+        "animation",
+        "model-3d",
+        "network-system",
+        "resource-system"
+      ],
+      "needs": [
+        "safe-editing"
+      ],
+      "requires": [
+        "roblox-mcp-skill-router"
+      ],
+      "complements": [
+        "roblox-studio-qa"
+      ],
+      "excludes": [],
+      "negativeIntents": [
+        "read-only"
+      ],
+      "priority": 95,
+      "activation": "on-demand"
+    },
+    "roblox-placement-system-authoring": {
+      "phase": "implementation",
+      "domains": [
+        "roblox"
+      ],
+      "actions": [
+        "design",
+        "create",
+        "edit"
+      ],
+      "artifacts": [
+        "game",
+        "placement-system"
+      ],
+      "needs": [
+        "safe-editing"
+      ],
+      "requires": [
+        "roblox-safe-editing"
+      ],
+      "complements": [
+        "roblox-placement-ui-review",
+        "roblox-playtest"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 84,
+      "activation": "on-demand"
+    },
+    "roblox-connection-network-authoring": {
+      "phase": "implementation",
+      "domains": [
+        "roblox"
+      ],
+      "actions": [
+        "design",
+        "create",
+        "edit"
+      ],
+      "artifacts": [
+        "network-system",
+        "resource-system",
+        "game"
+      ],
+      "needs": [
+        "safe-editing"
+      ],
+      "requires": [
+        "roblox-safe-editing"
+      ],
+      "complements": [
+        "roblox-resource-network-test",
+        "roblox-playtest"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 90,
+      "activation": "on-demand"
+    },
+    "roblox-technique-animation-authoring": {
+      "phase": "implementation",
+      "domains": [
+        "roblox"
+      ],
+      "actions": [
+        "design",
+        "create",
+        "edit",
+        "debug"
+      ],
+      "artifacts": [
+        "animation",
+        "code",
+        "game"
+      ],
+      "needs": [
+        "safe-editing"
+      ],
+      "requires": [
+        "roblox-safe-editing"
+      ],
+      "complements": [
+        "roblox-animation-frame-review",
+        "roblox-playtest"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 86,
+      "activation": "on-demand"
+    },
+    "roblox-ui-ux": {
+      "phase": "implementation",
+      "domains": [
+        "roblox"
+      ],
+      "actions": [
+        "design",
+        "create",
+        "edit",
+        "review"
+      ],
+      "artifacts": [
+        "ui",
+        "asset"
+      ],
+      "needs": [
+        "visual-qa",
+        "device-testing"
+      ],
+      "requires": [
+        "roblox-safe-editing"
+      ],
+      "complements": [
+        "roblox-placement-ui-review",
+        "rbx-device-simulator-lua"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 82,
+      "activation": "on-demand"
+    },
+    "roblox-playtest": {
+      "phase": "verification",
+      "domains": [
+        "roblox"
+      ],
+      "actions": [
+        "test",
+        "debug",
+        "review"
+      ],
+      "artifacts": [
+        "game",
+        "code",
+        "ui",
+        "animation",
+        "network-system",
+        "resource-system"
+      ],
+      "needs": [
+        "playtest"
+      ],
+      "requires": [
+        "roblox-mcp-skill-router"
+      ],
+      "complements": [
+        "roblox-studio-qa"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 91,
+      "activation": "on-demand"
+    },
+    "roblox-studio-qa": {
+      "phase": "verification",
+      "domains": [
+        "roblox"
+      ],
+      "actions": [
+        "review",
+        "test",
+        "debug",
+        "analyze"
+      ],
+      "artifacts": [
+        "game",
+        "code",
+        "ui",
+        "animation",
+        "model-3d",
+        "asset"
+      ],
+      "needs": [
+        "visual-qa"
+      ],
+      "requires": [
+        "roblox-mcp-skill-router"
+      ],
+      "complements": [
+        "roblox-playtest"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 89,
+      "activation": "on-demand"
+    },
+    "roblox-resource-network-test": {
+      "phase": "verification",
+      "domains": [
+        "roblox"
+      ],
+      "actions": [
+        "test",
+        "debug",
+        "analyze",
+        "optimize"
+      ],
+      "artifacts": [
+        "resource-system",
+        "network-system",
+        "game",
+        "code"
+      ],
+      "needs": [
+        "unit-tests",
+        "playtest",
+        "performance"
+      ],
+      "requires": [
+        "roblox-mcp-skill-router"
+      ],
+      "complements": [
+        "rbx-unit-test",
+        "roblox-playtest",
+        "rbx-perf-profiling"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 92,
+      "activation": "on-demand"
+    },
+    "roblox-placement-ui-review": {
+      "phase": "verification",
+      "domains": [
+        "roblox"
+      ],
+      "actions": [
+        "review",
+        "test",
+        "edit"
+      ],
+      "artifacts": [
+        "ui",
+        "game"
+      ],
+      "needs": [
+        "visual-qa",
+        "device-testing"
+      ],
+      "requires": [
+        "roblox-ui-ux"
+      ],
+      "complements": [
+        "roblox-placement-system-authoring",
+        "rbx-device-simulator-lua"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 84,
+      "activation": "on-demand"
+    },
+    "roblox-animation-frame-review": {
+      "phase": "verification",
+      "domains": [
+        "roblox"
+      ],
+      "actions": [
+        "review",
+        "test",
+        "debug"
+      ],
+      "artifacts": [
+        "animation"
+      ],
+      "needs": [
+        "visual-qa",
+        "playtest"
+      ],
+      "requires": [
+        "roblox-mcp-skill-router"
+      ],
+      "complements": [
+        "roblox-playtest"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 86,
+      "activation": "on-demand"
+    },
+    "roblox-locomotion-camera-review": {
+      "phase": "verification",
+      "domains": [
+        "roblox"
+      ],
+      "actions": [
+        "review",
+        "test",
+        "debug"
+      ],
+      "artifacts": [
+        "animation",
+        "game"
+      ],
+      "needs": [
+        "visual-qa",
+        "playtest"
+      ],
+      "requires": [
+        "roblox-animation-frame-review"
+      ],
+      "complements": [
+        "roblox-playtest"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 88,
+      "activation": "on-demand"
+    },
+    "roblox-model-turnaround-review": {
+      "phase": "verification",
+      "domains": [
+        "roblox",
+        "blender"
+      ],
+      "actions": [
+        "review",
+        "analyze"
+      ],
+      "artifacts": [
+        "model-3d",
+        "asset"
+      ],
+      "needs": [
+        "visual-qa"
+      ],
+      "requires": [
+        "roblox-mcp-skill-router"
+      ],
+      "complements": [
+        "blender-object-iteration"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 83,
+      "activation": "on-demand"
+    },
+    "roblox-save-backup-recovery": {
+      "phase": "persistence",
+      "domains": [
+        "roblox"
+      ],
+      "actions": [
+        "save",
+        "recover"
+      ],
+      "artifacts": [
+        "game",
+        "code"
+      ],
+      "needs": [
+        "backup",
+        "history-recovery"
+      ],
+      "requires": [
+        "mauroprime-bridge-collaboration"
+      ],
+      "complements": [],
+      "excludes": [],
+      "negativeIntents": [
+        "read-only"
+      ],
+      "priority": 98,
+      "activation": "on-demand"
+    },
+    "roblox-asset-review": {
+      "phase": "discovery",
+      "domains": [
+        "roblox"
+      ],
+      "actions": [
+        "discover",
+        "review"
+      ],
+      "artifacts": [
+        "asset",
+        "model-3d",
+        "animation"
+      ],
+      "needs": [
+        "visual-qa"
+      ],
+      "requires": [
+        "roblox-mcp-skill-router"
+      ],
+      "complements": [
+        "roblox-model-turnaround-review"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 78,
+      "activation": "on-demand"
+    },
+    "rbx-docs-search": {
+      "phase": "discovery",
+      "domains": [
+        "roblox"
+      ],
+      "actions": [
+        "discover",
+        "document"
+      ],
+      "artifacts": [
+        "code",
+        "game"
+      ],
+      "needs": [
+        "official-docs"
+      ],
+      "requires": [],
+      "complements": [],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 93,
+      "activation": "on-demand",
+      "requireNeedMatch": true
+    },
+    "rbx-device-simulator-lua": {
+      "phase": "verification",
+      "domains": [
+        "roblox"
+      ],
+      "actions": [
+        "test",
+        "review"
+      ],
+      "artifacts": [
+        "ui",
+        "game"
+      ],
+      "needs": [
+        "device-testing",
+        "visual-qa"
+      ],
+      "requires": [
+        "roblox-mcp-skill-router"
+      ],
+      "complements": [
+        "roblox-ui-ux"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 92,
+      "activation": "on-demand",
+      "requireNeedMatch": true
+    },
+    "rbx-unit-test": {
+      "phase": "verification",
+      "domains": [
+        "roblox"
+      ],
+      "actions": [
+        "test",
+        "debug"
+      ],
+      "artifacts": [
+        "code",
+        "resource-system",
+        "network-system"
+      ],
+      "needs": [
+        "unit-tests"
+      ],
+      "requires": [
+        "roblox-mcp-skill-router"
+      ],
+      "complements": [
+        "roblox-resource-network-test"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 94,
+      "activation": "on-demand",
+      "requireNeedMatch": true
+    },
+    "rbx-perf-profiling": {
+      "phase": "verification",
+      "domains": [
+        "roblox"
+      ],
+      "actions": [
+        "analyze",
+        "optimize",
+        "debug"
+      ],
+      "artifacts": [
+        "game",
+        "code",
+        "resource-system",
+        "network-system"
+      ],
+      "needs": [
+        "performance"
+      ],
+      "requires": [
+        "roblox-mcp-skill-router"
+      ],
+      "complements": [
+        "rbx-scene-analysis"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 90,
+      "activation": "on-demand",
+      "requireNeedMatch": true
+    },
+    "rbx-scene-analysis": {
+      "phase": "verification",
+      "domains": [
+        "roblox"
+      ],
+      "actions": [
+        "analyze",
+        "optimize",
+        "debug"
+      ],
+      "artifacts": [
+        "game",
+        "asset",
+        "animation"
+      ],
+      "needs": [
+        "scene-analysis",
+        "performance"
+      ],
+      "requires": [
+        "roblox-mcp-skill-router"
+      ],
+      "complements": [
+        "rbx-perf-profiling"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 89,
+      "activation": "on-demand",
+      "requireNeedMatch": true
+    },
+    "rbx-create-skill": {
+      "phase": "implementation",
+      "domains": [
+        "roblox",
+        "skill-system"
+      ],
+      "actions": [
+        "create",
+        "edit",
+        "maintain"
+      ],
+      "artifacts": [
+        "skill"
+      ],
+      "needs": [],
+      "requires": [
+        "shared-skill-governance"
+      ],
+      "complements": [
+        "skill-maintenance-loop"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 88,
+      "activation": "on-demand"
+    },
+    "blender-reference-pipeline": {
+      "phase": "implementation",
+      "domains": [
+        "blender"
+      ],
+      "actions": [
+        "design",
+        "create"
+      ],
+      "artifacts": [
+        "model-3d",
+        "asset"
+      ],
+      "needs": [
+        "visual-qa"
+      ],
+      "requires": [],
+      "complements": [
+        "blender-visual-review"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 84,
+      "activation": "on-demand"
+    },
+    "blender-object-iteration": {
+      "phase": "implementation",
+      "domains": [
+        "blender"
+      ],
+      "actions": [
+        "edit",
+        "review",
+        "optimize"
+      ],
+      "artifacts": [
+        "model-3d",
+        "asset"
+      ],
+      "needs": [
+        "visual-qa",
+        "backup"
+      ],
+      "requires": [],
+      "complements": [
+        "blender-visual-review"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 86,
+      "activation": "on-demand"
+    },
+    "blender-visual-review": {
+      "phase": "verification",
+      "domains": [
+        "blender"
+      ],
+      "actions": [
+        "review",
+        "test",
+        "analyze"
+      ],
+      "artifacts": [
+        "model-3d",
+        "animation",
+        "asset"
+      ],
+      "needs": [
+        "visual-qa"
+      ],
+      "requires": [],
+      "complements": [
+        "blender-object-iteration"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 88,
+      "activation": "on-demand"
+    },
+    "skill-routing-maintainer": {
+      "phase": "implementation",
+      "domains": [
+        "skill-system"
+      ],
+      "actions": [
+        "design",
+        "create",
+        "edit",
+        "review",
+        "maintain",
+        "document",
+        "analyze"
+      ],
+      "artifacts": [
+        "skill",
+        "mcp",
+        "code"
+      ],
+      "needs": [
+        "cross-agent"
+      ],
+      "requires": [
+        "shared-skill-governance"
+      ],
+      "complements": [
+        "skill-maintenance-loop"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 95,
+      "activation": "on-demand"
+    },
+    "opencode-agent-swarm": {
+      "phase": "implementation",
+      "domains": [
+        "opencode"
+      ],
+      "actions": [
+        "design",
+        "create",
+        "edit",
+        "coordinate"
+      ],
+      "artifacts": [
+        "code",
+        "mcp"
+      ],
+      "needs": [
+        "cross-agent"
+      ],
+      "requires": [],
+      "complements": [
+        "opencode-cli-audit"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "requireNeedMatch": true,
+      "priority": 82,
+      "activation": "on-demand"
+    },
+    "opencode-cli-audit": {
+      "phase": "verification",
+      "domains": [
+        "opencode"
+      ],
+      "actions": [
+        "analyze",
+        "review",
+        "debug",
+        "edit"
+      ],
+      "artifacts": [
+        "code"
+      ],
+      "needs": [],
+      "requires": [],
+      "complements": [
+        "opencode-agent-swarm"
+      ],
+      "excludes": [],
+      "negativeIntents": [],
+      "priority": 80,
+      "activation": "on-demand"
+    }
+  },
+  "workflows": [
+    {
+      "name": "roblox-development",
+      "match": {
+        "domains": [
+          "roblox"
+        ]
+      },
+      "phases": [
+        {
+          "phase": "discovery",
+          "skills": [
+            "roblox-mcp-skill-router"
+          ],
+          "required": true
+        },
+        {
+          "phase": "safety",
+          "skills": [
+            "roblox-safe-editing"
+          ],
+          "required": true,
+          "when": {
+            "risks": [
+              "write",
+              "destructive"
+            ]
+          }
+        },
+        {
+          "phase": "verification",
+          "skills": [
+            "roblox-playtest",
+            "roblox-studio-qa"
+          ],
+          "required": true,
+          "when": {
+            "actions": [
+              "create",
+              "edit",
+              "test",
+              "debug",
+              "optimize"
+            ]
+          }
+        },
+        {
+          "phase": "persistence",
+          "skills": [
+            "roblox-save-backup-recovery"
+          ],
+          "required": true,
+          "when": {
+            "risks": [
+              "write",
+              "destructive"
+            ]
+          }
+        },
+        {
+          "phase": "maintenance",
+          "skills": [
+            "skill-maintenance-loop"
+          ],
+          "required": true,
+          "when": {
+            "stages": [
+              "close"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "skill-system-maintenance",
+      "match": {
+        "domains": [
+          "skill-system"
+        ]
+      },
+      "phases": [
+        {
+          "phase": "discovery",
+          "skills": [
+            "shared-skill-governance"
+          ],
+          "required": true
+        },
+        {
+          "phase": "implementation",
+          "skills": [
+            "shared-skill-governance",
+            "skill-routing-maintainer"
+          ],
+          "required": true,
+          "when": {
+            "actions": [
+              "create",
+              "edit",
+              "maintain"
+            ]
+          }
+        },
+        {
+          "phase": "maintenance",
+          "skills": [
+            "skill-maintenance-loop"
+          ],
+          "required": true,
+          "when": {
+            "stages": [
+              "close"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "blender-iteration",
+      "match": {
+        "domains": [
+          "blender"
+        ]
+      },
+      "phases": [
+        {
+          "phase": "verification",
+          "skills": [
+            "blender-visual-review"
+          ],
+          "required": true,
+          "when": {
+            "actions": [
+              "create",
+              "edit",
+              "review",
+              "optimize"
+            ]
+          }
+        },
+        {
+          "phase": "maintenance",
+          "skills": [
+            "skill-maintenance-loop"
+          ],
+          "required": true,
+          "when": {
+            "stages": [
+              "close"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -76,6 +76,11 @@ function defaultAllowedRoots(): string[] {
   const home = os.homedir();
   return existingDirectoryCandidates([
     path.resolve(process.cwd(), ".."),
+    path.resolve("D:\\"),
+    path.resolve(os.homedir(), ".codex", "skills"),
+    path.resolve("D:\\AI"),
+    path.resolve("D:\\ai-models"),
+    path.resolve("D:\\ai-runtime"),
     os.tmpdir(),
     path.join(home, "Documents", "Proyectos"),
     path.join(home, "Desktop", "Proyectos"),
