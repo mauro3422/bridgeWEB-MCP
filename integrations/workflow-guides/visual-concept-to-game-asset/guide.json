@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "name": "visual-concept-to-game-asset",
+  "title": "Visual Concept to Game Asset",
+  "description": "Generate divergent visual concepts, preserve them, extract a measurable geometric recipe, choose a Roblox-direct or Blender production path, build a game-ready prototype, compare deterministic renders against the concept with overlays, and iterate by the largest visual error.",
+  "activation": {
+    "keywords": [
+      "concept art",
+      "concepto visual",
+      "game asset",
+      "modelo 3d",
+      "roblox model",
+      "blender model",
+      "geometría",
+      "silueta",
+      "proporciones",
+      "turnaround",
+      "overlay",
+      "referencia",
+      "prompting visual",
+      "dirección visual",
+      "receta paramétrica",
+      "concept sheet"
+    ],
+    "phrases": [
+      "generá varias ideas antes de modelar",
+      "convertí este boceto en un modelo de juego",
+      "analizá la geometría de esta imagen",
+      "replicá este concepto dentro de Roblox",
+      "usá imágenes para guiar el modelado",
+      "compará el modelo con el boceto superpuesto",
+      "sacá proporciones y piezas de esta lámina",
+      "automatizá concepto a modelo",
+      "no iteres siempre sobre la misma forma",
+      "hacé variantes visuales realmente distintas"
+    ],
+    "negativeKeywords": [
+      "solo editar una foto",
+      "solo benchmark de un modelo existente",
+      "solo captura decorativa",
+      "sin modelado",
+      "solo identificar imagen",
+      "solo gameplay logic",
+      "no guardar referencias"
+    ],
+    "examples": [
+      "Generá cuatro familias distintas de una torre, elegí una, extraé sus proporciones y construí una versión Roblox comparada con overlays.",
+      "Tomá esta lámina de hongo, descomponela en primitivas y convertíla en una receta paramétrica antes de modelar.",
+      "Creá bocetos frontal, perfil y superior para un prop, guardalos y usalos como referencia en Blender.",
+      "No sigas puliendo la misma silueta: explorá direcciones divergentes y medí cuál se reproduce mejor en el juego."
+    ]
+  },
+  "entrypoint": "GUIDE.md",
+  "phases": {
+    "define-visual-contract": "phases/define-visual-contract.md",
+    "generate-divergent-concepts": "phases/generate-divergent-concepts.md",
+    "normalize-reference-set": "phases/normalize-reference-set.md",
+    "extract-geometry-recipe": "phases/extract-geometry-recipe.md",
+    "choose-production-path": "phases/choose-production-path.md",
+    "build-parametric-prototype": "phases/build-parametric-prototype.md",
+    "align-and-compare": "phases/align-and-compare.md",
+    "iterate-largest-error": "phases/iterate-largest-error.md",
+    "publish-provenance-dashboard": "phases/publish-provenance-dashboard.md",
+    "maintain-pipeline": "phases/maintain-pipeline.md"
+  },
+  "recommendedTools": [
+    "image_gen",
+    "project_context_load",
+    "workflow_guide_load",
+    "skill_recommend",
+    "skill_load",
+    "blender_store_reference_image",
+    "blender_batch_script",
+    "blender_open",
+    "roblox_mcp_status",
+    "roblox_mcp_tool_list",
+    "roblox_mcp_query",
+    "roblox_mcp_action",
+    "run_command",
+    "write_text_file",
+    "binary_file_info",
+    "workspace_snapshot",
+    "roblox_place_save"
+  ],
+  "scopeNotes": "Global guide available to all projects connected through Mauro's Bridge MCP."
+}

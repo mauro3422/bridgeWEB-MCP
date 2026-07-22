@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "name": "roblox-object-driven-visual-review",
+  "title": "Roblox Object-Driven Visual Review",
+  "description": "Generate deterministic Roblox visual-review stations and camera plans from a selected Model or ProceduralModel, including bounds-based turnarounds, growth/state strips, animation extrema, warm-up, retries, evidence manifests, comparisons, and dashboards.",
+  "activation": {
+    "keywords": [
+      "roblox capture",
+      "camera plan",
+      "selected object",
+      "turnaround",
+      "automatic screenshots",
+      "visual review",
+      "growth strip",
+      "animation review",
+      "dashboard"
+    ],
+    "phrases": [
+      "sacale fotos automaticas a este objeto",
+      "genera las vistas desde el modelo seleccionado",
+      "captura frontal lateral superior y tres cuartos",
+      "no quiero configurar las camaras a mano",
+      "haz el benchmark automaticamente",
+      "entregame un dashboard del objeto"
+    ],
+    "negativeKeywords": [
+      "screenshot manual",
+      "solo una foto",
+      "captura de pantalla del escritorio",
+      "sin modelo seleccionado"
+    ],
+    "examples": [
+      "Tomá este modelo seleccionado y generá automáticamente frontal, lateral, superior, tres cuartos y fases.",
+      "Derivá las cámaras desde GetBoundingBox y dejá un manifest verificable.",
+      "Capturá una animación en los extremos de pose y comparala con la referencia.",
+      "Ocultá labels y elementos ajenos antes de fotografiar el asset."
+    ]
+  },
+  "entrypoint": "GUIDE.md",
+  "phases": {
+    "resolve-target": "phases/resolve-target.md",
+    "prepare-clean-stage": "phases/prepare-clean-stage.md",
+    "derive-cameras": "phases/derive-cameras.md",
+    "capture-resiliently": "phases/capture-resiliently.md",
+    "compare-and-critique": "phases/compare-and-critique.md",
+    "publish-and-verify": "phases/publish-and-verify.md"
+  },
+  "recommendedTools": [
+    "workflow_guide_load",
+    "roblox_mcp_status",
+    "roblox_mcp_query",
+    "roblox_mcp_action",
+    "run_command",
+    "write_text_file",
+    "binary_file_info",
+    "roblox_place_save"
+  ],
+  "scopeNotes": "Global guide available to all projects connected through Mauro's Bridge MCP."
+}

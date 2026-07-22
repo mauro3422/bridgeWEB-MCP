@@ -399,6 +399,162 @@
         ],
         "missingRequiredPhases": []
       }
+    },
+    {
+      "name": "roblox-visual-asset-forge-positive",
+      "task": "Creá un hongo procedural, registralo en una estación reusable, generá cámaras automáticas y asegurate de que entre completo aunque sea muy ancho o largo antes de pasarlo al benchmark visual",
+      "stage": "start",
+      "sources": [
+        "codex-local"
+      ],
+      "intent": {
+        "summary": "Crear y registrar un asset visual Roblox con estación, cámara adaptativa y benchmark",
+        "domains": [
+          "roblox"
+        ],
+        "actions": [
+          "design",
+          "create",
+          "document"
+        ],
+        "artifacts": [
+          "asset",
+          "model-3d"
+        ],
+        "needs": [
+          "safe-editing",
+          "visual-qa"
+        ],
+        "risk": "write",
+        "ambiguity": "low"
+      },
+      "expect": {
+        "classificationMode": "structured-semantic",
+        "activeIncludes": [
+          "roblox-mcp-skill-router",
+          "roblox-safe-editing",
+          "roblox-visual-asset-forge"
+        ],
+        "activeExcludes": [
+          "roblox-asset-review",
+          "roblox-technique-animation-authoring"
+        ],
+        "deferredIncludes": [
+          "roblox-model-turnaround-review",
+          "roblox-studio-qa",
+          "roblox-save-backup-recovery"
+        ]
+      }
+    },
+    {
+      "name": "roblox-visual-asset-forge-continuation",
+      "task": "Dale, hacé eso",
+      "taskVariants": [
+        "Sí, mandale",
+        "Seguí con el forge",
+        "De una",
+        "Bueno, registralo",
+        "Perfecto, avanzá"
+      ],
+      "context": "La propuesta aceptada fue crear en Roblox un modelo visual procedural, registrarlo en una estación reusable, derivar cámaras adaptativas para cualquier ancho, alto o profundidad, capturar fases y publicar el benchmark.",
+      "stage": "start",
+      "sources": [
+        "codex-local"
+      ],
+      "expect": {
+        "classificationMode": "lexical-fallback",
+        "contextUsed": true,
+        "activeIncludes": [
+          "roblox-mcp-skill-router",
+          "roblox-visual-asset-forge"
+        ],
+        "activeExcludes": [
+          "roblox-asset-review",
+          "opencode-agent-swarm"
+        ]
+      }
+    },
+    {
+      "name": "roblox-asset-inventory-does-not-trigger-forge",
+      "task": "Buscá en mi inventario o en Creator Store un modelo de hongo ya publicado y decime si es seguro usarlo",
+      "stage": "start",
+      "sources": [
+        "codex-local"
+      ],
+      "intent": {
+        "summary": "Descubrir y revisar un asset existente sin crear una estación ni un benchmark",
+        "domains": [
+          "roblox"
+        ],
+        "actions": [
+          "discover",
+          "review"
+        ],
+        "artifacts": [
+          "asset",
+          "model-3d"
+        ],
+        "needs": [
+          "visual-qa"
+        ],
+        "risk": "read-only",
+        "ambiguity": "low"
+      },
+      "expect": {
+        "classificationMode": "structured-semantic",
+        "activeIncludes": [
+          "roblox-mcp-skill-router",
+          "roblox-asset-review"
+        ],
+        "activeExcludes": [
+          "roblox-visual-asset-forge",
+          "roblox-safe-editing"
+        ]
+      }
+    },
+    {
+      "name": "roblox-visual-asset-forge-verification",
+      "task": "Verificá que la estación del asset no recorte objetos muy anchos, altos, profundos o planos y que cambie la firma cuando cambia el viewport",
+      "stage": "verify",
+      "completedPhases": [
+        "discovery",
+        "safety",
+        "implementation"
+      ],
+      "sources": [
+        "codex-local"
+      ],
+      "intent": {
+        "summary": "Verificar encuadre adaptativo y firmas del forge visual Roblox",
+        "domains": [
+          "roblox"
+        ],
+        "actions": [
+          "test",
+          "analyze"
+        ],
+        "artifacts": [
+          "asset",
+          "model-3d"
+        ],
+        "needs": [
+          "safe-editing",
+          "visual-qa"
+        ],
+        "risk": "write",
+        "ambiguity": "low"
+      },
+      "expect": {
+        "classificationMode": "structured-semantic",
+        "activeIncludes": [
+          "roblox-visual-asset-forge",
+          "roblox-studio-qa"
+        ],
+        "activeExcludes": [
+          "roblox-asset-review",
+          "roblox-save-backup-recovery"
+        ]
+      }
     }
   ]
 }
