@@ -1,6 +1,6 @@
 param(
   [string]$ProjectRoot = "C:\dev\bridge-mcp",
-  [string]$ExpectedServerVersion = "0.6.5",
+  [string]$ExpectedServerVersion = "0.6.6",
   [switch]$StrictGit
 )
 

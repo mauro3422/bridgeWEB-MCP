@@ -7,7 +7,7 @@ El objetivo es tener un puente local controlado por nosotros para operar filesys
 ## Estado actual
 
 ```text
-bridge-mcp v0.6.5
+bridge-mcp v0.6.6
 Mode: HTTP production-candidate
 Project root: C:\dev\bridge-mcp
 Bridge MCP: http://127.0.0.1:3001/mcp
@@ -80,6 +80,7 @@ code-intelligence
 code-graph
 python-analysis
 blender
+tablet-whiteboard
 bridge-workflow
 ```
 
@@ -101,9 +102,12 @@ Las guias globales viven en `integrations/workflow-guides/`. Las guias del proye
 
 ## Tools expuestas
 
-El runtime actual expone 94 tools.
+El runtime actual expone 108 tools.
 
 `blender_review_bundle` genera en una sola llamada vistas ortográficas múltiples, una hoja de contacto adjunta al resultado MCP y un manifiesto con geometría, materiales, colecciones, visibilidad, rig, acciones, diagnósticos, hashes y confirmación de restauración de la escena.
+
+`whiteboard_capture_pc_view` solicita una captura fresca al navegador de PC que está viendo TabletWhiteboard, respeta su pan/zoom actual y adjunta el PNG al resultado MCP. `whiteboard_latest_capture` reutiliza la última imagen guardada y `whiteboard_capture_list` devuelve el álbum como metadatos. Las URLs se limitan a localhost o redes LAN privadas.
+
 
 ### Core / lectura / navegacion
 
@@ -315,7 +319,7 @@ Estado esperado:
 
 ```text
 bridge_self_check.ok = true
-server.version = 0.6.5
+server.version = 0.6.6
 tunnel.baseUrl = http://127.0.0.1:8081
 tunnel healthz = live
 tunnel readyz = ready

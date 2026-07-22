@@ -18,6 +18,7 @@ import { robloxStudioToolModule } from "./tools/roblox-studio-tools.js";
 import { skillCatalogToolModule } from "./tools/skill-catalog-tools.js";
 import { workspaceToolModule } from "./tools/workspace-tools.js";
 import { workflowGuideToolModule } from "./tools/workflow-guide-tools.js";
+import { whiteboardToolModule } from "./tools/whiteboard-tools.js";
 import type { BridgeToolModule, BridgeToolRegistry, BridgeToolSchema } from "./tools/types.js";
 
 const readOnlyToolNames = new Set([
@@ -32,6 +33,7 @@ const readOnlyToolNames = new Set([
   "skill_catalog", "skill_recommend", "skill_route_audit", "skill_route_plan", "skill_bootstrap", "skill_load", "roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_query",
   "binary_file_info", "binary_file_read_chunk", "binary_upload_status",
   "blender_status", "blender_scene_info", "blender_character_loop_status",
+  "whiteboard_capture_pc_view", "whiteboard_latest_capture", "whiteboard_capture_list",
   "python_validate", "python_symbols", "python_impact_analysis", "python_import_graph", "python_call_graph", "python_dead_code", "python_test_plan", "pytest_testmon",
 ]);
 
@@ -123,7 +125,20 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
     const name = delegatedToolName(args.toolName);
     if (!readOnlyToolNames.has(name)) throw new Error(`Tool '${name}' is not classified read-only; use its direct schema or bridge_tool_action.`);
     const handler = handlers.get(name)!;
-    return { delegatedTool: name, classification: "read-only", result: await handler(delegatedArguments(args.arguments)) };
+    const delegatedResult = await handler(delegatedArguments(args.arguments));
+    if (delegatedResult && typeof delegatedResult === "object" && !Array.isArray(delegatedResult)) {
+      const record = delegatedResult as Record<string, unknown>;
+      if (Array.isArray(record.__bridgeImages)) {
+        const { __bridgeImages, ...publicResult } = record;
+        return {
+          delegatedTool: name,
+          classification: "read-only",
+          result: publicResult,
+          __bridgeImages,
+        };
+      }
+    }
+    return { delegatedTool: name, classification: "read-only", result: delegatedResult };
   });
   handlers.set("bridge_tool_action", async (args) => {
     const name = delegatedToolName(args.toolName);
@@ -167,6 +182,7 @@ export function createDefaultToolRegistry(): BridgeToolRegistry {
     codeGraphToolModule,
     pythonToolModule,
     blenderToolModule,
+    whiteboardToolModule,
     bridgeWorkflowToolModule,
   ]);
 }

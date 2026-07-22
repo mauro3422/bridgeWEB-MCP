@@ -15,6 +15,7 @@ const groupRules = [
   ["Imagenes", ["image_asset_save", "image_character_views_prepare"]],
   ["Ejecucion / terminal", ["run_command", "terminal_start", "terminal_write", "terminal_read", "terminal_stop", "terminal_list"]],
   ["Blender", ["blender_status", "blender_open", "blender_scene_info", "blender_viewport_screenshot", "blender_review_bundle", "blender_execute_code", "blender_batch_script", "blender_store_reference_image", "blender_setup_character_references", "blender_character_loop_status"]],
+  ["Tablet Whiteboard", ["whiteboard_capture_pc_view", "whiteboard_latest_capture", "whiteboard_capture_list"]],
   ["Git", ["git_status", "git_set_remote", "git_commit_all", "git_push_current_branch"]],
   ["Bridge ops", ["tunnel_health", "bridge_self_check", "bridge_verify_all", "bridge_request_restart", "bridge_restart_status"]],
   ["Metricas / visualizaciones", ["bridge_metrics_status", "bridge_metrics_summary", "bridge_metrics_recent", "bridge_visualization_catalog", "bridge_visualize_metrics"]],

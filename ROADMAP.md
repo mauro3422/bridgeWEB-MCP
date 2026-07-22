@@ -348,10 +348,11 @@ npm run verify:all
 
 ## Next recommended work
 
-### Completed through v0.6.5
+### Completed through v0.6.6
 
 ```txt
-94 tools across 18 modules
+108 tools across 22 modules
+fresh TabletWhiteboard PC viewport capture with attached PNG results, latest/list album tools and private-LAN guards
 project context bootstrap and reusable workflow guides
 image asset persistence and character-view normalization
 interactive/batch Blender control and character reference scenes
@@ -369,7 +370,7 @@ regressions and live HTTP verification expanded for the full surface
 
 ```txt
 use `blender_review_bundle` to drive evidence-based CBAnimal character refinements
-exercise v0.6.5 mixed text/image tool results through the live connector
+exercise v0.6.6 mixed text/image tool results through the live connector
 add further convenience tools only when repeated friction is observed
 consider native connector file parameters if the MCP/client surface exposes them
 continue improving code graphs only from real project failures
