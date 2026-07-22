@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "name": "roblox-visual-benchmark",
+  "title": "Roblox Visual Benchmark",
+  "description": "Plan, capture, criticize, compare, persist, and verify deterministic visual evidence for Roblox models, procedural growth, VFX, environmental props, world-space UI, 3D interaction visuals, and stateful presentation systems across projects.",
+  "activation": {
+    "keywords": [
+      "roblox",
+      "visual benchmark",
+      "benchmark visual",
+      "modelo",
+      "vfx",
+      "efecto visual",
+      "crecimiento procedural",
+      "fases",
+      "frames",
+      "estados",
+      "cámaras",
+      "dashboard",
+      "evidencia visual",
+      "baseline",
+      "comparar versiones",
+      "ui 3d",
+      "world-space ui",
+      "environment art",
+      "prop",
+      "iteración visual",
+      "criticar fotos"
+    ],
+    "phrases": [
+      "prepara un set de fotos para revisar este modelo",
+      "captura todas las fases y estados",
+      "compará visualmente esta versión con la anterior",
+      "guardá evidencias del loop de iteración",
+      "hacé un dashboard con las capturas",
+      "revisá este VFX en varios frames y ángulos",
+      "planificá cámaras para evaluar este objeto",
+      "vigilá todas las fotos y criticá qué mejorar",
+      "cada iteración visual debe guardarse automáticamente",
+      "mostrame el historial de versiones en un dashboard",
+      "revisá un modelo de cerca y a distancia de juego"
+    ],
+    "negativeKeywords": [
+      "solo una captura decorativa",
+      "identificar un asset de la tienda",
+      "solo test funcional sin visuales",
+      "blender sin roblox",
+      "captura casual sin comparación",
+      "no guardar evidencia"
+    ],
+    "examples": [
+      "Creá V1, V2 y V3 de este modelo y guardá fuente, cámaras, capturas y críticas en un dashboard.",
+      "Revisá este crecimiento procedural en 0/25/50/75/100 %, estados y cuatro ángulos.",
+      "Compará el VFX anterior y el nuevo con las mismas cámaras, criticá cada fase y persistí los comentarios.",
+      "Prepará una galería aislada y una escena integrada para este prop de Roblox.",
+      "Cada vez que iteremos UI 3D o un visual interactivo, usá el benchmark y guardá el run."
+    ]
+  },
+  "entrypoint": "GUIDE.md",
+  "phases": {
+    "define-contract": "phases/define-contract.md",
+    "prepare-review-set": "phases/prepare-review-set.md",
+    "plan-cameras": "phases/plan-cameras.md",
+    "capture-matrix": "phases/capture-matrix.md",
+    "measure-and-audit": "phases/measure-and-audit.md",
+    "compare-and-criticize": "phases/compare-and-criticize.md",
+    "iterate-and-regress": "phases/iterate-and-regress.md",
+    "publish-dashboard": "phases/publish-dashboard.md",
+    "maintain-workflow": "phases/maintain-workflow.md"
+  },
+  "recommendedTools": [
+    "project_context_load",
+    "workflow_guide_recommend",
+    "workflow_guide_load",
+    "skill_recommend",
+    "skill_load",
+    "roblox_mcp_status",
+    "roblox_mcp_tool_list",
+    "roblox_mcp_query",
+    "roblox_mcp_action",
+    "run_command",
+    "write_text_file",
+    "binary_file_info",
+    "workspace_snapshot",
+    "roblox_place_save"
+  ],
+  "scopeNotes": "Global guide available to all projects connected through Mauro's Bridge MCP."
+}
