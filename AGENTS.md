@@ -215,14 +215,16 @@ Mauro usa este bridge como “mini-Codex” local. Priorizar estabilidad sobre f
 
 ## MauroPrime Structured Skill Router (MSSR)
 
-- Canonical documentation: `docs/skill-routing/README.md`.
+- MSSR is an independent sibling system. Canonical documentation: `C:\Dev\mssr\docs\skill-routing\README.md`.
 - Custom skill Git source: `C:\Dev\mauroprime-skills\skills`; Codex runtime paths under `~/.codex/skills/<name>` are junctions to that repository.
-- Canonical Git-tracked contract and fixtures: `config/skill-routing/`.
+- Canonical Git-tracked contract and fixtures: `C:\Dev\mssr\config\skill-routing\`.
+- Bridge imports `@mauroprime/mssr` and remains an adapter for ChatGPT, local/plugin discovery, skill content loading and Roblox health. It is not the MSSR owner or an execution bottleneck.
 - Before substantial specialized work, infer compact structured intent with `domains`, `actions`, `artifacts`, `needs`, `signals`, `risk`, and `ambiguity`, then use `skill_route_plan` or `skill_bootstrap`.
-- Always emit at least one semantic `signal`. Use only `nominal` when no anomaly exists; otherwise omit `nominal` and tag observed errors, warnings, degradation, uncertainty, conflicting evidence, repeated friction, manual workarounds, missing capability, recovery needs, skill gaps, or reusable patterns.
+- Always emit at least one semantic `signal`. Use only `nominal` when no anomaly exists; otherwise include observable incident, capability-discovery, tool-chain, provider-refresh or replan signals.
 - The current agent produces that intent during its normal turn; MSSR does not call a hidden classifier model. Pass `caller=codex-local` or `caller=chatgpt-web` when known and follow the returned execution guidance.
+- Load `mssr-agent-routing` as the transversal protocol. The first route is advisory, not an allowlist: if another capability is needed, search/inspect or refresh providers, re-plan, and continue through normally authorized tools.
 - Semantic tags may select skills, tools, phases and checks, but must never bypass normal authorization for destructive mutations or external side effects.
 - For every multi-turn specialized `skill_route_plan` or `skill_bootstrap` call, pass a bounded resolved `context` summary—normally 500–2000 characters covering the accepted goal, relevant constraints, completed work/current phase, and unresolved references. This applies to any short continuation or acceptance such as “dale”, “ok”, “sí”, “mandale”, “seguí”, “de una”, “hacé eso”, or equivalent wording. Omit context only for a genuinely standalone first turn; never pass chain-of-thought, irrelevant history, or a full transcript.
-- After creating, renaming, deleting, splitting, or materially changing a skill, load `skill-routing-maintainer`, run `skill_route_audit`, update positive/negative/continuation fixtures, and execute `npm run test:skill-routing`.
+- After creating, renaming, deleting, splitting, or materially changing a skill, load `skill-routing-maintainer`, run `skill_route_audit`, update positive/negative/continuation fixtures, and execute `npm run test:skill-routing` in `C:\Dev\mssr`.
 - A new local skill may be discovered with inferred metadata, but it is not routing-stable until the audit is clean and its explicit entry and fixtures are committed.
 - Automated checks may detect drift and block verification. Do not silently autoedit skills or routing configuration in the background.

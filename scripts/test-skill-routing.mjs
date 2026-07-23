@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { routingFixturesPath } from '@mauroprime/mssr';
 
 const root = path.resolve(process.cwd());
-const fixturePath = path.join(root, 'config', 'skill-routing', 'skill-routing-fixtures.json');
+const fixturePath = routingFixturesPath();
 const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
 if (fixture.schemaVersion !== 1 || !Array.isArray(fixture.cases) || fixture.cases.length === 0) {
   throw new Error(`Invalid routing fixture file: ${fixturePath}`);
