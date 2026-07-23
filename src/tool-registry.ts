@@ -35,7 +35,7 @@ const readOnlyToolNames = new Set([
   "skill_catalog", "skill_recommend", "skill_route_audit", "skill_route_plan", "skill_bootstrap", "skill_load", "roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list", "roblox_mcp_query",
   "binary_file_info", "binary_file_read_chunk", "binary_upload_status", "image_file_attach",
   "blender_status", "blender_scene_info", "blender_character_loop_status",
-  "whiteboard_capture_pc_view", "whiteboard_latest_capture", "whiteboard_capture_list",
+  "whiteboard_latest_capture", "whiteboard_capture_list",
   "python_validate", "python_symbols", "python_impact_analysis", "python_import_graph", "python_call_graph", "python_dead_code", "python_test_plan", "pytest_testmon",
 ]);
 

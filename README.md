@@ -106,7 +106,16 @@ El runtime actual expone 109 tools.
 
 `blender_review_bundle` genera en una sola llamada vistas ortográficas múltiples, una hoja de contacto adjunta al resultado MCP y un manifiesto con geometría, materiales, colecciones, visibilidad, rig, acciones, diagnósticos, hashes y confirmación de restauración de la escena.
 
-`whiteboard_capture_pc_view` solicita una captura fresca al navegador de PC que está viendo TabletWhiteboard, respeta su pan/zoom actual y adjunta el PNG al resultado MCP. `whiteboard_latest_capture` reutiliza la última imagen guardada y `whiteboard_capture_list` devuelve el álbum como metadatos. Las URLs se limitan a localhost o redes LAN privadas.
+`whiteboard_capture_pc_view` solicita una captura fresca al navegador de PC que está viendo TabletWhiteboard, respeta su pan/zoom actual y adjunta el PNG al resultado MCP. Como crea un archivo y un registro SQLite, se clasifica como herramienta mutante neutral, no como consulta de solo lectura. `whiteboard_latest_capture` y `whiteboard_capture_list` siguen siendo read-only.
+
+Antes de adjuntar una captura, Bridge compara el tamaño HTTP, los bytes reales, las dimensiones del IHDR y el SHA-256 con los metadatos entregados por TabletWhiteboard. Una inconsistencia cancela la operación.
+
+El origen predeterminado se configura con `TABLET_WHITEBOARD_URL`. Orígenes privados adicionales deben declararse explícitamente, separados por comas, en `TABLET_WHITEBOARD_ALLOWED_ORIGINS`. Todos deben usar `http://`, no incluir credenciales/rutas y apuntar a localhost o una red LAN privada.
+
+```powershell
+$env:TABLET_WHITEBOARD_URL = "http://127.0.0.1:8787"
+$env:TABLET_WHITEBOARD_ALLOWED_ORIGINS = "http://192.168.1.33:8787"
+```
 
 
 ### Core / lectura / navegacion

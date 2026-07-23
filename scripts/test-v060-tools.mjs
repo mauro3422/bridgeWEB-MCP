@@ -113,7 +113,7 @@ try {
   if (drainedNotices.length !== 1 || getBridgeNoticeStatus().pendingCount !== 0) throw new Error('Bridge notice one-shot drain failed');
 
   if (registry.tools.length !== 115) throw new Error(`expected 115 tools, got ${registry.tools.length}`);
-  if (registry.riskSummary.neutral.length !== 0) throw new Error(`neutral tools remain: ${registry.riskSummary.neutral.join(', ')}`);
+  if (registry.riskSummary.neutral.length !== 1 || registry.riskSummary.neutral[0] !== 'whiteboard_capture_pc_view') throw new Error(`unexpected neutral tools: ${registry.riskSummary.neutral.join(', ')}`);
   for (const moduleName of ['project','workspace','cache','workflow-guides','skill-catalog-and-roblox-proxy','roblox-studio-ops','roblox-photo-capture','notices','binary-files','images','blender','tablet-whiteboard']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
   for (const toolName of ['project_context_load','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','skill_catalog','skill_recommend','skill_route_audit','skill_route_plan','skill_bootstrap','skill_load','bridge_notice_status','bridge_notice_drain','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_studio_list','roblox_mcp_query','roblox_mcp_action','roblox_studio_window_capture_save','roblox_screen_capture_save','roblox_photo_capture_job','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_file_attach','image_asset_save','image_character_views_prepare','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_review_bundle','blender_execute_code','blender_batch_script','blender_setup_character_references','blender_character_loop_status','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/Blender tool ${toolName}`);
   if (!registry.riskSummary.destructive.includes('roblox_mcp_action') || !registry.riskSummary.destructive.includes('roblox_studio_window_capture_save') || !registry.riskSummary.destructive.includes('roblox_screen_capture_save') || !registry.riskSummary.destructive.includes('roblox_photo_capture_job') || !registry.riskSummary.destructive.includes('roblox_place_save')) throw new Error('Roblox action/capture/save risk classification failed');
@@ -423,3 +423,4 @@ try {
 } finally {
   fs.rmSync(sandbox,{recursive:true,force:true});
 }
+

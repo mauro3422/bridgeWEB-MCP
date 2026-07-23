@@ -2127,7 +2127,7 @@ Parametros:
     "baseUrl": {
       "type": "string",
       "default": "http://127.0.0.1:8787",
-      "description": "Local or private-LAN TabletWhiteboard origin."
+      "description": "Configured TabletWhiteboard origin or an explicitly allowlisted private origin."
     },
     "boardId": {
       "type": "string",
@@ -2168,7 +2168,7 @@ Parametros:
     "baseUrl": {
       "type": "string",
       "default": "http://127.0.0.1:8787",
-      "description": "Local or private-LAN TabletWhiteboard origin."
+      "description": "Configured TabletWhiteboard origin or an explicitly allowlisted private origin."
     },
     "boardId": {
       "type": "string",
@@ -2210,7 +2210,7 @@ Parametros:
     "baseUrl": {
       "type": "string",
       "default": "http://127.0.0.1:8787",
-      "description": "Local or private-LAN TabletWhiteboard origin."
+      "description": "Configured TabletWhiteboard origin or an explicitly allowlisted private origin."
     },
     "boardId": {
       "type": "string",

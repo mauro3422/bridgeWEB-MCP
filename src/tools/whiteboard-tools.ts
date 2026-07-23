@@ -3,6 +3,11 @@ import { z } from "zod";
 import type { BridgeToolModule } from "./types.js";
 
 const DEFAULT_WHITEBOARD_URL = "http://127.0.0.1:8787";
+const CONFIGURED_WHITEBOARD_URL = process.env.TABLET_WHITEBOARD_URL ?? DEFAULT_WHITEBOARD_URL;
+const CONFIGURED_ALLOWED_ORIGINS = (process.env.TABLET_WHITEBOARD_ALLOWED_ORIGINS ?? "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -19,6 +24,7 @@ type CaptureMetadata = {
   width: number;
   height: number;
   bytes: number;
+  sha256: string;
   createdAt: string;
 };
 
@@ -36,7 +42,7 @@ function isPrivateHostname(hostname: string): boolean {
   return false;
 }
 
-function whiteboardBaseUrl(raw: string): URL {
+function normalizeWhiteboardUrl(raw: string): URL {
   const url = new URL(raw);
   if (url.protocol !== "http:") throw new Error("TabletWhiteboard baseUrl must use http://");
   if (url.username || url.password) throw new Error("TabletWhiteboard baseUrl must not include credentials");
@@ -44,6 +50,18 @@ function whiteboardBaseUrl(raw: string): URL {
   if (url.search || url.hash) throw new Error("TabletWhiteboard baseUrl must not include query parameters or a fragment");
   if (url.pathname !== "/" && url.pathname !== "") throw new Error("TabletWhiteboard baseUrl must not include an application path");
   url.pathname = "/";
+  return url;
+}
+
+function whiteboardBaseUrl(raw: string): URL {
+  const url = normalizeWhiteboardUrl(raw);
+  const allowedOrigins = new Set(
+    [CONFIGURED_WHITEBOARD_URL, ...CONFIGURED_ALLOWED_ORIGINS]
+      .map((candidate) => normalizeWhiteboardUrl(candidate).origin),
+  );
+  if (!allowedOrigins.has(url.origin)) {
+    throw new Error("TabletWhiteboard baseUrl is not in the configured origin allowlist");
+  }
   return url;
 }
 
@@ -93,9 +111,25 @@ function assertCapture(value: unknown): CaptureMetadata {
     width: z.number().int().min(1).max(10_000),
     height: z.number().int().min(1).max(10_000),
     bytes: z.number().int().min(1).max(MAX_IMAGE_BYTES),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/i),
     createdAt: z.string().datetime(),
   });
   return schema.parse(value);
+}
+
+function pngDimensions(data: Buffer): { width: number; height: number } {
+  if (data.length < 24 || !data.subarray(0, 8).equals(PNG_SIGNATURE)) {
+    throw new Error("TabletWhiteboard returned an invalid PNG capture");
+  }
+  if (data.readUInt32BE(8) !== 13 || data.toString("ascii", 12, 16) !== "IHDR") {
+    throw new Error("TabletWhiteboard PNG does not start with a valid IHDR chunk");
+  }
+  const width = data.readUInt32BE(16);
+  const height = data.readUInt32BE(20);
+  if (width < 1 || height < 1 || width > 10_000 || height > 10_000) {
+    throw new Error("TabletWhiteboard PNG dimensions are outside the allowed range");
+  }
+  return { width, height };
 }
 
 async function downloadCapture(baseUrl: URL, capture: CaptureMetadata, timeoutMs: number): Promise<Buffer> {
@@ -108,9 +142,15 @@ async function downloadCapture(baseUrl: URL, capture: CaptureMetadata, timeoutMs
   const declaredBytes = Number(response.headers.get("content-length") ?? 0);
   if (Number.isFinite(declaredBytes) && declaredBytes > MAX_IMAGE_BYTES) throw new Error("TabletWhiteboard capture exceeds the 8 MB limit");
   const data = Buffer.from(await response.arrayBuffer());
-  if (data.length < PNG_SIGNATURE.length || data.length > MAX_IMAGE_BYTES || !data.subarray(0, 8).equals(PNG_SIGNATURE)) {
-    throw new Error("TabletWhiteboard returned an invalid PNG capture");
+  if (data.length > MAX_IMAGE_BYTES) throw new Error("TabletWhiteboard capture exceeds the 8 MB limit");
+  const dimensions = pngDimensions(data);
+  const sha256 = crypto.createHash("sha256").update(data).digest("hex");
+  if (declaredBytes > 0 && declaredBytes !== data.length) throw new Error("TabletWhiteboard HTTP Content-Length does not match the downloaded PNG");
+  if (capture.bytes !== data.length) throw new Error("TabletWhiteboard capture byte metadata does not match the downloaded PNG");
+  if (capture.width !== dimensions.width || capture.height !== dimensions.height) {
+    throw new Error("TabletWhiteboard capture dimension metadata does not match the PNG IHDR");
   }
+  if (capture.sha256.toLowerCase() !== sha256) throw new Error("TabletWhiteboard capture SHA-256 does not match the downloaded PNG");
   return data;
 }
 
@@ -129,7 +169,7 @@ function imageResult(baseUrl: URL, capture: CaptureMetadata, data: Buffer) {
 }
 
 const baseInput = {
-  baseUrl: z.string().url().default(DEFAULT_WHITEBOARD_URL),
+  baseUrl: z.string().url().default(CONFIGURED_WHITEBOARD_URL),
   boardId: z.string().min(1).max(180).optional(),
 };
 
@@ -142,13 +182,13 @@ export const whiteboardToolModule: BridgeToolModule = {
       inputSchema: {
         type: "object",
         properties: {
-          baseUrl: { type: "string", default: DEFAULT_WHITEBOARD_URL, description: "Local or private-LAN TabletWhiteboard origin." },
+          baseUrl: { type: "string", default: CONFIGURED_WHITEBOARD_URL, description: "Configured TabletWhiteboard origin or an explicitly allowlisted private origin." },
           boardId: { type: "string", description: "Optional board id. Defaults to the active board." },
           timeoutMs: { type: "number", default: 8000, minimum: 1000, maximum: 15000 },
         },
         additionalProperties: false,
       },
-      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     {
       name: "whiteboard_latest_capture",
@@ -156,7 +196,7 @@ export const whiteboardToolModule: BridgeToolModule = {
       inputSchema: {
         type: "object",
         properties: {
-          baseUrl: { type: "string", default: DEFAULT_WHITEBOARD_URL, description: "Local or private-LAN TabletWhiteboard origin." },
+          baseUrl: { type: "string", default: CONFIGURED_WHITEBOARD_URL, description: "Configured TabletWhiteboard origin or an explicitly allowlisted private origin." },
           boardId: { type: "string", description: "Optional board id. Omitting it returns the latest capture across boards." },
           timeoutMs: { type: "number", default: 5000, minimum: 1000, maximum: 15000 },
         },
@@ -170,7 +210,7 @@ export const whiteboardToolModule: BridgeToolModule = {
       inputSchema: {
         type: "object",
         properties: {
-          baseUrl: { type: "string", default: DEFAULT_WHITEBOARD_URL, description: "Local or private-LAN TabletWhiteboard origin." },
+          baseUrl: { type: "string", default: CONFIGURED_WHITEBOARD_URL, description: "Configured TabletWhiteboard origin or an explicitly allowlisted private origin." },
           boardId: { type: "string", description: "Optional board id used to filter the album." },
           limit: { type: "number", default: 20, minimum: 1, maximum: 100 },
           timeoutMs: { type: "number", default: 5000, minimum: 1000, maximum: 15000 },
@@ -195,6 +235,12 @@ export const whiteboardToolModule: BridgeToolModule = {
       }, parsed.timeoutMs + 2000);
       const payload = await readJson<{ capture: unknown }>(response, "Could not request a fresh TabletWhiteboard capture");
       const capture = assertCapture(payload.capture);
+      if (capture.source !== "mcp" || capture.clientKind !== "pc") {
+        throw new Error("TabletWhiteboard fresh capture was not produced by the requested PC MCP flow");
+      }
+      if (parsed.boardId && capture.boardId !== parsed.boardId) {
+        throw new Error("TabletWhiteboard fresh capture belongs to a different board");
+      }
       const data = await downloadCapture(baseUrl, capture, parsed.timeoutMs);
       return imageResult(baseUrl, capture, data);
     },
