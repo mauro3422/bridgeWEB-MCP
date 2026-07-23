@@ -1,6 +1,6 @@
 {
   "name": "bridge-mcp",
-  "version": "0.6.6",
+  "version": "0.6.8",
   "description": "Kairos/KChat local MCP bridge for MauroPrime and future laptop agents.",
   "type": "module",
   "bin": {
@@ -29,7 +29,6 @@
   "overrides": {
     "@hono/node-server": "2.0.11"
   },
-
   "devDependencies": {
     "@types/node": "^20.17.24",
     "tsx": "^4.21.0",

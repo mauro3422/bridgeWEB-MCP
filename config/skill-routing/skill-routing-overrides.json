@@ -51,6 +51,7 @@
       ],
       "excludes": [],
       "negativeIntents": [],
+      "requireActionMatch": true,
       "priority": 84,
       "activation": "on-demand"
     },
@@ -128,7 +129,8 @@
         "discovery",
         "safety",
         "implementation",
-        "verification"
+        "verification",
+        "persistence"
       ]
     },
     "opencode-agent-swarm": {
@@ -144,7 +146,9 @@
       ],
       "artifacts": [
         "code",
-        "mcp"
+        "mcp",
+        "project",
+        "repository"
       ],
       "needs": [
         "cross-agent"
@@ -171,7 +175,9 @@
         "edit"
       ],
       "artifacts": [
-        "code"
+        "code",
+        "project",
+        "repository"
       ],
       "needs": [],
       "requires": [],
@@ -474,6 +480,56 @@
       "priority": 88,
       "activation": "on-demand"
     },
+    "roblox-mcp-incident-recovery": {
+      "phase": "discovery",
+      "coversPhases": [
+        "discovery",
+        "verification",
+        "maintenance"
+      ],
+      "domains": [
+        "roblox",
+        "agent-orchestration"
+      ],
+      "actions": [
+        "analyze",
+        "debug",
+        "recover",
+        "verify"
+      ],
+      "artifacts": [
+        "mcp"
+      ],
+      "needs": [
+        "integrity-verification",
+        "cross-agent"
+      ],
+      "signals": [
+        "error-observed",
+        "warning-observed",
+        "degraded-capability",
+        "uncertainty",
+        "conflicting-evidence",
+        "repeated-friction",
+        "manual-workaround",
+        "missing-capability",
+        "recovery-needed",
+        "skill-gap",
+        "reusable-pattern"
+      ],
+      "requires": [],
+      "complements": [
+        "roblox-mcp-skill-router",
+        "skill-maintenance-loop"
+      ],
+      "excludes": [],
+      "negativeIntents": [
+        "nominal"
+      ],
+      "requireActionMatch": true,
+      "priority": 97,
+      "activation": "on-demand"
+    },
     "roblox-mcp-skill-router": {
       "phase": "discovery",
       "domains": [
@@ -504,8 +560,7 @@
     "roblox-model-turnaround-review": {
       "phase": "verification",
       "domains": [
-        "roblox",
-        "blender"
+        "roblox"
       ],
       "actions": [
         "review",
@@ -693,9 +748,7 @@
     "roblox-save-backup-recovery": {
       "phase": "persistence",
       "domains": [
-        "roblox",
-        "git",
-        "filesystem"
+        "roblox"
       ],
       "actions": [
         "save",
@@ -917,6 +970,14 @@
         "skill"
       ],
       "needs": [],
+      "signals": [
+        "error-observed",
+        "repeated-friction",
+        "manual-workaround",
+        "missing-capability",
+        "skill-gap",
+        "reusable-pattern"
+      ],
       "requires": [
         "shared-skill-governance"
       ],
@@ -948,6 +1009,14 @@
       "needs": [
         "cross-agent"
       ],
+      "signals": [
+        "conflicting-evidence",
+        "repeated-friction",
+        "manual-workaround",
+        "missing-capability",
+        "skill-gap",
+        "reusable-pattern"
+      ],
       "requires": [
         "shared-skill-governance"
       ],
@@ -961,6 +1030,63 @@
     }
   },
   "workflows": [
+    {
+      "name": "roblox-mcp-incident",
+      "match": {
+        "domains": [
+          "roblox"
+        ],
+        "artifacts": [
+          "mcp"
+        ],
+        "signals": [
+          "error-observed",
+          "warning-observed",
+          "degraded-capability",
+          "uncertainty",
+          "conflicting-evidence",
+          "repeated-friction",
+          "manual-workaround",
+          "missing-capability",
+          "recovery-needed",
+          "skill-gap",
+          "reusable-pattern"
+        ]
+      },
+      "phases": [
+        {
+          "phase": "discovery",
+          "skills": [
+            "roblox-mcp-incident-recovery",
+            "roblox-mcp-skill-router"
+          ],
+          "required": true
+        },
+        {
+          "phase": "verification",
+          "skills": [
+            "roblox-mcp-incident-recovery"
+          ],
+          "required": true
+        },
+        {
+          "phase": "maintenance",
+          "skills": [
+            "skill-maintenance-loop"
+          ],
+          "required": true,
+          "when": {
+            "signals": [
+              "repeated-friction",
+              "manual-workaround",
+              "missing-capability",
+              "skill-gap",
+              "reusable-pattern"
+            ]
+          }
+        }
+      ]
+    },
     {
       "name": "roblox-development",
       "match": {

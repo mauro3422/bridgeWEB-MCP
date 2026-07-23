@@ -38,6 +38,7 @@ for (const testCase of expandedCases) {
     task: testCase.task,
     context: testCase.context,
     intent: testCase.intent,
+    caller: testCase.caller,
     stage: testCase.stage,
     completedPhases: testCase.completedPhases ?? [],
     sources: testCase.sources,
@@ -61,6 +62,13 @@ for (const testCase of expandedCases) {
       failures.push(`${testCase.name}: expected missingRequiredPhases=${expectedMissing.join(', ') || 'none'}, got ${actualMissing.join(', ') || 'none'}`);
     }
   }
+  if (Array.isArray(expected.agentFallbackPhases)) {
+    const actualFallback = [...(route.coverage?.agentFallbackPhases ?? [])].sort();
+    const expectedFallback = [...expected.agentFallbackPhases].sort();
+    if (JSON.stringify(actualFallback) !== JSON.stringify(expectedFallback)) {
+      failures.push(`${testCase.name}: expected agentFallbackPhases=${expectedFallback.join(', ') || 'none'}, got ${actualFallback.join(', ') || 'none'}`);
+    }
+  }
   results.push({
     name: testCase.name,
     mode: route.classificationMode,
@@ -68,6 +76,7 @@ for (const testCase of expandedCases) {
     active: route.loadOrder,
     deferred: route.deferredLoadOrder,
     missingRequiredPhases: route.coverage?.missingRequiredPhases ?? [],
+    agentFallbackPhases: route.coverage?.agentFallbackPhases ?? [],
     warnings: route.warnings,
   });
 }

@@ -18,6 +18,7 @@
           "task": { "type": "string", "minLength": 1 },
           "taskVariants": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
           "context": { "type": "string", "maxLength": 4000 },
+          "caller": { "enum": ["codex-local", "chatgpt-web", "other"] },
           "stage": { "enum": ["start", "implement", "verify", "persist", "close", "resume"] },
           "completedPhases": {
             "type": "array",
@@ -37,7 +38,8 @@
               "activeExcludes": { "type": "array", "items": { "type": "string" } },
               "deferredIncludes": { "type": "array", "items": { "type": "string" } },
               "deferredExcludes": { "type": "array", "items": { "type": "string" } },
-              "missingRequiredPhases": { "type": "array", "items": { "enum": ["discovery", "safety", "implementation", "verification", "persistence", "maintenance"] }, "uniqueItems": true }
+              "missingRequiredPhases": { "type": "array", "items": { "enum": ["discovery", "safety", "implementation", "verification", "persistence", "maintenance"] }, "uniqueItems": true },
+              "agentFallbackPhases": { "type": "array", "items": { "enum": ["discovery", "safety", "implementation", "verification", "persistence", "maintenance"] }, "uniqueItems": true }
             },
             "additionalProperties": false
           }

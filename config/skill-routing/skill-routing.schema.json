@@ -25,6 +25,7 @@
         "actions": { "type": "array", "items": { "type": "string" } },
         "artifacts": { "type": "array", "items": { "type": "string" } },
         "needs": { "type": "array", "items": { "type": "string" } },
+        "signals": { "type": "array", "items": { "type": "string" } },
         "risks": { "type": "array", "items": { "enum": ["read-only", "write", "destructive", "external-side-effect"] } },
         "stages": { "type": "array", "items": { "enum": ["start", "implement", "verify", "persist", "close", "resume"] } }
       }
@@ -39,11 +40,13 @@
         "actions": { "type": "array", "items": { "type": "string" } },
         "artifacts": { "type": "array", "items": { "type": "string" } },
         "needs": { "type": "array", "items": { "type": "string" } },
+        "signals": { "type": "array", "items": { "type": "string" } },
         "requires": { "type": "array", "items": { "type": "string" } },
         "complements": { "type": "array", "items": { "type": "string" } },
         "excludes": { "type": "array", "items": { "type": "string" } },
         "negativeIntents": { "type": "array", "items": { "type": "string" } },
         "requireNeedMatch": { "type": "boolean", "default": false },
+        "requireActionMatch": { "type": "boolean", "default": false },
         "priority": { "type": "integer", "minimum": 0, "maximum": 100 },
         "activation": { "enum": ["on-demand", "always", "closing"] }
       }

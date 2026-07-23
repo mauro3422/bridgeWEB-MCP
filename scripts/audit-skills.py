@@ -235,7 +235,7 @@ def jaccard(a: set[str], b: set[str]) -> float:
     return len(a & b) / len(a | b)
 
 
-def dependency_graph(skills: list[SkillFile]) -> tuple[dict[str, set[str]], list[dict], list[list[str]]]:
+def dependency_graph(skills: list[SkillFile], routing: dict) -> tuple[dict[str, set[str]], list[dict], list[list[str]]]:
     local = [s for s in skills if s.source in {"codex-local", "codex-system"}]
     names = sorted({s.name for s in local}, key=len, reverse=True)
     edges: dict[str, set[str]] = defaultdict(set)
@@ -254,6 +254,18 @@ def dependency_graph(skills: list[SkillFile]) -> tuple[dict[str, set[str]], list
         if not edges.get(n) and inbound[n] == 0
     ]
 
+    # Textual mentions are useful dashboard references, but only explicit
+    # `requires` edges are mandatory dependencies. Complements and prose may
+    # legitimately point both ways and must not be reported as dependency cycles.
+    required_edges: dict[str, set[str]] = defaultdict(set)
+    routing_skills = routing.get("skills", {}) if isinstance(routing, dict) else {}
+    for name, metadata in routing_skills.items():
+        if not isinstance(metadata, dict):
+            continue
+        for target in metadata.get("requires", []):
+            if isinstance(target, str):
+                required_edges[name].add(target)
+
     cycles: list[list[str]] = []
     state: dict[str, int] = {}
     stack: list[str] = []
@@ -263,7 +275,7 @@ def dependency_graph(skills: list[SkillFile]) -> tuple[dict[str, set[str]], list
         state[node] = 1
         index[node] = len(stack)
         stack.append(node)
-        for nxt in sorted(edges.get(node, set())):
+        for nxt in sorted(required_edges.get(node, set())):
             if state.get(nxt, 0) == 0:
                 visit(nxt)
             elif state.get(nxt) == 1:
@@ -281,7 +293,7 @@ def dependency_graph(skills: list[SkillFile]) -> tuple[dict[str, set[str]], list
     return edges, orphan, cycles
 
 
-def analyze(skills: list[SkillFile]) -> dict:
+def analyze(skills: list[SkillFile], routing: dict) -> dict:
     by_name: dict[str, list[SkillFile]] = defaultdict(list)
     for s in skills:
         by_name[s.name].append(s)
@@ -314,7 +326,7 @@ def analyze(skills: list[SkillFile]) -> dict:
                 overlap_pairs.append({"a": a.name, "b": b.name, "score": round(score, 3)})
     overlap_pairs.sort(key=lambda x: x["score"], reverse=True)
 
-    edges, orphan, cycles = dependency_graph(skills)
+    edges, orphan, cycles = dependency_graph(skills, routing)
     inbound = Counter(t for targets in edges.values() for t in targets)
     dependency_rows = [
         {
@@ -509,8 +521,8 @@ def render_markdown(report: dict) -> str:
 
 def main() -> None:
     skills = discover()
-    report = analyze(skills)
     routing = load_routing()
+    report = analyze(skills, routing)
     registry = {
         "schemaVersion": 1,
         "generatedAt": report["generatedAt"],

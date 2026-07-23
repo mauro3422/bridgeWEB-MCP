@@ -6,6 +6,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { createBridgeServer } from "./bridge-server.js";
 import { getBridgeHttpConfig, SERVER_NAME, SERVER_VERSION } from "./config.js";
 import { renderDashboardHtml } from "./dashboard.js";
+import { closeRobloxMcpConnection } from "./integrations/roblox-mcp-client.js";
 import { getMetricsErrors, getMetricsOverview, getMetricsStatus, getMetricsSummary, getMetricsTimeline, getRecentMetrics } from "./metrics.js";
 
 const config = getBridgeHttpConfig();
@@ -498,6 +499,7 @@ async function main() {
       await Promise.allSettled([
         ...Array.from(sessions.entries()).map(([sessionId, record]) => closeTransport(record.transport, "shutdown", sessionId)),
         ...Array.from(anonymousTransports.keys()).map((transport) => closeTransport(transport, "shutdown")),
+        closeRobloxMcpConnection(),
       ]);
       log("info", "shutdown complete", { signal });
       process.exit(0);

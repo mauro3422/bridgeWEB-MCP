@@ -7,7 +7,7 @@ El objetivo es tener un puente local controlado por nosotros para operar filesys
 ## Estado actual
 
 ```text
-bridge-mcp v0.6.6
+bridge-mcp v0.6.8
 Mode: HTTP production-candidate
 Project root: C:\dev\bridge-mcp
 Bridge MCP: http://127.0.0.1:3001/mcp
@@ -102,7 +102,7 @@ Las guias globales viven en `integrations/workflow-guides/`. Las guias del proye
 
 ## Tools expuestas
 
-El runtime actual expone 108 tools.
+El runtime actual expone 109 tools.
 
 `blender_review_bundle` genera en una sola llamada vistas ortográficas múltiples, una hoja de contacto adjunta al resultado MCP y un manifiesto con geometría, materiales, colecciones, visibilidad, rig, acciones, diagnósticos, hashes y confirmación de restauración de la escena.
 
@@ -319,7 +319,7 @@ Estado esperado:
 
 ```text
 bridge_self_check.ok = true
-server.version = 0.6.6
+server.version = 0.6.8
 tunnel.baseUrl = http://127.0.0.1:8081
 tunnel healthz = live
 tunnel readyz = ready

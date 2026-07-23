@@ -26,6 +26,12 @@ const linkedSkillSource = path.join(sandbox, 'linked-skill-source', 'linked-junc
 fs.mkdirSync(linkedSkillSource, {recursive:true});
 fs.writeFileSync(path.join(linkedSkillSource, 'SKILL.md'), '---\nname: linked-junction-skill\ndescription: Verify safe discovery through a directory junction.\n---\n\n# linked-junction-skill\n\nFixture guidance.\n');
 fs.symlinkSync(linkedSkillSource, path.join(fixtureSkillRoot, 'linked-junction-skill'), process.platform === 'win32' ? 'junction' : 'dir');
+const fixturePluginSkill = path.join(fixtureCodexHome, 'plugins', 'cache', 'fixture-vendor', 'fixture-plugin', '1.0.0', 'skills', 'fixture-plugin-skill');
+fs.mkdirSync(fixturePluginSkill, {recursive:true});
+fs.writeFileSync(path.join(fixturePluginSkill, 'SKILL.md'), '---\nname: fixture-plugin-skill\ndescription: Verify read-only discovery from the managed Codex plugin cache.\n---\n\n# Fixture plugin skill\n\nFixture guidance.\n');
+// Deliberately exclude plugins/cache from the general Bridge path policy. Skill
+// discovery must use its narrower read-only cache boundary instead.
+process.env.BRIDGE_MCP_ALLOWED_ROOTS = [fixtureSkillRoot, linkedSkillSource, path.join(sandbox, 'project'), process.cwd()].join(path.delimiter);
 fs.mkdirSync(path.join(fixtureSkillRoot, '_dashboard'), {recursive:true});
 fs.writeFileSync(path.join(fixtureSkillRoot, '_dashboard', 'skill-routing-overrides.json'), JSON.stringify({
   schemaVersion: 1,
@@ -50,16 +56,48 @@ process.env.BRIDGE_MCP_SKILL_ROUTING_FIXTURES_PATH = path.join(fixtureSkillRoot,
 
 const { createDefaultToolRegistry } = await import('../dist/tool-registry.js');
 const { writePersistentCache } = await import('../dist/tools/shared/persistent-cache.js');
+const { classifyRobloxMcpToolCatalog, parseRobloxStudios } = await import('../dist/integrations/roblox-mcp-client.js');
 const registry = createDefaultToolRegistry();
 const call = (name, args = {}) => registry.call(name, args);
 const root = path.join(sandbox, 'project');
 fs.mkdirSync(root, {recursive:true});
 
 try {
-  if (registry.tools.length !== 108) throw new Error(`expected 108 tools, got ${registry.tools.length}`);
+  const liveRobloxCatalog = classifyRobloxMcpToolCatalog({
+    liveTools: [{name:'skill'}],
+    attempts: 1,
+    durationMs: 25,
+  });
+  if (liveRobloxCatalog.status !== 'healthy' || liveRobloxCatalog.liveToolCount !== 1 || liveRobloxCatalog.usingCachedTools) throw new Error('healthy Roblox tool catalog classification failed');
+  const cachedRobloxCatalog = classifyRobloxMcpToolCatalog({
+    liveTools: [],
+    cachedTools: [{name:'skill'}],
+    cacheCapturedAt: '2026-07-23T00:00:00.000Z',
+    attempts: 2,
+    durationMs: 20_000,
+    errors: ['tools/list returned zero tools'],
+  });
+  if (cachedRobloxCatalog.status !== 'degraded' || cachedRobloxCatalog.liveToolCount !== 0 || cachedRobloxCatalog.effectiveToolCount !== 1 || !cachedRobloxCatalog.usingCachedTools || !cachedRobloxCatalog.warning?.includes('last-known')) throw new Error('degraded Roblox tool cache classification failed');
+  const unavailableRobloxCatalog = classifyRobloxMcpToolCatalog({
+    liveTools: [],
+    attempts: 2,
+    durationMs: 20_000,
+    errors: ['tools/list returned zero tools'],
+  });
+  if (unavailableRobloxCatalog.status !== 'unavailable' || unavailableRobloxCatalog.effectiveToolCount !== 0 || !unavailableRobloxCatalog.warning?.includes('No last-known tool cache')) throw new Error('unavailable Roblox tool catalog classification failed');
+  const parsedStudios = parseRobloxStudios({
+    content: [{type:'text',text:JSON.stringify({studios:[
+      {id:'studio-a',name:'A.rbxl',active:true},
+      {id:'studio-b',name:'B.rbxl',active:false},
+    ]})}],
+  });
+  if (parsedStudios.length !== 2 || parsedStudios[0].id !== 'studio-a' || !parsedStudios[0].active || parsedStudios[1].active) throw new Error('Roblox Studio instance parsing failed');
+  if (parseRobloxStudios({content:[{type:'text',text:'not-json'}]}).length !== 0) throw new Error('malformed Roblox Studio listing was not rejected');
+
+  if (registry.tools.length !== 109) throw new Error(`expected 109 tools, got ${registry.tools.length}`);
   if (registry.riskSummary.neutral.length !== 0) throw new Error(`neutral tools remain: ${registry.riskSummary.neutral.join(', ')}`);
   for (const moduleName of ['project','workspace','cache','workflow-guides','skill-catalog-and-roblox-proxy','roblox-studio-ops','binary-files','images','blender','tablet-whiteboard']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
-  for (const toolName of ['project_context_load','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','skill_catalog','skill_recommend','skill_route_audit','skill_route_plan','skill_bootstrap','skill_load','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_query','roblox_mcp_action','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_asset_save','image_character_views_prepare','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_review_bundle','blender_execute_code','blender_batch_script','blender_setup_character_references','blender_character_loop_status','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/Blender tool ${toolName}`);
+  for (const toolName of ['project_context_load','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','skill_catalog','skill_recommend','skill_route_audit','skill_route_plan','skill_bootstrap','skill_load','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_studio_list','roblox_mcp_query','roblox_mcp_action','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_asset_save','image_character_views_prepare','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_review_bundle','blender_execute_code','blender_batch_script','blender_setup_character_references','blender_character_loop_status','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/Blender tool ${toolName}`);
   if (!registry.riskSummary.destructive.includes('roblox_mcp_action') || !registry.riskSummary.destructive.includes('roblox_place_save')) throw new Error('Roblox action/save risk classification failed');
   const reviewTool = registry.tools.find((tool) => tool.name === 'blender_review_bundle');
   if (!reviewTool || !registry.riskSummary.destructive.includes('blender_review_bundle')) throw new Error('Blender review bundle classification failed');
@@ -67,6 +105,8 @@ try {
 
   const junctionCatalog = await call('skill_catalog', {sources:['codex-local'],maxResults:50});
   if (!junctionCatalog.skills.some((skill) => skill.name === 'linked-junction-skill')) throw new Error('skill catalog did not follow an allowed directory junction');
+  const pluginCatalog = await call('skill_catalog', {sources:['codex-plugin'],maxResults:50});
+  if (!pluginCatalog.skills.some((skill) => skill.name === 'fixture-plugin-skill')) throw new Error(`skill catalog did not discover the managed plugin cache: ${JSON.stringify(pluginCatalog.warnings)}`);
 
   const structuredRoute = await call('skill_route_plan', {
     task:'Diseñar máquinas conectables por puertos, transportar recursos y guardar el proyecto',
@@ -91,6 +131,15 @@ try {
     if (!structuredRoute.deferredLoadOrder.includes(name)) throw new Error(`structured route missing deferred skill ${name}`);
   }
   if (!structuredRoute.coverage.requiredPhases.includes('verification') || !structuredRoute.coverage.requiredPhases.includes('persistence')) throw new Error('structured route phase coverage failed');
+
+  const callerRoute = await call('skill_route_plan', {
+    task:'Revisar un proyecto local desde Codex',
+    caller:'codex-local',
+    sources:['codex-local'],
+    intent:{domains:['filesystem'],actions:['review'],artifacts:['project'],needs:[],risk:'read-only',ambiguity:'low'},
+  });
+  if (callerRoute.caller !== 'codex-local' || callerRoute.classifier?.producer !== 'calling-agent' || callerRoute.classifier?.modelCallInsideRouter !== false) throw new Error('skill route caller/classifier metadata failed');
+  if (!callerRoute.executionGuidance.some((item) => item.includes('direct local filesystem'))) throw new Error('Codex local execution guidance failed');
 
   const verificationRoute = await call('skill_route_plan', {
     task:'Verificar el mismo sistema Roblox',

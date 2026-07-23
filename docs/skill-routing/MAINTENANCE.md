@@ -1,5 +1,9 @@
 # Mantenimiento de MSSR
 
+## Salud de fuentes externas
+
+Trata la integridad del contrato y la disponibilidad de fuentes como verificaciones distintas. Un contrato limpio no vuelve sana una fuente MCP solicitada. Si Roblox Studio MCP devuelve cero tools, conserva el routing local/plugin, informa la fuente Roblox como degradada o no disponible y exige mantenimiento en la auditoría viva. Nunca conviertas un catálogo dinámico vacío en un resultado silenciosamente sano.
+
 ## Al crear una skill
 
 1. Crear su `SKILL.md` con `name` y una descripción que explique claramente cuándo usarla.
@@ -59,10 +63,17 @@ Cuando una tool cambia qué workflows son posibles:
 ## Errores de activación
 
 - **Se activa de más:** añadir artefacto específico, `requireNeedMatch`, intención negativa o fixture negativo.
+- **Coincide por artefacto pero no por operación:** añadir `requireActionMatch` y un caso negativo cercano.
 - **No se activa:** mejorar descripción, metadata, dependencia o fixture positivo.
 - **Fase incorrecta:** corregir `phase`, workflow y `completedPhases` del caso.
 - **Una continuación breve pierde el plan:** el caller debe enviar siempre un `context` resuelto y acotado para trabajos multi-turno, no depender de detectar una frase literal.
+- **Codex local y ChatGPT web eligen rutas distintas:** enviar `caller` y seguir `executionGuidance`; no duplicar filesystem/terminal mediante Bridge cuando Codex ya posee una ruta directa suficiente.
+- **Falta una fuente completa del catálogo:** exigir un warning de raíz y probar `skills`, junctions y `plugins/cache` por separado. No ampliar permisos generales para resolver un problema de descubrimiento interno.
 - **Dos skills compiten:** establecer roles complementarios, dependencia o exclusión; evitar duplicar procedimientos.
+
+- **Aparecen varios `StudioMCP.exe`:** no limpiar por nombre. Comparar PPID y `roblox_mcp_status.ownership.childPid`; cada cliente puede tener un hijo legítimo.
+- **Hay varias ventanas Studio:** obtener ids vivos y exigir `studioId` para toda mutación proxied.
+- **Sólo existe catálogo Roblox cacheado:** permitir descubrimiento degradado, pero bloquear queries, acciones y carga de skills vivas.
 
 ## Incidentes confirmados
 

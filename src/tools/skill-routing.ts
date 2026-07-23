@@ -7,6 +7,8 @@ export const SKILL_PHASES = ["discovery", "safety", "implementation", "verificat
 export type SkillPhase = typeof SKILL_PHASES[number];
 export const SKILL_STAGES = ["start", "implement", "verify", "persist", "close", "resume"] as const;
 export type SkillStage = typeof SKILL_STAGES[number];
+export const SKILL_CALLERS = ["codex-local", "chatgpt-web", "other"] as const;
+export type SkillCaller = typeof SKILL_CALLERS[number];
 
 export const SKILL_DOMAINS = [
   "roblox", "blender", "figma", "github", "git", "filesystem", "google-workspace", "openai-development", "artifacts",
@@ -23,6 +25,10 @@ export const SKILL_ARTIFACTS = [
 export const SKILL_NEEDS = [
   "official-docs", "safe-editing", "unit-tests", "playtest", "visual-qa", "device-testing", "performance",
   "scene-analysis", "backup", "integrity-verification", "version-control", "history-recovery", "cross-agent", "human-approval",
+] as const;
+export const SKILL_SIGNALS = [
+  "nominal", "error-observed", "warning-observed", "degraded-capability", "uncertainty", "conflicting-evidence",
+  "repeated-friction", "manual-workaround", "missing-capability", "recovery-needed", "skill-gap", "reusable-pattern",
 ] as const;
 export const SKILL_RISKS = ["read-only", "write", "destructive", "external-side-effect"] as const;
 
@@ -41,6 +47,7 @@ export const structuredSkillIntentSchema = z.object({
   actions: z.array(z.enum(SKILL_ACTIONS)).min(1).max(12),
   artifacts: z.array(z.enum(SKILL_ARTIFACTS)).max(12).default([]),
   needs: z.array(z.enum(SKILL_NEEDS)).max(12).default([]),
+  signals: z.array(z.enum(SKILL_SIGNALS)).min(1).max(12).default(["nominal"]),
   risk: z.enum(SKILL_RISKS).default("read-only"),
   ambiguity: z.enum(["low", "medium", "high"]).default("low"),
 }).strict();
@@ -53,11 +60,13 @@ const routeMetadataSchema = z.object({
   actions: z.array(z.string()).default([]),
   artifacts: z.array(z.string()).default([]),
   needs: z.array(z.string()).default([]),
+  signals: z.array(z.string()).default([]),
   requires: z.array(z.string()).default([]),
   complements: z.array(z.string()).default([]),
   excludes: z.array(z.string()).default([]),
   negativeIntents: z.array(z.string()).default([]),
   requireNeedMatch: z.boolean().default(false),
+  requireActionMatch: z.boolean().default(false),
   priority: z.number().int().min(0).max(100).default(40),
   activation: z.enum(["on-demand", "always", "closing"]).default("on-demand"),
 }).strict();
@@ -67,6 +76,7 @@ const conditionSchema = z.object({
   actions: z.array(z.string()).optional(),
   artifacts: z.array(z.string()).optional(),
   needs: z.array(z.string()).optional(),
+  signals: z.array(z.string()).optional(),
   risks: z.array(z.string()).optional(),
   stages: z.array(z.enum(SKILL_STAGES)).optional(),
 }).strict();
@@ -140,6 +150,7 @@ function conditionMatches(condition: Condition | undefined, intent: StructuredSk
   if (condition.actions?.length && !intersects(condition.actions, intent.actions)) return false;
   if (condition.artifacts?.length && !intersects(condition.artifacts, intent.artifacts)) return false;
   if (condition.needs?.length && !intersects(condition.needs, intent.needs)) return false;
+  if (condition.signals?.length && !intersects(condition.signals, intent.signals)) return false;
   if (condition.risks?.length && !condition.risks.includes(intent.risk)) return false;
   if (condition.stages?.length && !condition.stages.includes(stage)) return false;
   return true;
@@ -246,11 +257,13 @@ function inferredMetadata(skill: SkillEntry): RouteMetadata {
     actions: actions.length ? actions : ["create"],
     artifacts: [],
     needs: [],
+    signals: [],
     requires: [],
     complements: [],
     excludes: [],
     negativeIntents: [],
     requireNeedMatch: false,
+    requireActionMatch: false,
     priority: skill.source === "codex-local" ? 55 : skill.source === "roblox" ? 50 : skill.source === "codex-system" ? 45 : 25,
     activation: "on-demand",
   };
@@ -266,6 +279,7 @@ function mergeMetadata(base: RouteMetadata, override: RouteMetadata | undefined)
     actions: override.actions.length ? override.actions : base.actions,
     artifacts: override.artifacts.length ? override.artifacts : base.artifacts,
     needs: override.needs.length ? override.needs : base.needs,
+    signals: override.signals.length ? override.signals : base.signals,
     requires: override.requires,
     complements: override.complements,
     excludes: override.excludes,
@@ -368,6 +382,7 @@ export async function auditSkillRouting(skills: SkillEntry[]) {
         excludes: entry.excludes,
         negativeIntents: entry.negativeIntents,
         requireNeedMatch: entry.requireNeedMatch,
+        requireActionMatch: entry.requireActionMatch,
         priority: entry.priority,
         activation: entry.activation,
       },
@@ -392,6 +407,7 @@ export async function auditSkillRouting(skills: SkillEntry[]) {
   const cycles = routingDependencyCycles(registry.entries);
   const fileHealth = (await Promise.all(registry.entries.map(skillFileHealth))).filter((item): item is NonNullable<typeof item> => Boolean(item));
   const oversizedSkills = fileHealth.filter((item) => item.lines > 500 || item.chars > MAX_SAFE_SKILL_CHARS);
+  const oversizedOwnedSkills = oversizedSkills.filter((item) => ownedSources.has(item.source));
   const missingDescriptions = fileHealth.filter((item) => item.source === "codex-local" && item.descriptionMissing);
   const unreadableSkills = fileHealth.filter((item) => "unreadable" in item && item.unreadable);
   const errors = [
@@ -404,7 +420,7 @@ export async function auditSkillRouting(skills: SkillEntry[]) {
   const maintenanceReasons = [
     ...unconfiguredOwnedSkills.map((item) => `Owned skill lacks explicit routing metadata: ${item.name}`),
     ...staleConfigEntries.map((name) => `Routing config entry is stale: ${name}`),
-    ...oversizedSkills.map((item) => `Skill may need splitting: ${item.name} (${item.lines} lines, ${item.chars} chars)`),
+    ...oversizedOwnedSkills.map((item) => `Owned skill may need splitting: ${item.name} (${item.lines} lines, ${item.chars} chars)`),
     ...missingDescriptions.map((item) => `Skill description is missing: ${item.name}`),
   ];
   return {
@@ -493,12 +509,26 @@ function fallbackIntent(task: string): StructuredSkillIntent {
   if (/hash|sha ?256|checksum|integridad|comparar archivos|verify/.test(text)) needs.push("integrity-verification");
   if (/\bgit\b|commit|\btag\b|repositorio|repository|\brepo\b/.test(text)) needs.push("version-control");
   if (/historial|recuperar sesion|recovery/.test(text)) needs.push("history-recovery");
-  if (/codex.*chatgpt|chatgpt.*codex|bridge|coordinar agentes/.test(text)) needs.push("cross-agent");
+  if (/codex.*chatgpt|chatgpt.*codex|bridge|coordinar agentes|subagente|subagent|swarm/.test(text)) needs.push("cross-agent");
+
+  const signals: StructuredSkillIntent["signals"] = [];
+  if (/error|fall|bug|exception|timeout|se rompio|no funciona/.test(text)) signals.push("error-observed");
+  if (/warning|advertencia|aviso/.test(text)) signals.push("warning-observed");
+  if (/degrad|catalogo vacio|lista vacia|tools?[^a-z0-9]+0|count[^a-z0-9]+0|ciego de tools/.test(text)) signals.push("degraded-capability");
+  if (/no se|duda|quizas|tal vez|parece|incierto|uncertain/.test(text)) signals.push("uncertainty");
+  if (/contradic|conflict|dice conectado|connected.*(?:vacio|empty|0)|evidencia.*distint/.test(text)) signals.push("conflicting-evidence");
+  if (/repetid|otra vez|siempre pasa|friccion|recurrent/.test(text)) signals.push("repeated-friction");
+  if (/workaround|parche manual|a mano|manualment/.test(text)) signals.push("manual-workaround");
+  if (/falta.*(?:tool|capacidad|skill)|missing capability|no (?:tiene|hay).*(?:tool|skill)/.test(text)) signals.push("missing-capability");
+  if (/recuper|recovery|restore|reconectar|reiniciar/.test(text)) signals.push("recovery-needed");
+  if (/crear.*skill|nueva skill|falta.*skill|skill.*falt/.test(text)) signals.push("skill-gap");
+  if (/reutilizable|para siempre|cada vez|patron|generalizar/.test(text)) signals.push("reusable-pattern");
+  if (!signals.length) signals.push("nominal");
 
   const risk: StructuredSkillIntent["risk"] = /borrar|delete|destruct|rollback/.test(text)
     ? "destructive"
     : /crear|editar|modificar|mover|trasladar|migrar|guardar|publicar|push|commit|versionar|write|update|fix/.test(text) ? "write" : "read-only";
-  return { summary: task.slice(0, 600), domains: [...new Set(domains)], actions: [...new Set(actions)], artifacts: [...new Set(artifacts)], needs: [...new Set(needs)], risk, ambiguity: "high" };
+  return { summary: task.slice(0, 600), domains: [...new Set(domains)], actions: [...new Set(actions)], artifacts: [...new Set(artifacts)], needs: [...new Set(needs)], signals: [...new Set(signals)], risk, ambiguity: "high" };
 }
 
 const phaseOrder = new Map<SkillPhase, number>(SKILL_PHASES.map((phase, index) => [phase, index]));
@@ -523,7 +553,7 @@ const stagePhases: Record<SkillStage, SkillPhase[]> = {
 };
 
 function intentTags(intent: StructuredSkillIntent): string[] {
-  return [...intent.domains, ...intent.actions, ...intent.artifacts, ...intent.needs, intent.risk];
+  return [...intent.domains, ...intent.actions, ...intent.artifacts, ...intent.needs, ...intent.signals, intent.risk];
 }
 
 function scoreEntry(skill: SkillEntry & RouteMetadata, intent: StructuredSkillIntent, task: string): { score: number; reasons: string[]; excluded: boolean } {
@@ -547,6 +577,7 @@ function scoreEntry(skill: SkillEntry & RouteMetadata, intent: StructuredSkillIn
   const dimensions: Array<[string, string[], string[], number, boolean]> = [
     ["domain", skill.domains, intent.domains, 18, false], ["action", skill.actions, intent.actions, 12, false],
     ["artifact", skill.artifacts, intent.artifacts, 10, true], ["need", skill.needs, intent.needs, 16, true],
+    ["signal", skill.signals, intent.signals, 20, true],
   ];
   for (const [label, left, right, weight, isAnchor] of dimensions) {
     const rightTokens = tokenSet(right);
@@ -567,11 +598,15 @@ function scoreEntry(skill: SkillEntry & RouteMetadata, intent: StructuredSkillIn
   const specificArtifactMatched = skillSpecificArtifacts.some((artifact) => intentSpecificArtifacts.includes(artifact as StructuredSkillIntent["artifacts"][number]));
   const specificNeedMatched = skillSpecificNeeds.some((need) => intentSpecificNeeds.includes(need as StructuredSkillIntent["needs"][number]));
   const anyNeedMatched = skill.needs.some((need) => intent.needs.includes(need as StructuredSkillIntent["needs"][number]));
+  const anyActionMatched = skill.actions.some((action) => intent.actions.includes(action as StructuredSkillIntent["actions"][number]));
   const domainMatched = skill.domains.some((domain) => intent.domains.includes(domain as StructuredSkillIntent["domains"][number]));
   const intentHasAnchors = intent.artifacts.length > 0 || intent.needs.length > 0;
   if (!matched || (intentHasAnchors && !anchorMatched)) return { score: 0, reasons, excluded: false };
   if (skill.requireNeedMatch && !anyNeedMatched && !explicitNameMatched) {
     return { score: 0, reasons: [...reasons, "explicit need gate failed"], excluded: false };
+  }
+  if (skill.requireActionMatch && !anyActionMatched && !explicitNameMatched) {
+    return { score: 0, reasons: [...reasons, "explicit action gate failed"], excluded: false };
   }
   if (skill.domains.length > 0 && !domainMatched) return { score: 0, reasons: [...reasons, "domain gate failed"], excluded: false };
   if (intentSpecificArtifacts.length > 0 && !specificArtifactMatched && !specificNeedMatched) {
@@ -590,8 +625,26 @@ function inferredRequiredPhases(intent: StructuredSkillIntent, stage: SkillStage
   if (intent.risk !== "read-only" || intent.actions.some((action) => ["review", "verify", "test", "debug", "optimize", "analyze"].includes(action))) phases.add("verification");
   if (intent.actions.some((action) => ["save", "recover", "version", "publish"].includes(action)) || intent.needs.some((need) => ["backup", "integrity-verification", "version-control", "history-recovery"].includes(need))) phases.add("persistence");
   if (intent.domains.includes("roblox") && intent.risk !== "read-only") phases.add("persistence");
+  if (intent.signals.some((signal) => ["error-observed", "degraded-capability", "conflicting-evidence", "recovery-needed"].includes(signal))) phases.add("verification");
+  if (intent.signals.some((signal) => ["repeated-friction", "manual-workaround", "skill-gap", "reusable-pattern"].includes(signal))) phases.add("maintenance");
   if (stage === "close") phases.add("maintenance");
   return [...phases].sort((a, b) => (phaseOrder.get(a) ?? 0) - (phaseOrder.get(b) ?? 0));
+}
+
+function callerExecutionGuidance(caller: SkillCaller): string[] {
+  if (caller === "codex-local") {
+    return [
+      "Prefer direct local filesystem and terminal tools when they are authoritative and sufficient.",
+      "Use MauroPrime Bridge when it adds shared routing, snapshots, recovery, verified Roblox place saves, persistent terminals, or cross-client coordination.",
+    ];
+  }
+  if (caller === "chatgpt-web") {
+    return [
+      "Use MauroPrime Bridge for approved access to the local machine, project files, terminals, snapshots, and connected desktop applications.",
+      "Do not assume direct local filesystem or terminal access outside the capabilities exposed by the Bridge and installed apps.",
+    ];
+  }
+  return ["Select the shortest authoritative tool route from the capabilities actually available to the current client."];
 }
 
 function dependencyOrder(selected: RoutedSkill[], byName: Map<string, RoutedSkill>): { order: RoutedSkill[]; cycles: string[][] } {
@@ -626,17 +679,23 @@ export async function planSkillRoute(args: {
   context?: string;
   skills: SkillEntry[];
   intent?: unknown;
+  caller?: SkillCaller;
   stage?: SkillStage;
   completedPhases?: SkillPhase[];
   maxSkills?: number;
 }) {
+  const caller = z.enum(SKILL_CALLERS).catch("other").parse(args.caller ?? "other");
   const stage = z.enum(SKILL_STAGES).catch("start").parse(args.stage ?? "start");
   const completedPhases = z.array(z.enum(SKILL_PHASES)).catch([]).parse(args.completedPhases ?? []);
   const maxSkills = z.number().int().min(1).max(16).catch(8).parse(args.maxSkills ?? 8);
   const context = z.string().max(4_000).catch("").parse(args.context ?? "").trim();
   const routingText = [args.task, context].filter(Boolean).join("\n\nResolved conversation context:\n");
   const classificationMode = args.intent ? "structured-semantic" : "lexical-fallback";
-  const intent = args.intent ? structuredSkillIntentSchema.parse(args.intent) : fallbackIntent(routingText);
+  const parsedIntent = args.intent ? structuredSkillIntentSchema.parse(args.intent) : fallbackIntent(routingText);
+  const normalizedSignals = new Set(parsedIntent.signals);
+  if (normalizedSignals.size > 1) normalizedSignals.delete("nominal");
+  if (normalizedSignals.size === 0) normalizedSignals.add("nominal");
+  const intent: StructuredSkillIntent = { ...parsedIntent, signals: [...normalizedSignals] };
   const registry = await buildSkillRoutingRegistry(args.skills);
   const byNameBase = new Map(registry.entries.map((skill) => [skill.name, skill]));
   const requiredBy = new Map<string, string[]>();
@@ -754,7 +813,20 @@ export async function planSkillRoute(args: {
       deferred: "Do not load deferred skills until their workflow phase becomes active.",
     },
     classificationMode,
+    classifier: {
+      producer: args.intent ? "calling-agent" : "lexical-fallback",
+      modelCallInsideRouter: false,
+      deterministicAfterIntent: true,
+    },
+    semanticSignals: {
+      values: intent.signals,
+      nominal: intent.signals.length === 1 && intent.signals[0] === "nominal",
+      verificationRecommended: intent.signals.some((signal) => ["error-observed", "degraded-capability", "conflicting-evidence", "recovery-needed"].includes(signal)),
+      maintenanceRecommended: intent.signals.some((signal) => ["repeated-friction", "manual-workaround", "skill-gap", "reusable-pattern"].includes(signal)),
+    },
     intent,
+    caller,
+    executionGuidance: callerExecutionGuidance(caller),
     stage,
     registry: {
       canonicalSkills: registry.entries.length,
@@ -774,6 +846,7 @@ export async function planSkillRoute(args: {
       completedPhases,
       activePhases: [...activePhases],
       missingRequiredPhases,
+      agentFallbackPhases: missingRequiredPhases,
     },
     warnings: [...registry.warnings, ...conflictWarnings, ...inferredActiveWarnings, ...ordered.cycles.map((cycle) => `Skill dependency cycle: ${cycle.join(" -> ")}`)],
     activationInstruction: classificationMode === "structured-semantic"

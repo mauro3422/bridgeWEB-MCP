@@ -5,14 +5,25 @@ import path from "node:path";
 import { z } from "zod";
 import type { BridgeToolModule } from "./types.js";
 import { assertPathAllowed } from "./shared/path.js";
-import { callRobloxMcpTool, listRobloxMcpTools, robloxMcpConnectionStatus, type RobloxMcpTool } from "../integrations/roblox-mcp-client.js";
+import {
+  callRobloxMcpTool,
+  callRobloxMcpToolForStudio,
+  inspectRobloxMcpTools,
+  inspectRobloxStudioState,
+  parseRobloxStudios,
+  robloxMcpConnectionStatus,
+  type RobloxMcpTool,
+  type RobloxMcpToolCatalogHealth,
+} from "../integrations/roblox-mcp-client.js";
 import {
   SKILL_ACTIONS,
   SKILL_ARTIFACTS,
+  SKILL_CALLERS,
   SKILL_DOMAINS,
   SKILL_NEEDS,
   SKILL_PHASES,
   SKILL_RISKS,
+  SKILL_SIGNALS,
   SKILL_STAGES,
   auditSkillRouting,
   canonicalizeSkillEntries,
@@ -82,22 +93,44 @@ async function readSkillEntry(skillPath: string, source: SkillSource, origin?: s
   }
 }
 
-async function walkSkillFiles(root: string, source: SkillSource, maxDepth: number, origin?: string): Promise<SkillEntry[]> {
-  if (!(await pathExists(root))) return [];
+type SkillWalkResult = { skills: SkillEntry[]; warnings: string[] };
+
+function isWithinRoot(root: string, target: string): boolean {
+  const relative = path.relative(path.resolve(root), path.resolve(target));
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+async function walkSkillFiles(root: string, source: SkillSource, maxDepth: number, origin?: string): Promise<SkillWalkResult> {
+  if (!(await pathExists(root))) return { skills: [], warnings: [] };
   const results: SkillEntry[] = [];
+  const warnings: string[] = [];
   const visitedDirectories = new Set<string>();
+  let canonicalRoot: string;
+  try {
+    canonicalRoot = await fs.realpath(root);
+  } catch (error) {
+    return { skills: [], warnings: [`Skill root unavailable (${origin ?? source}): ${root}: ${error instanceof Error ? error.message : String(error)}`] };
+  }
   const walk = async (directory: string, depth: number): Promise<void> => {
     if (depth > maxDepth || results.length >= MAX_DISCOVERED_SKILLS) return;
     let realDirectory: string;
     let entries: Dirent[];
     try {
       realDirectory = await fs.realpath(directory);
-      assertPathAllowed(realDirectory, "read");
+      // Plugin packages are managed runtime inputs. Permit read-only discovery only
+      // while the resolved directory remains inside the exact plugin cache root;
+      // do not broaden the Bridge's general filesystem policy to all of .codex.
+      if (source === "codex-plugin") {
+        if (!isWithinRoot(canonicalRoot, realDirectory)) throw new Error(`plugin directory resolves outside cache root: ${realDirectory}`);
+      } else {
+        assertPathAllowed(realDirectory, "read");
+      }
       const visitKey = process.platform === "win32" ? realDirectory.toLowerCase() : realDirectory;
       if (visitedDirectories.has(visitKey)) return;
       visitedDirectories.add(visitKey);
       entries = await fs.readdir(directory, { withFileTypes: true });
-    } catch {
+    } catch (error) {
+      if (depth === 0) warnings.push(`Skill root unreadable (${origin ?? source}): ${root}: ${error instanceof Error ? error.message : String(error)}`);
       return;
     }
     for (const entry of entries) {
@@ -118,20 +151,20 @@ async function walkSkillFiles(root: string, source: SkillSource, maxDepth: numbe
     }
   };
   await walk(root, 0);
-  return results;
+  return { skills: results, warnings };
 }
 
-async function discoverCodexSkills(): Promise<SkillEntry[]> {
+async function discoverCodexSkills(): Promise<{ skills: SkillEntry[]; warnings: string[] }> {
   const home = codexHome();
   const normalRoot = path.join(home, "skills");
-  const allNormal = await walkSkillFiles(normalRoot, "codex-local", 5, "Codex skills directory");
-  for (const skill of allNormal) {
+  const normal = await walkSkillFiles(normalRoot, "codex-local", 5, "Codex skills directory");
+  for (const skill of normal.skills) {
     const normalized = skill.path?.split(path.sep).map((part) => part.toLowerCase()) ?? [];
     if (normalized.includes(".system")) skill.source = "codex-system";
   }
   const pluginRoot = path.join(home, "plugins", "cache");
-  const pluginSkills = await walkSkillFiles(pluginRoot, "codex-plugin", 8, "Codex plugin cache");
-  return [...allNormal, ...pluginSkills];
+  const plugins = await walkSkillFiles(pluginRoot, "codex-plugin", 8, "Codex plugin cache");
+  return { skills: [...normal.skills, ...plugins.skills], warnings: [...normal.warnings, ...plugins.warnings] };
 }
 
 function parseRobloxSkills(tool: RobloxMcpTool | undefined): SkillEntry[] {
@@ -149,23 +182,71 @@ function parseRobloxSkills(tool: RobloxMcpTool | undefined): SkillEntry[] {
   return skills;
 }
 
-async function discoverRobloxSkills(): Promise<SkillEntry[]> {
-  const tools = await listRobloxMcpTools();
-  return parseRobloxSkills(tools.find((tool) => tool.name === "skill"));
+type SkillSourceHealth = {
+  codex: {
+    status: "healthy" | "degraded";
+    skillCount: number;
+    warningCount: number;
+  };
+  roblox?: {
+    status: RobloxMcpToolCatalogHealth["status"];
+    liveToolCount: number;
+    effectiveToolCount: number;
+    skillCount: number;
+    usingCachedTools: boolean;
+    warning?: string;
+  };
+};
+
+function robloxHealthSummary(health: RobloxMcpToolCatalogHealth, skillCount: number): NonNullable<SkillSourceHealth["roblox"]> {
+  return {
+    status: health.status,
+    liveToolCount: health.liveToolCount,
+    effectiveToolCount: health.effectiveToolCount,
+    skillCount,
+    usingCachedTools: health.usingCachedTools,
+    warning: health.warning,
+  };
 }
 
-async function discoverAllSkills(includeRoblox = true): Promise<{ skills: SkillEntry[]; warnings: string[] }> {
+async function discoverRobloxSkills(): Promise<{ skills: SkillEntry[]; health: RobloxMcpToolCatalogHealth }> {
+  const health = await inspectRobloxMcpTools();
+  const skills = parseRobloxSkills(health.tools.find((tool) => tool.name === "skill"));
+  return { skills, health };
+}
+
+async function discoverAllSkills(includeRoblox = true): Promise<{ skills: SkillEntry[]; warnings: string[]; sourceHealth: SkillSourceHealth }> {
   const warnings: string[] = [];
   const codex = await discoverCodexSkills();
+  warnings.push(...codex.warnings);
   let roblox: SkillEntry[] = [];
+  const sourceHealth: SkillSourceHealth = {
+    codex: {
+      status: codex.warnings.length > 0 ? "degraded" : "healthy",
+      skillCount: codex.skills.length,
+      warningCount: codex.warnings.length,
+    },
+  };
   if (includeRoblox) {
     try {
-      roblox = await discoverRobloxSkills();
+      const discovered = await discoverRobloxSkills();
+      roblox = discovered.skills;
+      sourceHealth.roblox = robloxHealthSummary(discovered.health, roblox.length);
+      if (discovered.health.warning) warnings.push(discovered.health.warning);
     } catch (error) {
-      warnings.push(`Roblox MCP skills unavailable: ${error instanceof Error ? error.message : String(error)}`);
+      const warning = `Roblox MCP skills unavailable: ${error instanceof Error ? error.message : String(error)}`;
+      warnings.push(warning);
+      sourceHealth.roblox = {
+        status: "unavailable",
+        liveToolCount: 0,
+        effectiveToolCount: 0,
+        skillCount: 0,
+        usingCachedTools: false,
+        warning,
+      };
     }
   }
-  return { skills: [...codex, ...roblox], warnings };
+  return { skills: [...codex.skills, ...roblox], warnings, sourceHealth };
 }
 
 function normalize(value: string): string {
@@ -263,6 +344,14 @@ function remoteToolByName(tools: RobloxMcpTool[], name: string): RobloxMcpTool {
   return tool;
 }
 
+async function requireLiveRemoteTool(name: string): Promise<RobloxMcpTool> {
+  const health = await inspectRobloxMcpTools();
+  if (health.status !== "healthy") {
+    throw new Error(`Roblox MCP live tool catalog is ${health.status}; cached schemas cannot authorize or dispatch '${name}'. Refresh roblox_mcp_status after Studio recovers.`);
+  }
+  return remoteToolByName(health.tools, name);
+}
+
 function objectArgs(value: unknown): Record<string, unknown> {
   if (value === undefined) return {};
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("arguments must be a JSON object.");
@@ -282,17 +371,18 @@ async function loadCodexSkill(entry: SkillEntry) {
 
 const structuredIntentInputSchema = {
   type: "object",
-  description: "Compact semantic classification inferred by the agent from the user's request. This is not chain-of-thought; provide only the structured outcome.",
+  description: "Compact semantic classification inferred by the agent from the user's request. This is not chain-of-thought; provide only the structured outcome. Always declare at least one signal; use nominal only when no anomaly, doubt, friction, gap, or reusable pattern is present.",
   properties: {
     summary: { type: "string", maxLength: 600 },
     domains: { type: "array", minItems: 1, maxItems: 8, items: { type: "string", enum: [...SKILL_DOMAINS] } },
     actions: { type: "array", minItems: 1, maxItems: 12, items: { type: "string", enum: [...SKILL_ACTIONS] } },
     artifacts: { type: "array", maxItems: 12, items: { type: "string", enum: [...SKILL_ARTIFACTS] }, default: [] },
     needs: { type: "array", maxItems: 12, items: { type: "string", enum: [...SKILL_NEEDS] }, default: [] },
+    signals: { type: "array", minItems: 1, maxItems: 12, items: { type: "string", enum: [...SKILL_SIGNALS] }, default: ["nominal"], description: "Observable semantic conditions used to route verification, recovery, maintenance, and skill creation. Do not combine nominal with non-nominal signals." },
     risk: { type: "string", enum: [...SKILL_RISKS], default: "read-only" },
     ambiguity: { type: "string", enum: ["low", "medium", "high"], default: "low" },
   },
-  required: ["domains", "actions"],
+  required: ["domains", "actions", "signals"],
   additionalProperties: false,
 } as const;
 
@@ -301,7 +391,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
   tools: [
     {
       name: "skill_catalog",
-      description: "List the unified skill catalog available to Mauro's workflow: local/system/plugin Codex SKILL.md files plus the Roblox-authored skills exposed by Roblox Studio MCP. Use when the user asks what skills exist, when resuming a specialized workflow, or when you need to discover whether a reusable procedure applies.",
+      description: "List the unified skill catalog available to Mauro's workflow: local/system/plugin Codex SKILL.md files plus the Roblox-authored skills exposed by Roblox Studio MCP. Returns per-source health and warns when a requested live source is degraded. Use when the user asks what skills exist, when resuming a specialized workflow, or when you need to discover whether a reusable procedure applies.",
       inputSchema: {
         type: "object",
         properties: {
@@ -339,13 +429,14 @@ export const skillCatalogToolModule: BridgeToolModule = {
     },
     {
       name: "skill_route_plan",
-      description: "Plan skill activation before substantial specialized work. The agent should first infer a compact structured intent from the user's request, even when the wording is incomplete, then call this tool. It deterministically applies routing metadata, dependencies, exclusions, workflow phases, source precedence, and completed-phase coverage. It does not expose or require chain-of-thought.",
+      description: "Plan skill activation before substantial specialized work. The agent should first infer a compact structured intent from the user's request, including explicit semantic signals, even when the wording is incomplete, then call this tool. Use signal nominal only when no error, warning, uncertainty, friction, recovery need, capability gap, or reusable pattern is present. It deterministically applies routing metadata, dependencies, exclusions, workflow phases, source precedence, and completed-phase coverage. It does not expose or require chain-of-thought.",
       inputSchema: {
         type: "object",
         properties: {
           task: { type: "string", description: "Current user message or concise task statement." },
           context: { type: "string", maxLength: 4000, description: "Bounded resolved context from the recent relevant conversation. For multi-turn specialized work, normally pass a 500-2000 character summary covering the accepted goal, constraints, completed work/current phase, and unresolved references, even when the current message is not an obvious acknowledgment. Omit only for a genuinely standalone first turn. Do not send hidden chain-of-thought, irrelevant history, or a full transcript." },
           intent: structuredIntentInputSchema,
+          caller: { type: "string", enum: [...SKILL_CALLERS], default: "other", description: "Client executing the route. Use codex-local when direct shell/filesystem tools exist, chatgpt-web when local access is mediated by Bridge, or other when unknown." },
           stage: { type: "string", enum: [...SKILL_STAGES], default: "start" },
           completedPhases: { type: "array", items: { type: "string", enum: [...SKILL_PHASES] }, default: [] },
           sources: { type: "array", items: { type: "string", enum: ["codex-local", "codex-system", "codex-plugin", "roblox"] } },
@@ -357,13 +448,14 @@ export const skillCatalogToolModule: BridgeToolModule = {
     },
     {
       name: "skill_bootstrap",
-      description: "Load the current phase of a structured skill route. Use at start, implementation, verification, persistence, close, or resume. It rescans the canonical Codex skills and live Roblox catalog, plans activation deterministically, and loads only active-phase skills; deferred skills remain in the returned plan to avoid context bloat. Provide structured intent whenever possible; lexical matching is a marked fallback only.",
+      description: "Load the current phase of a structured skill route. Use at start, implementation, verification, persistence, close, or resume. It rescans the canonical Codex skills and live Roblox catalog, plans activation deterministically, and loads only active-phase skills; deferred skills remain in the returned plan to avoid context bloat. Provide structured intent with explicit semantic signals whenever possible; use nominal only for a clean request. Lexical matching is a marked fallback only.",
       inputSchema: {
         type: "object",
         properties: {
           task: { type: "string", description: "Current user message or concise task statement." },
           context: { type: "string", maxLength: 4000, description: "Bounded resolved context from the recent relevant conversation. For multi-turn specialized work, normally pass a 500-2000 character summary covering the accepted goal, constraints, completed work/current phase, and unresolved references, even when the current message is not an obvious acknowledgment. Omit only for a genuinely standalone first turn. Do not send hidden chain-of-thought, irrelevant history, or a full transcript." },
           intent: structuredIntentInputSchema,
+          caller: { type: "string", enum: [...SKILL_CALLERS], default: "other", description: "Client executing the route. Use codex-local when direct shell/filesystem tools exist, chatgpt-web when local access is mediated by Bridge, or other when unknown." },
           stage: { type: "string", enum: [...SKILL_STAGES], default: "start" },
           completedPhases: { type: "array", items: { type: "string", enum: [...SKILL_PHASES] }, default: [] },
           sources: { type: "array", items: { type: "string", enum: ["codex-local", "codex-system", "codex-plugin", "roblox"] } },
@@ -388,29 +480,48 @@ export const skillCatalogToolModule: BridgeToolModule = {
     },
     {
       name: "roblox_mcp_status",
-      description: "Check the persistent Bridge-to-Roblox Studio MCP connection, server version, available Studio instances, current Studio state, and tool count. Use before Roblox edits or when the MCP appears disconnected or stale.",
-      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      description: "Check process, Studio, and live tool-catalog health for the persistent Bridge-to-Roblox Studio MCP connection. Distinguishes healthy, degraded with last-known schemas, and unavailable states. Use before Roblox edits or when the MCP appears disconnected or stale.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          refresh: { type: "boolean", default: false, description: "Bypass the short health cache and retry tools/list once with a fresh StudioMCP child connection when needed." },
+        },
+        additionalProperties: false,
+      },
     },
     {
       name: "roblox_mcp_tool_list",
-      description: "List the live tools exposed by Roblox Studio MCP, including newly added tools and their schemas. Use when a Roblox capability may exist but is not represented by a dedicated Bridge tool.",
+      description: "List tools exposed by Roblox Studio MCP, including schemas and source health. When live tools/list is empty, retries once and may return explicitly marked last-known schemas instead of silently appearing healthy. Use when a Roblox capability may exist but is not represented by a dedicated Bridge tool.",
       inputSchema: {
         type: "object",
         properties: {
           query: { type: "string", description: "Optional name/description filter." },
           includeSchemas: { type: "boolean", default: true },
+          refresh: { type: "boolean", default: false, description: "Bypass the short health cache and perform a fresh bounded tools/list probe." },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "roblox_mcp_studio_list",
+      description: "List every Roblox Studio instance visible to the Bridge-owned StudioMCP connection, including stable instance ids and the active target. Use before proxied calls when more than one Studio window may be open.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          refresh: { type: "boolean", default: false, description: "Require a fresh healthy tool-catalog probe before listing Studio instances." },
         },
         additionalProperties: false,
       },
     },
     {
       name: "roblox_mcp_query",
-      description: "Call a live Roblox Studio MCP tool only when its remote annotation marks it read-only. Use roblox_mcp_tool_list first to inspect the exact schema. This provides forward-compatible access to current and future Roblox query/inspection tools.",
+      description: "Call a live Roblox Studio MCP tool only when its current live annotation marks it read-only. Optionally pins the call atomically to studioId so concurrent ChatGPT/Codex sessions cannot redirect it between selection and execution. Cached schemas are never used to authorize dispatch.",
       inputSchema: {
         type: "object",
         properties: {
           toolName: { type: "string" },
           arguments: { type: "object", additionalProperties: true, default: {} },
+          studioId: { type: "string", description: "Optional exact id from roblox_mcp_studio_list. Recommended whenever multiple Studio instances are open." },
         },
         required: ["toolName"],
         additionalProperties: false,
@@ -418,13 +529,14 @@ export const skillCatalogToolModule: BridgeToolModule = {
     },
     {
       name: "roblox_mcp_action",
-      description: "Call a live non-read-only Roblox Studio MCP tool through the Bridge. Before using it, list Studios, verify the active instance and Edit/Play state, inspect the remote schema, and require confirmToolName to exactly match toolName. This is the forward-compatible mutation path for current and future Roblox tools.",
+      description: "Call a live non-read-only Roblox Studio MCP tool through the Bridge. Requires current live schema authorization and exact tool-name confirmation. If multiple Studio instances exist, studioId is mandatory; selection and execution are serialized atomically across Bridge clients.",
       inputSchema: {
         type: "object",
         properties: {
           toolName: { type: "string" },
           confirmToolName: { type: "string" },
           arguments: { type: "object", additionalProperties: true, default: {} },
+          studioId: { type: "string", description: "Exact id from roblox_mcp_studio_list. Required when multiple Studio instances are connected." },
         },
         required: ["toolName", "confirmToolName"],
         additionalProperties: false,
@@ -442,7 +554,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         .filter((skill) => !query || normalize(`${skill.name} ${skill.description} ${skill.source}`).includes(query))
         .sort((a, b) => a.source.localeCompare(b.source) || a.name.localeCompare(b.name))
         .slice(0, maxResults);
-      return { count: filtered.length, skills: filtered, warnings: discovered.warnings };
+      return { count: filtered.length, skills: filtered, sourceHealth: discovered.sourceHealth, warnings: discovered.warnings };
     },
     skill_recommend: async (args) => {
       const task = z.string().min(1).parse(args.task);
@@ -459,6 +571,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
       return {
         task,
         matches,
+        sourceHealth: discovered.sourceHealth,
         warnings: discovered.warnings,
         activationInstruction: matches[0]
           ? "Load the highest relevant skill(s) with skill_load before taking the covered action. Local Codex and Roblox-authored skills can be combined."
@@ -470,10 +583,21 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const discovered = await discoverAllSkills(!selectedSources || selectedSources.includes("roblox"));
       const skills = discovered.skills.filter((skill) => !selectedSources || selectedSources.includes(skill.source));
       const audit = await auditSkillRouting(skills);
+      const robloxDegraded = Boolean(
+        (!selectedSources || selectedSources.includes("roblox"))
+        && discovered.sourceHealth.roblox
+        && discovered.sourceHealth.roblox.status !== "healthy",
+      );
+      const sourceMaintenanceReasons = robloxDegraded
+        ? [discovered.sourceHealth.roblox?.warning ?? "Roblox MCP source is degraded."]
+        : [];
       return {
         ...audit,
         ok: audit.ok && discovered.warnings.length === 0,
+        maintenanceRequired: audit.maintenanceRequired || sourceMaintenanceReasons.length > 0,
         errors: [...discovered.warnings, ...audit.errors],
+        maintenanceReasons: [...audit.maintenanceReasons, ...sourceMaintenanceReasons],
+        sourceHealth: discovered.sourceHealth,
       };
     },
     skill_route_plan: async (args) => {
@@ -486,11 +610,12 @@ export const skillCatalogToolModule: BridgeToolModule = {
         context: z.string().max(4_000).catch("").parse(args.context ?? ""),
         skills,
         intent: args.intent,
+        caller: z.enum(SKILL_CALLERS).catch("other").parse(args.caller ?? "other"),
         stage: z.enum(SKILL_STAGES).catch("start").parse(args.stage ?? "start"),
         completedPhases: z.array(z.enum(SKILL_PHASES)).catch([]).parse(args.completedPhases ?? []),
         maxSkills: z.number().int().min(1).max(16).catch(8).parse(args.maxSkills ?? 8),
       });
-      return { ...route, warnings: [...discovered.warnings, ...route.warnings] };
+      return { ...route, sourceHealth: discovered.sourceHealth, warnings: [...discovered.warnings, ...route.warnings] };
     },
     skill_bootstrap: async (args) => {
       const task = z.string().min(1).parse(args.task);
@@ -502,6 +627,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         context: z.string().max(4_000).catch("").parse(args.context ?? ""),
         skills,
         intent: args.intent,
+        caller: z.enum(SKILL_CALLERS).catch("other").parse(args.caller ?? "other"),
         stage: z.enum(SKILL_STAGES).catch("start").parse(args.stage ?? "start"),
         completedPhases: z.array(z.enum(SKILL_PHASES)).catch([]).parse(args.completedPhases ?? []),
         maxSkills: z.number().int().min(1).max(16).catch(8).parse(args.maxSkills ?? 8),
@@ -512,8 +638,17 @@ export const skillCatalogToolModule: BridgeToolModule = {
         const match = activeByName.get(name);
         if (!match) continue;
         if (match.source === "roblox") {
+          if (discovered.sourceHealth.roblox?.status !== "healthy") {
+            loaded.push({
+              skill: match,
+              loaded: false,
+              warning: `Roblox skill '${match.name}' was discovered from cached metadata but was not invoked because the live source is ${discovered.sourceHealth.roblox?.status ?? "unavailable"}.`,
+            });
+            continue;
+          }
           loaded.push({
             skill: match,
+            loaded: true,
             activationInstruction: "Treat the returned Roblox-authored skill as active guidance for this task phase.",
             result: await callRobloxMcpTool("skill", { skill_name: match.name }),
           });
@@ -525,6 +660,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         ...route,
         canonicalCodexSkillRoot: path.join(codexHome(), "skills"),
         loaded,
+        sourceHealth: discovered.sourceHealth,
         warnings: [...discovered.warnings, ...route.warnings],
         activationInstruction: loaded.length > 0
           ? "The loaded skills govern only the current workflow phase. Execute the task, then call skill_bootstrap again with stage=verify, persist, or close and the completedPhases list instead of carrying every deferred skill in context."
@@ -535,52 +671,94 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const name = z.string().min(1).parse(args.name);
       const source = z.enum(["auto", "codex", "roblox"]).catch("auto").parse(args.source ?? "auto");
       if (source !== "roblox") {
-        const codex = canonicalizeSkillEntries(await discoverCodexSkills()).entries;
+        const discoveredCodex = await discoverCodexSkills();
+        const codex = canonicalizeSkillEntries(discoveredCodex.skills).entries;
         const entry = codex.find((skill) => skill.name === name);
         if (entry) return await loadCodexSkill(entry);
         if (source === "codex") throw new Error(`Codex skill not found: ${name}`);
       }
       const roblox = await discoverRobloxSkills();
-      const entry = roblox.find((skill) => skill.name === name);
+      const entry = roblox.skills.find((skill) => skill.name === name);
       if (!entry) throw new Error(`Roblox MCP skill not found: ${name}`);
+      if (roblox.health.status !== "healthy") {
+        throw new Error(`Roblox MCP skill '${name}' is visible only through cached metadata; live skill loading is unavailable while source status is ${roblox.health.status}.`);
+      }
       return {
         skill: entry,
+        loaded: true,
         activationInstruction: "Treat the returned Roblox-authored skill as active guidance and follow it before writing code or taking action.",
         result: await callRobloxMcpTool("skill", { skill_name: name }),
       };
     },
-    roblox_mcp_status: async () => {
-      const status = await robloxMcpConnectionStatus();
-      const [studios, studioState] = await Promise.all([
-        callRobloxMcpTool("list_roblox_studios", {}),
-        callRobloxMcpTool("get_studio_state", {}).catch((error) => ({ error: error instanceof Error ? error.message : String(error) })),
-      ]);
-      return { ...status, studios, studioState };
+    roblox_mcp_status: async (args) => {
+      const status = await robloxMcpConnectionStatus({ forceRefresh: args.refresh === true });
+      if (status.status !== "healthy") return { ...status, studios: [], studioState: null };
+      const studioInspection = await inspectRobloxStudioState().catch((error) => ({
+        error: error instanceof Error ? error.message : String(error),
+      }));
+      return {
+        ...status,
+        studios: "studios" in studioInspection ? studioInspection.studios : [],
+        activeStudio: "activeStudio" in studioInspection ? studioInspection.activeStudio : null,
+        studioState: "studioState" in studioInspection ? studioInspection.studioState : null,
+        studioWarning: "warning" in studioInspection ? studioInspection.warning : undefined,
+        studioError: "error" in studioInspection ? studioInspection.error : undefined,
+      };
     },
     roblox_mcp_tool_list: async (args) => {
-      const tools = await listRobloxMcpTools();
+      const health = await inspectRobloxMcpTools({ force: args.refresh === true });
+      const tools = health.tools;
       const query = typeof args.query === "string" ? normalize(args.query) : "";
       const includeSchemas = args.includeSchemas !== false;
       const filtered = tools
         .filter((tool) => !query || normalize(`${tool.name} ${tool.description ?? ""}`).includes(query))
         .map((tool) => includeSchemas ? tool : ({ name: tool.name, description: tool.description, annotations: tool.annotations }));
-      return { count: filtered.length, tools: filtered };
+      return {
+        status: health.status,
+        count: filtered.length,
+        liveToolCount: health.liveToolCount,
+        usingCachedTools: health.usingCachedTools,
+        tools: filtered,
+        warnings: health.warning ? [health.warning] : [],
+      };
+    },
+    roblox_mcp_studio_list: async (args) => {
+      const health = await inspectRobloxMcpTools({ force: args.refresh === true });
+      if (health.status !== "healthy") {
+        throw new Error(`Roblox MCP Studio discovery requires a live catalog; current status is ${health.status}.`);
+      }
+      const result = await callRobloxMcpTool("list_roblox_studios", {});
+      const studios = parseRobloxStudios(result);
+      return {
+        status: health.status,
+        count: studios.length,
+        activeStudioId: studios.find((studio) => studio.active)?.id ?? null,
+        multipleStudios: studios.length > 1,
+        studios,
+      };
     },
     roblox_mcp_query: async (args) => {
       const name = z.string().min(1).parse(args.toolName);
-      const tools = await listRobloxMcpTools();
-      const tool = remoteToolByName(tools, name);
+      if (name === "set_active_studio") throw new Error("Use studioId targeting instead of proxying set_active_studio directly.");
+      const tool = await requireLiveRemoteTool(name);
       if (tool.annotations?.readOnlyHint !== true) throw new Error(`Roblox MCP tool '${name}' is not marked read-only; use roblox_mcp_action with explicit confirmation.`);
-      return { tool: name, result: await callRobloxMcpTool(name, objectArgs(args.arguments)) };
+      const targeted = await callRobloxMcpToolForStudio(name, objectArgs(args.arguments), {
+        studioId: typeof args.studioId === "string" ? args.studioId : undefined,
+      });
+      return { tool: name, annotations: tool.annotations, ...targeted };
     },
     roblox_mcp_action: async (args) => {
       const name = z.string().min(1).parse(args.toolName);
       const confirmName = z.string().min(1).parse(args.confirmToolName);
       if (confirmName !== name) throw new Error(`confirmToolName must exactly match '${name}'.`);
-      const tools = await listRobloxMcpTools();
-      const tool = remoteToolByName(tools, name);
+      if (name === "set_active_studio") throw new Error("Use studioId targeting instead of proxying set_active_studio directly.");
+      const tool = await requireLiveRemoteTool(name);
       if (tool.annotations?.readOnlyHint === true) throw new Error(`Roblox MCP tool '${name}' is read-only; use roblox_mcp_query.`);
-      return { tool: name, annotations: tool.annotations, result: await callRobloxMcpTool(name, objectArgs(args.arguments)) };
+      const targeted = await callRobloxMcpToolForStudio(name, objectArgs(args.arguments), {
+        studioId: typeof args.studioId === "string" ? args.studioId : undefined,
+        requireExplicitWhenMultiple: true,
+      });
+      return { tool: name, annotations: tool.annotations, ...targeted };
     },
   },
 };

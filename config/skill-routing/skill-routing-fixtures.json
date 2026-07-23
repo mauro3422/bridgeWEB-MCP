@@ -271,6 +271,7 @@
     {
       "name": "opencode-swarm-positive",
       "task": "Diseñá un swarm chico de OpenCode con subagentes para auditar, editar y verificar un repositorio",
+      "caller": "codex-local",
       "stage": "start",
       "sources": [
         "codex-local"
@@ -287,7 +288,8 @@
           "coordinate"
         ],
         "artifacts": [
-          "code"
+          "code",
+          "repository"
         ],
         "needs": [
           "cross-agent"
@@ -307,6 +309,214 @@
         "deferredIncludes": [
           "opencode-cli-audit"
         ]
+      }
+    },
+    {
+      "name": "opencode-existing-repository-audit-does-not-create-swarm",
+      "task": "Auditá este repositorio existente con OpenCode CLI, encontrá fallos y verificá los tests sin crear agentes nuevos",
+      "caller": "codex-local",
+      "stage": "verify",
+      "sources": [
+        "codex-local"
+      ],
+      "intent": {
+        "summary": "Auditar un repositorio existente con OpenCode CLI sin diseñar un swarm",
+        "domains": [
+          "opencode"
+        ],
+        "actions": [
+          "analyze",
+          "review",
+          "debug"
+        ],
+        "artifacts": [
+          "code",
+          "repository"
+        ],
+        "needs": [
+          "unit-tests"
+        ],
+        "risk": "read-only",
+        "ambiguity": "low"
+      },
+      "expect": {
+        "activeIncludes": [
+          "opencode-cli-audit"
+        ],
+        "activeExcludes": [
+          "opencode-agent-swarm",
+          "mauroprime-bridge-collaboration",
+          "roblox-mcp-skill-router"
+        ]
+      }
+    },
+    {
+      "name": "opencode-swarm-continuation",
+      "task": "Dale, armalo",
+      "taskVariants": [
+        "Sí, seguí con el swarm",
+        "De una, hacé eso"
+      ],
+      "context": "La propuesta aceptada fue diseñar un swarm reusable de OpenCode con subagentes coordinados para auditar, editar y verificar un repositorio de código.",
+      "caller": "codex-local",
+      "stage": "start",
+      "sources": [
+        "codex-local"
+      ],
+      "expect": {
+        "classificationMode": "lexical-fallback",
+        "contextUsed": true,
+        "activeIncludes": [
+          "opencode-agent-swarm"
+        ],
+        "activeExcludes": [
+          "roblox-mcp-incident-recovery",
+          "roblox-mcp-skill-router",
+          "roblox-connection-network-authoring"
+        ]
+      }
+    },
+    {
+      "name": "blender-review-does-not-open-roblox-branch",
+      "task": "Revisá y mejorá visualmente este objeto existente de Blender desde varios ángulos",
+      "caller": "codex-local",
+      "stage": "start",
+      "sources": [
+        "codex-local"
+      ],
+      "intent": {
+        "summary": "Iterar visualmente un objeto Blender existente",
+        "domains": [
+          "blender"
+        ],
+        "actions": [
+          "review",
+          "optimize"
+        ],
+        "artifacts": [
+          "model-3d",
+          "asset"
+        ],
+        "needs": [
+          "visual-qa",
+          "scene-analysis"
+        ],
+        "risk": "read-only",
+        "ambiguity": "low"
+      },
+      "expect": {
+        "activeIncludes": [
+          "blender-object-iteration"
+        ],
+        "activeExcludes": [
+          "blender-reference-pipeline",
+          "roblox-mcp-skill-router",
+          "roblox-model-turnaround-review"
+        ],
+        "deferredIncludes": [
+          "blender-visual-review"
+        ],
+        "deferredExcludes": [
+          "roblox-mcp-skill-router",
+          "roblox-model-turnaround-review"
+        ],
+        "missingRequiredPhases": [
+          "discovery"
+        ],
+        "agentFallbackPhases": [
+          "discovery"
+        ]
+      }
+    },
+    {
+      "name": "generic-coding-uses-explicit-agent-fallback",
+      "task": "Analizá y depurá una API TypeScript genérica con tests unitarios",
+      "caller": "codex-local",
+      "stage": "start",
+      "sources": [
+        "codex-local"
+      ],
+      "intent": {
+        "summary": "Auditar una API TypeScript genérica",
+        "domains": [
+          "coding"
+        ],
+        "actions": [
+          "analyze",
+          "debug",
+          "test"
+        ],
+        "artifacts": [
+          "code"
+        ],
+        "needs": [
+          "unit-tests"
+        ],
+        "risk": "read-only",
+        "ambiguity": "low"
+      },
+      "expect": {
+        "activeExcludes": [
+          "roblox-mcp-skill-router",
+          "skill-routing-maintainer",
+          "opencode-cli-audit"
+        ],
+        "missingRequiredPhases": [
+          "discovery",
+          "verification"
+        ],
+        "agentFallbackPhases": [
+          "discovery",
+          "verification"
+        ]
+      }
+    },
+    {
+      "name": "generic-project-migration-stays-outside-roblox",
+      "task": "Mové este proyecto general a otra carpeta, verificá hashes, inicializá Git y documentá el cambio",
+      "caller": "codex-local",
+      "stage": "start",
+      "sources": [
+        "codex-local"
+      ],
+      "intent": {
+        "summary": "Migrar y versionar un proyecto general con verificación de integridad",
+        "domains": [
+          "git",
+          "filesystem"
+        ],
+        "actions": [
+          "move",
+          "verify",
+          "version",
+          "document"
+        ],
+        "artifacts": [
+          "project",
+          "repository",
+          "backup",
+          "document"
+        ],
+        "needs": [
+          "backup",
+          "integrity-verification",
+          "version-control"
+        ],
+        "risk": "write",
+        "ambiguity": "low"
+      },
+      "expect": {
+        "activeIncludes": [
+          "mauroprime-bridge-collaboration"
+        ],
+        "activeExcludes": [
+          "roblox-mcp-skill-router",
+          "roblox-save-backup-recovery"
+        ],
+        "deferredExcludes": [
+          "roblox-save-backup-recovery"
+        ],
+        "missingRequiredPhases": []
       }
     },
     {
@@ -383,6 +593,7 @@
           "mauroprime-bridge-collaboration"
         ],
         "activeExcludes": [
+          "roblox-mcp-incident-recovery",
           "roblox-mcp-skill-router",
           "roblox-safe-editing",
           "rbx-docs-search",
@@ -554,6 +765,83 @@
           "roblox-asset-review",
           "roblox-save-backup-recovery"
         ]
+      }
+    },
+    {
+      "name": "roblox-mcp-connected-but-empty-catalog",
+      "task": "Roblox MCP dice connected true pero tools/list devuelve count 0; diagnosticá y recuperá la conexión sin matar las rutas válidas",
+      "stage": "start",
+      "sources": ["codex-local"],
+      "intent": {
+        "summary": "Diagnosticar evidencia contradictoria y recuperar un catálogo Roblox MCP vacío",
+        "domains": ["roblox", "agent-orchestration"],
+        "actions": ["analyze", "debug", "recover", "verify"],
+        "artifacts": ["mcp"],
+        "needs": ["integrity-verification", "cross-agent"],
+        "signals": ["error-observed", "degraded-capability", "conflicting-evidence", "recovery-needed"],
+        "risk": "read-only",
+        "ambiguity": "low"
+      },
+      "expect": {
+        "classificationMode": "structured-semantic",
+        "activeIncludes": ["roblox-mcp-incident-recovery", "roblox-mcp-skill-router"],
+        "activeExcludes": ["roblox-safe-editing"]
+      }
+    },
+    {
+      "name": "ordinary-roblox-ui-work-is-not-an-mcp-incident",
+      "task": "Creá una interfaz de inventario adaptable en Roblox",
+      "stage": "start",
+      "sources": ["codex-local"],
+      "intent": {
+        "summary": "Crear una interfaz de inventario Roblox sin anomalías MCP",
+        "domains": ["roblox"],
+        "actions": ["design", "create"],
+        "artifacts": ["ui", "game"],
+        "needs": ["safe-editing", "visual-qa"],
+        "signals": ["nominal"],
+        "risk": "write",
+        "ambiguity": "low"
+      },
+      "expect": {
+        "classificationMode": "structured-semantic",
+        "activeIncludes": ["roblox-mcp-skill-router", "roblox-safe-editing"],
+        "activeExcludes": ["roblox-mcp-incident-recovery"]
+      }
+    },
+    {
+      "name": "roblox-mcp-incident-continuation-uses-context",
+      "task": "seguí diagnosticándolo",
+      "taskVariants": ["dale, recuperalo", "continuá con esa verificación"],
+      "context": "El objetivo aceptado es recuperar Roblox Studio MCP. Inicialización exitosa pero tools/list devolvió 0 y hay varios procesos StudioMCP. Debemos preservar las rutas directas y del Bridge que tengan padres válidos, identificar ownership por PID/PPID, evitar matar por nombre y verificar un catálogo vivo no vacío.",
+      "stage": "verify",
+      "completedPhases": ["discovery"],
+      "sources": ["codex-local"],
+      "expect": {
+        "classificationMode": "lexical-fallback",
+        "contextUsed": true,
+        "activeIncludes": ["roblox-mcp-incident-recovery"]
+      }
+    },
+    {
+      "name": "roblox-mcp-repeated-friction-closes-through-maintenance",
+      "task": "Cerrá el incidente recurrente y documentá el workaround como patrón reusable",
+      "stage": "close",
+      "completedPhases": ["discovery", "verification"],
+      "sources": ["codex-local"],
+      "intent": {
+        "summary": "Preservar un patrón reutilizable después de fricción repetida en Roblox MCP",
+        "domains": ["roblox", "skill-system"],
+        "actions": ["review", "maintain", "document"],
+        "artifacts": ["mcp", "skill"],
+        "needs": ["cross-agent"],
+        "signals": ["repeated-friction", "manual-workaround", "reusable-pattern"],
+        "risk": "write",
+        "ambiguity": "low"
+      },
+      "expect": {
+        "classificationMode": "structured-semantic",
+        "activeIncludes": ["skill-maintenance-loop", "roblox-mcp-incident-recovery"]
       }
     }
   ]
