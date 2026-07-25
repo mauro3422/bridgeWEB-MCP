@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.13 - 2026-07-25
+
+- Unified `skill_recommend` with the deterministic MSSR phase router. It now accepts structured intent, bounded context, caller/stage/completed phases and returns the same active/deferred route plus a stable `traceId`; missing intent remains visibly lexical fallback.
+- Added privacy-preserving MSSR activation telemetry in the existing SQLite metrics store and `logs/mssr-events.jsonl`, without raw prompts, transcripts or chain-of-thought.
+- Added read-only `mssr_observatory_query` for status, benchmark, recent events and correlated traces, plus neutral `mssr_trace_record` for bounded context/phase/verification/persistence/outcome/friction/replan checkpoints.
+- Made `skill_load` and `skill_bootstrap` trace-aware and record both successful and failed loads, required status, source and phase.
+- Added integration coverage for structured recommendation, trace propagation, correlated load/checkpoint lookup, privacy invariants and clean SQLite shutdown.
+- Expanded the generated registry to 122 tools.
+
 ## 0.6.12 - 2026-07-25
 
 - Added `whiteboard_add_text`, `whiteboard_add_svg`, `whiteboard_add_diagram`, and `whiteboard_insert_image` for writing into ChatGPT's separate TabletWhiteboard layer.

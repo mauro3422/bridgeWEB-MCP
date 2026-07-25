@@ -31,6 +31,11 @@ import {
   type SkillEntry,
   type SkillSource,
 } from "./skill-routing.js";
+import {
+  recordMssrRoute,
+  recordMssrSkillLoad,
+  resolveMssrTraceId,
+} from "../mssr-observatory.js";
 
 const MAX_SKILL_FILE_CHARS = 160_000;
 const MAX_DISCOVERED_SKILLS = 600;
@@ -405,13 +410,19 @@ export const skillCatalogToolModule: BridgeToolModule = {
     },
     {
       name: "skill_recommend",
-      description: "Recommend relevant Codex and Roblox MCP skills for a task. Use before substantial specialized work when a skill may encode a safer or more complete loop, especially for Roblox Studio, Blender, asset review, animation, QA, or repeatable maintenance workflows.",
+      description: "Compatibility entrypoint for MSSR routing. Prefer a compact structured intent for substantial specialized work; when omitted, the result is explicitly marked lexical-fallback. Returns a phase-scoped route, ordered matches, a traceId, and source health so the same trace can be carried into skill_load, verification, persistence, and outcome checkpoints.",
       inputSchema: {
         type: "object",
         properties: {
-          task: { type: "string", description: "Current user request or intended workflow." },
+          task: { type: "string", description: "Current user request or concise task statement." },
+          context: { type: "string", maxLength: 4000, description: "Bounded resolved continuation context, never a full transcript or hidden reasoning." },
+          intent: structuredIntentInputSchema,
+          caller: { type: "string", enum: [...SKILL_CALLERS], default: "other" },
+          stage: { type: "string", enum: [...SKILL_STAGES], default: "start" },
+          completedPhases: { type: "array", items: { type: "string", enum: [...SKILL_PHASES] }, default: [] },
           sources: { type: "array", items: { type: "string", enum: ["codex-local", "codex-system", "codex-plugin", "roblox"] } },
-          maxResults: { type: "number", default: 8, minimum: 1, maximum: 30 },
+          maxResults: { type: "number", default: 8, minimum: 1, maximum: 16 },
+          traceId: { type: "string", description: "Optional existing MSSR trace id for a replan. A new id is generated when omitted." },
         },
         required: ["task"],
         additionalProperties: false,
@@ -451,6 +462,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
           completedPhases: { type: "array", items: { type: "string", enum: [...SKILL_PHASES] }, default: [] },
           sources: { type: "array", items: { type: "string", enum: ["codex-local", "codex-system", "codex-plugin", "roblox"] } },
           maxSkills: { type: "number", default: 8, minimum: 1, maximum: 16 },
+          traceId: { type: "string", description: "Optional existing MSSR trace id for a replan. A new id is generated when omitted." },
         },
         required: ["task"],
         additionalProperties: false,
@@ -470,6 +482,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
           completedPhases: { type: "array", items: { type: "string", enum: [...SKILL_PHASES] }, default: [] },
           sources: { type: "array", items: { type: "string", enum: ["codex-local", "codex-system", "codex-plugin", "roblox"] } },
           maxSkills: { type: "number", default: 8, minimum: 1, maximum: 16 },
+          traceId: { type: "string", description: "Optional existing MSSR trace id for a replan. A new id is generated when omitted." },
         },
         required: ["task"],
         additionalProperties: false,
@@ -477,12 +490,15 @@ export const skillCatalogToolModule: BridgeToolModule = {
     },
     {
       name: "skill_load",
-      description: "Load one skill as active guidance. For Codex skills this reads the exact SKILL.md; for Roblox-authored skills this invokes the Roblox Studio MCP skill tool. Use only after naming or recommending the skill, and load it before writing code or taking the covered action.",
+      description: "Load one skill as active guidance and record the load in the MSSR trace. Pass the traceId returned by routing whenever available. For Codex skills this reads the exact SKILL.md; for Roblox-authored skills this invokes the live Roblox Studio MCP skill tool.",
       inputSchema: {
         type: "object",
         properties: {
           name: { type: "string" },
           source: { type: "string", enum: ["auto", "codex", "roblox"], default: "auto" },
+          traceId: { type: "string", description: "Trace id returned by skill_recommend, skill_route_plan, or skill_bootstrap. Omission creates an observable orphan-load trace." },
+          stage: { type: "string", enum: [...SKILL_STAGES], default: "start" },
+          required: { type: "boolean", default: false, description: "Whether the route marked this skill required." },
         },
         required: ["name"],
         additionalProperties: false,
@@ -569,23 +585,33 @@ export const skillCatalogToolModule: BridgeToolModule = {
     skill_recommend: async (args) => {
       const task = z.string().min(1).parse(args.task);
       const selectedSources = sourceFilter(args.sources);
-      const maxResults = z.number().int().min(1).max(30).catch(8).parse(args.maxResults ?? 8);
+      const maxResults = z.number().int().min(1).max(16).catch(8).parse(args.maxResults ?? 8);
       const discovered = await discoverAllSkills(!selectedSources || selectedSources.includes("roblox"));
-      const canonical = canonicalizeSkillEntries(discovered.skills).entries;
-      const matches = canonical
-        .filter((skill) => !selectedSources || selectedSources.includes(skill.source))
-        .map((skill) => ({ ...skill, ...skillScore(task, skill) }))
-        .filter((skill) => skill.score > 0)
-        .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+      const skills = discovered.skills.filter((skill) => !selectedSources || selectedSources.includes(skill.source));
+      const route = await planSkillRoute({
+        task,
+        context: z.string().max(4_000).catch("").parse(args.context ?? ""),
+        skills,
+        intent: args.intent,
+        caller: z.enum(SKILL_CALLERS).catch("other").parse(args.caller ?? "other"),
+        stage: z.enum(SKILL_STAGES).catch("start").parse(args.stage ?? "start"),
+        completedPhases: z.array(z.enum(SKILL_PHASES)).catch([]).parse(args.completedPhases ?? []),
+        maxSkills: maxResults,
+      });
+      const traceId = resolveMssrTraceId(args.traceId);
+      recordMssrRoute({ traceId, action: "recommend", task, route: route as unknown as Record<string, unknown> });
+      const matches = [...route.activeSkills, ...route.deferredSkills]
+        .filter((skill, index, all) => all.findIndex((candidate) => candidate.name === skill.name) === index)
         .slice(0, maxResults);
       return {
-        task,
+        ...route,
+        traceId,
         matches,
         sourceHealth: discovered.sourceHealth,
-        warnings: discovered.warnings,
-        activationInstruction: matches[0]
-          ? "Load the highest relevant skill(s) with skill_load before taking the covered action. Local Codex and Roblox-authored skills can be combined."
-          : "No skill matched strongly; continue without forcing an unrelated workflow.",
+        warnings: [...discovered.warnings, ...route.warnings],
+        activationInstruction: route.classificationMode === "structured-semantic"
+          ? "Use loadOrder for the active phase, pass traceId into skill_load, and re-plan only after a stage change, material failure, new capability need, or verification/persistence boundary."
+          : "This recommendation used lexical fallback. Before mutations, infer a compact structured intent and call skill_recommend or skill_route_plan again with the same traceId.",
       };
     },
     skill_route_audit: async (args) => {
@@ -638,7 +664,9 @@ export const skillCatalogToolModule: BridgeToolModule = {
         completedPhases: z.array(z.enum(SKILL_PHASES)).catch([]).parse(args.completedPhases ?? []),
         maxSkills: z.number().int().min(1).max(16).catch(8).parse(args.maxSkills ?? 8),
       });
-      return { ...route, sourceHealth: discovered.sourceHealth, warnings: [...discovered.warnings, ...route.warnings] };
+      const traceId = resolveMssrTraceId(args.traceId);
+      recordMssrRoute({ traceId, action: "plan", task, route: route as unknown as Record<string, unknown> });
+      return { ...route, traceId, sourceHealth: discovered.sourceHealth, warnings: [...discovered.warnings, ...route.warnings] };
     },
     skill_bootstrap: async (args) => {
       const task = z.string().min(1).parse(args.task);
@@ -655,6 +683,8 @@ export const skillCatalogToolModule: BridgeToolModule = {
         completedPhases: z.array(z.enum(SKILL_PHASES)).catch([]).parse(args.completedPhases ?? []),
         maxSkills: z.number().int().min(1).max(16).catch(8).parse(args.maxSkills ?? 8),
       });
+      const traceId = resolveMssrTraceId(args.traceId);
+      recordMssrRoute({ traceId, action: "bootstrap", task, route: route as unknown as Record<string, unknown> });
       const activeByName = new Map(route.activeSkills.map((skill) => [skill.name, skill]));
       const loaded: Array<Record<string, unknown>> = [];
       for (const name of route.loadOrder) {
@@ -662,56 +692,85 @@ export const skillCatalogToolModule: BridgeToolModule = {
         if (!match) continue;
         if (match.source === "roblox") {
           if (discovered.sourceHealth.roblox?.status !== "healthy") {
-            loaded.push({
-              skill: match,
-              loaded: false,
-              warning: `Roblox skill '${match.name}' was discovered from cached metadata but was not invoked because the live source is ${discovered.sourceHealth.roblox?.status ?? "unavailable"}.`,
-            });
+            const warning = `Roblox skill '${match.name}' was discovered from cached metadata but was not invoked because the live source is ${discovered.sourceHealth.roblox?.status ?? "unavailable"}.`;
+            loaded.push({ skill: match, loaded: false, warning });
+            recordMssrSkillLoad({ traceId, skillName: match.name, source: match.source, stage: route.stage, required: match.required, loaded: false, via: "skill_bootstrap", warning });
             continue;
           }
-          loaded.push({
-            skill: match,
-            loaded: true,
-            activationInstruction: "Treat the returned Roblox-authored skill as active guidance for this task phase.",
-            result: await callRobloxMcpTool("skill", { skill_name: match.name }),
-          });
+          try {
+            const result = await callRobloxMcpTool("skill", { skill_name: match.name });
+            loaded.push({ skill: match, loaded: true, activationInstruction: "Treat the returned Roblox-authored skill as active guidance for this task phase.", result });
+            recordMssrSkillLoad({ traceId, skillName: match.name, source: match.source, stage: route.stage, required: match.required, loaded: true, via: "skill_bootstrap" });
+          } catch (error) {
+            recordMssrSkillLoad({ traceId, skillName: match.name, source: match.source, stage: route.stage, required: match.required, loaded: false, via: "skill_bootstrap", warning: error instanceof Error ? error.message : String(error) });
+            throw error;
+          }
         } else {
-          loaded.push(await loadCodexSkill(match));
+          try {
+            loaded.push(await loadCodexSkill(match));
+            recordMssrSkillLoad({ traceId, skillName: match.name, source: match.source, stage: route.stage, required: match.required, loaded: true, via: "skill_bootstrap" });
+          } catch (error) {
+            recordMssrSkillLoad({ traceId, skillName: match.name, source: match.source, stage: route.stage, required: match.required, loaded: false, via: "skill_bootstrap", warning: error instanceof Error ? error.message : String(error) });
+            throw error;
+          }
         }
       }
       return {
         ...route,
+        traceId,
         canonicalCodexSkillRoot: path.join(codexHome(), "skills"),
         loaded,
         sourceHealth: discovered.sourceHealth,
         warnings: [...discovered.warnings, ...route.warnings],
         activationInstruction: loaded.length > 0
-          ? "The loaded skills govern only the current workflow phase. Execute the task, then call skill_bootstrap again with stage=verify, persist, or close and the completedPhases list instead of carrying every deferred skill in context."
+          ? "The loaded skills govern only the current phase. Carry traceId into later loads/checkpoints and call skill_bootstrap again only at verify, persist, close, a material failure, or a newly discovered capability need."
           : route.activationInstruction,
       };
     },
     skill_load: async (args) => {
       const name = z.string().min(1).parse(args.name);
       const source = z.enum(["auto", "codex", "roblox"]).catch("auto").parse(args.source ?? "auto");
+      const stage = z.enum(SKILL_STAGES).catch("start").parse(args.stage ?? "start");
+      const required = args.required === true;
+      const traceId = resolveMssrTraceId(args.traceId);
       if (source !== "roblox") {
         const discoveredCodex = await discoverCodexSkills();
         const codex = canonicalizeSkillEntries(discoveredCodex.skills).entries;
         const entry = codex.find((skill) => skill.name === name);
-        if (entry) return await loadCodexSkill(entry);
-        if (source === "codex") throw new Error(`Codex skill not found: ${name}`);
+        if (entry) {
+          try {
+            const result = await loadCodexSkill(entry);
+            recordMssrSkillLoad({ traceId, skillName: name, source: entry.source, stage, required, loaded: true, via: "skill_load" });
+            return { ...result, traceId };
+          } catch (error) {
+            recordMssrSkillLoad({ traceId, skillName: name, source: entry.source, stage, required, loaded: false, via: "skill_load", warning: error instanceof Error ? error.message : String(error) });
+            throw error;
+          }
+        }
+        if (source === "codex") {
+          recordMssrSkillLoad({ traceId, skillName: name, source: "codex", stage, required, loaded: false, via: "skill_load", warning: "Codex skill not found." });
+          throw new Error(`Codex skill not found: ${name}`);
+        }
       }
       const roblox = await discoverRobloxSkills();
       const entry = roblox.skills.find((skill) => skill.name === name);
-      if (!entry) throw new Error(`Roblox MCP skill not found: ${name}`);
-      if (roblox.health.status !== "healthy") {
-        throw new Error(`Roblox MCP skill '${name}' is visible only through cached metadata; live skill loading is unavailable while source status is ${roblox.health.status}.`);
+      if (!entry) {
+        recordMssrSkillLoad({ traceId, skillName: name, source: "roblox", stage, required, loaded: false, via: "skill_load", warning: "Roblox MCP skill not found." });
+        throw new Error(`Roblox MCP skill not found: ${name}`);
       }
-      return {
-        skill: entry,
-        loaded: true,
-        activationInstruction: "Treat the returned Roblox-authored skill as active guidance and follow it before writing code or taking action.",
-        result: await callRobloxMcpTool("skill", { skill_name: name }),
-      };
+      if (roblox.health.status !== "healthy") {
+        const warning = `Roblox MCP skill '${name}' is visible only through cached metadata; live skill loading is unavailable while source status is ${roblox.health.status}.`;
+        recordMssrSkillLoad({ traceId, skillName: name, source: entry.source, stage, required, loaded: false, via: "skill_load", warning });
+        throw new Error(warning);
+      }
+      try {
+        const result = await callRobloxMcpTool("skill", { skill_name: name });
+        recordMssrSkillLoad({ traceId, skillName: name, source: entry.source, stage, required, loaded: true, via: "skill_load" });
+        return { skill: entry, loaded: true, traceId, activationInstruction: "Treat the returned Roblox-authored skill as active guidance and follow it before writing code or taking action.", result };
+      } catch (error) {
+        recordMssrSkillLoad({ traceId, skillName: name, source: entry.source, stage, required, loaded: false, via: "skill_load", warning: error instanceof Error ? error.message : String(error) });
+        throw error;
+      }
     },
     roblox_mcp_status: async (args) => {
       const status = await robloxMcpConnectionStatus({ forceRefresh: args.refresh === true });

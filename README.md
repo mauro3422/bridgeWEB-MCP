@@ -7,7 +7,7 @@ El objetivo es tener un puente local controlado por nosotros para operar filesys
 ## Estado actual
 
 ```text
-bridge-mcp v0.6.12
+bridge-mcp v0.6.13
 Mode: HTTP production-candidate
 Project root: C:\dev\bridge-mcp
 Bridge MCP: http://127.0.0.1:3001/mcp
@@ -248,6 +248,8 @@ bridge_metrics_summary
 bridge_metrics_recent
 bridge_visualization_catalog
 bridge_visualize_metrics
+mssr_observatory_query
+mssr_trace_record
 ```
 
 ### Inteligencia de codigo
@@ -330,7 +332,7 @@ Estado esperado:
 
 ```text
 bridge_self_check.ok = true
-server.version = 0.6.12
+server.version = 0.6.13
 tunnel.baseUrl = http://127.0.0.1:8081
 tunnel healthz = live
 tunnel readyz = ready
@@ -413,6 +415,7 @@ Runtime local:
 
 ```text
 logs/bridge-events.jsonl
+logs/mssr-events.jsonl
 data/bridge-metrics.sqlite
 data/bridge-metrics.sqlite-wal
 data/bridge-metrics.sqlite-shm
@@ -435,9 +438,14 @@ BRIDGE_MCP_METRICS_DIR=...
 BRIDGE_MCP_LOG_DIR=...
 BRIDGE_MCP_METRICS_SQLITE=...
 BRIDGE_MCP_EVENTS_JSONL=...
+BRIDGE_MCP_MSSR_EVENTS_JSONL=...
 ```
 
-Las metricas guardan nombres de tools, duracion, exito/error, claves de input y tamano de salida. No guardan argumentos completos.
+Las métricas generales guardan nombres de tools, duración, éxito/error, claves de input y tamaño de salida. No guardan argumentos completos.
+
+El MSSR Observatory agrega trazas correlacionadas para `route_planned`, `skill_loaded`, replans, fuentes de contexto, verificación, persistencia, resultados, fricción y correcciones del usuario. `skill_recommend`, `skill_route_plan` y `skill_bootstrap` devuelven `traceId`; debe pasarse a `skill_load` y checkpoints posteriores. No se guardan prompts crudos, transcripciones ni cadena de pensamiento: la tarea se conserva sólo como fingerprint SHA-256 y los detalles son metadata estructurada acotada.
+
+MSSR se consulta antes de cadenas especializadas y se replantea al cambiar de fase, ante fallos materiales, cambios de provider/schema, capabilities nuevas o fricción reusable. No se ejecuta entre cada lectura o comando exitoso de la misma fase.
 
 ## Modelo de uso desde laptop
 
