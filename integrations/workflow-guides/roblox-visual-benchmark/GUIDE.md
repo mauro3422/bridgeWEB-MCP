@@ -20,6 +20,12 @@ Use this guide only when its activation phrases or keywords clearly match the us
 8. **publish-dashboard** — Publicar automáticamente un historial navegable y verificable.
 9. **maintain-workflow** — Convertir fricción repetida en mejoras transversales sin sobreajustar a un proyecto.
 
+## Contrato de turnaround estático
+
+Para modelos, props y carriers estáticos, usar por defecto una cabina aislada con **cámara hero fija y objeto giratorio**. Resolver una única posición, `lookAt` y FOV desde los bounds conservadores del giro completo; capturar frontal, tres cuartos, lateral y trasera variando sólo el yaw del sujeto. Usar una cámara superior separada únicamente cuando la huella, la corona o la distribución superficial aporten información.
+
+El lote debe preservar los masters originales del backend. Cuando el backend interno de Studio incluya cubo de navegación u overlays fuera del sujeto, generar una derivada de revisión mediante recorte seguro a píxel nativo, registrar el rectángulo y el hash de origen, y conservar el raw intacto. Una captura física de ventana o una imagen con UI sobre el sujeto sigue siendo diagnóstica, no master aprobado.
+
 ## Tool policy
 
 Recommended tools:

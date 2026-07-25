@@ -10,6 +10,7 @@ if (fixture.schemaVersion !== 1 || !Array.isArray(fixture.cases) || fixture.case
 }
 
 const { createDefaultToolRegistry } = await import('../dist/tool-registry.js');
+const { closeRobloxMcpConnection } = await import('../dist/integrations/roblox-mcp-client.js');
 const registry = createDefaultToolRegistry();
 const failures = [];
 const results = [];
@@ -88,6 +89,7 @@ if (audit.maintenanceRequired) failures.push(...audit.maintenanceReasons.map((re
 
 if (failures.length > 0) {
   console.error(JSON.stringify({ ok: false, fixturePath, failures, results, audit }, null, 2));
+  await closeRobloxMcpConnection();
   process.exit(1);
 }
 
@@ -103,3 +105,5 @@ console.log(JSON.stringify({
     paths: audit.paths,
   },
 }, null, 2));
+await closeRobloxMcpConnection();
+

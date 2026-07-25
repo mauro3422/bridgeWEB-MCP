@@ -37,7 +37,37 @@ type Connection = {
   generation: number;
 };
 
+function positiveTimeoutFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+export function getRobloxMcpToolRequestOptions(toolName: string): {
+  timeout: number;
+  resetTimeoutOnProgress: boolean;
+  maxTotalTimeout?: number;
+} {
+  if (LONG_RUNNING_TOOL_NAMES.has(toolName)) {
+    return {
+      timeout: LONG_RUNNING_TOOL_CALL_TIMEOUT_MS,
+      resetTimeoutOnProgress: true,
+      maxTotalTimeout: LONG_RUNNING_TOOL_CALL_MAX_TOTAL_TIMEOUT_MS,
+    };
+  }
+  return {
+    timeout: DEFAULT_TOOL_CALL_TIMEOUT_MS,
+    resetTimeoutOnProgress: true,
+    maxTotalTimeout: DEFAULT_TOOL_CALL_TIMEOUT_MS,
+  };
+}
+
 const TOOL_LIST_TIMEOUT_MS = 12_000;
+const DEFAULT_TOOL_CALL_TIMEOUT_MS = positiveTimeoutFromEnv("ROBLOX_STUDIO_MCP_TOOL_TIMEOUT_MS", 60_000);
+const LONG_RUNNING_TOOL_CALL_TIMEOUT_MS = positiveTimeoutFromEnv("ROBLOX_STUDIO_MCP_LONG_TOOL_TIMEOUT_MS", 300_000);
+const LONG_RUNNING_TOOL_CALL_MAX_TOTAL_TIMEOUT_MS = positiveTimeoutFromEnv("ROBLOX_STUDIO_MCP_LONG_TOOL_MAX_TOTAL_TIMEOUT_MS", 360_000);
+const LONG_RUNNING_TOOL_NAMES = new Set(["execute_luau", "screen_capture", "start_stop_play"]);
 const TOOL_CATALOG_INSPECTION_TTL_MS = 15_000;
 const TOOL_CATALOG_CACHE_PATH = path.resolve(
   process.env.ROBLOX_STUDIO_MCP_TOOL_CACHE?.trim()
@@ -319,7 +349,11 @@ export async function listRobloxMcpTools(): Promise<RobloxMcpTool[]> {
 
 export async function callRobloxMcpTool(toolName: string, args: Record<string, unknown> = {}): Promise<unknown> {
   return await runExclusive(async () => {
-    return await withClientUnlocked((client) => client.callTool({ name: toolName, arguments: args }));
+    return await withClientUnlocked((client) => client.callTool(
+      { name: toolName, arguments: args },
+      undefined,
+      getRobloxMcpToolRequestOptions(toolName),
+    ));
   });
 }
 
@@ -397,7 +431,11 @@ export async function callRobloxMcpToolForStudio(
     let result: unknown;
     let callError: unknown;
     try {
-      result = await withClientUnlocked((client) => client.callTool({ name: toolName, arguments: args }));
+      result = await withClientUnlocked((client) => client.callTool(
+        { name: toolName, arguments: args },
+        undefined,
+        getRobloxMcpToolRequestOptions(toolName),
+      ));
     } catch (error) {
       callError = error;
     }

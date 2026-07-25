@@ -53,6 +53,7 @@
     "run_command",
     "write_text_file",
     "binary_file_info",
+    "image_file_attach",
     "roblox_place_save"
   ],
   "scopeNotes": "Global guide available to all projects connected through Mauro's Bridge MCP."

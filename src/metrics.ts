@@ -144,8 +144,7 @@ function cryptoRandomId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export function finishToolMetric(metric: BridgeMetricStart, ok: boolean, outputChars: number, error?: string) {
-  if (!metricsEnabled) return;
+export function finishToolMetric(metric: BridgeMetricStart, ok: boolean, outputChars: number, error?: string): BridgeMetricEnd {
   const endedAt = new Date();
   const durationMs = Math.max(0, endedAt.getTime() - metric.startedAtMs);
   const safeError = error ? redactText(error) : null;
@@ -158,6 +157,8 @@ export function finishToolMetric(metric: BridgeMetricStart, ok: boolean, outputC
     error: safeError || undefined,
   };
 
+  if (!metricsEnabled) return event;
+
   writeJsonl({
     type: "tool_call",
     ...event,
@@ -167,7 +168,7 @@ export function finishToolMetric(metric: BridgeMetricStart, ok: boolean, outputC
   });
 
   const database = getDb();
-  if (!database || !insertToolCall) return;
+  if (!database || !insertToolCall) return event;
 
   try {
     insertToolCall.run(
@@ -194,6 +195,7 @@ export function finishToolMetric(metric: BridgeMetricStart, ok: boolean, outputC
       error: sqliteError instanceof Error ? redactText(sqliteError.message) : String(sqliteError),
     });
   }
+  return event;
 }
 
 export function getMetricsStatus() {

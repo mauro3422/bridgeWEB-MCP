@@ -11,9 +11,11 @@ import { fileWritingToolModule } from "./tools/file-writing.js";
 import { gitToolModule } from "./tools/git-tools.js";
 import { imageToolModule } from "./tools/image-tools.js";
 import { metricsToolModule } from "./tools/metrics-tools.js";
+import { noticeToolModule } from "./tools/notice-tools.js";
 import { processToolModule } from "./tools/process-tools.js";
 import { projectToolModule } from "./tools/project-tools.js";
 import { pythonToolModule } from "./tools/python-tools.js";
+import { robloxPhotoCaptureToolModule } from "./tools/roblox-photo-capture-tools.js";
 import { robloxStudioToolModule } from "./tools/roblox-studio-tools.js";
 import { skillCatalogToolModule } from "./tools/skill-catalog-tools.js";
 import { workspaceToolModule } from "./tools/workspace-tools.js";
@@ -26,12 +28,12 @@ const readOnlyToolNames = new Set([
   "terminal_read", "terminal_list", "work_peek", "work_show",
   "git_status", "git_diff", "git_log", "git_show_commit", "git_compare_branches",
   "tunnel_health", "bridge_health", "bridge_self_check", "bridge_restart_status",
-  "bridge_metrics_status", "bridge_metrics_summary", "bridge_metrics_recent", "bridge_metrics_query", "bridge_visualization_catalog", "bridge_visualize_metrics",
+  "bridge_metrics_status", "bridge_metrics_summary", "bridge_metrics_recent", "bridge_metrics_query", "bridge_visualization_catalog", "bridge_visualize_metrics", "bridge_notice_status", "bridge_notice_drain",
   "path_policy_status", "project_profile", "workspace_diff", "workspace_snapshot_list", "cache_status",
   "analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code",
   "project_context_load", "workflow_guide_recommend", "workflow_guide_load", "bridge_tool_query",
   "skill_catalog", "skill_recommend", "skill_route_audit", "skill_route_plan", "skill_bootstrap", "skill_load", "roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list", "roblox_mcp_query",
-  "binary_file_info", "binary_file_read_chunk", "binary_upload_status",
+  "binary_file_info", "binary_file_read_chunk", "binary_upload_status", "image_file_attach",
   "blender_status", "blender_scene_info", "blender_character_loop_status",
   "whiteboard_capture_pc_view", "whiteboard_latest_capture", "whiteboard_capture_list",
   "python_validate", "python_symbols", "python_impact_analysis", "python_import_graph", "python_call_graph", "python_dead_code", "python_test_plan", "pytest_testmon",
@@ -42,7 +44,7 @@ const destructiveToolNames = new Set([
   "work_once", "work_begin", "work_feed", "work_finish",
   "git_create_branch", "git_restore_file", "git_set_remote", "git_commit_all", "git_push_current_branch",
   "project_profile_save", "workspace_snapshot", "workspace_rollback", "cache_prune",
-  "bridge_request_restart", "bridge_verify_all", "workflow_guide_create", "bridge_tool_action", "roblox_mcp_action", "roblox_place_save",
+  "bridge_request_restart", "bridge_verify_all", "workflow_guide_create", "bridge_tool_action", "roblox_mcp_action", "roblox_studio_window_capture_save", "roblox_screen_capture_save", "roblox_photo_capture_job", "roblox_place_save",
   "image_asset_save", "image_character_views_prepare",
   "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_finish", "binary_upload_abort",
   "blender_open", "blender_viewport_screenshot", "blender_review_bundle", "blender_execute_code", "blender_batch_script", "blender_store_reference_image", "blender_setup_character_references",
@@ -128,15 +130,14 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
     const delegatedResult = await handler(delegatedArguments(args.arguments));
     if (delegatedResult && typeof delegatedResult === "object" && !Array.isArray(delegatedResult)) {
       const record = delegatedResult as Record<string, unknown>;
-      if (Array.isArray(record.__bridgeImages)) {
-        const { __bridgeImages, ...publicResult } = record;
-        return {
-          delegatedTool: name,
-          classification: "read-only",
-          result: publicResult,
-          __bridgeImages,
-        };
-      }
+      const { __bridgeImages, __bridgeNotices, ...publicResult } = record;
+      return {
+        delegatedTool: name,
+        classification: "read-only",
+        result: publicResult,
+        ...(Array.isArray(__bridgeImages) ? { __bridgeImages } : {}),
+        ...(Array.isArray(__bridgeNotices) ? { __bridgeNotices } : {}),
+      };
     }
     return { delegatedTool: name, classification: "read-only", result: delegatedResult };
   });
@@ -145,7 +146,19 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
     if (!destructiveToolNames.has(name)) throw new Error(`Tool '${name}' is not classified destructive; use its direct schema or bridge_tool_query.`);
     if (args.confirmToolName !== name) throw new Error(`confirmToolName must exactly match '${name}'.`);
     const handler = handlers.get(name)!;
-    return { delegatedTool: name, classification: "destructive", result: await handler(delegatedArguments(args.arguments)) };
+    const delegatedResult = await handler(delegatedArguments(args.arguments));
+    if (delegatedResult && typeof delegatedResult === "object" && !Array.isArray(delegatedResult)) {
+      const record = delegatedResult as Record<string, unknown>;
+      const { __bridgeImages, __bridgeNotices, ...publicResult } = record;
+      return {
+        delegatedTool: name,
+        classification: "destructive",
+        result: publicResult,
+        ...(Array.isArray(__bridgeImages) ? { __bridgeImages } : {}),
+        ...(Array.isArray(__bridgeNotices) ? { __bridgeNotices } : {}),
+      };
+    }
+    return { delegatedTool: name, classification: "destructive", result: delegatedResult };
   });
 
   return {
@@ -169,6 +182,7 @@ export function createDefaultToolRegistry(): BridgeToolRegistry {
     workflowGuideToolModule,
     skillCatalogToolModule,
     robloxStudioToolModule,
+    robloxPhotoCaptureToolModule,
     binaryFileToolModule,
     imageToolModule,
     processToolModule,
@@ -178,6 +192,7 @@ export function createDefaultToolRegistry(): BridgeToolRegistry {
     cacheToolModule,
     bridgeOpsToolModule,
     metricsToolModule,
+    noticeToolModule,
     codeIntelligenceToolModule,
     codeGraphToolModule,
     pythonToolModule,

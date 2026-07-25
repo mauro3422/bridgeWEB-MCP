@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "name": "visual-concept-to-game-asset",
   "title": "Visual Concept to Game Asset",
-  "description": "Generate divergent visual concepts, preserve them, extract a measurable geometric recipe, choose a Roblox-direct or Blender production path, build a game-ready prototype, compare deterministic renders against the concept with overlays, and iterate by the largest visual error.",
+  "description": "Inspect actual visual references, extract visible characteristics, convert them into a measurable game-asset recipe, build a reproducible prototype, prove the subject appears in deterministic captures, compare the real render against the real reference, and iterate by the largest verified visual error.",
   "activation": {
     "keywords": [
       "concept art",
@@ -20,7 +20,10 @@
       "prompting visual",
       "dirección visual",
       "receta paramétrica",
-      "concept sheet"
+      "concept sheet",
+      "características visibles",
+      "comparación referencia render",
+      "subject presence"
     ],
     "phrases": [
       "generá varias ideas antes de modelar",
@@ -32,7 +35,10 @@
       "sacá proporciones y piezas de esta lámina",
       "automatizá concepto a modelo",
       "no iteres siempre sobre la misma forma",
-      "hacé variantes visuales realmente distintas"
+      "hacé variantes visuales realmente distintas",
+      "mirá la imagen y extraé sus características antes de modelar",
+      "compará las fotos reales del modelo con la referencia",
+      "no aceptes una captura si el objeto no aparece"
     ],
     "negativeKeywords": [
       "solo editar una foto",

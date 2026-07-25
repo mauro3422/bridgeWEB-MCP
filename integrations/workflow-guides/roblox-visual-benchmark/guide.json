@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "name": "roblox-visual-benchmark",
   "title": "Roblox Visual Benchmark",
-  "description": "Plan, capture, criticize, compare, persist, and verify deterministic visual evidence for Roblox models, procedural growth, VFX, environmental props, world-space UI, 3D interaction visuals, and stateful presentation systems across projects.",
+  "description": "Plan, capture, validate subject presence, compare real Roblox renders with their visual references, criticize, persist and verify deterministic evidence for models, growth, VFX, props, world-space UI and stateful presentation systems across projects.",
   "activation": {
     "keywords": [
       "roblox",
@@ -25,7 +25,17 @@
       "environment art",
       "prop",
       "iteración visual",
-      "criticar fotos"
+      "criticar fotos",
+      "subject presence",
+      "captura vacía",
+      "comparar con referencia",
+      "cámara fija",
+      "camara fija",
+      "girar el objeto",
+      "turntable",
+      "cabina de fotos",
+      "fondo limpio",
+      "poses del modelo"
     ],
     "phrases": [
       "prepara un set de fotos para revisar este modelo",
@@ -38,7 +48,15 @@
       "vigilá todas las fotos y criticá qué mejorar",
       "cada iteración visual debe guardarse automáticamente",
       "mostrame el historial de versiones en un dashboard",
-      "revisá un modelo de cerca y a distancia de juego"
+      "revisá un modelo de cerca y a distancia de juego",
+      "verificá que el objeto aparezca realmente en cada foto",
+      "compará las capturas con la imagen que inspiró el asset",
+      "extraé características visibles y controlá si sobrevivieron",
+      "dejá fija la cámara y girá el objeto para sacar las poses",
+      "sacá frontal tres cuartos lateral trasera y una superior",
+      "automatizá la cabina del fotógrafo y el loop visual",
+      "mostrame el objeto sin la interfaz de Studio",
+      "guardá los masters y usá fotos limpias en el dashboard"
     ],
     "negativeKeywords": [
       "solo una captura decorativa",
@@ -81,6 +99,7 @@
     "run_command",
     "write_text_file",
     "binary_file_info",
+    "image_file_attach",
     "workspace_snapshot",
     "roblox_place_save"
   ],

@@ -2,8 +2,18 @@
 
 ## Goal
 
-Corregir una causa visual dominante por iteración y explorar otra familia cuando la base sea incorrecta.
+Correct the largest verified visual mismatch while preserving characteristics that already match.
 
 ## Instructions
 
-Clasificar el mayor desvío: concepto, cámara, proporción, primitivas, superficie, material, crecimiento, VFX o integración. Si dos iteraciones consecutivas no mejoran la silueta, detener refinamiento local y volver a conceptos divergentes o cambiar de ruta Roblox/Blender.
+Use the paired-image comparison, not metadata alone, to rank deviations. Classify the dominant error as reference quality, camera, framing, silhouette, mass hierarchy, proportion, topology/branching, primitive choice, surface, material, growth, VFX or integration.
+
+Select one bounded correction to the canonical source and state:
+
+- which observed reference characteristic is targeted;
+- which render/capture proves the mismatch;
+- what already matches and must not regress;
+- what parameter or construction method changes;
+- which identical comparison views will be repeated.
+
+After recapture, compare before/reference/after. Do not call the iteration improved unless the selected characteristic visibly improves without unacceptable regression. If two consecutive iterations fail to improve the intended characteristics, stop local polishing and return to divergent concepts or change the Roblox/Blender production path.

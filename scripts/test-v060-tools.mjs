@@ -56,7 +56,9 @@ process.env.BRIDGE_MCP_SKILL_ROUTING_FIXTURES_PATH = path.join(fixtureSkillRoot,
 
 const { createDefaultToolRegistry } = await import('../dist/tool-registry.js');
 const { writePersistentCache } = await import('../dist/tools/shared/persistent-cache.js');
-const { classifyRobloxMcpToolCatalog, parseRobloxStudios } = await import('../dist/integrations/roblox-mcp-client.js');
+const { classifyRobloxMcpToolCatalog, getRobloxMcpToolRequestOptions, parseRobloxStudios } = await import('../dist/integrations/roblox-mcp-client.js');
+const { extractRobloxMcpImage } = await import('../dist/tools/roblox-studio-tools.js');
+const { clearBridgeNotices, drainBridgeNotices, emitBridgeNotice, getBridgeNoticeStatus } = await import('../dist/notices.js');
 const registry = createDefaultToolRegistry();
 const call = (name, args = {}) => registry.call(name, args);
 const root = path.join(sandbox, 'project');
@@ -94,14 +96,34 @@ try {
   if (parsedStudios.length !== 2 || parsedStudios[0].id !== 'studio-a' || !parsedStudios[0].active || parsedStudios[1].active) throw new Error('Roblox Studio instance parsing failed');
   if (parseRobloxStudios({content:[{type:'text',text:'not-json'}]}).length !== 0) throw new Error('malformed Roblox Studio listing was not rejected');
 
-  if (registry.tools.length !== 109) throw new Error(`expected 109 tools, got ${registry.tools.length}`);
+  const defaultRobloxCallOptions = getRobloxMcpToolRequestOptions('get_studio_state');
+  const longRobloxCallOptions = getRobloxMcpToolRequestOptions('execute_luau');
+  if (defaultRobloxCallOptions.timeout !== 60_000 || defaultRobloxCallOptions.maxTotalTimeout !== 60_000 || !defaultRobloxCallOptions.resetTimeoutOnProgress) throw new Error('default Roblox MCP request options are invalid');
+  if (longRobloxCallOptions.timeout < 300_000 || (longRobloxCallOptions.maxTotalTimeout ?? 0) < longRobloxCallOptions.timeout || !longRobloxCallOptions.resetTimeoutOnProgress) throw new Error('long-running Roblox MCP request options are invalid');
+  const nestedRobloxImage = extractRobloxMcpImage({result:{content:[{type:'text',text:'ok'},{type:'image',data:'aGVsbG8=',mimeType:'image/png'}]}});
+  if (!nestedRobloxImage || nestedRobloxImage.data !== 'aGVsbG8=' || nestedRobloxImage.mimeType !== 'image/png') throw new Error('nested Roblox MCP image extraction failed');
+  if (extractRobloxMcpImage({content:[{type:'text',text:'no image'}]}) !== null) throw new Error('Roblox MCP image extraction accepted a missing image');
+
+  clearBridgeNotices();
+  emitBridgeNotice({severity:'warning',code:'fixture-warning',source:'fixture',message:'Fixture notice'});
+  emitBridgeNotice({severity:'warning',code:'fixture-warning',source:'fixture',message:'Fixture notice'});
+  const noticeStatus = getBridgeNoticeStatus();
+  if (noticeStatus.pendingCount !== 1 || noticeStatus.notices[0].occurrences !== 2) throw new Error('Bridge notice dedupe/status failed');
+  const drainedNotices = drainBridgeNotices();
+  if (drainedNotices.length !== 1 || getBridgeNoticeStatus().pendingCount !== 0) throw new Error('Bridge notice one-shot drain failed');
+
+  if (registry.tools.length !== 115) throw new Error(`expected 115 tools, got ${registry.tools.length}`);
   if (registry.riskSummary.neutral.length !== 0) throw new Error(`neutral tools remain: ${registry.riskSummary.neutral.join(', ')}`);
-  for (const moduleName of ['project','workspace','cache','workflow-guides','skill-catalog-and-roblox-proxy','roblox-studio-ops','binary-files','images','blender','tablet-whiteboard']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
-  for (const toolName of ['project_context_load','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','skill_catalog','skill_recommend','skill_route_audit','skill_route_plan','skill_bootstrap','skill_load','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_studio_list','roblox_mcp_query','roblox_mcp_action','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_asset_save','image_character_views_prepare','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_review_bundle','blender_execute_code','blender_batch_script','blender_setup_character_references','blender_character_loop_status','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/Blender tool ${toolName}`);
-  if (!registry.riskSummary.destructive.includes('roblox_mcp_action') || !registry.riskSummary.destructive.includes('roblox_place_save')) throw new Error('Roblox action/save risk classification failed');
+  for (const moduleName of ['project','workspace','cache','workflow-guides','skill-catalog-and-roblox-proxy','roblox-studio-ops','roblox-photo-capture','notices','binary-files','images','blender','tablet-whiteboard']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
+  for (const toolName of ['project_context_load','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','skill_catalog','skill_recommend','skill_route_audit','skill_route_plan','skill_bootstrap','skill_load','bridge_notice_status','bridge_notice_drain','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_studio_list','roblox_mcp_query','roblox_mcp_action','roblox_studio_window_capture_save','roblox_screen_capture_save','roblox_photo_capture_job','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_file_attach','image_asset_save','image_character_views_prepare','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_review_bundle','blender_execute_code','blender_batch_script','blender_setup_character_references','blender_character_loop_status','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/Blender tool ${toolName}`);
+  if (!registry.riskSummary.destructive.includes('roblox_mcp_action') || !registry.riskSummary.destructive.includes('roblox_studio_window_capture_save') || !registry.riskSummary.destructive.includes('roblox_screen_capture_save') || !registry.riskSummary.destructive.includes('roblox_photo_capture_job') || !registry.riskSummary.destructive.includes('roblox_place_save')) throw new Error('Roblox action/capture/save risk classification failed');
+  if (!registry.riskSummary.readOnly.includes('bridge_notice_status') || !registry.riskSummary.readOnly.includes('bridge_notice_drain')) throw new Error('Bridge notice risk classification failed');
   const reviewTool = registry.tools.find((tool) => tool.name === 'blender_review_bundle');
   if (!reviewTool || !registry.riskSummary.destructive.includes('blender_review_bundle')) throw new Error('Blender review bundle classification failed');
   if (!reviewTool.inputSchema?.properties?.views || !reviewTool.inputSchema?.properties?.outputDir) throw new Error('Blender review bundle schema failed');
+  const imageAttachTool = registry.tools.find((tool) => tool.name === 'image_file_attach');
+  if (!imageAttachTool || !registry.riskSummary.readOnly.includes('image_file_attach')) throw new Error('Local image attachment classification failed');
+  if (!imageAttachTool.inputSchema?.properties?.items) throw new Error('Local image attachment schema failed');
 
   const junctionCatalog = await call('skill_catalog', {sources:['codex-local'],maxResults:50});
   if (!junctionCatalog.skills.some((skill) => skill.name === 'linked-junction-skill')) throw new Error('skill catalog did not follow an allowed directory junction');
@@ -230,6 +252,22 @@ try {
     items:[{outputPath:path.join(root,'images','single.png'),base64:tinyPng,role:'single',prompt:'fixture single'}],
   });
   if (singleImage.mode !== 'single' || singleImage.itemCount !== 1 || singleImage.saved[0].width !== 2 || !fs.existsSync(path.join(root,'images','single.png'))) throw new Error('single image save failed');
+  const savedSinglePath = path.join(root,'images','single.png');
+  const savedSingleBytes = fs.readFileSync(savedSinglePath);
+  const savedSingleSha256 = crypto.createHash('sha256').update(savedSingleBytes).digest('hex');
+  const attachedImage = await call('image_file_attach', {
+    items:[{path:savedSinglePath,label:'fixture-front',expectedSha256:savedSingleSha256}],
+  });
+  if (attachedImage.mode !== 'single' || attachedImage.itemCount !== 1 || attachedImage.totalBytes !== savedSingleBytes.length || !attachedImage.originalBytesPreserved) throw new Error('local image attachment metadata failed');
+  if (attachedImage.attached[0].width !== 2 || attachedImage.attached[0].height !== 2 || attachedImage.attached[0].sha256 !== savedSingleSha256 || attachedImage.attached[0].transformed) throw new Error('local image attachment inspection failed');
+  if (!Array.isArray(attachedImage.__bridgeImages) || attachedImage.__bridgeImages.length !== 1 || Buffer.from(attachedImage.__bridgeImages[0].data,'base64').compare(savedSingleBytes) !== 0) throw new Error('local image attachment did not preserve the original image bytes');
+  let imageHashRejected = false;
+  try {
+    await call('image_file_attach', {items:[{path:savedSinglePath,expectedSha256:'0'.repeat(64)}]});
+  } catch (error) {
+    imageHashRejected = String(error).includes('SHA-256 mismatch');
+  }
+  if (!imageHashRejected) throw new Error('local image attachment accepted an incorrect expected hash');
   const imageManifest = path.join(root,'images','batch.json');
   const batchImages = await call('image_asset_save', {
     collectionName:'fixture turnaround',

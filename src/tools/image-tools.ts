@@ -8,6 +8,8 @@ import { resolveToolPath, runProcess } from "./shared/process.js";
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_BASE64_CHARS = 15 * 1024 * 1024;
 const MAX_BATCH_ITEMS = 8;
+const MAX_ATTACH_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_ATTACH_TOTAL_BYTES = 24 * 1024 * 1024;
 
 const itemSchema = z.object({
   outputPath: z.string().min(1),
@@ -18,7 +20,14 @@ const itemSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
+const localImageItemSchema = z.object({
+  path: z.string().min(1),
+  label: z.string().min(1).max(160).optional(),
+  expectedSha256: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
+});
+
 type ImageInput = z.infer<typeof itemSchema>;
+type LocalImageInput = z.infer<typeof localImageItemSchema>;
 
 type DecodedImage = {
   input: ImageInput;
@@ -85,13 +94,29 @@ function jpegSize(buffer: Buffer): { width: number; height: number } | null {
   return null;
 }
 
-function decodeImage(input: ImageInput): DecodedImage {
-  const outputPath = resolveToolPath(input.outputPath, { access: "write" });
-  const extension = path.extname(outputPath).toLowerCase();
+function inspectImageBytes(filePath: string, bytes: Buffer) {
+  const extension = path.extname(filePath).toLowerCase();
   if (![".png", ".jpg", ".jpeg", ".webp"].includes(extension)) {
-    throw new Error(`Unsupported image extension for ${outputPath}; use .png, .jpg, .jpeg, or .webp`);
+    throw new Error(`Unsupported image extension for ${filePath}; use .png, .jpg, .jpeg, or .webp`);
   }
 
+  const isPng = bytes.length >= 24 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  const isJpeg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  const isWebp = bytes.length >= 30 && bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP";
+  const valid = extension === ".png" ? isPng : extension === ".webp" ? isWebp : isJpeg;
+  if (!valid) throw new Error(`Image bytes do not match extension ${extension}: ${filePath}`);
+
+  const size = isPng ? pngSize(bytes) : isWebp ? webpSize(bytes) : jpegSize(bytes);
+  return {
+    extension,
+    mime: isPng ? "image/png" : isWebp ? "image/webp" : "image/jpeg",
+    width: size?.width ?? null,
+    height: size?.height ?? null,
+  };
+}
+
+function decodeImage(input: ImageInput): DecodedImage {
+  const outputPath = resolveToolPath(input.outputPath, { access: "write" });
   const raw = input.base64
     .replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "")
     .replace(/\s+/g, "");
@@ -99,23 +124,74 @@ function decodeImage(input: ImageInput): DecodedImage {
 
   const bytes = Buffer.from(raw, "base64");
   if (!bytes.length || bytes.length > MAX_IMAGE_BYTES) throw new Error(`Decoded image is empty or exceeds ${MAX_IMAGE_BYTES} bytes: ${outputPath}`);
+  const metadata = inspectImageBytes(outputPath, bytes);
 
-  const isPng = bytes.length >= 24 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-  const isJpeg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
-  const isWebp = bytes.length >= 30 && bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP";
-  const valid = extension === ".png" ? isPng : extension === ".webp" ? isWebp : isJpeg;
-  if (!valid) throw new Error(`Image bytes do not match extension ${extension}: ${outputPath}`);
-
-  const size = isPng ? pngSize(bytes) : isWebp ? webpSize(bytes) : jpegSize(bytes);
   return {
     input,
     outputPath,
-    extension,
-    mime: isPng ? "image/png" : isWebp ? "image/webp" : "image/jpeg",
+    extension: metadata.extension,
+    mime: metadata.mime,
     bytes,
-    width: size?.width ?? null,
-    height: size?.height ?? null,
+    width: metadata.width,
+    height: metadata.height,
     sha256: sha256(bytes),
+  };
+}
+
+async function attachLocalImages(args: { items: LocalImageInput[] }) {
+  const resolved = await Promise.all(args.items.map(async (input) => {
+    const filePath = resolveToolPath(input.path, { access: "read" });
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile()) throw new Error(`Image path is not a file: ${filePath}`);
+    if (stat.size <= 0) throw new Error(`Image file is empty: ${filePath}`);
+    if (stat.size > MAX_ATTACH_IMAGE_BYTES) {
+      throw new Error(`Image exceeds the ${MAX_ATTACH_IMAGE_BYTES} byte attachment limit: ${filePath}`);
+    }
+    return { input, filePath, stat };
+  }));
+
+  const uniquePaths = new Set(resolved.map((item) => item.filePath.toLowerCase()));
+  if (uniquePaths.size !== resolved.length) throw new Error("Batch contains duplicate image paths");
+  const totalBytes = resolved.reduce((sum, item) => sum + item.stat.size, 0);
+  if (totalBytes > MAX_ATTACH_TOTAL_BYTES) {
+    throw new Error(`Image batch exceeds the ${MAX_ATTACH_TOTAL_BYTES} byte attachment limit`);
+  }
+
+  const attached = [];
+  const imageAttachments = [];
+  for (const item of resolved) {
+    const bytes = await fs.readFile(item.filePath);
+    if (bytes.length !== item.stat.size) throw new Error(`Image changed while it was being read: ${item.filePath}`);
+    const metadata = inspectImageBytes(item.filePath, bytes);
+    const digest = sha256(bytes);
+    if (item.input.expectedSha256 && digest !== item.input.expectedSha256.toLowerCase()) {
+      throw new Error(`SHA-256 mismatch for ${item.filePath}: expected ${item.input.expectedSha256.toLowerCase()}, got ${digest}`);
+    }
+
+    attached.push({
+      path: item.filePath,
+      label: item.input.label ?? path.basename(item.filePath),
+      bytes: bytes.length,
+      sha256: digest,
+      mime: metadata.mime,
+      extension: metadata.extension,
+      width: metadata.width,
+      height: metadata.height,
+      modifiedAt: item.stat.mtime.toISOString(),
+      attachedToToolResult: true,
+      transformed: false,
+    });
+    imageAttachments.push({ type: "image", mimeType: metadata.mime, data: bytes.toString("base64") });
+  }
+
+  return {
+    mode: attached.length === 1 ? "single" : "batch",
+    itemCount: attached.length,
+    totalBytes,
+    originalBytesPreserved: true,
+    transport: "mcp-image-content",
+    attached,
+    __bridgeImages: imageAttachments,
   };
 }
 
@@ -293,6 +369,32 @@ export const imageToolModule: BridgeToolModule = {
   name: "images",
   tools: [
     {
+      name: "image_file_attach",
+      description: "Attach one or more allowed local PNG/JPEG/WebP files directly to the MCP tool result for full-quality visual inspection. Preserves the original bytes, reports dimensions and SHA-256, supports optional hash verification, and never prints the encoded image payload in the text result. Prefer this over binary_file_read_chunk, temporary HTTP servers, tunnels, or resized previews when ChatGPT needs to see an existing local image.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            minItems: 1,
+            maxItems: MAX_BATCH_ITEMS,
+            items: {
+              type: "object",
+              properties: {
+                path: { type: "string", description: "Allowed local PNG/JPEG/WebP path to attach without transformation." },
+                label: { type: "string", description: "Optional short label identifying the view or role." },
+                expectedSha256: { type: "string", pattern: "^[0-9a-fA-F]{64}$", description: "Optional expected SHA-256 for immutable evidence verification." },
+              },
+              required: ["path"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["items"],
+        additionalProperties: false,
+      },
+    },
+    {
       name: "image_asset_save",
       description: "Use this when ChatGPT has generated or edited one or more images that must be persisted on MauroPrime. Saves one image or an atomic batch from base64/data URLs, validates signatures, records hashes and dimensions, and can write a JSON manifest.",
       inputSchema: {
@@ -363,6 +465,12 @@ export const imageToolModule: BridgeToolModule = {
     },
   ],
   handlers: {
+    image_file_attach: async (raw) => {
+      const parsed = z.object({
+        items: z.array(localImageItemSchema).min(1).max(MAX_BATCH_ITEMS),
+      }).parse(raw);
+      return await attachLocalImages(parsed);
+    },
     image_asset_save: async (raw) => {
       const parsed = z.object({
         items: z.array(itemSchema).min(1).max(MAX_BATCH_ITEMS),
