@@ -35,7 +35,17 @@
       "turntable",
       "cabina de fotos",
       "fondo limpio",
-      "poses del modelo"
+      "poses del modelo",
+      "run ownership collision",
+      "photo session lock",
+      "dashboard gate regression",
+      "review downgrade",
+      "Studio stuck in Play",
+      "asset track collapse",
+      "growth stage mixing",
+      "visual evidence catalog",
+      "representative cover",
+      "capture chronology"
     ],
     "phrases": [
       "prepara un set de fotos para revisar este modelo",
@@ -56,7 +66,16 @@
       "sacá frontal tres cuartos lateral trasera y una superior",
       "automatizá la cabina del fotógrafo y el loop visual",
       "mostrame el objeto sin la interfaz de Studio",
-      "guardá los masters y usá fotos limpias en el dashboard"
+      "guardá los masters y usá fotos limpias en el dashboard",
+      "el gate estaba listo y volvió a pendiente",
+      "dos runs están controlando la misma cámara",
+      "Studio quedó en Play después de capturar",
+      "la revisión completa fue reemplazada",
+      "las poses distintas tienen el mismo hash",
+      "catalogá las capturas antes del dashboard",
+      "separá los assets aunque todos sean V1",
+      "ordená primero por etapa y después por cámara",
+      "el preview muestra una fase vacía"
     ],
     "negativeKeywords": [
       "solo una captura decorativa",
@@ -71,7 +90,9 @@
       "Revisá este crecimiento procedural en 0/25/50/75/100 %, estados y cuatro ángulos.",
       "Compará el VFX anterior y el nuevo con las mismas cámaras, criticá cada fase y persistí los comentarios.",
       "Prepará una galería aislada y una escena integrada para este prop de Roblox.",
-      "Cada vez que iteremos UI 3D o un visual interactivo, usá el benchmark y guardá el run."
+      "Cada vez que iteremos UI 3D o un visual interactivo, usá el benchmark y guardá el run.",
+      "Normalizar asset, versión, etapa y cámara antes de construir el dashboard.",
+      "Rechazar un cover ausente o prematuro aunque sea la primera captura."
     ]
   },
   "entrypoint": "GUIDE.md",

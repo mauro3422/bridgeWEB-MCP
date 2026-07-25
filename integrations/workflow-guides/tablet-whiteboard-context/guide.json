@@ -15,7 +15,10 @@
       "álbum",
       "captura guardada",
       "dashboard de fotos",
-      "panorama"
+      "panorama",
+      "runtime catalog",
+      "bridge_tool_query",
+      "mis trazos primero"
     ],
     "phrases": [
       "mirá la board",
@@ -25,7 +28,9 @@
       "abrí el álbum de la board",
       "usá el dashboard de la board",
       "organizá las fotos de la board",
-      "anotá esto en la board"
+      "anotá esto en la board",
+      "intentá el fallback de la board",
+      "no digas que no está disponible sin probar el catálogo runtime"
     ],
     "negativeKeywords": [
       "no uses la board",
@@ -38,7 +43,8 @@
       "Mirá la board y decime qué entendés de mis flechas y círculos.",
       "Revisá la última foto guardada del álbum, no saques otra captura.",
       "Usá el dashboard de la board para comparar estas etapas de crecimiento.",
-      "Poné un diagrama en la board sin tapar mis trazos."
+      "Poné un diagrama en la board sin tapar mis trazos.",
+      "Si la herramienta dedicada no aparece, consultar catálogo runtime y usar bridge_tool_query read-only antes de declarar falta de acceso."
     ]
   },
   "entrypoint": "GUIDE.md",

@@ -8,6 +8,10 @@ Plan, capture, criticize, compare, persist, and verify deterministic visual evid
 
 Use this guide only when its activation phrases or keywords clearly match the user's task. If the match is uncertain, explain the possible match instead of silently forcing the workflow.
 
+## Cataloging boundary
+
+Load `visual-evidence-cataloging` when verified captures must become a multi-asset, versioned, stateful or legacy dashboard collection. The benchmark owns capture/review truth; cataloging owns logical tracks, semantic axis, chronology, stable sorting and representative covers. Do not let package paths or array position determine identity and presentation.
+
 ## Workflow
 
 1. **define-contract** — Definir el artefacto canónico, baseline, aspectos evaluados, fases semánticas, estados y criterios Pass/Fail.

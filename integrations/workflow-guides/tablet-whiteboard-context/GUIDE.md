@@ -41,3 +41,7 @@ Recommended tools:
 ## Maintenance
 
 Update `guide.json` when activation patterns, phases, or recommended tools change.
+
+## Availability proof gate
+
+Never conclude that the Board is unavailable from the absence of a dedicated connector schema alone. Check, in order: dedicated tool schema, Bridge runtime catalog, read-only `bridge_tool_query`, then report the exact failing layer. When a saved capture is requested, inspect it and the human annotation layer before discussing the surrounding dashboard.
