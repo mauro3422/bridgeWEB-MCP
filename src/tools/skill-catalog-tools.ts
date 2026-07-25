@@ -291,8 +291,9 @@ function skillScore(task: string, skill: SkillEntry): { score: number; reasons: 
     "roblox-placement-system-authoring": /placement|colocar|colocacion|construir|fantasma|ghost|snap|rotar|rotacion|superficie|footprint|preview de objeto/,
     "roblox-resource-network-test": /recurso|resource|produccion|productor|consumo|consumidor|almacen|storage|transportar|distribuir|flujo|logistica|nutriente|energia|power grid/,
     "roblox-save-backup-recovery": /guardar|guardado|save|ctrl s|backup|respaldo|copia segura|recuperar|recovery|autosave|persistir|rollback/,
-    "mauroprime-bridge-collaboration": /mauroprime|bridge|codex.*chatgpt|chatgpt.*codex|coordinar agentes|historial de codex|sesion de codex/,
+    "mauroprime-bridge-collaboration": /mauroprime|bridge|codex.*chatgpt|chatgpt.*codex|coordinar agentes|historial de codex|sesion de codex|migracion de proyecto|mover proyecto|project root migration/,
     "shared-skill-governance": /crear skill|actualizar skill|mejorar skill|generalizar skill|skills compartidas|skill bootstrap|gobernanza de skills|catalogo de skills/,
+    "skill-maintenance-loop": /cerrar.{0,40}iteracion|iteracion.{0,60}(?:friccion|incidente|error|bug)|registrar.{0,40}(?:incidente|friccion|bug)|(?:incidente|friccion|bug).{0,40}(?:skill|routing|tool|lifecycle)|mantenimiento.{0,30}(?:skill|capacidad)|skill gap|repeated friction|manual workaround|lifecycle defect/,
   };
   const localPattern = localIntentPatterns[skill.name];
   if (localPattern?.test(taskText)) {
@@ -336,6 +337,21 @@ function skillScore(task: string, skill: SkillEntry): { score: number; reasons: 
   }
   if (descriptionText && taskText.includes(descriptionText)) score += 4;
   return { score, reasons };
+}
+
+export async function findExistingSkillCoverage(task: string, maxResults = 5) {
+  const discovered = await discoverCodexSkills();
+  const ranked = canonicalizeSkillEntries(discovered.skills).entries
+    .map((skill) => ({ ...skill, ...skillScore(task, skill) }))
+    .filter((skill) => skill.score >= 12)
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+    .slice(0, Math.max(1, Math.min(maxResults, 20)));
+  return {
+    covered: ranked.length > 0,
+    threshold: 12,
+    matches: ranked,
+    warnings: discovered.warnings,
+  };
 }
 
 function sourceFilter(value: unknown): SkillSource[] | null {
@@ -844,7 +860,3 @@ export const skillCatalogToolModule: BridgeToolModule = {
     },
   },
 };
-
-
-
-

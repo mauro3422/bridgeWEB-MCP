@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.14 - 2026-07-25
+
+- Workflow-guide recommendation now checks the existing Codex skill catalog before proposing a new guide and returns `use_existing_skill` when a skill already owns the reusable procedure.
+- Workspace snapshots publish their manifest atomically, read it back before reporting success and return actionable diagnostics for missing or legacy snapshot ids from older live Bridge versions.
+- Added a canonical Bridge incident ledger and close-phase server instructions that preserve observable symptom/evidence/cause/correction/regression/follow-up without storing chain-of-thought.
+- Added isolated regressions for skill-owned guide requests, verified snapshot readback, immediate stable diff and legacy-id lifecycle guidance.
+
+
 ## 0.6.13 - 2026-07-25
 
 - Unified `skill_recommend` with the deterministic MSSR phase router. It now accepts structured intent, bounded context, caller/stage/completed phases and returns the same active/deferred route plus a stable `traceId`; missing intent remains visibly lexical fallback.

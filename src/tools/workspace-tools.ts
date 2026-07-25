@@ -63,7 +63,20 @@ function projectContentPath(root: string, relativePath: string, access: "read" |
 }
 
 async function readManifest(id: string): Promise<SnapshotManifest> {
-  const parsed = JSON.parse(await fs.readFile(manifestPath(id), "utf8")) as SnapshotManifest;
+  let text: string;
+  try {
+    text = await fs.readFile(manifestPath(id), "utf8");
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+    if (code === "ENOENT") {
+      const legacyHint = id.startsWith("snapshot_")
+        ? " The id uses the legacy snapshot_<timestamp>_<counter> format and likely came from an older live Bridge process."
+        : "";
+      throw new Error(`Snapshot manifest not found for '${id}' under '${SNAPSHOT_ROOT}'.${legacyHint} Create a fresh workspace_snapshot with the current live Bridge and use the returned snapshot.id.`);
+    }
+    throw error;
+  }
+  const parsed = JSON.parse(text) as SnapshotManifest;
   if (parsed.schemaVersion !== 1 || parsed.id !== id || !path.isAbsolute(parsed.sourceRoot) || !Array.isArray(parsed.files) || !Array.isArray(parsed.skipped)) {
     throw new Error(`Invalid snapshot manifest: ${id}`);
   }
@@ -153,8 +166,12 @@ async function createWorkspaceSnapshot(projectRoot: string | undefined, maxFiles
       git: await gitSnapshot(root),
       ...(label?.trim() ? { label: label.trim().slice(0, 200) } : {}),
     };
-    await fs.writeFile(path.join(dir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-    return { created: true, snapshot: manifest, storagePath: dir };
+    const finalManifestPath = path.join(dir, "manifest.json");
+    const temporaryManifestPath = path.join(dir, `.manifest-${randomUUID()}.tmp`);
+    await fs.writeFile(temporaryManifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    await fs.rename(temporaryManifestPath, finalManifestPath);
+    const verifiedManifest = await readManifest(id);
+    return { created: true, verified: true, snapshot: verifiedManifest, manifestPath: finalManifestPath, storagePath: dir };
   } catch (error) {
     await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
     throw error;
@@ -256,8 +273,8 @@ async function listSnapshots(limit: number) {
 export const workspaceToolModule: BridgeToolModule = {
   name: "workspace",
   tools: [
-    { name: "workspace_snapshot", description: "Create a bounded content-addressed workspace snapshot outside the project, excluding generated/noisy directories and sensitive denied paths.", inputSchema: { type: "object", properties: { projectRoot: { type: "string" }, label: { type: "string" }, maxFiles: { type: "number", default: DEFAULT_MAX_FILES, minimum: 1, maximum: 5000 }, maxFileBytes: { type: "number", default: DEFAULT_MAX_FILE_BYTES, minimum: 1024, maximum: 10485760 }, maxTotalBytes: { type: "number", default: DEFAULT_MAX_TOTAL_BYTES, minimum: 1024, maximum: 104857600 } }, additionalProperties: false } },
-    { name: "workspace_diff", description: "Compare the current workspace with a saved snapshot by file hashes.", inputSchema: { type: "object", properties: { snapshotId: { type: "string" }, projectRoot: { type: "string" }, maxChanges: { type: "number", default: 200, minimum: 1, maximum: 2000 } }, required: ["snapshotId"], additionalProperties: false } },
+    { name: "workspace_snapshot", description: "Create a bounded content-addressed workspace snapshot outside the project, excluding generated/noisy directories and sensitive denied paths. The manifest is published atomically and read back before created=true is returned; use snapshot.id for later diff or rollback.", inputSchema: { type: "object", properties: { projectRoot: { type: "string" }, label: { type: "string" }, maxFiles: { type: "number", default: DEFAULT_MAX_FILES, minimum: 1, maximum: 5000 }, maxFileBytes: { type: "number", default: DEFAULT_MAX_FILE_BYTES, minimum: 1024, maximum: 10485760 }, maxTotalBytes: { type: "number", default: DEFAULT_MAX_TOTAL_BYTES, minimum: 1024, maximum: 104857600 } }, additionalProperties: false } },
+    { name: "workspace_diff", description: "Compare the current workspace with a saved snapshot by file hashes. Missing or legacy snapshot ids return actionable lifecycle guidance instead of a raw manifest ENOENT.", inputSchema: { type: "object", properties: { snapshotId: { type: "string" }, projectRoot: { type: "string" }, maxChanges: { type: "number", default: 200, minimum: 1, maximum: 2000 } }, required: ["snapshotId"], additionalProperties: false } },
     { name: "workspace_rollback", description: "Restore files from a complete snapshot after preflight hash/path checks. Requires an exact repeated snapshot id; optional removal affects only newly added files from a complete current scan.", inputSchema: { type: "object", properties: { snapshotId: { type: "string" }, confirmSnapshotId: { type: "string" }, projectRoot: { type: "string" }, removeAddedFiles: { type: "boolean", default: false } }, required: ["snapshotId", "confirmSnapshotId"], additionalProperties: false } },
     { name: "workspace_snapshot_list", description: "List recent workspace snapshots with roots, timestamps, sizes, and Git metadata.", inputSchema: { type: "object", properties: { limit: { type: "number", default: 20, minimum: 1, maximum: 200 } }, additionalProperties: false } },
   ],

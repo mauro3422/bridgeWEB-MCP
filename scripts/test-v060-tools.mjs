@@ -25,6 +25,7 @@ writeFixtureSkill('roblox-playtest', 'Run focused Roblox gameplay tests.');
 writeFixtureSkill('roblox-studio-qa', 'Inspect Roblox structure, visuals, and console output.');
 writeFixtureSkill('roblox-save-backup-recovery', 'Save and back up local Roblox places.');
 const linkedSkillSource = path.join(sandbox, 'linked-skill-source', 'linked-junction-skill');
+writeFixtureSkill('skill-maintenance-loop', 'Audit long iterations, record observable incidents, bugs and friction, and update the owning skill, routing, tool or lifecycle contract.');
 fs.mkdirSync(linkedSkillSource, {recursive:true});
 fs.writeFileSync(path.join(linkedSkillSource, 'SKILL.md'), '---\nname: linked-junction-skill\ndescription: Verify safe discovery through a directory junction.\n---\n\n# linked-junction-skill\n\nFixture guidance.\n');
 fs.symlinkSync(linkedSkillSource, path.join(fixtureSkillRoot, 'linked-junction-skill'), process.platform === 'win32' ? 'junction' : 'dir');
@@ -44,6 +45,7 @@ fs.writeFileSync(path.join(fixtureSkillRoot, '_dashboard', 'skill-routing-overri
     'roblox-playtest': {phase:'verification',domains:['roblox'],actions:['test','debug'],artifacts:['game','network-system','resource-system'],needs:['playtest'],requires:['roblox-mcp-skill-router'],complements:[],excludes:[],negativeIntents:[],priority:91,activation:'on-demand'},
     'roblox-studio-qa': {phase:'verification',domains:['roblox'],actions:['review','test'],artifacts:['game'],needs:['visual-qa'],requires:['roblox-mcp-skill-router'],complements:[],excludes:[],negativeIntents:[],priority:89,activation:'on-demand'},
     'roblox-save-backup-recovery': {phase:'persistence',domains:['roblox'],actions:['save','recover'],artifacts:['game'],needs:['backup'],requires:[],complements:[],excludes:[],negativeIntents:['read-only'],priority:98,activation:'on-demand'},
+    'skill-maintenance-loop': {phase:'maintenance',domains:['skill-system'],actions:['maintain','document'],artifacts:['skill','project'],needs:['integrity-verification'],signals:['error-observed','repeated-friction','manual-workaround','skill-gap','reusable-pattern'],requireSignalMatch:true,requires:[],complements:[],excludes:[],negativeIntents:[],priority:92,activation:'on-demand'},
     'linked-junction-skill': {phase:'discovery',domains:['skill-system'],actions:['discover'],artifacts:['skill'],needs:[],requires:[],complements:[],excludes:[],negativeIntents:[],priority:10,activation:'on-demand'},
   },
   workflows: [{name:'roblox-development',match:{domains:['roblox']},phases:[
@@ -254,6 +256,13 @@ try {
     projectRoot:root,
   });
   if (genericRecommendation.recommendation.action !== 'propose_new' || genericRecommendation.recommendation.builderGuide !== 'workflow-guide-builder') throw new Error('new guide recommendation failed');
+  const ownedBySkillRecommendation = await call('workflow_guide_recommend', {
+    task:'Cuando terminemos una iteracion larga registra los incidentes, bugs y friccion y arregla la skill propietaria',
+    projectRoot:root,
+  });
+  if (ownedBySkillRecommendation.recommendation.action !== 'use_existing_skill' || ownedBySkillRecommendation.recommendation.skill !== 'skill-maintenance-loop') throw new Error(`existing skill coverage failed: ${JSON.stringify(ownedBySkillRecommendation.recommendation)}`);
+  if (!ownedBySkillRecommendation.existingSkillCoverage?.covered) throw new Error('existing skill coverage evidence missing');
+
   const createdGuide = await call('workflow_guide_create', {
     scope:'project',
     projectRoot:root,
@@ -427,6 +436,13 @@ try {
   if (largeCompare.diff.code !== 0 || largeCompare.diff.error) throw new Error(`large-path git compare failed: ${JSON.stringify(largeCompare)}`);
 
   const snap = await call('workspace_snapshot',{projectRoot:root,label:'integration fixture'});
+  if (!snap.verified || !snap.manifestPath || !fs.existsSync(snap.manifestPath)) throw new Error('workspace snapshot manifest readback failed');
+  const immediateSnapshotDiff = await call('workspace_diff',{snapshotId:snap.snapshot.id,projectRoot:root});
+  if (immediateSnapshotDiff.changed) throw new Error('fresh workspace snapshot was not immediately readable/stable');
+  let legacySnapshotRejected = false;
+  try { await call('workspace_diff',{snapshotId:'snapshot_1785002749168_19',projectRoot:root}); } catch (error) { legacySnapshotRejected = /legacy snapshot|older live Bridge|fresh workspace_snapshot/i.test(String(error)); }
+  if (!legacySnapshotRejected) throw new Error('legacy snapshot id did not return actionable lifecycle guidance');
+
   fs.writeFileSync(path.join(root,'app.txt'), 'after snapshot\n');
   fs.writeFileSync(path.join(root,'added.txt'), 'added\n');
   const snapshotDiff = await call('workspace_diff',{snapshotId:snap.snapshot.id,projectRoot:root});

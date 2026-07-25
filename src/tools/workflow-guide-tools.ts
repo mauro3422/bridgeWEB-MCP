@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { BridgeToolModule } from "./types.js";
 import { resolveToolPath } from "./shared/process.js";
 
+import { findExistingSkillCoverage } from "./skill-catalog-tools.js";
 const GUIDE_SCHEMA_VERSION = 1;
 const MAX_GUIDES = 200;
 const MAX_GUIDE_TEXT_CHARS = 120_000;
@@ -275,22 +276,28 @@ async function recommendGuide(args: { task: string; projectRoot?: string; maxRes
     .slice(0, args.maxResults);
 
   const pattern = reusablePattern(args.task);
+  const skillCoverage = await findExistingSkillCoverage(args.task, args.maxResults);
   const bestDomainGuide = ranked.find((item) => item.name !== "workflow-guide-builder") ?? null;
   const builderGuide = ranked.find((item) => item.name === "workflow-guide-builder") ?? null;
+  const bestSkill = skillCoverage.matches[0] ?? null;
   const shouldLoadExisting = Boolean(bestDomainGuide && bestDomainGuide.score >= 4);
-  const createNewRecommended = !shouldLoadExisting && pattern.detected;
+  const useExistingSkill = !shouldLoadExisting && skillCoverage.covered;
+  const createNewRecommended = !shouldLoadExisting && !useExistingSkill && pattern.detected;
 
   return {
     task: args.task,
     searchedScopes: args.projectRoot ? ["project", "global"] : ["global"],
     guideCount: guides.length,
     reusablePattern: pattern,
+    existingSkillCoverage: skillCoverage,
     matches: ranked,
     recommendation: shouldLoadExisting
-      ? { action: "load_existing", guide: bestDomainGuide?.name, builderGuide: null, reason: "A domain guide matched the task strongly." }
-      : createNewRecommended
-        ? { action: "propose_new", guide: null, builderGuide: builderGuide?.name ?? "workflow-guide-builder", reason: "The task looks repeatable but no domain guide matched strongly." }
-        : { action: "none", guide: null, builderGuide: null, reason: "No strong reusable-workflow signal or domain guide match was found." },
+      ? { action: "load_existing", guide: bestDomainGuide?.name, skill: null, builderGuide: null, reason: "A domain guide matched the task strongly." }
+      : useExistingSkill
+        ? { action: "use_existing_skill", guide: null, skill: bestSkill?.name, builderGuide: null, reason: "An existing skill already owns this reusable procedure; do not create a duplicate workflow guide." }
+        : createNewRecommended
+          ? { action: "propose_new", guide: null, skill: null, builderGuide: builderGuide?.name ?? "workflow-guide-builder", reason: "The task looks repeatable and neither a domain guide nor an existing skill covers it strongly." }
+          : { action: "none", guide: null, skill: null, builderGuide: null, reason: "No strong reusable-workflow signal, domain guide, or existing skill match was found." },
   };
 }
 
@@ -487,7 +494,7 @@ export const workflowGuideToolModule: BridgeToolModule = {
     },
     {
       name: "workflow_guide_recommend",
-      description: "Use this when a user describes a repeatable multi-step process, says it should happen every time or in future, asks for a skill/pipeline/template/hook, or when an existing reusable workflow may apply. Searches project and global guides, scores activation patterns, and recommends loading an existing guide or proposing a new one.",
+      description: "Use this when a user describes a repeatable multi-step process, says it should happen every time or in future, asks for a skill/pipeline/template/hook, or when an existing reusable workflow may apply. Searches project/global guides and the existing Codex skill catalog. Prefer a strong guide, otherwise return use_existing_skill when a skill already owns the procedure; propose a new guide only when neither covers it.",
       inputSchema: {
         type: "object",
         properties: {
