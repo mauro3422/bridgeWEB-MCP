@@ -1,8 +1,13 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { routingFixturesPath } from '@mauroprime/mssr';
 
 const root = path.resolve(process.cwd());
+const telemetrySandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-skill-routing-telemetry-'));
+process.env.BRIDGE_MCP_METRICS_DIR = path.join(telemetrySandbox, 'metrics');
+process.env.BRIDGE_MCP_LOG_DIR = path.join(telemetrySandbox, 'logs');
+process.env.BRIDGE_MCP_MSSR_STATE = path.join(telemetrySandbox, 'metrics', 'mssr-observability-state.json');
 const fixturePath = routingFixturesPath();
 const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
 if (fixture.schemaVersion !== 1 || !Array.isArray(fixture.cases) || fixture.cases.length === 0) {
@@ -11,7 +16,16 @@ if (fixture.schemaVersion !== 1 || !Array.isArray(fixture.cases) || fixture.case
 
 const { createDefaultToolRegistry } = await import('../dist/tool-registry.js');
 const { closeRobloxMcpConnection } = await import('../dist/integrations/roblox-mcp-client.js');
+const { closeMssrObservatoryForTests } = await import('../dist/mssr-observatory.js');
+const { closeMetricsForTests } = await import('../dist/metrics.js');
 const registry = createDefaultToolRegistry();
+
+async function cleanupTelemetry() {
+  await closeRobloxMcpConnection().catch(() => {});
+  closeMssrObservatoryForTests();
+  closeMetricsForTests();
+  fs.rmSync(telemetrySandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+}
 const failures = [];
 const results = [];
 const fullIntegration = process.argv.includes('--full-integration') || process.env.BRIDGE_SKILL_ROUTING_FULL === '1';
@@ -108,7 +122,7 @@ if (audit.maintenanceRequired) failures.push(...audit.maintenanceReasons.map((re
 
 if (failures.length > 0) {
   console.error(JSON.stringify({ ok: false, fixturePath, failures, results, audit }, null, 2));
-  await closeRobloxMcpConnection();
+  await cleanupTelemetry();
   process.exit(1);
 }
 
@@ -128,12 +142,4 @@ console.log(JSON.stringify({
     paths: audit.paths,
   },
 }, null, 2));
-await closeRobloxMcpConnection();
-
-
-
-
-
-
-
-
+await cleanupTelemetry();

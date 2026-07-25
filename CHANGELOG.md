@@ -6,6 +6,7 @@
 - Added logical MSSR observability epochs: the dashboard and `scope=active` begin from a clean persisted baseline, while `scope=all` preserves legacy telemetry for comparison.
 - Added an end-to-end in-memory MCP regression proving route → required loads → replan → verification → persistence → outcome continuity, plus negative notice cases.
 - Expanded the MSSR dashboard with route→load continuity, orphan loads, active epoch, and baseline visibility.
+- Isolated the Bridge skill-routing integration suite in temporary telemetry storage so verification cannot pollute the production observability epoch.
 
 ## 0.6.14 - 2026-07-25
 
