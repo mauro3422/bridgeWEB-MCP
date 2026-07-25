@@ -97,7 +97,13 @@ export async function runShellCommand(command: string, cwd?: string, timeoutMs =
   });
 }
 
-export async function runProcess(command: string, args: string[], cwd?: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Record<string, unknown>> {
+export async function runProcess(
+  command: string,
+  args: string[],
+  cwd?: string,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  stdin?: string | Buffer,
+): Promise<Record<string, unknown>> {
   const resolvedCwd = resolveToolPath(cwd ?? process.cwd(), { access: "cwd" });
   if (!(await fileExists(resolvedCwd))) throw new Error(`cwd does not exist: ${resolvedCwd}`);
   const commandLine = [command, ...args].join(" ");
@@ -120,6 +126,7 @@ export async function runProcess(command: string, args: string[], cwd?: string, 
     }, timeoutMs);
     child.stdout?.on("data", (chunk: Buffer) => { stdout = appendBounded(stdout, chunk); });
     child.stderr?.on("data", (chunk: Buffer) => { stderr = appendBounded(stderr, chunk); });
+    if (stdin !== undefined) child.stdin?.end(stdin);
     child.on("error", (error) => finish({ command: commandLine, cwd: resolvedCwd, code: null, signal: null, timedOut, durationMs: Date.now() - startedAt, stdout, stderr, error: error.message }));
     child.on("close", (code, signal) => finish({ command: commandLine, cwd: resolvedCwd, code, signal, timedOut, durationMs: Date.now() - startedAt, stdout, stderr }));
   });
@@ -136,3 +143,4 @@ export function summarizeCommand(result: Record<string, unknown>) {
     error: result.error,
   };
 }
+

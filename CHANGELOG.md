@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.11 - 2026-07-24
+
+- Added read-only `skill_route_vocabulary`, exposing the canonical closed MSSR enums before routing metadata or fixtures are authored.
+- Fixed `git_commit_all` to stage large path sets through NUL-delimited stdin pathspecs instead of expanding every filename into the Windows argument vector.
+- Fixed `git_show_commit` and `git_compare_branches` to avoid safe-path expansion, while retaining bounded sensitive-path exclusions and an explicit degraded-filter flag when exclusions themselves exceed the safe argument budget.
+- Added a real 320-file long-path Git regression covering commit, show and branch comparison.
+- Filtered synthetic `__test_*` and legacy `metrics_regression` events from operational metrics summaries, recent calls, timelines, errors and slowest-call views.
+- Fixed Bridge skill frontmatter extraction so ordinary `name:` and `description:` fields use whitespace matching instead of requiring a literal backslash; the registry now preserves descriptions and regression-tests parser parity.
+- Made successful Bridge routing tests compact by default and reduced duplicate live-provider work to 10 adapter integration cases; MSSR remains the owner of the full 83-case semantic suite, while `--full-integration` preserves exhaustive Bridge replay when explicitly needed.
+- Expanded the generated registry to 116 tools.
+
+
 ## 0.6.10 - 2026-07-24
 
 - Integrated verified TabletWhiteboard capture integrity, origin/board validation and LAN allowlisting.
@@ -23,3 +35,6 @@
 - Added the routed `roblox-mcp-incident-recovery` procedure from the versioned MauroPrime skills repository.
 - Hardened Roblox Studio MCP discovery with explicit `healthy`, `degraded`, and `unavailable` source state, bounded retry, discovery-only cache, and nonzero live-catalog verification.
 - Hardened multi-client StudioMCP lifecycle and ownership diagnostics while preserving valid direct and Bridge-managed routes.
+
+
+

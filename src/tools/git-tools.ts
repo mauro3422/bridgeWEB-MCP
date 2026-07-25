@@ -41,6 +41,20 @@ function parseNulPaths(result: Record<string, unknown>) {
   return String(result.stdout ?? "").split("\0").filter(Boolean);
 }
 
+function nulPathspecInput(paths: string[]) {
+  return Buffer.from(`${paths.join("\0")}\0`, "utf8");
+}
+
+function exclusionPathspecs(denied: Array<{ path: string; reason: string }>) {
+  return denied.map((entry) => `:(top,literal,exclude)${entry.path}`);
+}
+
+function boundedExclusionPathspecs(denied: Array<{ path: string; reason: string }>, maxChars = 12_000) {
+  const pathspecs = exclusionPathspecs(denied);
+  const characters = pathspecs.reduce((total, item) => total + item.length + 1, 0);
+  return characters <= maxChars ? pathspecs : null;
+}
+
 function filterSensitiveRepoPaths(root: string, candidates: string[]) {
   const safe: string[] = [];
   const denied: Array<{ path: string; reason: string }> = [];
@@ -115,9 +129,17 @@ async function gitShowCommit(cwd: string | undefined, ref: string, includePatch:
   if (!includePatch) args.push("--stat", "--summary");
   if (filtered.safe.length === 0) args.push("--no-patch");
   args.push(safeRef);
-  if (filtered.safe.length > 0) args.push("--", ...filtered.safe);
+
+  const exclusions = boundedExclusionPathspecs(filtered.denied);
+  const pathFilterDegraded = filtered.denied.length > 0 && exclusions === null;
+  if (pathFilterDegraded) {
+    args.push("--no-patch");
+  } else if (exclusions && exclusions.length > 0) {
+    args.push("--", ".", ...exclusions);
+  }
+
   const result = await runProcess("git", args, root, 120_000);
-  return { ...bounded(result, maxChars), deniedPaths: filtered.denied };
+  return { ...bounded(result, maxChars), deniedPaths: filtered.denied, pathFilterDegraded };
 }
 
 async function gitCompareBranches(cwd: string | undefined, base: string, head: string, maxChars: number) {
@@ -131,10 +153,26 @@ async function gitCompareBranches(cwd: string | undefined, base: string, head: s
   ]);
   if (discovery.code !== 0) return { base: safeBase, head: safeHead, diff: bounded(discovery, maxChars), commits: bounded(commits, maxChars), deniedPaths: [] };
   const filtered = filterSensitiveRepoPaths(root, parseNulPaths(discovery));
-  const diff = filtered.safe.length > 0
-    ? await runProcess("git", ["diff", "--stat", "--summary", range, "--", ...filtered.safe], root, 120_000)
-    : emptyGitResult(`git diff --stat --summary ${range}`, root);
-  return { base: safeBase, head: safeHead, diff: bounded(diff, maxChars), commits: bounded(commits, maxChars), deniedPaths: filtered.denied };
+  const exclusions = boundedExclusionPathspecs(filtered.denied);
+  const pathFilterDegraded = filtered.denied.length > 0 && exclusions === null;
+  const diff = filtered.safe.length === 0 || pathFilterDegraded
+    ? emptyGitResult(`git diff --stat --summary ${range}`, root)
+    : await runProcess(
+      "git",
+      exclusions && exclusions.length > 0
+        ? ["diff", "--stat", "--summary", range, "--", ".", ...exclusions]
+        : ["diff", "--stat", "--summary", range],
+      root,
+      120_000,
+    );
+  return {
+    base: safeBase,
+    head: safeHead,
+    diff: bounded(diff, maxChars),
+    commits: bounded(commits, maxChars),
+    deniedPaths: filtered.denied,
+    pathFilterDegraded,
+  };
 }
 
 async function gitCreateBranch(cwd: string | undefined, name: string, startPoint: string | undefined, checkout: boolean) {
@@ -189,7 +227,13 @@ async function gitCommitAll(message: string, cwd?: string) {
   }
   if (filtered.safe.length === 0) return { committed: false, reason: "working tree clean", status: await gitStatus(root) };
 
-  const add = await runProcess("git", ["add", "-A", "--", ...filtered.safe], root, 120_000);
+  const add = await runProcess(
+    "git",
+    ["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"],
+    root,
+    120_000,
+    nulPathspecInput(filtered.safe),
+  );
   if (add.code !== 0) return { committed: false, add };
   const commit = await runProcess("git", ["commit", "-m", message], root, 120_000);
   return { committed: commit.code === 0, commit, status: await gitStatus(root) };
@@ -232,3 +276,7 @@ export const gitToolModule: BridgeToolModule = {
     git_push_current_branch: async (args) => { const p = z.object({ remote: z.string().default("origin"), branch: z.string().optional(), cwd: z.string().optional() }).parse(args); return gitPushCurrentBranch(p.remote, p.branch, p.cwd); },
   },
 };
+
+
+
+

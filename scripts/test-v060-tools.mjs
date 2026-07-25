@@ -112,10 +112,10 @@ try {
   const drainedNotices = drainBridgeNotices();
   if (drainedNotices.length !== 1 || getBridgeNoticeStatus().pendingCount !== 0) throw new Error('Bridge notice one-shot drain failed');
 
-  if (registry.tools.length !== 115) throw new Error(`expected 115 tools, got ${registry.tools.length}`);
+  if (registry.tools.length !== 116) throw new Error(`expected 116 tools, got ${registry.tools.length}`);
   if (registry.riskSummary.neutral.length !== 1 || registry.riskSummary.neutral[0] !== 'whiteboard_capture_pc_view') throw new Error(`unexpected neutral tools: ${registry.riskSummary.neutral.join(', ')}`);
   for (const moduleName of ['project','workspace','cache','workflow-guides','skill-catalog-and-roblox-proxy','roblox-studio-ops','roblox-photo-capture','notices','binary-files','images','blender','tablet-whiteboard']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
-  for (const toolName of ['project_context_load','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','skill_catalog','skill_recommend','skill_route_audit','skill_route_plan','skill_bootstrap','skill_load','bridge_notice_status','bridge_notice_drain','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_studio_list','roblox_mcp_query','roblox_mcp_action','roblox_studio_window_capture_save','roblox_screen_capture_save','roblox_photo_capture_job','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_file_attach','image_asset_save','image_character_views_prepare','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_review_bundle','blender_execute_code','blender_batch_script','blender_setup_character_references','blender_character_loop_status','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/Blender tool ${toolName}`);
+  for (const toolName of ['project_context_load','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','skill_catalog','skill_recommend','skill_route_audit','skill_route_vocabulary','skill_route_plan','skill_bootstrap','skill_load','bridge_notice_status','bridge_notice_drain','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_studio_list','roblox_mcp_query','roblox_mcp_action','roblox_studio_window_capture_save','roblox_screen_capture_save','roblox_photo_capture_job','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_file_attach','image_asset_save','image_character_views_prepare','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_review_bundle','blender_execute_code','blender_batch_script','blender_setup_character_references','blender_character_loop_status','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/Blender tool ${toolName}`);
   if (!registry.riskSummary.destructive.includes('roblox_mcp_action') || !registry.riskSummary.destructive.includes('roblox_studio_window_capture_save') || !registry.riskSummary.destructive.includes('roblox_screen_capture_save') || !registry.riskSummary.destructive.includes('roblox_photo_capture_job') || !registry.riskSummary.destructive.includes('roblox_place_save')) throw new Error('Roblox action/capture/save risk classification failed');
   if (!registry.riskSummary.readOnly.includes('bridge_notice_status') || !registry.riskSummary.readOnly.includes('bridge_notice_drain')) throw new Error('Bridge notice risk classification failed');
   const reviewTool = registry.tools.find((tool) => tool.name === 'blender_review_bundle');
@@ -127,6 +127,8 @@ try {
 
   const junctionCatalog = await call('skill_catalog', {sources:['codex-local'],maxResults:50});
   if (!junctionCatalog.skills.some((skill) => skill.name === 'linked-junction-skill')) throw new Error('skill catalog did not follow an allowed directory junction');
+  const linkedSkill = junctionCatalog.skills.find((skill) => skill.name === 'linked-junction-skill');
+  if (!linkedSkill?.description?.includes('directory junction')) throw new Error(`skill catalog lost plain-scalar frontmatter description: ${JSON.stringify(linkedSkill)}`);
   const pluginCatalog = await call('skill_catalog', {sources:['codex-plugin'],maxResults:50});
   if (!pluginCatalog.skills.some((skill) => skill.name === 'fixture-plugin-skill')) throw new Error(`skill catalog did not discover the managed plugin cache: ${JSON.stringify(pluginCatalog.warnings)}`);
 
@@ -196,6 +198,8 @@ try {
 
   const routeAudit = await call('skill_route_audit', {sources:['codex-local']});
   if (!routeAudit.ok || routeAudit.maintenanceRequired) throw new Error(`fixture routing audit failed: ${JSON.stringify({errors:routeAudit.errors,maintenance:routeAudit.maintenanceReasons})}`);
+  const routeVocabulary = await call('skill_route_vocabulary');
+  if (!routeVocabulary.actions.includes('publish') || routeVocabulary.actions.includes('commit') || !routeVocabulary.signals.includes('reusable-pattern')) throw new Error('skill route vocabulary failed');
 
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({name:'fixture-project',scripts:{build:'tsc',test:'node test.js'},devDependencies:{typescript:'1.0.0'}}, null, 2));
   fs.writeFileSync(path.join(root, 'app.txt'), 'original\n');
@@ -379,6 +383,27 @@ try {
   const restoredText = fs.readFileSync(path.join(root,'app.txt'),'utf8').replace(/\r\n/g,'\n');
   if (!restored.restored || restoredText !== 'original\n') throw new Error('git restore failed');
 
+  const largeGitRoot = path.join(root, 'large-path-repo');
+  fs.mkdirSync(largeGitRoot, {recursive:true});
+  execFileSync('git',['init','-b','main'],{cwd:largeGitRoot,stdio:'pipe'});
+  execFileSync('git',['config','user.name','Bridge Regression'],{cwd:largeGitRoot,stdio:'pipe'});
+  execFileSync('git',['config','user.email','bridge-regression@example.invalid'],{cwd:largeGitRoot,stdio:'pipe'});
+  for (let index = 0; index < 320; index += 1) {
+    const directory = path.join(largeGitRoot, `group-${String(index % 20).padStart(2,'0')}`);
+    fs.mkdirSync(directory, {recursive:true});
+    fs.writeFileSync(path.join(directory, `artifact-${String(index).padStart(4,'0')}-${'long-name-'.repeat(12)}.txt`), `row ${index}\n`);
+  }
+  const largeCommit = await call('git_commit_all',{cwd:largeGitRoot,message:'test: large path set'});
+  if (!largeCommit.committed) throw new Error(`large-path git commit failed: ${JSON.stringify(largeCommit)}`);
+  const largeShow = await call('git_show_commit',{cwd:largeGitRoot,ref:'HEAD',includePatch:false,maxChars:20000});
+  if (largeShow.code !== 0 || largeShow.error) throw new Error(`large-path git show failed: ${JSON.stringify(largeShow)}`);
+  execFileSync('git',['switch','-c','comparison'],{cwd:largeGitRoot,stdio:'pipe'});
+  fs.writeFileSync(path.join(largeGitRoot,'comparison.txt'),'comparison\n');
+  execFileSync('git',['add','comparison.txt'],{cwd:largeGitRoot,stdio:'pipe'});
+  execFileSync('git',['commit','-m','test: comparison'],{cwd:largeGitRoot,stdio:'pipe'});
+  const largeCompare = await call('git_compare_branches',{cwd:largeGitRoot,base:'main',head:'comparison',maxChars:20000});
+  if (largeCompare.diff.code !== 0 || largeCompare.diff.error) throw new Error(`large-path git compare failed: ${JSON.stringify(largeCompare)}`);
+
   const snap = await call('workspace_snapshot',{projectRoot:root,label:'integration fixture'});
   fs.writeFileSync(path.join(root,'app.txt'), 'after snapshot\n');
   fs.writeFileSync(path.join(root,'added.txt'), 'added\n');
@@ -423,4 +448,7 @@ try {
 } finally {
   fs.rmSync(sandbox,{recursive:true,force:true});
 }
+
+
+
 

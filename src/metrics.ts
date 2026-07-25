@@ -38,6 +38,7 @@ const metricsEnabled = process.env.BRIDGE_MCP_METRICS_ENABLED !== "0";
 const metricsDir = path.resolve(process.env.BRIDGE_MCP_METRICS_DIR || path.join(process.cwd(), "data"));
 const logsDir = path.resolve(process.env.BRIDGE_MCP_LOG_DIR || path.join(process.cwd(), "logs"));
 const sqlitePath = path.resolve(process.env.BRIDGE_MCP_METRICS_SQLITE || path.join(metricsDir, "bridge-metrics.sqlite"));
+const OPERATIONAL_METRIC_WHERE = "tool NOT LIKE '__test_%' AND tool <> 'metrics_regression'";
 const jsonlPath = path.resolve(process.env.BRIDGE_MCP_EVENTS_JSONL || path.join(logsDir, "bridge-events.jsonl"));
 
 let db: DatabaseSync | null | undefined;
@@ -216,6 +217,7 @@ export function getMetricsSummary(limit = 50) {
   const rows = sqlite.prepare(`
     SELECT tool, calls, ok_calls, error_calls, avg_duration_ms, max_duration_ms, last_started_at
     FROM tool_call_summary
+    WHERE ${OPERATIONAL_METRIC_WHERE}
     ORDER BY calls DESC, tool ASC
     LIMIT ?
   `).all(limit);
@@ -228,6 +230,7 @@ export function getRecentMetrics(limit = 25) {
   const rows = sqlite.prepare(`
     SELECT started_at, duration_ms, tool, ok, error, input_keys, output_chars, pid
     FROM tool_calls
+    WHERE ${OPERATIONAL_METRIC_WHERE}
     ORDER BY started_at DESC
     LIMIT ?
   `).all(limit);
@@ -240,7 +243,7 @@ export function getMetricsErrors(limit = 25) {
   const rows = sqlite.prepare(`
     SELECT started_at, duration_ms, tool, error, input_keys, output_chars, pid
     FROM tool_calls
-    WHERE ok = 0
+    WHERE ok = 0 AND ${OPERATIONAL_METRIC_WHERE}
     ORDER BY started_at DESC
     LIMIT ?
   `).all(limit);
@@ -265,11 +268,13 @@ export function getMetricsOverview() {
       ROUND(AVG(duration_ms), 2) AS avgDurationMs,
       MAX(duration_ms) AS maxDurationMs
     FROM tool_calls
+    WHERE ${OPERATIONAL_METRIC_WHERE}
   `).get() ?? { calls: 0, okCalls: 0, errorCalls: 0, avgDurationMs: 0, maxDurationMs: 0 };
 
   const slowest = sqlite.prepare(`
     SELECT started_at, duration_ms, tool, ok, error, input_keys, output_chars, pid
     FROM tool_calls
+    WHERE ${OPERATIONAL_METRIC_WHERE}
     ORDER BY duration_ms DESC
     LIMIT 10
   `).all();
@@ -283,6 +288,7 @@ export function getMetricsTimeline(limit = 500) {
   const rows = sqlite.prepare(`
     SELECT started_at, duration_ms, ok
     FROM tool_calls
+    WHERE ${OPERATIONAL_METRIC_WHERE}
     ORDER BY started_at DESC
     LIMIT ?
   `).all(limit);
@@ -312,3 +318,4 @@ export function getMetricsTimeline(limit = 500) {
 
   return { ...getMetricsStatus(), timeline };
 }
+

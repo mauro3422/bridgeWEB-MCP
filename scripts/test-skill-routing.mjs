@@ -14,7 +14,26 @@ const { closeRobloxMcpConnection } = await import('../dist/integrations/roblox-m
 const registry = createDefaultToolRegistry();
 const failures = [];
 const results = [];
-const expandedCases = fixture.cases.flatMap((testCase) => {
+const fullIntegration = process.argv.includes('--full-integration') || process.env.BRIDGE_SKILL_ROUTING_FULL === '1';
+const integrationCaseNames = new Set([
+  'skill-created-or-updated',
+  'git-change-publication-push-race',
+  'visual-reference-replication-negative-text-only',
+  'bridge-tool-authoring-positive',
+  'bridge-tool-authoring-verification',
+  'bridge-tool-authoring-continuation',
+  'bridge-tool-authoring-negative-existing-tool-use',
+  'bridge-tool-authoring-negative-one-off-command',
+]);
+const selectedCases = fullIntegration
+  ? fixture.cases
+  : fixture.cases.filter((testCase) => integrationCaseNames.has(testCase.name));
+if (!fullIntegration && selectedCases.length !== integrationCaseNames.size) {
+  const found = new Set(selectedCases.map((testCase) => testCase.name));
+  const missing = [...integrationCaseNames].filter((name) => !found.has(name));
+  throw new Error(`Bridge routing integration fixtures missing: ${missing.join(', ')}`);
+}
+const expandedCases = selectedCases.flatMap((testCase) => {
   const tasks = [testCase.task, ...(testCase.taskVariants ?? [])];
   return tasks.map((task, index) => ({
     ...testCase,
@@ -93,11 +112,15 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
+const verbose = process.argv.includes('--verbose') || process.env.BRIDGE_SKILL_ROUTING_VERBOSE === '1';
 console.log(JSON.stringify({
   ok: true,
   fixturePath,
-  cases: results.length,
-  results,
+  canonicalBaseCases: fixture.cases.length,
+  canonicalEffectiveCases: fixture.cases.reduce((total, testCase) => total + 1 + (testCase.taskVariants?.length ?? 0), 0),
+  integrationCases: results.length,
+  fullIntegration,
+  ...(verbose ? { results } : {}),
   audit: {
     ok: audit.ok,
     maintenanceRequired: audit.maintenanceRequired,
@@ -106,4 +129,11 @@ console.log(JSON.stringify({
   },
 }, null, 2));
 await closeRobloxMcpConnection();
+
+
+
+
+
+
+
 

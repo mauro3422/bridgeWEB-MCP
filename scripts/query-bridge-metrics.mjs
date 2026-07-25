@@ -14,14 +14,16 @@ if (!fs.existsSync(dbPath)) {
 }
 
 const db = new DatabaseSync(dbPath);
+const operationalWhere = "tool NOT LIKE '__test_%' AND tool <> 'metrics_regression'";
 
 if (command === "status") {
-  const row = db.prepare("SELECT COUNT(*) AS calls, MIN(started_at) AS first_started_at, MAX(started_at) AS last_started_at FROM tool_calls").get();
+  const row = db.prepare(`SELECT COUNT(*) AS calls, MIN(started_at) AS first_started_at, MAX(started_at) AS last_started_at FROM tool_calls WHERE ${operationalWhere}`).get();
   console.log(JSON.stringify({ dbPath, ...row }, null, 2));
 } else if (command === "recent") {
   const rows = db.prepare(`
     SELECT started_at, duration_ms, tool, ok, error, input_keys, output_chars, pid
     FROM tool_calls
+    WHERE ${operationalWhere}
     ORDER BY started_at DESC
     LIMIT ?
   `).all(limit);
@@ -30,7 +32,7 @@ if (command === "status") {
   const rows = db.prepare(`
     SELECT started_at, duration_ms, tool, error, input_keys, pid
     FROM tool_calls
-    WHERE ok = 0
+    WHERE ok = 0 AND ${operationalWhere}
     ORDER BY started_at DESC
     LIMIT ?
   `).all(limit);
@@ -39,6 +41,7 @@ if (command === "status") {
   const rows = db.prepare(`
     SELECT tool, calls, ok_calls, error_calls, avg_duration_ms, max_duration_ms, last_started_at
     FROM tool_call_summary
+    WHERE ${operationalWhere}
     ORDER BY calls DESC, tool ASC
     LIMIT ?
   `).all(limit);

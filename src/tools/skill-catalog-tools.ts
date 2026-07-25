@@ -63,9 +63,10 @@ function frontmatterValue(text: string, key: string): string {
   const block = text.slice(3, end);
   const lines = block.split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
-    const match = lines[index].match(new RegExp(`^${key}:\\s*(.*)$`, "i"));
-    if (!match) continue;
-    const initial = match[1].trim();
+    const prefix = `${key.toLowerCase()}:`;
+    const line = lines[index];
+    if (!line.toLowerCase().startsWith(prefix)) continue;
+    const initial = line.slice(prefix.length).trim();
     if (initial === ">" || initial === ">-" || initial === "|" || initial === "|-") {
       const collected: string[] = [];
       for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
@@ -428,6 +429,15 @@ export const skillCatalogToolModule: BridgeToolModule = {
       },
     },
     {
+      name: "skill_route_vocabulary",
+      description: "Return the canonical closed MSSR vocabulary for structured intent and workflow phase fields. Use before writing routing metadata or fixtures so domains, actions, artifacts, needs, signals, risks, stages, phases, and callers are validated before the full routing suite.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+    },
+    {
       name: "skill_route_plan",
       description: "Plan skill activation before substantial specialized work. The agent should first infer a compact structured intent from the user's request, including explicit semantic signals, even when the wording is incomplete, then call this tool. Use signal nominal only when no error, warning, uncertainty, friction, recovery need, capability gap, or reusable pattern is present. It deterministically applies routing metadata, dependencies, exclusions, workflow phases, source precedence, and completed-phase coverage. It does not expose or require chain-of-thought.",
       inputSchema: {
@@ -600,6 +610,19 @@ export const skillCatalogToolModule: BridgeToolModule = {
         sourceHealth: discovered.sourceHealth,
       };
     },
+    skill_route_vocabulary: async () => ({
+      schemaVersion: 1,
+      domains: [...SKILL_DOMAINS],
+      actions: [...SKILL_ACTIONS],
+      artifacts: [...SKILL_ARTIFACTS],
+      needs: [...SKILL_NEEDS],
+      signals: [...SKILL_SIGNALS],
+      risks: [...SKILL_RISKS],
+      stages: [...SKILL_STAGES],
+      phases: [...SKILL_PHASES],
+      callers: [...SKILL_CALLERS],
+      note: "These values are closed vocabulary. Reuse them exactly in structured intents and routing fixtures.",
+    }),
     skill_route_plan: async (args) => {
       const task = z.string().min(1).parse(args.task);
       const selectedSources = sourceFilter(args.sources);
@@ -762,3 +785,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
     },
   },
 };
+
+
+
+

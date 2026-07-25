@@ -530,11 +530,15 @@ Invoke-Check "HTTP body and session limits reject excess work" {
 
 Invoke-Check "metrics store only input keys and redact sensitive errors" {
   $nodeScript = @'
-import { beginToolMetric, finishToolMetric } from "./dist/metrics.js";
-const metric = beginToolMetric("metrics_regression", { token: "secret-value", path: "sample.txt" });
+import { beginToolMetric, finishToolMetric, getMetricsErrors, getMetricsOverview, getMetricsSummary } from "./dist/metrics.js";
+const metric = beginToolMetric("__test_metrics_regression", { token: "secret-value", path: "sample.txt" });
 if (metric.inputKeys !== "path,token") process.exit(98);
 if (JSON.stringify(metric).includes("secret-value")) process.exit(99);
 finishToolMetric(metric, false, 0, "token=abc123secret password: hunter2");
+const syntheticName = "__test_metrics_regression";
+if (getMetricsSummary(200).summary.some((row) => row.tool === syntheticName)) process.exit(100);
+if (getMetricsErrors(200).errors.some((row) => row.tool === syntheticName)) process.exit(101);
+if (getMetricsOverview().slowest.some((row) => row.tool === syntheticName)) process.exit(102);
 console.log("  OK metrics input key storage and redaction");
 '@
   $tmpScript = Join-Path (Get-Location) (".tmp-metrics-regression-" + [Guid]::NewGuid().ToString("N") + ".mjs")
@@ -547,3 +551,4 @@ console.log("  OK metrics input key storage and redaction");
 }
 
 Write-Host "[bridge-regression-test] all checks passed"
+
