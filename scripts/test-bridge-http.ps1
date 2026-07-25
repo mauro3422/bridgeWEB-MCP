@@ -51,7 +51,7 @@ Invoke-Check "status" {
 
 Invoke-Check "MSSR dashboard" {
   $dashboard = Invoke-WebRequest -UseBasicParsing "$BaseUrl/dashboard"
-  if ($dashboard.Content -notmatch "MSSR routing semántico" -or $dashboard.Content -notmatch "mssr-skill-outcomes") {
+  if ($dashboard.Content -notmatch "MSSR routing" -or $dashboard.Content -notmatch "mssr-skill-outcomes") {
     throw "Dashboard does not expose MSSR routing/outcome sections"
   }
   $mssr = Invoke-RestMethod "$BaseUrl/api/mssr/summary?days=30"

@@ -21,7 +21,7 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ## 2026-07-25 — Guía propuesta aunque existía una skill propietaria
 
-**Estado:** Corregido en source; pendiente verificación del servicio vivo tras publicación/restart.
+**Estado:** Corregido y verificado en el servicio vivo `0.6.14`.
 
 **Capa / owner:** `src/tools/workflow-guide-tools.ts` y catálogo de skills del Bridge.
 
@@ -44,7 +44,7 @@ Cuando terminemos una iteración larga registra los incidentes, bugs y fricción
 
 **Regresión:** `scripts/test-v060-tools.mjs` crea un catálogo aislado con `skill-maintenance-loop` y exige `use_existing_skill`.
 
-**Seguimiento:** verificar `project_context_load` desde el Bridge HTTP reiniciado.
+**Seguimiento:** cerrado; `project_context_load` vivo devolvió `use_existing_skill` para `skill-maintenance-loop`.
 
 ---
 
@@ -73,7 +73,7 @@ C:\dev\bridge-mcp\data\workspace-snapshots\snapshot_1785002749168_19\manifest.js
 
 **Regresión:** la suite exige readback inmediato, diff estable de un snapshot recién creado y error descriptivo para el ID legacy.
 
-**Seguimiento:** después del restart, confirmar que `workspace_snapshot` vivo devuelve el formato actual y `verified: true`.
+**Seguimiento:** cerrado; el servicio vivo creó `20260725191925_4e39507b-e51`, devolvió `verified: true` y produjo un diff estable.
 
 ---
 
@@ -90,3 +90,59 @@ C:\dev\bridge-mcp\data\workspace-snapshots\snapshot_1785002749168_19\manifest.js
 **Corrección:** lectura inmediata del fragmento, restauración explícita de los bloques afectados y compilación TypeScript antes de continuar.
 
 **Regresión procedural:** para archivos que cambiaron desde la última lectura, preferir `apply_patch` por texto exacto o volver a leer líneas antes de otro `edit_lines`; no encadenar rangos basados en numeración stale.
+
+---
+
+## 2026-07-25 — `work_begin` devolvió éxito sin ejecutar una cadena larga
+
+**Estado:** No resuelta; mitigada mediante ejecuciones individuales verificadas.
+
+**Capa / owner:** terminal persistente `work_begin` / wrapper de comandos Windows.
+
+**Síntoma:** una cadena de tres benchmarks enlazados con `&&` terminó con `exitCode: 0` en aproximadamente 27 ms, sin stdout/stderr y sin crear ninguno de los tres JSON esperados.
+
+**Evidencia mínima:**
+
+```text
+session: term_1785011567453_3
+running: false
+exitCode: 0
+duración observada: ~27 ms
+archivos validate-*.json: 0
+```
+
+**Causa:** No resuelta. No está demostrado si la cadena fue absorbida por quoting/longitud de `cmd.exe`, por el wrapper de terminal o por otra condición de transporte.
+
+**Corrección aplicada:** no se trató el `exitCode: 0` como evidencia. Se comprobó la ausencia de outputs y se ejecutó cada benchmark con `work_once` y timeout explícito.
+
+**Prueba de regresión operativa:** las tres ejecuciones individuales crearon sus JSON y devolvieron código 0 después de 21.9 s, 42.6 s y 78.7 s.
+
+**Seguimiento:** agregar una regresión que ejecute una cadena corta con `&&`, compruebe efectos por paso y haga fallar la tool cuando el comando nominalmente exitoso no alcance un output declarado.
+
+---
+
+## 2026-07-25 — Sesión persistente desapareció después de un 502
+
+**Estado:** No resuelta; lifecycle seguro respecto de procesos huérfanos.
+
+**Capa / owner:** transporte HTTP y almacenamiento de sesiones de terminal.
+
+**Síntoma:** durante un benchmark de tres repeticiones, `work_peek` devolvió primero HTTP 502 y luego `Unknown terminal session`. El output esperado no existía y el proceso `llama-bench.exe` ya no estaba activo.
+
+**Evidencia mínima:**
+
+```text
+session: term_1785011693811_4
+primer readback: 502 upstream/external service error
+segundo readback: Unknown terminal session
+output validate-e2b-q40-compact-r3.json: ausente
+llama-bench activo después del incidente: ninguno
+```
+
+**Causa:** No resuelta. No está demostrado si hubo restart del Bridge, pérdida del registro en memoria o terminación del proceso padre por fallo de transporte.
+
+**Corrección aplicada:** se conservó el log de inicio, se verificó que no hubiera proceso huérfano y se repitió la corrida con `work_once`.
+
+**Prueba de regresión operativa:** la repetición directa terminó en 21.9 s, escribió el JSON y confirmó integridad `unchanged` y cero procesos competidores.
+
+**Seguimiento:** persistir suficiente metadata de sesiones fuera de memoria para diferenciar `proceso finalizado`, `sesión expirada`, `Bridge reiniciado` y `transporte interrumpido`; incluir PID/estado final recuperable tras restart.
