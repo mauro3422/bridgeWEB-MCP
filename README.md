@@ -347,6 +347,8 @@ Endpoints locales:
 GET  http://127.0.0.1:3001/healthz
 GET  http://127.0.0.1:3001/readyz
 GET  http://127.0.0.1:3001/status
+GET  http://127.0.0.1:3001/dashboard
+GET  http://127.0.0.1:3001/api/mssr/summary?days=30
 POST http://127.0.0.1:3001/mcp
 ```
 
@@ -443,7 +445,9 @@ BRIDGE_MCP_MSSR_EVENTS_JSONL=...
 
 Las métricas generales guardan nombres de tools, duración, éxito/error, claves de input y tamaño de salida. No guardan argumentos completos.
 
-El MSSR Observatory agrega trazas correlacionadas para `route_planned`, `skill_loaded`, replans, fuentes de contexto, verificación, persistencia, resultados, fricción y correcciones del usuario. `skill_recommend`, `skill_route_plan` y `skill_bootstrap` devuelven `traceId`; debe pasarse a `skill_load` y checkpoints posteriores. No se guardan prompts crudos, transcripciones ni cadena de pensamiento: la tarea se conserva sólo como fingerprint SHA-256 y los detalles son metadata estructurada acotada.
+El MSSR Observatory agrega trazas correlacionadas para `route_planned`, `skill_loaded`, replans, fuentes de contexto, verificación, persistencia, outcomes, fricción y correcciones del usuario. `skill_recommend`, `skill_route_plan` y `skill_bootstrap` devuelven `traceId`; debe pasarse a `skill_load`, tools de dominio compatibles y checkpoints posteriores. No se guardan prompts crudos, transcripciones ni cadena de pensamiento: la tarea se conserva sólo como fingerprint SHA-256 y los detalles son metadata estructurada acotada.
+
+Cada outcome sustancial declara una sola `primarySkill`; las `supportingSkills` quedan como contribución sin duplicar la tasa de éxito. Reintentos y revisiones reutilizan el mismo trace y el resumen cuenta el último outcome. El dashboard separa routing semántico, required-load compliance, verificación/persistencia, éxito, aceptación y score por skill primaria.
 
 MSSR se consulta antes de cadenas especializadas y se replantea al cambiar de fase, ante fallos materiales, cambios de provider/schema, capabilities nuevas o fricción reusable. No se ejecuta entre cada lectura o comando exitoso de la misma fase.
 

@@ -8,6 +8,7 @@ import { getBridgeHttpConfig, SERVER_NAME, SERVER_VERSION } from "./config.js";
 import { renderDashboardHtml } from "./dashboard.js";
 import { closeRobloxMcpConnection } from "./integrations/roblox-mcp-client.js";
 import { getMetricsErrors, getMetricsOverview, getMetricsStatus, getMetricsSummary, getMetricsTimeline, getRecentMetrics } from "./metrics.js";
+import { queryMssrObservatory } from "./mssr-observatory.js";
 
 const config = getBridgeHttpConfig();
 const startedAt = new Date();
@@ -105,6 +106,11 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
 
 function getLimit(url: URL, fallback: number, max = 500): number {
   const raw = Number.parseInt(url.searchParams.get("limit") || "", 10);
+  return Number.isFinite(raw) && raw > 0 ? Math.min(raw, max) : fallback;
+}
+
+function getDays(url: URL, fallback: number, max = 365): number {
+  const raw = Number.parseInt(url.searchParams.get("days") || "", 10);
   return Number.isFinite(raw) && raw > 0 ? Math.min(raw, max) : fallback;
 }
 
@@ -412,6 +418,10 @@ async function main() {
         return;
       }
 
+      if (req.method === "GET" && url.pathname === "/api/mssr/summary") {
+        sendJson(res, 200, queryMssrObservatory({ kind: "summary", days: getDays(url, 30, 365) }) as Record<string, unknown>);
+        return;
+      }
 
       if (req.method === "GET" && url.pathname === "/api/metrics/status") {
         sendJson(res, 200, getMetricsStatus());

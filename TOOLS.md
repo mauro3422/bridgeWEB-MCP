@@ -4361,6 +4361,17 @@ Run one resilient Roblox Photo Rig capture job from an existing photo-plan. The 
     "jobId": {
       "type": "string",
       "description": "Optional explicit job id for reproducible tests."
+    },
+    "traceId": {
+      "type": "string",
+      "description": "MSSR trace id. When provided, the verified manifest records a primary outcome for roblox-photo-rig-capture."
+    },
+    "supportingSkills": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 24
     }
   },
   "required": [
@@ -5057,6 +5068,45 @@ Record one bounded MSSR trace checkpoint after a phase, verification, persistenc
     },
     "skillName": {
       "type": "string"
+    },
+    "primarySkill": {
+      "type": "string",
+      "description": "Single skill primarily accountable for this task outcome."
+    },
+    "supportingSkills": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 24
+    },
+    "metricName": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "accepted": {
+      "type": "boolean"
+    },
+    "evidenceKind": {
+      "type": "string",
+      "enum": [
+        "manifest",
+        "tests",
+        "runtime",
+        "user-confirmation",
+        "manual-review",
+        "mixed",
+        "other"
+      ]
+    },
+    "evidenceRef": {
+      "type": "string",
+      "maxLength": 300
     },
     "status": {
       "type": "string",

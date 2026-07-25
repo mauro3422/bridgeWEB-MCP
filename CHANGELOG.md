@@ -6,6 +6,9 @@
 - Workspace snapshots publish their manifest atomically, read it back before reporting success and return actionable diagnostics for missing or legacy snapshot ids from older live Bridge versions.
 - Added a canonical Bridge incident ledger and close-phase server instructions that preserve observable symptom/evidence/cause/correction/regression/follow-up without storing chain-of-thought.
 - Added isolated regressions for skill-owned guide requests, verified snapshot readback, immediate stable diff and legacy-id lifecycle guidance.
+- MSSR outcomes now attribute one latest effective result per trace to a single primary skill, retain supporting-skill contributions without duplicate success credit, and expose status, acceptance, normalized scores, evidence kind/reference, and per-skill aggregates.
+- The local dashboard now separates structured routing, required-load compliance, outcome success, artifact acceptance, average score, and per-primary-skill results.
+- `roblox_photo_capture_job` can carry the MSSR trace and records a preliminary Photo Rig technical outcome from the authoritative capture manifest; final visual review may replace it on the same trace.
 
 
 ## 0.6.13 - 2026-07-25

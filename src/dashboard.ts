@@ -61,6 +61,9 @@ const fmt = new Intl.NumberFormat('es-AR');
 const shortTime = (iso) => iso ? new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-';
 const num = (v) => fmt.format(Number(v || 0));
 const ms = (v) => num(Math.round(Number(v || 0))) + ' ms';
+const pct = (v) => v === null || v === undefined ? '-' : Number(v).toLocaleString('es-AR', { maximumFractionDigits: 1 }) + '%';
+const score = (v) => v === null || v === undefined ? '-' : Number(v).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const esc = (v) => String(v ?? '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 async function getJson(url) {
   const res = await fetch(url, { cache: 'no-store' });
   if (!res.ok) throw new Error(url + ' -> HTTP ' + res.status);
@@ -79,6 +82,10 @@ function timelineBars(rows) {
   const max = Math.max(1, ...rows.map(r => Number(r.calls || 0)));
   return rows.map(r => '<div class="tick ' + (Number(r.errors || 0) > 0 ? 'error' : '') + '" title="' + shortTime(r.bucket) + ' · calls ' + r.calls + ' · errors ' + r.errors + '" style="height:' + Math.max(6, (Number(r.calls || 0) / max) * 100) + '%"></div>').join('');
 }
+function skillOutcomeRows(rows) {
+  if (!rows.length) return '<tr><td colspan="6" class="muted">todavía no hay outcomes atribuidos</td></tr>';
+  return rows.map(r => '<tr><td><code>' + esc(r.name) + '</code></td><td>' + num(r.outcomes) + '</td><td>' + pct(r.successRate) + '</td><td>' + pct(r.acceptanceRate) + '</td><td>' + score(r.averageScore) + '</td><td class="muted small">' + num(r.success) + ' ok · ' + num(r.partial) + ' parcial · ' + num(r.failed) + ' fallo</td></tr>').join('');
+}
 `;
 
 export function renderDashboardHtml() {
@@ -96,10 +103,15 @@ export function renderDashboardHtml() {
     <section class="card span3"><div class="label">Errores</div><div id="total-errors" class="metric">-</div></section>
     <section class="card span3"><div class="label">Avg duration</div><div id="avg-duration" class="metric">-</div></section>
     <section class="card span3"><div class="label">Sesiones HTTP</div><div id="sessions" class="metric">-</div><div class="muted small">anon <span id="anonymous">-</span></div></section>
+    <section class="card span3"><div class="label">MSSR routing semántico</div><div id="mssr-structured" class="metric">-</div><div class="muted small"><span id="mssr-routes">-</span> rutas</div></section>
+    <section class="card span3"><div class="label">Skills requeridas cargadas</div><div id="mssr-required" class="metric">-</div><div class="muted small"><span id="mssr-required-count">-</span></div></section>
+    <section class="card span3"><div class="label">Éxito por outcome</div><div id="mssr-success" class="metric">-</div><div class="muted small"><span id="mssr-outcomes">-</span> outcomes atribuidos</div></section>
+    <section class="card span3"><div class="label">Aceptación medida</div><div id="mssr-acceptance" class="metric">-</div><div class="muted small">score medio <span id="mssr-score">-</span></div></section>
     <section class="card span8"><div class="label">Actividad por bloques de 5 minutos</div><div id="timeline" class="timeline"></div></section>
     <section class="card span4"><div class="label">Runtime</div><p class="small"><strong>PID:</strong> <span id="pid">-</span></p><p class="small"><strong>Uptime:</strong> <span id="uptime">-</span></p><p class="small"><strong>DB:</strong> <span id="dbpath" class="muted">-</span></p><p class="small"><a href="/widget">abrir widget compacto</a></p></section>
     <section class="card span6"><div class="label">Tools más usadas</div><div id="summary-bars"></div></section>
     <section class="card span6"><div class="label">Llamadas recientes</div><table><thead><tr><th>Hora</th><th>Tool</th><th>Duración</th><th>Estado</th><th>Detalle</th></tr></thead><tbody id="recent"></tbody></table></section>
+    <section class="card span12"><div class="label">Outcomes por skill primaria · últimos 30 días</div><table><thead><tr><th>Skill</th><th>Tareas</th><th>Éxito</th><th>Aceptación</th><th>Score</th><th>Distribución</th></tr></thead><tbody id="mssr-skill-outcomes"></tbody></table></section>
     <section class="card span12"><div class="label">Errores recientes</div><table><thead><tr><th>Hora</th><th>Tool</th><th>Duración</th><th>Error</th></tr></thead><tbody id="errors"></tbody></table></section>
   </div>
 </main>
@@ -107,12 +119,18 @@ export function renderDashboardHtml() {
 ${sharedScript}
 async function refresh() {
   try {
-    const [status, overview, summary, recent, errors, timeline] = await Promise.all([
-      getJson('/status'), getJson('/api/metrics/overview'), getJson('/api/metrics/summary?limit=10'), getJson('/api/metrics/recent?limit=20'), getJson('/api/metrics/errors?limit=20'), getJson('/api/metrics/timeline?limit=500')
+    const [status, overview, summary, recent, errors, timeline, mssr] = await Promise.all([
+      getJson('/status'), getJson('/api/metrics/overview'), getJson('/api/metrics/summary?limit=10'), getJson('/api/metrics/recent?limit=20'), getJson('/api/metrics/errors?limit=20'), getJson('/api/metrics/timeline?limit=500'), getJson('/api/mssr/summary?days=30')
     ]);
     okDot('ready-dot', status.ready); setText('ready-text', status.ready ? 'ready' : 'not ready');
     setText('sessions', num(status.sessions)); setText('anonymous', num(status.anonymousTransports)); setText('pid', status.pid); setText('uptime', num(status.uptimeSeconds) + 's');
     setText('total-calls', num(overview.totals.calls)); setText('total-errors', num(overview.totals.errorCalls)); setText('avg-duration', ms(overview.totals.avgDurationMs)); setText('dbpath', overview.sqlitePath || '-');
+    const mb = mssr.benchmark || {};
+    setText('mssr-structured', pct(mb.structuredRouteRate)); setText('mssr-routes', num(mb.routeEvents));
+    setText('mssr-required', pct(mb.requiredLoadCompliance)); setText('mssr-required-count', num(mb.requiredSkillLoadsSatisfied) + ' / ' + num(mb.requiredSkillLoadsExpected));
+    setText('mssr-success', pct(mb.outcomeSuccessRate)); setText('mssr-outcomes', num(mb.attributedOutcomeTraces));
+    setText('mssr-acceptance', pct(mb.outcomeAcceptanceRate)); setText('mssr-score', score(mb.averageOutcomeScore));
+    document.getElementById('mssr-skill-outcomes').innerHTML = skillOutcomeRows(mssr.top?.skillOutcomes || []);
     document.getElementById('summary-bars').innerHTML = barRows(summary.summary || []);
     document.getElementById('recent').innerHTML = recentRows(recent.recent || []);
     document.getElementById('errors').innerHTML = (errors.errors || []).map(r => '<tr><td>' + shortTime(r.started_at) + '</td><td><code>' + r.tool + '</code></td><td>' + ms(r.duration_ms) + '</td><td class="muted small">' + (r.error || '-') + '</td></tr>').join('') || '<tr><td colspan="4" class="muted">sin errores registrados</td></tr>';
@@ -125,4 +143,3 @@ refresh(); setInterval(refresh, 5000);
 </script>
 `, false);
 }
-

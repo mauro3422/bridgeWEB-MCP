@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   MSSR_CHECKPOINT_TYPES,
   MSSR_CONTEXT_SOURCES,
+  MSSR_OUTCOME_EVIDENCE_KINDS,
   queryMssrObservatory,
   recordMssrCheckpoint,
 } from "../mssr-observatory.js";
@@ -39,6 +40,13 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
           caller: { type: "string", enum: ["codex-local", "chatgpt-web", "other"] },
           stage: { type: "string", enum: SKILL_STAGES },
           skillName: { type: "string" },
+          primarySkill: { type: "string", description: "Single skill primarily accountable for this task outcome." },
+          supportingSkills: { type: "array", items: { type: "string" }, maxItems: 24 },
+          metricName: { type: "string", maxLength: 120 },
+          score: { type: "number", minimum: 0, maximum: 1 },
+          accepted: { type: "boolean" },
+          evidenceKind: { type: "string", enum: MSSR_OUTCOME_EVIDENCE_KINDS },
+          evidenceRef: { type: "string", maxLength: 300 },
           status: { type: "string", enum: checkpointStatuses },
           completedPhases: { type: "array", items: { type: "string", enum: SKILL_PHASES }, maxItems: 6 },
           contextSources: { type: "array", items: { type: "string", enum: MSSR_CONTEXT_SOURCES }, maxItems: 8 },
@@ -70,6 +78,13 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
         caller: z.enum(["codex-local", "chatgpt-web", "other"]).optional(),
         stage: z.enum(SKILL_STAGES).optional(),
         skillName: z.string().max(160).optional(),
+        primarySkill: z.string().max(160).optional(),
+        supportingSkills: z.array(z.string().max(160)).max(24).optional(),
+        metricName: z.string().max(120).optional(),
+        score: z.number().min(0).max(1).optional(),
+        accepted: z.boolean().optional(),
+        evidenceKind: z.enum(MSSR_OUTCOME_EVIDENCE_KINDS).optional(),
+        evidenceRef: z.string().max(300).optional(),
         status: z.enum(checkpointStatuses).optional(),
         completedPhases: z.array(z.enum(SKILL_PHASES)).max(6).optional(),
         contextSources: z.array(z.enum(MSSR_CONTEXT_SOURCES)).max(8).optional(),
@@ -79,6 +94,12 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
         signals: z.array(z.enum(SKILL_SIGNALS)).max(20).optional(),
         summary: z.string().max(300).optional(),
       }).parse(args);
+      if (parsed.eventType === "outcome" && !(parsed.primarySkill || parsed.skillName)) {
+        throw new Error("Outcome checkpoints require primarySkill so metrics have one accountable owner.");
+      }
+      if (parsed.eventType === "outcome" && !parsed.status) {
+        throw new Error("Outcome checkpoints require status.");
+      }
       const event = recordMssrCheckpoint(parsed);
       return {
         recorded: true,

@@ -49,6 +49,18 @@ Invoke-Check "status" {
   Write-Host "  OK $($status.server.name) $($status.server.version) pid=$($status.pid) uptime=$($status.uptimeSeconds)s sessions=$($status.sessions) active=$($status.activeSessions)"
 }
 
+Invoke-Check "MSSR dashboard" {
+  $dashboard = Invoke-WebRequest -UseBasicParsing "$BaseUrl/dashboard"
+  if ($dashboard.Content -notmatch "MSSR routing semántico" -or $dashboard.Content -notmatch "mssr-skill-outcomes") {
+    throw "Dashboard does not expose MSSR routing/outcome sections"
+  }
+  $mssr = Invoke-RestMethod "$BaseUrl/api/mssr/summary?days=30"
+  if ($null -eq $mssr.benchmark -or $null -eq $mssr.top.skillOutcomes) {
+    throw "MSSR summary endpoint is missing benchmark or per-skill outcomes"
+  }
+  Write-Host "  OK routes=$($mssr.benchmark.routeEvents) outcomes=$($mssr.benchmark.attributedOutcomeTraces)"
+}
+
 Invoke-Check "mcp session lifecycle" {
   $baselineSessions = [int](Invoke-RestMethod "$BaseUrl/status").sessions
   $sessionId = $null

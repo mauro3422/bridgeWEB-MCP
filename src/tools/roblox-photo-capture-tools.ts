@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
+import { recordMssrCheckpoint } from "../mssr-observatory.js";
 import { resolveToolPath, runProcess, summarizeCommand } from "./shared/process.js";
 import type { BridgeToolModule } from "./types.js";
 
@@ -130,6 +131,8 @@ export const robloxPhotoCaptureToolModule: BridgeToolModule = {
           overwrite: { type: "boolean", default: false },
           simulateFirstFailure: { type: "string", description: "Optional capture id used only to verify per-shot retry behavior." },
           jobId: { type: "string", description: "Optional explicit job id for reproducible tests." },
+          traceId: { type: "string", description: "MSSR trace id. When provided, the verified manifest records a primary outcome for roblox-photo-rig-capture." },
+          supportingSkills: { type: "array", items: { type: "string" }, maxItems: 24 },
         },
         required: ["projectRoot", "planPath"],
         additionalProperties: false,
@@ -147,6 +150,8 @@ export const robloxPhotoCaptureToolModule: BridgeToolModule = {
         overwrite: z.boolean().default(false),
         simulateFirstFailure: z.string().min(1).optional(),
         jobId: z.string().min(1).optional(),
+        traceId: z.string().regex(/^[A-Za-z0-9._:-]{6,128}$/).optional(),
+        supportingSkills: z.array(z.string().max(160)).max(24).default([]),
       }).parse(args);
 
       const projectRoot = resolveToolPath(parsed.projectRoot, { access: "cwd" });
@@ -188,19 +193,73 @@ export const robloxPhotoCaptureToolModule: BridgeToolModule = {
       const manifest = await readJson(resultPath) as CaptureManifest;
       if (manifest.schemaVersion !== 2) throw new Error(`Expected capture manifest schemaVersion 2 at ${resultPath}.`);
 
+      const capturedCount = Math.max(0, Number(manifest.capturedCount || 0));
+      const failedCount = Math.max(0, Number(manifest.failedCount || 0));
+      const measuredCount = capturedCount + failedCount;
+      const ok = manifest.technicalStatus === "complete" && manifest.status !== "rejected";
+      const outcomeStatus: "success" | "partial" | "failed" = ok
+        ? "success"
+        : manifest.technicalStatus === "failed" || capturedCount === 0
+          ? "failed"
+          : "partial";
+      const technicalScore = measuredCount > 0 ? capturedCount / measuredCount : ok ? 1 : 0;
+      const notices = captureNotices(manifest, commandSummary);
+      const outcomeEvent = parsed.traceId
+        ? recordMssrCheckpoint({
+          traceId: parsed.traceId,
+          eventType: "outcome",
+          caller: "chatgpt-web",
+          stage: "close",
+          primarySkill: "roblox-photo-rig-capture",
+          supportingSkills: parsed.supportingSkills,
+          status: outcomeStatus,
+          metricName: "photo-capture-technical-acceptance",
+          score: technicalScore,
+          accepted: ok,
+          evidenceKind: "manifest",
+          evidenceRef: resultPath,
+          verificationPassed: ok,
+          summary: `Photo Rig manifest: technicalStatus=${String(manifest.technicalStatus)}, status=${String(manifest.status)}, captured=${capturedCount}, failed=${failedCount}.`,
+        })
+        : null;
+      if (!parsed.traceId) {
+        notices.push({
+          severity: "warning",
+          code: "photo-rig-mssr-trace-missing",
+          source: "roblox_photo_capture_job",
+          message: "La captura terminó sin traceId MSSR; el resultado técnico no pudo atribuirse automáticamente a la skill primaria.",
+          details: { primarySkill: "roblox-photo-rig-capture", resultPath },
+          dedupeKey: `photo-rig-mssr-trace-missing:${String(manifest.jobId || resultPath)}`,
+        });
+      }
+
       return {
-        ok: manifest.technicalStatus === "complete" && manifest.status !== "rejected",
+        ok,
         projectRoot,
         planPath,
         resultPath,
         command: commandSummary,
         manifest,
+        mssrOutcome: {
+          recorded: Boolean(outcomeEvent),
+          traceId: parsed.traceId ?? null,
+          eventId: outcomeEvent?.id ?? null,
+          primarySkill: "roblox-photo-rig-capture",
+          supportingSkills: parsed.supportingSkills,
+          status: outcomeStatus,
+          metricName: "photo-capture-technical-acceptance",
+          score: technicalScore,
+          accepted: ok,
+          evidenceKind: "manifest",
+          evidenceRef: resultPath,
+          supersedableByFinalReview: true,
+        },
         fallback: {
           used: false,
           availableTool: "roblox_studio_window_capture_save",
           policy: "explicit-only; never invoked automatically because it can steal Windows focus",
         },
-        __bridgeNotices: captureNotices(manifest, commandSummary),
+        __bridgeNotices: notices,
       };
     },
   },

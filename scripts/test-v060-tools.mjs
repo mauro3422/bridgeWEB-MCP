@@ -180,6 +180,16 @@ try {
   const observatoryStatus = await call('mssr_observatory_query', {kind:'status'});
   if (!observatoryStatus.enabled || !observatoryStatus.privacy || observatoryStatus.privacy.rawPromptsStored !== false) throw new Error('MSSR observatory privacy/status failed');
 
+  await call('mssr_trace_record', {traceId:'fixture-outcome-trace',eventType:'outcome',caller:'chatgpt-web',stage:'close',primarySkill:'roblox-photo-rig-capture',supportingSkills:['systematic-debugging','mssr-agent-routing'],status:'failed',metricName:'artifact-acceptance',score:0.2,accepted:false,evidenceKind:'manifest',evidenceRef:'fixture/results.json',summary:'Initial capture rejected.'});
+  await call('mssr_trace_record', {traceId:'fixture-outcome-trace',eventType:'outcome',caller:'chatgpt-web',stage:'close',primarySkill:'roblox-photo-rig-capture',supportingSkills:['systematic-debugging'],status:'success',metricName:'artifact-acceptance',score:0.9,accepted:true,evidenceKind:'mixed',evidenceRef:'fixture/results.json',summary:'Verified capture accepted.'});
+  const outcomeTrace = await call('mssr_observatory_query', {kind:'trace',traceId:'fixture-outcome-trace',limit:10});
+  const latestOutcome = outcomeTrace.trace.at(-1);
+  if (latestOutcome?.skillName !== 'roblox-photo-rig-capture' || latestOutcome?.details?.accepted !== true || latestOutcome?.details?.score !== 0.9) throw new Error('MSSR primary outcome attribution failed');
+  const outcomeSummary = await call('mssr_observatory_query', {kind:'summary',days:30});
+  const photoOutcome = outcomeSummary.top?.skillOutcomes?.find((item) => item.name === 'roblox-photo-rig-capture');
+  if (!photoOutcome || photoOutcome.outcomes !== 1 || photoOutcome.successRate !== 100 || photoOutcome.acceptanceRate !== 100 || photoOutcome.averageScore !== 0.9) throw new Error('MSSR per-skill outcome metrics or latest-outcome dedupe failed');
+  if (!outcomeSummary.top?.outcomeSupportingSkills?.some((item) => item.name === 'systematic-debugging' && item.count === 1)) throw new Error('MSSR supporting-skill contribution metric failed');
+
   const callerRoute = await call('skill_route_plan', {
     task:'Revisar un proyecto local desde Codex',
     caller:'codex-local',

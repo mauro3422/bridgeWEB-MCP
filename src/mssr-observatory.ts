@@ -30,6 +30,16 @@ export const MSSR_CHECKPOINT_TYPES = [
   "replan",
 ] as const;
 
+export const MSSR_OUTCOME_EVIDENCE_KINDS = [
+  "manifest",
+  "tests",
+  "runtime",
+  "user-confirmation",
+  "manual-review",
+  "mixed",
+  "other",
+] as const;
+
 export const MSSR_CONTEXT_SOURCES = [
   "current-conversation",
   "personal-context",
@@ -43,6 +53,7 @@ export const MSSR_CONTEXT_SOURCES = [
 
 export type MssrCheckpointType = typeof MSSR_CHECKPOINT_TYPES[number];
 export type MssrContextSource = typeof MSSR_CONTEXT_SOURCES[number];
+export type MssrOutcomeEvidenceKind = typeof MSSR_OUTCOME_EVIDENCE_KINDS[number];
 
 type MssrEventInput = {
   traceId: string;
@@ -309,6 +320,13 @@ export function recordMssrCheckpoint(args: {
   caller?: string;
   stage?: string;
   skillName?: string;
+  primarySkill?: string;
+  supportingSkills?: string[];
+  metricName?: string;
+  score?: number;
+  accepted?: boolean;
+  evidenceKind?: MssrOutcomeEvidenceKind;
+  evidenceRef?: string;
   status?: "success" | "partial" | "failed" | "skipped";
   completedPhases?: string[];
   contextSources?: MssrContextSource[];
@@ -319,12 +337,17 @@ export function recordMssrCheckpoint(args: {
   signals?: string[];
 }): MssrStoredEvent {
   const ok = args.status === undefined ? undefined : args.status === "success";
+  const primarySkill = args.primarySkill ?? args.skillName;
+  const supportingSkills = [...new Set((args.supportingSkills ?? []).filter((name) => name && name !== primarySkill))].slice(0, 24);
+  const score = typeof args.score === "number" && Number.isFinite(args.score)
+    ? Math.max(0, Math.min(1, args.score))
+    : undefined;
   return recordMssrEvent({
     traceId: args.traceId,
     eventType: args.eventType,
     caller: args.caller,
     stage: args.stage,
-    skillName: args.skillName,
+    skillName: primarySkill,
     ok,
     details: {
       status: args.status,
@@ -333,6 +356,13 @@ export function recordMssrCheckpoint(args: {
       userCorrections: args.userCorrections ?? 0,
       verificationPassed: args.verificationPassed,
       persisted: args.persisted,
+      primarySkill,
+      supportingSkills,
+      metricName: args.metricName ? redactText(args.metricName, 120) : undefined,
+      score,
+      accepted: args.accepted,
+      evidenceKind: args.evidenceKind,
+      evidenceRef: args.evidenceRef ? redactText(args.evidenceRef, 300) : undefined,
       summary: args.summary ? redactText(args.summary, 300) : undefined,
       signals: args.signals ?? [],
     },
@@ -440,7 +470,71 @@ function summary(days: number) {
 
   const verificationTraces = new Set(events.filter((event) => event.eventType === "verification" && (event.ok === true || event.details.verificationPassed === true)).map((event) => event.traceId));
   const persistenceTraces = new Set(events.filter((event) => event.eventType === "persistence" && (event.ok === true || event.details.persisted === true)).map((event) => event.traceId));
-  const outcomeTraces = new Set(events.filter((event) => event.eventType === "outcome").map((event) => event.traceId));
+  const outcomeEvents = events.filter((event) => event.eventType === "outcome");
+  const latestOutcomeByTrace = new Map<string, MssrStoredEvent>();
+  for (const event of outcomeEvents) latestOutcomeByTrace.set(event.traceId, event);
+  const latestOutcomes = [...latestOutcomeByTrace.values()];
+  const outcomeTraces = new Set(latestOutcomes.map((event) => event.traceId));
+  const primaryOutcomeEvents = latestOutcomes.filter((event) => Boolean(event.skillName));
+  const measuredAcceptanceOutcomes = primaryOutcomeEvents.filter((event) => typeof event.details.accepted === "boolean");
+  const acceptedOutcomes = measuredAcceptanceOutcomes.filter((event) => event.details.accepted === true);
+  const successfulOutcomes = primaryOutcomeEvents.filter((event) => event.details.status === "success" || event.ok === true);
+  const scoredOutcomes = primaryOutcomeEvents.filter((event) => typeof event.details.score === "number");
+  const outcomeSupportingSkills: string[] = [];
+  const outcomeBySkill = new Map<string, {
+    outcomes: number;
+    success: number;
+    partial: number;
+    failed: number;
+    accepted: number;
+    acceptanceMeasured: number;
+    scoreTotal: number;
+    scoreCount: number;
+  }>();
+  for (const event of primaryOutcomeEvents) {
+    const skill = String(event.skillName);
+    const current = outcomeBySkill.get(skill) ?? {
+      outcomes: 0,
+      success: 0,
+      partial: 0,
+      failed: 0,
+      accepted: 0,
+      acceptanceMeasured: 0,
+      scoreTotal: 0,
+      scoreCount: 0,
+    };
+    current.outcomes += 1;
+    const status = String(event.details.status ?? (event.ok === true ? "success" : event.ok === false ? "failed" : "unknown"));
+    if (status === "success") current.success += 1;
+    else if (status === "partial") current.partial += 1;
+    else if (status === "failed") current.failed += 1;
+    if (typeof event.details.accepted === "boolean") {
+      current.acceptanceMeasured += 1;
+      if (event.details.accepted === true) current.accepted += 1;
+    }
+    if (typeof event.details.score === "number") {
+      current.scoreTotal += event.details.score;
+      current.scoreCount += 1;
+    }
+    if (Array.isArray(event.details.supportingSkills)) {
+      outcomeSupportingSkills.push(...event.details.supportingSkills.filter((item): item is string => typeof item === "string"));
+    }
+    outcomeBySkill.set(skill, current);
+  }
+  const skillOutcomes = [...outcomeBySkill.entries()]
+    .map(([name, value]) => ({
+      name,
+      outcomes: value.outcomes,
+      successRate: rate(value.success, value.outcomes),
+      success: value.success,
+      partial: value.partial,
+      failed: value.failed,
+      acceptanceRate: rate(value.accepted, value.acceptanceMeasured),
+      accepted: value.accepted,
+      acceptanceMeasured: value.acceptanceMeasured,
+      averageScore: value.scoreCount > 0 ? Math.round((value.scoreTotal / value.scoreCount) * 10_000) / 10_000 : null,
+    }))
+    .sort((a, b) => b.outcomes - a.outcomes || a.name.localeCompare(b.name));
   const contextSources = events.flatMap((event) => Array.isArray(event.details.contextSources) ? event.details.contextSources.filter((item): item is string => typeof item === "string") : []);
   const userCorrections = events.reduce((total, event) => total + (typeof event.details.userCorrections === "number" ? event.details.userCorrections : 0), 0);
   const structuredRoutes = routes.filter((event) => event.classificationMode === "structured-semantic").length;
@@ -473,11 +567,24 @@ function summary(days: number) {
       persistenceCoverage: rate(persistenceTraces.size, traceIdsWithRoutes.size),
       outcomeTraces: outcomeTraces.size,
       outcomeCoverage: rate(outcomeTraces.size, traceIdsWithRoutes.size),
+      attributedOutcomeTraces: primaryOutcomeEvents.length,
+      outcomeAttributionCoverage: rate(primaryOutcomeEvents.length, latestOutcomes.length),
+      successfulOutcomeTraces: successfulOutcomes.length,
+      outcomeSuccessRate: rate(successfulOutcomes.length, primaryOutcomeEvents.length),
+      acceptedOutcomeTraces: acceptedOutcomes.length,
+      measuredAcceptanceOutcomeTraces: measuredAcceptanceOutcomes.length,
+      outcomeAcceptanceRate: rate(acceptedOutcomes.length, measuredAcceptanceOutcomes.length),
+      scoredOutcomeTraces: scoredOutcomes.length,
+      averageOutcomeScore: scoredOutcomes.length > 0
+        ? Math.round((scoredOutcomes.reduce((total, event) => total + Number(event.details.score), 0) / scoredOutcomes.length) * 10_000) / 10_000
+        : null,
       userCorrections,
     },
     top: {
       selectedSkills: topCounts(selectedSkillNames),
       loadedSkills: topCounts(successfulLoads.flatMap((event) => event.skillName ? [event.skillName] : [])),
+      skillOutcomes,
+      outcomeSupportingSkills: topCounts(outcomeSupportingSkills),
       callers: topCounts(routes.flatMap((event) => event.caller ? [event.caller] : [])),
       stages: topCounts(routes.flatMap((event) => event.stage ? [event.stage] : [])),
       contextSources: topCounts(contextSources),
