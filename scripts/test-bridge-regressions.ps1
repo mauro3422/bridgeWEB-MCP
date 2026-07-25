@@ -17,12 +17,17 @@ function Invoke-Check {
 
 Set-Location -LiteralPath $ProjectRoot
 
-Invoke-Check "version bump is consistent" {
+Invoke-Check "version sources are consistent" {
   $packageJson = Get-Content -LiteralPath "package.json" -Raw | ConvertFrom-Json
+  $packageLockText = Get-Content -LiteralPath "package-lock.json" -Raw
   $configText = Get-Content -LiteralPath "src\config.ts" -Raw
-  if ($packageJson.version -ne "0.6.9") { throw "package.json version is $($packageJson.version), expected 0.6.9" }
-  if ($configText -notmatch 'SERVER_VERSION = "0\.6\.9"') { throw "src/config.ts does not report SERVER_VERSION 0.6.9" }
-  Write-Host "  OK 0.6.9"
+  $expectedVersion = [string]$packageJson.version
+  if ([string]::IsNullOrWhiteSpace($expectedVersion)) { throw "package.json version is empty" }
+  $escapedVersion = [regex]::Escape($expectedVersion)
+  $lockVersionMatches = [regex]::Matches($packageLockText, ('"version"\s*:\s*"' + $escapedVersion + '"'))
+  if ($lockVersionMatches.Count -lt 2) { throw "package-lock.json does not contain both root versions for $expectedVersion" }
+  if ($configText -notmatch ('SERVER_VERSION = "' + $escapedVersion + '"')) { throw "src/config.ts does not report SERVER_VERSION $expectedVersion" }
+  Write-Host "  OK $expectedVersion"
 }
 
 Invoke-Check "tunnel admin default stays on HTTP profile port" {

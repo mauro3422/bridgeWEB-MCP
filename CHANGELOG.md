@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.10 - 2026-07-24
+
+- Integrated verified TabletWhiteboard capture integrity, origin/board validation and LAN allowlisting.
+- Added Roblox visual-capture diagnostics, notices, deterministic Photo Rig support and 115-tool generated documentation.
+- Made release consistency derive from package metadata instead of hard-coded regression versions, while keeping live-version verification as a post-restart gate.
+- Closed the skill-routing test MCP client explicitly so successful fixtures terminate without leaking an open process handle.
+
 ## 0.6.9 - 2026-07-23
 
 - Extracted the MSSR engine, routing contract, fixtures, audit and canonical documentation to the independent `C:\Dev\mssr` repository.

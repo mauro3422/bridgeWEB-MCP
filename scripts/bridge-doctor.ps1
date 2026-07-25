@@ -5,10 +5,15 @@ param(
   [int]$BridgePort = 3001,
   [string]$TunnelBaseUrl = "http://127.0.0.1:8081",
   [string]$StartupFileName = "BridgeMCP-Watchdog.cmd",
-  [string]$ExpectedServerVersion = "0.6.9"
+  [string]$ExpectedServerVersion = ""
 )
 
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($ExpectedServerVersion)) {
+  $packagePath = Join-Path $ProjectRoot "package.json"
+  $ExpectedServerVersion = [string]((Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json).version)
+}
 
 function Write-Section {
   param([string]$Title)

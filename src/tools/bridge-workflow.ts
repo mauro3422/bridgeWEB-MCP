@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { SERVER_VERSION } from "../config.js";
 import { resolveToolPath } from "./shared/path.js";
 import { z } from "zod";
 import type { BridgeToolModule } from "./types.js";
@@ -58,7 +59,7 @@ export const bridgeWorkflowToolModule: BridgeToolModule = {
         type: "object",
         properties: {
           cwd: { type: "string" },
-          expectedServerVersion: { type: "string", default: "0.6.9" },
+          expectedServerVersion: { type: "string", default: SERVER_VERSION },
           strictGit: { type: "boolean", default: false },
           timeoutMs: { type: "number", default: 180000, minimum: 30000, maximum: 600000 },
         },
@@ -70,7 +71,7 @@ export const bridgeWorkflowToolModule: BridgeToolModule = {
     bridge_verify_all: async (args) => {
       const parsed = z.object({
         cwd: z.string().optional(),
-        expectedServerVersion: z.string().default("0.6.9"),
+        expectedServerVersion: z.string().default(SERVER_VERSION),
         strictGit: z.boolean().default(false),
         timeoutMs: z.number().int().min(30000).max(600000).default(180000),
       }).parse(args);

@@ -1,10 +1,15 @@
 param(
   [string]$ProjectRoot = "C:\dev\bridge-mcp",
-  [string]$ExpectedServerVersion = "0.6.9",
+  [string]$ExpectedServerVersion = "",
   [switch]$StrictGit
 )
 
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($ExpectedServerVersion)) {
+  $packagePath = Join-Path $ProjectRoot "package.json"
+  $ExpectedServerVersion = [string]((Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json).version)
+}
 
 function Convert-ToTailText {
   param([string]$Text, [int]$MaxChars = 4000)
