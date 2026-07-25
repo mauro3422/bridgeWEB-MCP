@@ -12,6 +12,7 @@ import {
   type BridgeNoticeInput,
 } from "./notices.js";
 import { createDefaultToolRegistry } from "./tool-registry.js";
+import { createMssrTraceSessionCoordinator } from "./mssr-trace-context.js";
 
 export { SERVER_NAME, SERVER_VERSION } from "./config.js";
 export { bridgeRestartStatus } from "./tools/bridge-ops.js";
@@ -135,11 +136,13 @@ export function createBridgeServer() {
         "When the user asks you to look at, inspect, read, or review the current TabletWhiteboard view, call whiteboard_capture_pc_view so the connected PC creates a fresh viewport PNG at its exact pan and zoom and the image is attached to the result. Use whiteboard_latest_capture only when the user explicitly wants the last saved image without taking a new one.",
         "When the user asks you to write, explain, diagram, annotate, or place an existing image inside TabletWhiteboard, use whiteboard_add_text for structured prose, whiteboard_add_diagram for safe shapes, arrows, polylines and Bezier paths, whiteboard_add_svg only for sanitized SVG markup, and whiteboard_insert_image only for an existing local PNG, JPEG, or WebP. These tools write to ChatGPT's separate locked layer; do not claim an object exists until the tool confirms it.",
         "Bridge anomaly notices are delivered inside normal tool responses as bridgeNotices and are removed from the pending queue after delivery. Inspect them before continuing a long workflow.",
+        "Within one MCP session, Bridge automatically propagates the active MSSR traceId from routing into skill loads, trace checkpoints, and trace-aware domain tools. Keep explicit traceId only for cross-session resume or deliberate trace selection; treat trace mismatch, orphan load, missing required skill, and outcome-without-route notices as control evidence that may require replanning.",
         "Never claim that a guide, file, image, build, Blender scene, or other side effect exists until a tool result confirms it.",
       ].join(" "),
     },
   );
   const modularToolRegistry = createDefaultToolRegistry();
+  const mssrTraceSession = createMssrTraceSessionCoordinator(modularToolRegistry.tools);
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: modularToolRegistry.tools,
@@ -147,7 +150,9 @@ export function createBridgeServer() {
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const name = request.params.name;
-    const args = request.params.arguments ?? {};
+    const prepared = mssrTraceSession.prepare(name, (request.params.arguments ?? {}) as Record<string, unknown>);
+    for (const notice of prepared.notices) emitBridgeNotice(notice);
+    const args = prepared.args;
     const metric = beginToolMetric(name, args);
 
     const complete = (rawData: unknown, ok = true, error?: string) => {
@@ -166,7 +171,8 @@ export function createBridgeServer() {
 
     try {
       if (!modularToolRegistry.has(name)) throw new Error(`Unknown tool: ${name}`);
-      const result = await modularToolRegistry.call(name, args as Record<string, unknown>);
+      const result = await modularToolRegistry.call(name, args);
+      for (const notice of mssrTraceSession.observe(name, args, result)) emitBridgeNotice(notice);
       return complete(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

@@ -419,7 +419,11 @@ async function main() {
       }
 
       if (req.method === "GET" && url.pathname === "/api/mssr/summary") {
-        sendJson(res, 200, queryMssrObservatory({ kind: "summary", days: getDays(url, 30, 365) }) as Record<string, unknown>);
+        sendJson(res, 200, queryMssrObservatory({
+          kind: "summary",
+          days: getDays(url, 30, 365),
+          scope: url.searchParams.get("scope") === "all" ? "all" : "active",
+        }) as Record<string, unknown>);
         return;
       }
 

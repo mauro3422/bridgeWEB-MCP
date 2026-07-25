@@ -11,17 +11,19 @@ import type { BridgeToolModule } from "./types.js";
 
 const observatoryKinds = ["status", "summary", "benchmark", "recent", "trace"] as const;
 const checkpointStatuses = ["success", "partial", "failed", "skipped"] as const;
+const observatoryScopes = ["active", "all"] as const;
 
 export const mssrObservatoryToolModule: BridgeToolModule = {
   name: "mssr-observatory",
   tools: [
     {
       name: "mssr_observatory_query",
-      description: "Inspect privacy-preserving MSSR activation telemetry and benchmark route plans, skill loads, replans, verification, persistence, outcomes, context sources, and required-load compliance. Raw prompts and transcripts are not stored.",
+      description: "Inspect privacy-preserving MSSR activation telemetry for the active trace-contract epoch or preserved all-history scope. Benchmark route plans, correlated skill loads, replans, verification, persistence, outcomes, context sources, continuity, and required-load compliance. Raw prompts and transcripts are not stored.",
       inputSchema: {
         type: "object",
         properties: {
           kind: { type: "string", enum: observatoryKinds, default: "summary" },
+          scope: { type: "string", enum: observatoryScopes, default: "active", description: "active starts at the current trace-contract epoch; all includes preserved legacy telemetry." },
           traceId: { type: "string", description: "Required only for kind=trace." },
           days: { type: "number", minimum: 1, maximum: 365, default: 30 },
           limit: { type: "number", minimum: 1, maximum: 200, default: 50 },
@@ -31,7 +33,7 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
     },
     {
       name: "mssr_trace_record",
-      description: "Record one bounded MSSR trace checkpoint after a phase, verification, persistence, outcome, friction, context retrieval, or replan. Store only structured metadata and a short redacted summary, never a raw prompt or transcript.",
+      description: "Record one bounded MSSR trace checkpoint after a phase, verification, persistence, outcome, friction, context retrieval, or replan. Bridge injects the active trace within the current MCP session; provide traceId explicitly for cross-session resume. Store only structured metadata and a short redacted summary, never a raw prompt or transcript.",
       inputSchema: {
         type: "object",
         properties: {
@@ -65,6 +67,7 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
     mssr_observatory_query: (args) => {
       const parsed = z.object({
         kind: z.enum(observatoryKinds).default("summary"),
+        scope: z.enum(observatoryScopes).default("active"),
         traceId: z.string().optional(),
         days: z.number().int().min(1).max(365).default(30),
         limit: z.number().int().min(1).max(200).default(50),

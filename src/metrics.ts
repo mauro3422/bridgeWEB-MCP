@@ -13,6 +13,7 @@ type StatementSync = {
 type DatabaseSync = {
   exec: (sql: string) => void;
   prepare: (sql: string) => StatementSync;
+  close: () => void;
 };
 type SqliteModule = {
   DatabaseSync: new (filename: string) => DatabaseSync;
@@ -319,3 +320,8 @@ export function getMetricsTimeline(limit = 500) {
   return { ...getMetricsStatus(), timeline };
 }
 
+export function closeMetricsForTests(): void {
+  if (db) db.close();
+  db = undefined;
+  insertToolCall = null;
+}

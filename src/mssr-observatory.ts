@@ -4,6 +4,11 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { SERVER_NAME, SERVER_VERSION } from "./config.js";
+import {
+  getMssrObservabilityEpoch,
+  mssrObservabilityStatePath,
+  resetMssrObservabilityEpochForTests,
+} from "./mssr-observability-epoch.js";
 
 type JsonRecord = Record<string, unknown>;
 type StatementSync = {
@@ -54,6 +59,7 @@ export const MSSR_CONTEXT_SOURCES = [
 export type MssrCheckpointType = typeof MSSR_CHECKPOINT_TYPES[number];
 export type MssrContextSource = typeof MSSR_CONTEXT_SOURCES[number];
 export type MssrOutcomeEvidenceKind = typeof MSSR_OUTCOME_EVIDENCE_KINDS[number];
+export type MssrObservatoryScope = "active" | "all";
 
 type MssrEventInput = {
   traceId: string;
@@ -202,6 +208,7 @@ export function hashMssrTask(task: string): string {
 }
 
 export function recordMssrEvent(input: MssrEventInput): MssrStoredEvent {
+  const epoch = getMssrObservabilityEpoch();
   const event: MssrStoredEvent = {
     id: `${Date.now().toString(36)}-${randomUUID().slice(0, 12)}`,
     occurredAt: new Date().toISOString(),
@@ -214,7 +221,11 @@ export function recordMssrEvent(input: MssrEventInput): MssrStoredEvent {
     required: input.required,
     ok: input.ok,
     taskHash: input.taskHash,
-    details: safeDetails(input.details),
+    details: safeDetails({
+      ...(input.details ?? {}),
+      observabilityEpoch: epoch.activeEpoch,
+      contractVersion: epoch.contractVersion,
+    }),
   };
   writeJsonl(event);
   const database = getDb();
@@ -407,16 +418,38 @@ function topCounts(values: string[], limit = 12): Array<{ name: string; count: n
 
 function observatoryStatus() {
   const database = getDb();
+  const epoch = getMssrObservabilityEpoch();
   const totals = database?.prepare(`
     SELECT COUNT(*) AS events, COUNT(DISTINCT trace_id) AS traces, MAX(occurred_at) AS latest
     FROM mssr_events
     WHERE trace_id NOT LIKE '__test_%'
   `).get() ?? { events: 0, traces: 0, latest: null };
+  const activeEvents = database?.prepare(`
+    SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
+           skill_name, required, ok, task_hash, details_json
+    FROM mssr_events
+    WHERE occurred_at >= ? AND trace_id NOT LIKE '__test_%'
+    ORDER BY occurred_at ASC
+  `).all(epoch.baselineAt).map(decodeRow)
+    .filter((event) => event.details.observabilityEpoch === epoch.activeEpoch) ?? [];
+  const activeTotals = {
+    events: activeEvents.length,
+    traces: new Set(activeEvents.map((event) => event.traceId)).size,
+    latest: activeEvents.at(-1)?.occurredAt ?? null,
+  };
   return {
     enabled: observatoryEnabled,
     sqliteAvailable: Boolean(database),
     sqlitePath,
     jsonlPath,
+    observability: {
+      defaultScope: "active",
+      contractVersion: epoch.contractVersion,
+      activeEpoch: epoch.activeEpoch,
+      baselineAt: epoch.baselineAt,
+      legacyScope: epoch.legacyScope,
+      statePath: mssrObservabilityStatePath,
+    },
     privacy: {
       rawPromptsStored: false,
       transcriptsStored: false,
@@ -424,20 +457,26 @@ function observatoryStatus() {
       details: "bounded structured metadata with sensitive-key filtering",
     },
     totals,
+    activeTotals,
   };
 }
 
-function summary(days: number) {
+function summary(days: number, scope: MssrObservatoryScope) {
   const database = getDb();
-  if (!database) return { ...observatoryStatus(), days, benchmark: null, top: {} };
-  const since = new Date(Date.now() - days * 86_400_000).toISOString();
-  const events = database.prepare(`
+  const epoch = getMssrObservabilityEpoch();
+  if (!database) return { ...observatoryStatus(), scope, days, benchmark: null, top: {} };
+  const windowSince = new Date(Date.now() - days * 86_400_000).toISOString();
+  const since = scope === "active" && epoch.baselineAt > windowSince ? epoch.baselineAt : windowSince;
+  const decoded = database.prepare(`
     SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
            skill_name, required, ok, task_hash, details_json
     FROM mssr_events
     WHERE occurred_at >= ? AND trace_id NOT LIKE '__test_%'
     ORDER BY occurred_at ASC
   `).all(since).map(decodeRow);
+  const events = scope === "active"
+    ? decoded.filter((event) => event.details.observabilityEpoch === epoch.activeEpoch)
+    : decoded;
 
   const byTrace = new Map<string, MssrStoredEvent[]>();
   for (const event of events) {
@@ -542,6 +581,7 @@ function summary(days: number) {
 
   return {
     ...observatoryStatus(),
+    scope,
     days,
     since,
     eventCount: events.length,
@@ -554,12 +594,15 @@ function summary(days: number) {
       tracesWithRoute: traceIdsWithRoutes.size,
       tracesWithSuccessfulLoad: traceIdsWithLoads.size,
       routedTraceLoadCoverage: rate(routeTracesWithLoads, traceIdsWithRoutes.size),
+      skillLoadCoverage: rate(routeTracesWithLoads, traceIdsWithRoutes.size),
+      correlatedRouteLoadCoverage: rate(routeTracesWithLoads, traceIdsWithRoutes.size),
       requiredSkillLoadsExpected: expectedRequired.size,
       requiredSkillLoadsSatisfied: satisfiedRequired,
       requiredLoadCompliance: rate(satisfiedRequired, expectedRequired.size),
       loadEvents: loads.length,
       successfulLoadEvents: successfulLoads.length,
       orphanLoadEvents: orphanLoads,
+      orphanLoadRate: rate(orphanLoads, loads.length),
       replannedTraces,
       verifiedTraces: verificationTraces.size,
       verificationCoverage: rate(verificationTraces.size, traceIdsWithRoutes.size),
@@ -597,34 +640,44 @@ export function queryMssrObservatory(args: {
   traceId?: string;
   days?: number;
   limit?: number;
+  scope?: MssrObservatoryScope;
 }) {
   const kind = args.kind ?? "summary";
   const days = Math.max(1, Math.min(365, Math.trunc(args.days ?? 30)));
   const limit = Math.max(1, Math.min(200, Math.trunc(args.limit ?? 50)));
-  if (kind === "status") return observatoryStatus();
-  if (kind === "summary" || kind === "benchmark") return summary(days);
+  const scope: MssrObservatoryScope = args.scope === "all" ? "all" : "active";
+  const epoch = getMssrObservabilityEpoch();
+  if (kind === "status") return { ...observatoryStatus(), scope };
+  if (kind === "summary" || kind === "benchmark") return summary(days, scope);
   const database = getDb();
-  if (!database) return { ...observatoryStatus(), [kind]: [] };
+  if (!database) return { ...observatoryStatus(), scope, [kind]: [] };
   if (kind === "trace") {
     if (!args.traceId || !validTraceId(args.traceId)) throw new Error("traceId is required for kind=trace and must contain only letters, numbers, dot, underscore, colon, or hyphen.");
-    const trace = database.prepare(`
+    const decoded = database.prepare(`
       SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
              skill_name, required, ok, task_hash, details_json
       FROM mssr_events WHERE trace_id = ? ORDER BY occurred_at ASC LIMIT ?
     `).all(args.traceId, limit).map(decodeRow);
-    return { ...observatoryStatus(), traceId: args.traceId, trace };
+    const trace = scope === "active"
+      ? decoded.filter((event) => event.details.observabilityEpoch === epoch.activeEpoch)
+      : decoded;
+    return { ...observatoryStatus(), scope, traceId: args.traceId, trace };
   }
-  const recent = database.prepare(`
+  const decoded = database.prepare(`
     SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
            skill_name, required, ok, task_hash, details_json
     FROM mssr_events
     WHERE trace_id NOT LIKE '__test_%'
     ORDER BY occurred_at DESC LIMIT ?
-  `).all(limit).map(decodeRow);
-  return { ...observatoryStatus(), recent };
+  `).all(scope === "active" ? Math.min(1_000, limit * 10) : limit).map(decodeRow);
+  const recent = (scope === "active"
+    ? decoded.filter((event) => event.details.observabilityEpoch === epoch.activeEpoch)
+    : decoded).slice(0, limit);
+  return { ...observatoryStatus(), scope, recent };
 }
 export function closeMssrObservatoryForTests(): void {
   if (db) db.close();
   db = undefined;
   insertEvent = null;
+  resetMssrObservabilityEpochForTests();
 }

@@ -104,14 +104,15 @@ export function renderDashboardHtml() {
     <section class="card span3"><div class="label">Avg duration</div><div id="avg-duration" class="metric">-</div></section>
     <section class="card span3"><div class="label">Sesiones HTTP</div><div id="sessions" class="metric">-</div><div class="muted small">anon <span id="anonymous">-</span></div></section>
     <section class="card span3"><div class="label">MSSR routing semántico</div><div id="mssr-structured" class="metric">-</div><div class="muted small"><span id="mssr-routes">-</span> rutas</div></section>
+    <section class="card span3"><div class="label">Continuidad route → load</div><div id="mssr-continuity" class="metric">-</div><div class="muted small"><span id="mssr-orphans">-</span> cargas huérfanas</div></section>
     <section class="card span3"><div class="label">Skills requeridas cargadas</div><div id="mssr-required" class="metric">-</div><div class="muted small"><span id="mssr-required-count">-</span></div></section>
     <section class="card span3"><div class="label">Éxito por outcome</div><div id="mssr-success" class="metric">-</div><div class="muted small"><span id="mssr-outcomes">-</span> outcomes atribuidos</div></section>
     <section class="card span3"><div class="label">Aceptación medida</div><div id="mssr-acceptance" class="metric">-</div><div class="muted small">score medio <span id="mssr-score">-</span></div></section>
     <section class="card span8"><div class="label">Actividad por bloques de 5 minutos</div><div id="timeline" class="timeline"></div></section>
-    <section class="card span4"><div class="label">Runtime</div><p class="small"><strong>PID:</strong> <span id="pid">-</span></p><p class="small"><strong>Uptime:</strong> <span id="uptime">-</span></p><p class="small"><strong>DB:</strong> <span id="dbpath" class="muted">-</span></p><p class="small"><a href="/widget">abrir widget compacto</a></p></section>
+    <section class="card span4"><div class="label">Runtime</div><p class="small"><strong>PID:</strong> <span id="pid">-</span></p><p class="small"><strong>Uptime:</strong> <span id="uptime">-</span></p><p class="small"><strong>DB:</strong> <span id="dbpath" class="muted">-</span></p><p class="small"><strong>MSSR epoch:</strong> <span id="mssr-epoch" class="muted">-</span></p><p class="small"><strong>Baseline:</strong> <span id="mssr-baseline" class="muted">-</span></p><p class="small"><a href="/widget">abrir widget compacto</a></p></section>
     <section class="card span6"><div class="label">Tools más usadas</div><div id="summary-bars"></div></section>
     <section class="card span6"><div class="label">Llamadas recientes</div><table><thead><tr><th>Hora</th><th>Tool</th><th>Duración</th><th>Estado</th><th>Detalle</th></tr></thead><tbody id="recent"></tbody></table></section>
-    <section class="card span12"><div class="label">Outcomes por skill primaria · últimos 30 días</div><table><thead><tr><th>Skill</th><th>Tareas</th><th>Éxito</th><th>Aceptación</th><th>Score</th><th>Distribución</th></tr></thead><tbody id="mssr-skill-outcomes"></tbody></table></section>
+    <section class="card span12"><div class="label">Outcomes por skill primaria · época activa</div><table><thead><tr><th>Skill</th><th>Tareas</th><th>Éxito</th><th>Aceptación</th><th>Score</th><th>Distribución</th></tr></thead><tbody id="mssr-skill-outcomes"></tbody></table></section>
     <section class="card span12"><div class="label">Errores recientes</div><table><thead><tr><th>Hora</th><th>Tool</th><th>Duración</th><th>Error</th></tr></thead><tbody id="errors"></tbody></table></section>
   </div>
 </main>
@@ -120,13 +121,16 @@ ${sharedScript}
 async function refresh() {
   try {
     const [status, overview, summary, recent, errors, timeline, mssr] = await Promise.all([
-      getJson('/status'), getJson('/api/metrics/overview'), getJson('/api/metrics/summary?limit=10'), getJson('/api/metrics/recent?limit=20'), getJson('/api/metrics/errors?limit=20'), getJson('/api/metrics/timeline?limit=500'), getJson('/api/mssr/summary?days=30')
+      getJson('/status'), getJson('/api/metrics/overview'), getJson('/api/metrics/summary?limit=10'), getJson('/api/metrics/recent?limit=20'), getJson('/api/metrics/errors?limit=20'), getJson('/api/metrics/timeline?limit=500'), getJson('/api/mssr/summary?days=30&scope=active')
     ]);
     okDot('ready-dot', status.ready); setText('ready-text', status.ready ? 'ready' : 'not ready');
     setText('sessions', num(status.sessions)); setText('anonymous', num(status.anonymousTransports)); setText('pid', status.pid); setText('uptime', num(status.uptimeSeconds) + 's');
     setText('total-calls', num(overview.totals.calls)); setText('total-errors', num(overview.totals.errorCalls)); setText('avg-duration', ms(overview.totals.avgDurationMs)); setText('dbpath', overview.sqlitePath || '-');
     const mb = mssr.benchmark || {};
+    const epoch = mssr.observability || {};
+    setText('mssr-epoch', epoch.activeEpoch || '-'); setText('mssr-baseline', epoch.baselineAt ? new Date(epoch.baselineAt).toLocaleString('es-AR') : '-');
     setText('mssr-structured', pct(mb.structuredRouteRate)); setText('mssr-routes', num(mb.routeEvents));
+    setText('mssr-continuity', pct(mb.correlatedRouteLoadCoverage)); setText('mssr-orphans', num(mb.orphanLoadEvents));
     setText('mssr-required', pct(mb.requiredLoadCompliance)); setText('mssr-required-count', num(mb.requiredSkillLoadsSatisfied) + ' / ' + num(mb.requiredSkillLoadsExpected));
     setText('mssr-success', pct(mb.outcomeSuccessRate)); setText('mssr-outcomes', num(mb.attributedOutcomeTraces));
     setText('mssr-acceptance', pct(mb.outcomeAcceptanceRate)); setText('mssr-score', score(mb.averageOutcomeScore));

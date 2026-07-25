@@ -51,14 +51,19 @@ Invoke-Check "status" {
 
 Invoke-Check "MSSR dashboard" {
   $dashboard = Invoke-WebRequest -UseBasicParsing "$BaseUrl/dashboard"
-  if ($dashboard.Content -notmatch "MSSR routing" -or $dashboard.Content -notmatch "mssr-skill-outcomes") {
-    throw "Dashboard does not expose MSSR routing/outcome sections"
+  if ($dashboard.Content -notmatch "MSSR routing" -or $dashboard.Content -notmatch "Continuidad route" -or $dashboard.Content -notmatch "mssr-skill-outcomes") {
+    throw "Dashboard does not expose MSSR routing/continuity/outcome sections"
   }
-  $mssr = Invoke-RestMethod "$BaseUrl/api/mssr/summary?days=30"
+  $mssr = Invoke-RestMethod "$BaseUrl/api/mssr/summary?days=30&scope=active"
+  $all = Invoke-RestMethod "$BaseUrl/api/mssr/summary?days=30&scope=all"
   if ($null -eq $mssr.benchmark -or $null -eq $mssr.top.skillOutcomes) {
     throw "MSSR summary endpoint is missing benchmark or per-skill outcomes"
   }
-  Write-Host "  OK routes=$($mssr.benchmark.routeEvents) outcomes=$($mssr.benchmark.attributedOutcomeTraces)"
+  if ($mssr.scope -ne "active" -or $mssr.observability.contractVersion -ne "trace-contract-v1") {
+    throw "MSSR active scope or trace contract is invalid"
+  }
+  if ([int]$all.eventCount -lt [int]$mssr.eventCount) { throw "All-history scope cannot contain fewer events than active scope" }
+  Write-Host "  OK epoch=$($mssr.observability.activeEpoch) routes=$($mssr.benchmark.routeEvents) outcomes=$($mssr.benchmark.attributedOutcomeTraces) allEvents=$($all.eventCount)"
 }
 
 Invoke-Check "mcp session lifecycle" {

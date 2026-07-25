@@ -348,7 +348,7 @@ GET  http://127.0.0.1:3001/healthz
 GET  http://127.0.0.1:3001/readyz
 GET  http://127.0.0.1:3001/status
 GET  http://127.0.0.1:3001/dashboard
-GET  http://127.0.0.1:3001/api/mssr/summary?days=30
+GET  http://127.0.0.1:3001/api/mssr/summary?days=30&scope=active
 POST http://127.0.0.1:3001/mcp
 ```
 
@@ -441,15 +441,16 @@ BRIDGE_MCP_LOG_DIR=...
 BRIDGE_MCP_METRICS_SQLITE=...
 BRIDGE_MCP_EVENTS_JSONL=...
 BRIDGE_MCP_MSSR_EVENTS_JSONL=...
+BRIDGE_MCP_MSSR_STATE=...
 ```
 
 Las métricas generales guardan nombres de tools, duración, éxito/error, claves de input y tamaño de salida. No guardan argumentos completos.
 
-El MSSR Observatory agrega trazas correlacionadas para `route_planned`, `skill_loaded`, replans, fuentes de contexto, verificación, persistencia, outcomes, fricción y correcciones del usuario. `skill_recommend`, `skill_route_plan` y `skill_bootstrap` devuelven `traceId`; debe pasarse a `skill_load`, tools de dominio compatibles y checkpoints posteriores. No se guardan prompts crudos, transcripciones ni cadena de pensamiento: la tarea se conserva sólo como fingerprint SHA-256 y los detalles son metadata estructurada acotada.
+El MSSR Observatory agrega trazas correlacionadas para rutas, cargas, replans, fuentes de contexto, verificación, persistencia, outcomes, fricción y correcciones. Con `trace-contract-v1`, cada servidor/sesión MCP conserva una traza activa y la propaga automáticamente a `skill_load`, tools de dominio compatibles, `bridge_tool_query`/`bridge_tool_action` delegados y checkpoints posteriores. Un ID explícito se usa para reanudar entre sesiones o seleccionar deliberadamente una traza. Las pérdidas de continuidad producen notices acotados; no se guardan prompts crudos, transcripciones ni cadena de pensamiento.
 
-Cada outcome sustancial declara una sola `primarySkill`; las `supportingSkills` quedan como contribución sin duplicar la tasa de éxito. Reintentos y revisiones reutilizan el mismo trace y el resumen cuenta el último outcome. El dashboard separa routing semántico, required-load compliance, verificación/persistencia, éxito, aceptación y score por skill primaria.
+Cada outcome sustancial declara una sola `primarySkill`; las `supportingSkills` quedan como contribución sin duplicar éxito. Reintentos y revisiones reutilizan el mismo trace y el resumen cuenta el último outcome. El dashboard separa routing semántico, continuidad route→load, required-load compliance, verificación/persistencia, éxito, aceptación y score por skill primaria.
 
-MSSR se consulta antes de cadenas especializadas y se replantea al cambiar de fase, ante fallos materiales, cambios de provider/schema, capabilities nuevas o fricción reusable. No se ejecuta entre cada lectura o comando exitoso de la misma fase.
+La telemetría actual usa una época persistida `trace-contract-v1`. `/api/mssr/summary?scope=active` y el dashboard muestran sólo la línea base actual; `scope=all` conserva la historia anterior para comparar sin borrarla. MSSR se consulta antes de cadenas especializadas y se replantea al cambiar de fase, ante fallos materiales, cambios de provider/schema, capabilities nuevas o fricción reusable; no se ejecuta entre cada lectura o comando exitoso de la misma fase.
 
 ## Modelo de uso desde laptop
 

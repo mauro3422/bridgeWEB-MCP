@@ -4986,7 +4986,7 @@ Compact read-only bridge metrics query. Use kind=status, summary, recent, visual
 
 #### `mssr_observatory_query`
 
-Inspect privacy-preserving MSSR activation telemetry and benchmark route plans, skill loads, replans, verification, persistence, outcomes, context sources, and required-load compliance. Raw prompts and transcripts are not stored.
+Inspect privacy-preserving MSSR activation telemetry for the active trace-contract epoch or preserved all-history scope. Benchmark route plans, correlated skill loads, replans, verification, persistence, outcomes, context sources, continuity, and required-load compliance. Raw prompts and transcripts are not stored.
 
 ```json
 {
@@ -5002,6 +5002,15 @@ Inspect privacy-preserving MSSR activation telemetry and benchmark route plans, 
         "trace"
       ],
       "default": "summary"
+    },
+    "scope": {
+      "type": "string",
+      "enum": [
+        "active",
+        "all"
+      ],
+      "default": "active",
+      "description": "active starts at the current trace-contract epoch; all includes preserved legacy telemetry."
     },
     "traceId": {
       "type": "string",
@@ -5026,7 +5035,7 @@ Inspect privacy-preserving MSSR activation telemetry and benchmark route plans, 
 
 #### `mssr_trace_record`
 
-Record one bounded MSSR trace checkpoint after a phase, verification, persistence, outcome, friction, context retrieval, or replan. Store only structured metadata and a short redacted summary, never a raw prompt or transcript.
+Record one bounded MSSR trace checkpoint after a phase, verification, persistence, outcome, friction, context retrieval, or replan. Bridge injects the active trace within the current MCP session; provide traceId explicitly for cross-session resume. Store only structured metadata and a short redacted summary, never a raw prompt or transcript.
 
 ```json
 {
