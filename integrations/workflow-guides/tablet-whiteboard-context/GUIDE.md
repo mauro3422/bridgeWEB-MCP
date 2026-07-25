@@ -24,6 +24,7 @@ Recommended tools:
 - `whiteboard_capture_pc_view`
 - `whiteboard_latest_capture`
 - `whiteboard_capture_list`
+- `bridge_tool_query` as the required read-only fallback when a Whiteboard tool exists in the runtime catalog but its dedicated connector schema is not surfaced
 - `whiteboard_add_text`
 - `whiteboard_add_diagram`
 - `whiteboard_add_svg`

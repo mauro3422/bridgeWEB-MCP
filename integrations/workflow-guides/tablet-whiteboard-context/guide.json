@@ -54,6 +54,7 @@
     "whiteboard_capture_pc_view",
     "whiteboard_latest_capture",
     "whiteboard_capture_list",
+    "bridge_tool_query",
     "whiteboard_add_text",
     "whiteboard_add_diagram",
     "whiteboard_add_svg",
