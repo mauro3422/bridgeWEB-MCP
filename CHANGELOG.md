@@ -8,6 +8,7 @@
 - Made `skill_load` and `skill_bootstrap` trace-aware and record both successful and failed loads, required status, source and phase.
 - Added integration coverage for structured recommendation, trace propagation, correlated load/checkpoint lookup, privacy invariants and clean SQLite shutdown.
 - Expanded the generated registry to 122 tools.
+- Fixed fallback dispatch for neutral tools: `bridge_tool_action` now accepts explicitly confirmed neutral or destructive targets, so newly added telemetry/checkpoint tools remain usable before the connector refreshes their dedicated schemas.
 
 ## 0.6.12 - 2026-07-25
 

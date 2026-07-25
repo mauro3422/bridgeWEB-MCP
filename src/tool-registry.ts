@@ -111,7 +111,7 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
   };
   const actionTool: BridgeToolSchema = {
     name: "bridge_tool_action",
-    description: "Use this explicit destructive fallback when a runtime Bridge tool exists but its dedicated schema is missing from the current connector catalog. Delegates only to tools classified destructive and requires exact target-name confirmation.",
+    description: "Use this explicit non-read-only fallback when a runtime Bridge tool exists but its dedicated schema is missing from the current connector catalog. Delegates to neutral or destructive tools and requires exact target-name confirmation.",
     inputSchema: {
       type: "object",
       properties: {
@@ -144,8 +144,9 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
   });
   handlers.set("bridge_tool_action", async (args) => {
     const name = delegatedToolName(args.toolName);
-    if (!destructiveToolNames.has(name)) throw new Error(`Tool '${name}' is not classified destructive; use its direct schema or bridge_tool_query.`);
+    if (readOnlyToolNames.has(name)) throw new Error(`Tool '${name}' is classified read-only; use its direct schema or bridge_tool_query.`);
     if (args.confirmToolName !== name) throw new Error(`confirmToolName must exactly match '${name}'.`);
+    const classification = destructiveToolNames.has(name) ? "destructive" : "neutral";
     const handler = handlers.get(name)!;
     const delegatedResult = await handler(delegatedArguments(args.arguments));
     if (delegatedResult && typeof delegatedResult === "object" && !Array.isArray(delegatedResult)) {
@@ -153,13 +154,13 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
       const { __bridgeImages, __bridgeNotices, ...publicResult } = record;
       return {
         delegatedTool: name,
-        classification: "destructive",
+        classification,
         result: publicResult,
         ...(Array.isArray(__bridgeImages) ? { __bridgeImages } : {}),
         ...(Array.isArray(__bridgeNotices) ? { __bridgeNotices } : {}),
       };
     }
-    return { delegatedTool: name, classification: "destructive", result: delegatedResult };
+    return { delegatedTool: name, classification, result: delegatedResult };
   });
 
   return {

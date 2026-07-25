@@ -5799,7 +5799,7 @@ Use this read-only fallback when a runtime Bridge tool exists but its dedicated 
 
 #### `bridge_tool_action`
 
-Use this explicit destructive fallback when a runtime Bridge tool exists but its dedicated schema is missing from the current connector catalog. Delegates only to tools classified destructive and requires exact target-name confirmation.
+Use this explicit non-read-only fallback when a runtime Bridge tool exists but its dedicated schema is missing from the current connector catalog. Delegates to neutral or destructive tools and requires exact target-name confirmation.
 
 ```json
 {
