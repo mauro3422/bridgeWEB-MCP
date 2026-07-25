@@ -7,7 +7,7 @@ El objetivo es tener un puente local controlado por nosotros para operar filesys
 ## Estado actual
 
 ```text
-bridge-mcp v0.6.11
+bridge-mcp v0.6.12
 Mode: HTTP production-candidate
 Project root: C:\dev\bridge-mcp
 Bridge MCP: http://127.0.0.1:3001/mcp
@@ -102,11 +102,13 @@ Las guias globales viven en `integrations/workflow-guides/`. Las guias del proye
 
 ## Tools expuestas
 
-El runtime actual expone 109 tools.
+El runtime actual expone 120 tools.
 
 `blender_review_bundle` genera en una sola llamada vistas ortográficas múltiples, una hoja de contacto adjunta al resultado MCP y un manifiesto con geometría, materiales, colecciones, visibilidad, rig, acciones, diagnósticos, hashes y confirmación de restauración de la escena.
 
 `whiteboard_capture_pc_view` solicita una captura fresca al navegador de PC que está viendo TabletWhiteboard, respeta su pan/zoom actual y adjunta el PNG al resultado MCP. Como crea un archivo y un registro SQLite, se clasifica como herramienta mutante neutral, no como consulta de solo lectura. `whiteboard_latest_capture` y `whiteboard_capture_list` siguen siendo read-only.
+
+`whiteboard_add_text` crea cajas de texto estructuradas. `whiteboard_add_diagram` crea rectángulos, elipses, líneas, flechas, polylines, polígonos, etiquetas y paths SVG con curvas Bézier cuadráticas o cúbicas. `whiteboard_add_svg` acepta SVG sanitizado, y `whiteboard_insert_image` sube un PNG/JPEG/WebP local existente después de validar política de rutas, tamaño, MIME y firma. Todas escriben objetos bloqueados dentro de la capa separada de ChatGPT y conservan persistencia, undo/redo, backups, exportación y capturas.
 
 Antes de adjuntar una captura, Bridge compara el tamaño HTTP, los bytes reales, las dimensiones del IHDR y el SHA-256 con los metadatos entregados por TabletWhiteboard. Una inconsistencia cancela la operación.
 
@@ -328,7 +330,7 @@ Estado esperado:
 
 ```text
 bridge_self_check.ok = true
-server.version = 0.6.11
+server.version = 0.6.12
 tunnel.baseUrl = http://127.0.0.1:8081
 tunnel healthz = live
 tunnel readyz = ready

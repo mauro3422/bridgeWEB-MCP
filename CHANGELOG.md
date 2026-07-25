@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.12 - 2026-07-25
+
+- Added `whiteboard_add_text`, `whiteboard_add_svg`, `whiteboard_add_diagram`, and `whiteboard_insert_image` for writing into ChatGPT's separate TabletWhiteboard layer.
+- Structured diagrams support rectangles, ellipses, lines, arrows, polylines, polygons, labels, and quadratic/cubic Bézier SVG paths.
+- Existing local PNG, JPEG, and WebP files can be inserted after Bridge path-policy, size, MIME, and signature validation.
+- SVG writes are sanitized by TabletWhiteboard and reject scripts, event handlers, links, embedded resources, CSS, and unsafe SVG elements.
+- Expanded the whiteboard regression suite to verify seven tools, request payloads, Bézier preservation, image bytes, MIME, placement, and SHA-256.
 ## 0.6.11 - 2026-07-24
 
 - Added read-only `skill_route_vocabulary`, exposing the canonical closed MSSR enums before routing metadata or fixtures are authored.
@@ -35,6 +42,3 @@
 - Added the routed `roblox-mcp-incident-recovery` procedure from the versioned MauroPrime skills repository.
 - Hardened Roblox Studio MCP discovery with explicit `healthy`, `degraded`, and `unavailable` source state, bounded retry, discovery-only cache, and nonzero live-catalog verification.
 - Hardened multi-client StudioMCP lifecycle and ownership diagnostics while preserving valid direct and Bridge-managed routes.
-
-
-
