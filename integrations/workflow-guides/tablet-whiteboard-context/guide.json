@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "name": "tablet-whiteboard-context",
+  "title": "TabletWhiteboard Context and Album Review",
+  "description": "Inspect and use Mauro's TabletWhiteboard as a shared visual workspace. Resolve whether the user means the live board or a saved album capture, inspect human traces and annotations before interpreting images, use the capture dashboard deliberately, and write or diagram only after preserving the user's visual context.",
+  "activation": {
+    "keywords": [
+      "board",
+      "whiteboard",
+      "tabletwhiteboard",
+      "pizarra",
+      "trazos",
+      "anotaciones",
+      "album",
+      "álbum",
+      "captura guardada",
+      "dashboard de fotos",
+      "panorama"
+    ],
+    "phrases": [
+      "mirá la board",
+      "revisá lo que dibujé",
+      "fijate mis trazos",
+      "mirá la captura guardada",
+      "abrí el álbum de la board",
+      "usá el dashboard de la board",
+      "organizá las fotos de la board",
+      "anotá esto en la board"
+    ],
+    "negativeKeywords": [
+      "no uses la board",
+      "sin mirar la pizarra",
+      "solo texto",
+      "no tomes captura",
+      "no escribas en la board"
+    ],
+    "examples": [
+      "Mirá la board y decime qué entendés de mis flechas y círculos.",
+      "Revisá la última foto guardada del álbum, no saques otra captura.",
+      "Usá el dashboard de la board para comparar estas etapas de crecimiento.",
+      "Poné un diagrama en la board sin tapar mis trazos."
+    ]
+  },
+  "entrypoint": "GUIDE.md",
+  "phases": {
+    "resolve-intent": "phases/resolve-intent.md",
+    "acquire-context": "phases/acquire-context.md",
+    "inspect-human-layer": "phases/inspect-human-layer.md",
+    "interpret-dashboard": "phases/interpret-dashboard.md",
+    "act-on-board": "phases/act-on-board.md",
+    "verify-and-report": "phases/verify-and-report.md"
+  },
+  "recommendedTools": [
+    "whiteboard_capture_pc_view",
+    "whiteboard_latest_capture",
+    "whiteboard_capture_list",
+    "whiteboard_add_text",
+    "whiteboard_add_diagram",
+    "whiteboard_add_svg",
+    "whiteboard_insert_image",
+    "image_file_attach"
+  ],
+  "scopeNotes": "Global guide available to all projects connected through Mauro's Bridge MCP."
+}
