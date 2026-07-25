@@ -626,8 +626,8 @@ export const skillCatalogToolModule: BridgeToolModule = {
         sourceHealth: discovered.sourceHealth,
         warnings: [...discovered.warnings, ...route.warnings],
         activationInstruction: route.classificationMode === "structured-semantic"
-          ? "Use loadOrder for the active phase. Bridge automatically propagates traceId within the current MCP session; provide it explicitly only for cross-session resume or deliberate trace selection. Re-plan after a stage change, material failure, new capability need, or verification/persistence boundary."
-          : "This recommendation used lexical fallback. Before mutations, infer a compact structured intent and call skill_recommend or skill_route_plan again; Bridge will retain the active trace within this MCP session.",
+          ? "Use loadOrder for the active phase. Bridge automatically propagates traceId in-session and across stateless calls only when one compatible process-shared trace exists; provide it explicitly after restart, for ambiguous candidates, or deliberate trace selection. Re-plan after a stage change, material failure, new capability need, or verification/persistence boundary."
+          : "This recommendation used lexical fallback. Before mutations, infer a compact structured intent and call skill_recommend or skill_route_plan again; Bridge will retain or uniquely recover the active trace when safe.",
       };
     },
     skill_route_audit: async (args) => {
@@ -739,7 +739,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         sourceHealth: discovered.sourceHealth,
         warnings: [...discovered.warnings, ...route.warnings],
         activationInstruction: loaded.length > 0
-          ? "The loaded skills govern only the current phase. Bridge carries the active trace into later loads and checkpoints within this MCP session. Call skill_bootstrap again only at verify, persist, close, a material failure, or a newly discovered capability need; pass traceId explicitly only when resuming across sessions."
+          ? "The loaded skills govern only the current phase. Bridge carries the active trace in-session and uniquely recovers it across stateless calls when safe. Call skill_bootstrap again only at verify, persist, close, a material failure, or a newly discovered capability need; pass traceId explicitly after restart or when multiple candidates exist."
           : route.activationInstruction,
       };
     },

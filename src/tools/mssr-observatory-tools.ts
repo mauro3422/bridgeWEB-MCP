@@ -33,7 +33,7 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
     },
     {
       name: "mssr_trace_record",
-      description: "Record one bounded MSSR trace checkpoint after a phase, verification, persistence, outcome, friction, context retrieval, or replan. Bridge injects the active trace within the current MCP session; provide traceId explicitly for cross-session resume. Store only structured metadata and a short redacted summary, never a raw prompt or transcript.",
+      description: "Record one bounded MSSR trace checkpoint after a phase, verification, persistence, outcome, friction, context retrieval, or replan. Bridge injects the active trace from the current session or a unique compatible process-shared lease; provide traceId explicitly after restart, for cross-process resume, or when multiple candidates exist. Store only structured metadata and a short redacted summary, never a raw prompt or transcript.",
       inputSchema: {
         type: "object",
         properties: {

@@ -442,11 +442,12 @@ BRIDGE_MCP_METRICS_SQLITE=...
 BRIDGE_MCP_EVENTS_JSONL=...
 BRIDGE_MCP_MSSR_EVENTS_JSONL=...
 BRIDGE_MCP_MSSR_STATE=...
+BRIDGE_MCP_MSSR_TRACE_LEASE_MS=7200000
 ```
 
 Las métricas generales guardan nombres de tools, duración, éxito/error, claves de input y tamaño de salida. No guardan argumentos completos.
 
-El MSSR Observatory agrega trazas correlacionadas para rutas, cargas, replans, fuentes de contexto, verificación, persistencia, outcomes, fricción y correcciones. Con `trace-contract-v1`, cada servidor/sesión MCP conserva una traza activa y la propaga automáticamente a `skill_load`, tools de dominio compatibles, `bridge_tool_query`/`bridge_tool_action` delegados y checkpoints posteriores. Un ID explícito se usa para reanudar entre sesiones o seleccionar deliberadamente una traza. Las pérdidas de continuidad producen notices acotados; no se guardan prompts crudos, transcripciones ni cadena de pensamiento.
+El MSSR Observatory agrega trazas correlacionadas para rutas, cargas, replans, fuentes de contexto, verificación, persistencia, outcomes, fricción y correcciones. Con `trace-contract-v1`, Bridge propaga la traza dentro de una sesión y también entre llamadas stateless del mismo proceso cuando existe una única candidata compatible por tarea, caller o skill. Si varias trazas pueden corresponder, no adivina: emite `mssr-trace-ambiguous` y exige un ID explícito. Reinicios, reanudación entre procesos y selección histórica también requieren `traceId`. No se guardan prompts crudos, transcripciones ni cadena de pensamiento.
 
 Cada outcome sustancial declara una sola `primarySkill`; las `supportingSkills` quedan como contribución sin duplicar éxito. Reintentos y revisiones reutilizan el mismo trace y el resumen cuenta el último outcome. El dashboard separa routing semántico, continuidad route→load, required-load compliance, verificación/persistencia, éxito, aceptación y score por skill primaria.
 

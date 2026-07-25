@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Added per-MCP-session `trace-contract-v1` propagation across direct tools and generic dispatch wrappers, with automatic required-skill attribution and notices for orphan loads, missing/mismatched traces, omitted required skills, outcomes without routes, and unfinished trace replacement.
+- Added `trace-contract-v1` propagation across direct tools and generic dispatch wrappers. Bridge keeps local session continuity and a bounded process-shared lease for stateless calls, selects only a unique compatible trace, and emits `mssr-trace-ambiguous` instead of mixing concurrent agents or tasks.
 - Added logical MSSR observability epochs: the dashboard and `scope=active` begin from a clean persisted baseline, while `scope=all` preserves legacy telemetry for comparison.
 - Added an end-to-end in-memory MCP regression proving route → required loads → replan → verification → persistence → outcome continuity, plus negative notice cases.
 - Expanded the MSSR dashboard with route→load continuity, orphan loads, active epoch, and baseline visibility.

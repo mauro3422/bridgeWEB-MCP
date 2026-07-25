@@ -45,14 +45,20 @@ function payload(result) {
   return parsed;
 }
 
-async function call(client, name, args = {}) {
-  return payload(await client.callTool({ name, arguments: args }));
+traceContext.resetSharedMssrTraceRegistryForTests();
+let sessionCounter = 0;
+async function callFresh(name, args = {}) {
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const server = createBridgeServer();
+  const client = new Client({ name: `trace-contract-test-${++sessionCounter}`, version: '1.0.0' }, { capabilities: {} });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  try {
+    return payload(await client.callTool({ name, arguments: args }));
+  } finally {
+    await client.close().catch(() => {});
+    await server.close().catch(() => {});
+  }
 }
-
-const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-const server = createBridgeServer();
-const client = new Client({ name: 'trace-contract-test', version: '1.0.0' }, { capabilities: {} });
-await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
 
 const task = 'Implement and verify automatic MSSR trace propagation in the Bridge adapter.';
 const intent = {
@@ -67,7 +73,7 @@ const intent = {
 };
 
 try {
-  const route = await call(client, 'skill_route_plan', {
+  const route = await callFresh('skill_route_plan', {
     task,
     context: 'The host must automatically carry one trace through route, load, verify, persist and outcome.',
     intent,
@@ -82,13 +88,15 @@ try {
   assert.ok(required.length > 0, 'Fixture route must contain at least one required skill.');
 
   const loaded = new Set();
-  for (const name of required) {
-    const result = await call(client, 'skill_load', { name, source: 'codex' });
+  for (const [index, name] of required.entries()) {
+    const result = index === 0
+      ? (await callFresh('bridge_tool_query', { toolName: 'skill_load', arguments: { name, source: 'codex' } })).result
+      : await callFresh('skill_load', { name, source: 'codex' });
     assert.equal(result.traceId, traceId, `skill_load should inherit trace for ${name}`);
     loaded.add(name);
   }
 
-  const replan = await call(client, 'skill_route_plan', {
+  const replan = await callFresh('skill_route_plan', {
     task,
     context: 'Implementation completed; enter verification without manually copying traceId.',
     intent: { ...intent, actions: ['test', 'verify'], risk: 'read-only' },
@@ -102,12 +110,12 @@ try {
 
   for (const skill of replan.activeSkills.filter((item) => item.required)) {
     if (loaded.has(skill.name)) continue;
-    const result = await call(client, 'skill_load', { name: skill.name, source: 'codex' });
+    const result = await callFresh('skill_load', { name: skill.name, source: 'codex' });
     assert.equal(result.traceId, traceId, `verification skill should inherit trace for ${skill.name}`);
     loaded.add(skill.name);
   }
 
-  const verification = await call(client, 'mssr_trace_record', {
+  const verification = await callFresh('mssr_trace_record', {
     eventType: 'verification',
     caller: 'chatgpt-web',
     stage: 'verify',
@@ -118,7 +126,7 @@ try {
   });
   assert.equal(verification.traceId, traceId);
 
-  const persistence = await call(client, 'mssr_trace_record', {
+  const persistence = await callFresh('mssr_trace_record', {
     eventType: 'persistence',
     caller: 'chatgpt-web',
     stage: 'persist',
@@ -129,7 +137,7 @@ try {
   });
   assert.equal(persistence.traceId, traceId);
 
-  const outcome = await call(client, 'mssr_trace_record', {
+  const outcome = await callFresh('mssr_trace_record', {
     eventType: 'outcome',
     caller: 'chatgpt-web',
     stage: 'close',
@@ -146,7 +154,7 @@ try {
   });
   assert.equal(outcome.traceId, traceId);
 
-  const summary = await call(client, 'mssr_observatory_query', { kind: 'summary', scope: 'active', days: 30 });
+  const summary = await callFresh('mssr_observatory_query', { kind: 'summary', scope: 'active', days: 30 });
   assert.equal(summary.scope, 'active');
   assert.equal(summary.observability.contractVersion, 'trace-contract-v1');
   assert.match(summary.observability.activeEpoch, /^trace-contract-v1-/);
@@ -174,14 +182,14 @@ try {
   } finally {
     legacyDb.close();
   }
-  const activeAfterLegacy = await call(client, 'mssr_observatory_query', { kind: 'summary', scope: 'active', days: 30 });
-  const allAfterLegacy = await call(client, 'mssr_observatory_query', { kind: 'summary', scope: 'all', days: 30 });
+  const activeAfterLegacy = await callFresh('mssr_observatory_query', { kind: 'summary', scope: 'active', days: 30 });
+  const allAfterLegacy = await callFresh('mssr_observatory_query', { kind: 'summary', scope: 'all', days: 30 });
   assert.equal(activeAfterLegacy.eventCount, summary.eventCount, 'Legacy telemetry must not enter the active epoch.');
   assert.equal(activeAfterLegacy.activeTotals.events, summary.eventCount, 'Active totals must use exact epoch membership, not timestamp alone.');
   assert.equal(allAfterLegacy.eventCount, summary.eventCount + 1, 'All-history scope must preserve legacy telemetry.');
   assert.equal(allAfterLegacy.benchmark.routeEvents, summary.benchmark.routeEvents + 1);
 
-  const nextRoute = await call(client, 'skill_route_plan', {
+  const nextRoute = await callFresh('skill_route_plan', {
     task: 'Start a separate MSSR task after the previous outcome closed.',
     context: 'This is intentionally a new task.',
     intent,
@@ -192,6 +200,7 @@ try {
   });
   assert.notEqual(nextRoute.traceId, traceId, 'A new task after outcome must receive a new trace.');
 
+  traceContext.resetSharedMssrTraceRegistryForTests();
   const schemas = [
     { name: 'skill_route_plan', inputSchema: { type: 'object', properties: { traceId: { type: 'string' } } } },
     { name: 'skill_load', inputSchema: { type: 'object', properties: { traceId: { type: 'string' } } } },
@@ -230,6 +239,20 @@ try {
   const replacement = negative.prepare('skill_route_plan', { task: 'different unfinished task', stage: 'start' });
   assert.ok(replacement.notices.some((item) => item.code === 'mssr-active-trace-replaced-before-outcome'));
 
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const agentA = traceContext.createMssrTraceSessionCoordinator(schemas);
+  const agentB = traceContext.createMssrTraceSessionCoordinator(schemas);
+  const statelessCaller = traceContext.createMssrTraceSessionCoordinator(schemas);
+  agentA.observe('skill_route_plan', { task: 'agent A', caller: 'chatgpt-web', stage: 'implement' }, {
+    traceId: 'trace-agent-a-001', stage: 'implement', activeSkills: [{ name: 'required-skill', required: true }],
+  });
+  agentB.observe('skill_route_plan', { task: 'agent B', caller: 'chatgpt-web', stage: 'implement' }, {
+    traceId: 'trace-agent-b-001', stage: 'implement', activeSkills: [{ name: 'required-skill', required: true }],
+  });
+  const ambiguous = statelessCaller.prepare('skill_load', { name: 'required-skill' });
+  assert.equal(Object.prototype.hasOwnProperty.call(ambiguous.args, 'traceId'), false);
+  assert.ok(ambiguous.notices.some((item) => item.code === 'mssr-trace-ambiguous'));
+
   console.log(JSON.stringify({
     ok: true,
     traceId,
@@ -244,9 +267,8 @@ try {
     },
   }, null, 2));
 } finally {
-  await client.close().catch(() => {});
+  traceContext.resetSharedMssrTraceRegistryForTests();
   await robloxClient.closeRobloxMcpConnection().catch(() => {});
-  await server.close().catch(() => {});
   observatory.closeMssrObservatoryForTests();
   metrics.closeMetricsForTests();
   fs.rmSync(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
