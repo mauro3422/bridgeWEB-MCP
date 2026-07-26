@@ -377,3 +377,65 @@ secciones `mssr-agent-activation` y `mssr-agent-results`.
 **Seguimiento:** Medir por separado la cobertura de traza de cada superficie.
 ChatGPT Web debe declarar modelo/esfuerzo al abrir su ruta mientras el host no
 los exponga; nunca inferirlos por latencia, longitud o calidad aparente.
+
+---
+
+## 2026-07-26 — Actividad Web sin ruta no distinguía conversación ni proyecto
+
+**Estado:** Corregido en source 0.6.18.
+
+**Capa / owner:** Adaptación MCP y métricas generales / `bridge-mcp`.
+
+**Síntoma:** La época limpia mostró llamadas atribuidas a `chatgpt-web`, pero
+ningún evento MSSR. No era posible probar si pertenecían al dashboard, a
+`LLM-Rig` o a otra conversación, ni calcular qué porcentaje de tools elegibles
+tenía traza.
+
+**Evidencia:** La documentación oficial de OpenAI enumera
+`_meta["openai/session"]` como identificador anónimo de conversación para
+correlacionar tool calls. No enumera modelo ni nivel de razonamiento; además
+define `openai/userAgent` como una pista opcional y best-effort.
+
+**Causa:** Bridge sólo guardaba `clientInfo`, caller, modelo/esfuerzo y trace.
+No consumía la sesión oficial, no atribuía un proyecto acotado y mezclaba en un
+mismo denominador bootstrap, diagnóstico y trabajo sustancial.
+
+**Corrección:** Bridge vuelve a hashear localmente `openai/session`, deriva sólo
+un nombre acotado de proyecto, clasifica llamadas como `bootstrap`, `exempt`,
+`traced` o `unrouted`, y calcula cobertura sobre tools elegibles. Una llamada
+sin traza emite `mssr-unrouted-tool-call` con rate limit y no se bloquea.
+
+**Regresión:** El contrato MCP crea una sesión Web anónima, carga contexto de un
+proyecto fixture, ejecuta una búsqueda sin ruta y exige proyecto, session key,
+cobertura 0%, una llamada elegible sin traza y aviso no bloqueante.
+
+**Seguimiento:** Modelo y esfuerzo de ChatGPT Web deben permanecer `unknown`
+salvo que el host los exponga o el agente los declare explícitamente al abrir
+MSSR. Nunca inferirlos desde user-agent, latencia o conducta.
+
+---
+
+## 2026-07-26 — Reiniciar Bridge olvidaba skills ya cargadas
+
+**Estado:** Corregido en source 0.6.18.
+
+**Capa / owner:** Continuidad MSSR y persistencia / `bridge-mcp`.
+
+**Síntoma:** Después de un restart controlado, retomar una traza explícita en
+verificación podía emitir `mssr-required-skill-not-loaded` aunque las cargas
+exitosas existieran en SQLite.
+
+**Causa:** Eventos y traceId eran persistentes, pero `requiredSkills`,
+`selectedSkills` y `loadedSkills` vivían sólo en el registro de proceso.
+
+**Corrección:** Al recibir un `traceId` explícito ausente en memoria, el
+coordinador reconstruye la última ruta, cargas exitosas, perfil, fase y cierre
+desde el observatorio antes de aplicar gates o replans. Sesión/proyecto se
+recuperan desde la llamada métrica correlacionada cuando existen.
+
+**Regresión:** El test carga todas las skills requeridas, vacía el registro en
+memoria simulando restart, retoma la misma traza en `verify` y exige cero
+faltantes y cero aviso falso.
+
+**Seguimiento:** Mantener la restauración acotada a un trace explícito; no
+adivinar automáticamente entre varias trazas históricas después de reiniciar.

@@ -128,14 +128,18 @@ function renderAgentProfiles(inputRows) {
   if (!target) return;
   const rows = inputRows || [];
   if (!rows.length) {
-    target.innerHTML = '<tr><td colspan="6" class="muted">Sin llamadas en la época activa.</td></tr>';
+    target.innerHTML = '<tr><td colspan="8" class="muted">Sin llamadas en la época activa.</td></tr>';
     return;
   }
   target.innerHTML = rows.map((row) => '<tr>' +
     '<td><code>' + esc(row.caller || 'other') + '</code></td>' +
     '<td>' + esc(row.model || 'unknown') + '</td>' +
     '<td>' + esc(row.reasoning_effort || 'unknown') + '</td>' +
+    '<td><code>' + esc(row.project || 'unknown') + '</code><div class="recent-detail" title="' + esc(row.session_key || 'unknown') + '">' +
+      esc(row.session_key && row.session_key !== 'unknown' ? String(row.session_key).slice(-10) : 'sesión unknown') + '</div></td>' +
     '<td>' + num(row.calls) + '</td>' +
+    '<td title="' + esc(num(row.traced_calls) + ' / ' + num(row.eligible_calls) + ' tools elegibles') + '">' +
+      pct(row.mssr_trace_coverage) + '<div class="recent-detail">' + num(row.untraced_calls) + ' sin traza</div></td>' +
     '<td>' + num(row.error_calls) + '</td>' +
     '<td>' + ms(row.avg_duration_ms) + '</td>' +
   '</tr>').join('');

@@ -13,6 +13,9 @@ export type BridgeMetricProfile = {
   model?: string;
   reasoningEffort?: string;
   clientName?: string;
+  sessionKey?: string;
+  project?: string;
+  routingStatus?: "traced" | "unrouted" | "bootstrap" | "exempt";
 };
 type StatementSync = {
   run: (...args: unknown[]) => unknown;
@@ -40,6 +43,10 @@ export type BridgeMetricStart = {
   model: string;
   reasoningEffort: string;
   clientName: string;
+  sessionKey: string;
+  project: string;
+  routingStatus: "traced" | "unrouted" | "bootstrap" | "exempt";
+  mssrEligible: boolean;
 };
 
 export type BridgeMetricEnd = BridgeMetricStart & {
@@ -74,6 +81,10 @@ function ensureToolCallProfileColumns(database: DatabaseSync): void {
     ["model", "TEXT"],
     ["reasoning_effort", "TEXT"],
     ["client_name", "TEXT"],
+    ["session_key", "TEXT"],
+    ["project", "TEXT"],
+    ["routing_status", "TEXT"],
+    ["mssr_eligible", "INTEGER"],
   ] as const;
   for (const [name, type] of additions) {
     if (!columns.has(name)) database.exec(`ALTER TABLE tool_calls ADD COLUMN ${name} ${type};`);
@@ -128,8 +139,12 @@ function getDb(): DatabaseSync | null {
       trace_id TEXT,
       caller TEXT,
       model TEXT,
-      reasoning_effort TEXT
-      ,client_name TEXT
+      reasoning_effort TEXT,
+      client_name TEXT,
+      session_key TEXT,
+      project TEXT,
+      routing_status TEXT,
+      mssr_eligible INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_tool_calls_started_at ON tool_calls(started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_tool_started_at ON tool_calls(tool, started_at);
@@ -152,13 +167,17 @@ function getDb(): DatabaseSync | null {
     CREATE INDEX IF NOT EXISTS idx_tool_calls_profile ON tool_calls(caller, model, reasoning_effort, started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_trace_id ON tool_calls(trace_id);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_client_name ON tool_calls(client_name, started_at);
+    CREATE INDEX IF NOT EXISTS idx_tool_calls_session_key ON tool_calls(session_key, started_at);
+    CREATE INDEX IF NOT EXISTS idx_tool_calls_project ON tool_calls(project, started_at);
+    CREATE INDEX IF NOT EXISTS idx_tool_calls_routing_status ON tool_calls(routing_status, started_at);
   `);
   insertToolCall = db.prepare(`
     INSERT INTO tool_calls (
       id, started_at, ended_at, duration_ms, tool, ok, error, input_keys,
       output_chars, server_name, server_version, pid, hostname, platform, cwd,
-      observability_epoch, trace_id, caller, model, reasoning_effort, client_name
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      observability_epoch, trace_id, caller, model, reasoning_effort, client_name,
+      session_key, project, routing_status, mssr_eligible
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   return db;
 }
@@ -185,6 +204,7 @@ function boundedProfileText(value: unknown, fallback: string, maxChars: number):
 export function beginToolMetric(tool: string, args: unknown, profile: BridgeMetricProfile = {}): BridgeMetricStart {
   const now = Date.now();
   const epoch = getMssrObservabilityEpoch();
+  const routingStatus = profile.routingStatus ?? (profile.traceId ? "traced" : "unrouted");
   const inputKeys = args && typeof args === "object" && !Array.isArray(args)
     ? Object.keys(args as Record<string, unknown>).sort().join(",")
     : "";
@@ -201,6 +221,10 @@ export function beginToolMetric(tool: string, args: unknown, profile: BridgeMetr
     model: boundedProfileText(profile.model, "unknown", 80),
     reasoningEffort: boundedProfileText(profile.reasoningEffort, "unknown", 20),
     clientName: boundedProfileText(profile.clientName, "unknown", 120),
+    sessionKey: boundedProfileText(profile.sessionKey, "unknown", 80),
+    project: boundedProfileText(profile.project, "unknown", 120),
+    routingStatus,
+    mssrEligible: routingStatus === "traced" || routingStatus === "unrouted",
   };
 }
 
@@ -236,6 +260,10 @@ export function finishToolMetric(metric: BridgeMetricStart, ok: boolean, outputC
       model: metric.model,
       reasoningEffort: metric.reasoningEffort,
       clientName: metric.clientName,
+      sessionKey: metric.sessionKey,
+      project: metric.project,
+      routingStatus: metric.routingStatus,
+      mssrEligible: metric.mssrEligible,
     },
   });
 
@@ -265,6 +293,10 @@ export function finishToolMetric(metric: BridgeMetricStart, ok: boolean, outputC
       metric.model,
       metric.reasoningEffort,
       metric.clientName,
+      metric.sessionKey,
+      metric.project,
+      metric.routingStatus,
+      metric.mssrEligible ? 1 : 0,
     );
   } catch (sqliteError) {
     writeJsonl({
@@ -310,7 +342,14 @@ function getMetricsProfiles(database: DatabaseSync, scope: BridgeMetricsScope) {
     SELECT COALESCE(caller, 'other') AS caller,
       COUNT(*) AS calls,
       SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS error_calls,
-      ROUND(AVG(duration_ms), 2) AS avg_duration_ms
+      ROUND(AVG(duration_ms), 2) AS avg_duration_ms,
+      SUM(CASE WHEN mssr_eligible = 1 THEN 1 ELSE 0 END) AS eligible_calls,
+      SUM(CASE WHEN mssr_eligible = 1 AND trace_id IS NOT NULL THEN 1 ELSE 0 END) AS traced_calls,
+      SUM(CASE WHEN mssr_eligible = 1 AND trace_id IS NULL THEN 1 ELSE 0 END) AS untraced_calls,
+      CASE WHEN SUM(CASE WHEN mssr_eligible = 1 THEN 1 ELSE 0 END) > 0
+        THEN ROUND(100.0 * SUM(CASE WHEN mssr_eligible = 1 AND trace_id IS NOT NULL THEN 1 ELSE 0 END)
+          / SUM(CASE WHEN mssr_eligible = 1 THEN 1 ELSE 0 END), 2)
+        ELSE NULL END AS mssr_trace_coverage
     FROM tool_calls
     WHERE ${filter.where}
     GROUP BY COALESCE(caller, 'other')
@@ -320,13 +359,23 @@ function getMetricsProfiles(database: DatabaseSync, scope: BridgeMetricsScope) {
     SELECT COALESCE(caller, 'other') AS caller,
       COALESCE(model, 'unknown') AS model,
       COALESCE(reasoning_effort, 'unknown') AS reasoning_effort,
+      COALESCE(project, 'unknown') AS project,
+      COALESCE(session_key, 'unknown') AS session_key,
       COUNT(*) AS calls,
       SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS error_calls,
-      ROUND(AVG(duration_ms), 2) AS avg_duration_ms
+      ROUND(AVG(duration_ms), 2) AS avg_duration_ms,
+      SUM(CASE WHEN mssr_eligible = 1 THEN 1 ELSE 0 END) AS eligible_calls,
+      SUM(CASE WHEN mssr_eligible = 1 AND trace_id IS NOT NULL THEN 1 ELSE 0 END) AS traced_calls,
+      SUM(CASE WHEN mssr_eligible = 1 AND trace_id IS NULL THEN 1 ELSE 0 END) AS untraced_calls,
+      CASE WHEN SUM(CASE WHEN mssr_eligible = 1 THEN 1 ELSE 0 END) > 0
+        THEN ROUND(100.0 * SUM(CASE WHEN mssr_eligible = 1 AND trace_id IS NOT NULL THEN 1 ELSE 0 END)
+          / SUM(CASE WHEN mssr_eligible = 1 THEN 1 ELSE 0 END), 2)
+        ELSE NULL END AS mssr_trace_coverage
     FROM tool_calls
     WHERE ${filter.where}
-    GROUP BY COALESCE(caller, 'other'), COALESCE(model, 'unknown'), COALESCE(reasoning_effort, 'unknown')
-    ORDER BY calls DESC, caller ASC, model ASC, reasoning_effort ASC
+    GROUP BY COALESCE(caller, 'other'), COALESCE(model, 'unknown'), COALESCE(reasoning_effort, 'unknown'),
+      COALESCE(project, 'unknown'), COALESCE(session_key, 'unknown')
+    ORDER BY calls DESC, caller ASC, model ASC, reasoning_effort ASC, project ASC, session_key ASC
   `).all(...filter.params);
   return { surfaces, agentProfiles };
 }
@@ -358,7 +407,8 @@ export function getRecentMetrics(limit = 25, scope: BridgeMetricsScope = "active
   const filter = metricsFilter(scope);
   const rows = sqlite.prepare(`
     SELECT started_at, duration_ms, tool, ok, error, input_keys, output_chars, pid,
-      trace_id, caller, model, reasoning_effort, client_name
+      trace_id, caller, model, reasoning_effort, client_name, session_key, project,
+      routing_status, mssr_eligible
     FROM tool_calls
     WHERE ${filter.where}
     ORDER BY started_at DESC
@@ -373,7 +423,8 @@ export function getMetricsErrors(limit = 25, scope: BridgeMetricsScope = "active
   const filter = metricsFilter(scope);
   const rows = sqlite.prepare(`
     SELECT started_at, duration_ms, tool, error, input_keys, output_chars, pid,
-      trace_id, caller, model, reasoning_effort, client_name
+      trace_id, caller, model, reasoning_effort, client_name, session_key, project,
+      routing_status, mssr_eligible
     FROM tool_calls
     WHERE ok = 0 AND ${filter.where}
     ORDER BY started_at DESC

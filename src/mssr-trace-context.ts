@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { BridgeNoticeInput } from "./notices.js";
+import { readPersistedMssrTraceState } from "./mssr-observatory.js";
 
 type JsonRecord = Record<string, unknown>;
 type ToolSchemaLike = {
@@ -14,6 +15,8 @@ type ActiveTraceState = {
   caller: string;
   model: string;
   reasoningEffort: string;
+  sessionKey: string;
+  project: string;
   requiredSkills: Set<string>;
   selectedSkills: Set<string>;
   loadedSkills: Set<string>;
@@ -58,6 +61,10 @@ function taskFingerprint(value: unknown): string {
 
 function normalizedCaller(value: unknown): string {
   return normalizedText(value, 80) || "other";
+}
+
+function normalizedScopeValue(value: unknown): string {
+  return normalizedText(value, 120) || "unknown";
 }
 
 function validTraceId(value: unknown): value is string {
@@ -139,6 +146,8 @@ function candidateDetails(candidates: ActiveTraceState[]): JsonRecord {
       traceId: state.traceId,
       stage: state.stage,
       caller: state.caller,
+      sessionKey: state.sessionKey,
+      project: state.project,
       missingRequiredSkills: missingRequired(state),
       ageMs: Math.max(0, Date.now() - state.updatedAt),
     })),
@@ -157,6 +166,8 @@ export type MssrTraceSessionSnapshot = {
   caller: string | null;
   model: string | null;
   reasoningEffort: string | null;
+  sessionKey: string | null;
+  project: string | null;
   routeCount: number;
   closed: boolean;
   requiredSkills: string[];
@@ -180,6 +191,12 @@ export type MssrTraceCoordinatorOptions = {
   onClosureReminder?: (reminder: MssrClosureReminder) => void;
 };
 
+export type MssrTraceHostContext = {
+  caller?: string;
+  sessionKey?: string;
+  project?: string;
+};
+
 export function createMssrTraceSessionCoordinator(
   toolSchemas: readonly ToolSchemaLike[],
   options: MssrTraceCoordinatorOptions = {},
@@ -194,6 +211,11 @@ export function createMssrTraceSessionCoordinator(
     toolSchemas.filter((schema) => schemaPropertyExists(schema, "stage")).map((schema) => schema.name),
   );
   let localTraceId: string | null = null;
+  let hostContext: Required<MssrTraceHostContext> = {
+    caller: "other",
+    sessionKey: "unknown",
+    project: "unknown",
+  };
   const closureIdleMs = Math.max(
     10,
     options.closureIdleMs
@@ -263,6 +285,39 @@ export function createMssrTraceSessionCoordinator(
     return state;
   }
 
+  function restore(traceId: string): ActiveTraceState | null {
+    const persisted = readPersistedMssrTraceState(traceId);
+    if (!persisted) return null;
+    const state: ActiveTraceState = {
+      ...persisted,
+      requiredSkills: new Set(persisted.requiredSkills),
+      selectedSkills: new Set(persisted.selectedSkills),
+      loadedSkills: new Set(persisted.loadedSkills),
+      lastToolCompletedAt: null,
+      lastToolName: null,
+      toolActivityVersion: 0,
+      closureReminderVersion: 0,
+    };
+    sharedTraces.set(traceId, state);
+    return state;
+  }
+
+  function scopedCandidates(candidates: ActiveTraceState[]): ActiveTraceState[] {
+    let scoped = candidates;
+    if (hostContext.sessionKey !== "unknown") {
+      return scoped.filter((state) => state.sessionKey === hostContext.sessionKey);
+    }
+    if (hostContext.project !== "unknown") {
+      const projectMatches = scoped.filter((state) => state.project === hostContext.project);
+      if (projectMatches.length > 0) scoped = projectMatches;
+    }
+    if (hostContext.caller !== "other") {
+      const callerMatches = scoped.filter((state) => state.caller === hostContext.caller);
+      if (callerMatches.length > 0) scoped = callerMatches;
+    }
+    return scoped;
+  }
+
   function ambiguousNotice(toolName: string, candidates: ActiveTraceState[]): BridgeNoticeInput {
     return notice(
       "warning",
@@ -298,13 +353,13 @@ export function createMssrTraceSessionCoordinator(
     const fingerprint = taskFingerprint(args.task);
     if (!fingerprint) return null;
     const caller = normalizedCaller(args.caller);
-    const taskMatches = openSharedTraces().filter((state) => state.taskHash === fingerprint);
+    const taskMatches = scopedCandidates(openSharedTraces()).filter((state) => state.taskHash === fingerprint);
     const callerMatches = taskMatches.filter((state) => state.caller === caller);
     return uniqueCandidate(toolName, callerMatches.length > 0 ? callerMatches : taskMatches, notices);
   }
 
   function findToolCandidate(toolName: string, args: JsonRecord, notices: BridgeNoticeInput[]): ActiveTraceState | null {
-    const traces = openSharedTraces();
+    const traces = scopedCandidates(openSharedTraces());
     if (toolName === "skill_load") {
       const skillName = typeof args.name === "string" ? args.name : "";
       if (!skillName) return null;
@@ -325,20 +380,32 @@ export function createMssrTraceSessionCoordinator(
     return uniqueCandidate(toolName, traces, notices);
   }
 
-  function prepare(toolName: string, rawArgs: JsonRecord): MssrTracePreparation {
+  function prepare(
+    toolName: string,
+    rawArgs: JsonRecord,
+    context: MssrTraceHostContext = {},
+  ): MssrTracePreparation {
+    hostContext = {
+      caller: normalizedCaller(context.caller),
+      sessionKey: normalizedScopeValue(context.sessionKey),
+      project: normalizedScopeValue(context.project),
+    };
     const args: JsonRecord = { ...rawArgs };
     const notices: BridgeNoticeInput[] = [];
     if (TRACE_DISPATCH_TOOLS.has(toolName)) {
       const delegatedTool = typeof args.toolName === "string" ? args.toolName.trim() : "";
       if (!delegatedTool || TRACE_DISPATCH_TOOLS.has(delegatedTool)) return { args, notices };
-      const delegated = prepare(delegatedTool, asRecord(args.arguments) ?? {});
+      const delegated = prepare(delegatedTool, asRecord(args.arguments) ?? {}, hostContext);
       args.arguments = delegated.args;
       notices.push(...delegated.notices);
       return { args, notices };
     }
 
     const explicitTrace = validTraceId(args.traceId) ? String(args.traceId).trim() : null;
-    if (explicitTrace && sharedTraces.has(explicitTrace)) adopt(sharedTraces.get(explicitTrace)!);
+    if (explicitTrace) {
+      const state = sharedTraces.get(explicitTrace) ?? restore(explicitTrace);
+      if (state) adopt(state);
+    }
     const activeBeforeCall = localState(toolName === "mssr_trace_record");
     if (activeBeforeCall) clearClosureTimer(activeBeforeCall.traceId);
 
@@ -457,11 +524,13 @@ export function createMssrTraceSessionCoordinator(
         traceId,
         stage: typeof record.stage === "string" ? record.stage : typeof args.stage === "string" ? args.stage : "start",
         taskHash: taskFingerprint(args.task),
-        caller: normalizedCaller(args.caller),
+        caller: normalizedCaller(args.caller ?? hostContext.caller),
         model: normalizedText(asRecord(record.agentProfile)?.model, 80) || normalizedText(args.model, 80) || "unknown",
         reasoningEffort: normalizedText(asRecord(record.agentProfile)?.reasoningEffort, 20)
           || normalizedText(args.reasoningEffort, 20)
           || "unknown",
+        sessionKey: previous && previous.sessionKey !== "unknown" ? previous.sessionKey : hostContext.sessionKey,
+        project: previous && previous.project !== "unknown" ? previous.project : hostContext.project,
         requiredSkills: new Set([
           ...(previous ? previous.requiredSkills : []),
           ...skills.filter((skill) => skill.required).map((skill) => skill.name),
@@ -526,6 +595,8 @@ export function createMssrTraceSessionCoordinator(
       caller: state?.caller ?? null,
       model: state?.model ?? null,
       reasoningEffort: state?.reasoningEffort ?? null,
+      sessionKey: state?.sessionKey ?? null,
+      project: state?.project ?? null,
       routeCount: state?.routeCount ?? 0,
       closed: state?.closed ?? false,
       requiredSkills: state ? [...state.requiredSkills].sort() : [],
@@ -535,14 +606,15 @@ export function createMssrTraceSessionCoordinator(
     };
   }
 
-  function resolveMetricContext(caller?: string): MssrTraceSessionSnapshot {
+  function resolveMetricContext(context: MssrTraceHostContext = {}): MssrTraceSessionSnapshot {
+    hostContext = {
+      caller: normalizedCaller(context.caller),
+      sessionKey: normalizedScopeValue(context.sessionKey),
+      project: normalizedScopeValue(context.project),
+    };
     let state = localState(true);
     if (!state || state.closed) {
-      const normalized = normalizedCaller(caller);
-      const open = openSharedTraces();
-      const compatible = normalized === "other"
-        ? open
-        : open.filter((candidate) => candidate.caller === normalized);
+      const compatible = scopedCandidates(openSharedTraces());
       if (compatible.length === 1) state = adopt(compatible[0]);
     }
     return snapshot();

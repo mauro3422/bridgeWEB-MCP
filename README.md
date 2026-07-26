@@ -7,7 +7,7 @@ El objetivo es tener un puente local controlado por nosotros para operar filesys
 ## Estado actual
 
 ```text
-bridge-mcp v0.6.17
+bridge-mcp v0.6.18
 Mode: HTTP production-candidate
 Project root: C:\dev\bridge-mcp
 Bridge MCP: http://127.0.0.1:3001/mcp
@@ -333,7 +333,7 @@ Estado esperado:
 
 ```text
 bridge_self_check.ok = true
-server.version = 0.6.17
+server.version = 0.6.18
 tunnel.baseUrl = http://127.0.0.1:8081
 tunnel healthz = live
 tunnel readyz = ready
@@ -445,6 +445,7 @@ BRIDGE_MCP_MSSR_EVENTS_JSONL=...
 BRIDGE_MCP_MSSR_STATE=...
 BRIDGE_MCP_MSSR_TRACE_LEASE_MS=7200000
 BRIDGE_MCP_WEB_CLOSURE_IDLE_MS=60000
+BRIDGE_MCP_MSSR_UNROUTED_WARNING_MS=60000
 ```
 
 Las métricas generales guardan nombres de tools, duración, éxito/error, claves de input y tamaño de salida. No guardan argumentos completos.
@@ -460,6 +461,25 @@ La telemetría actual usa una época persistida `trace-contract-v1`. `/api/mssr/
 La misma época gobierna ahora las métricas generales de tools. `/api/metrics/*` y `bridge_metrics_*` usan `scope=active` por defecto, mientras `scope=all` conserva el acumulado. Cada llamada nueva guarda `traceId`, `caller`, `model` y `reasoningEffort` cuando son observables; el dashboard muestra llamadas, errores y latencia agrupados por ese perfil para no mezclar Codex con ChatGPT Web ni variantes de modelo.
 
 La identidad de superficie también se obtiene del `clientInfo` del handshake MCP. Una tool genérica o stateless hereda la única traza abierta compatible con su caller para fines de observabilidad, sin inyectar argumentos fuera de schema ni volver a ejecutar MSSR entre llamadas. El dashboard MSSR separa por perfil routing estructurado, route→load, cargas requeridas, verificación, cierre, éxito, aceptación, score, duración, recordatorios de loop y correcciones del usuario.
+
+ChatGPT también entrega `_meta["openai/session"]`, un identificador anónimo de
+conversación. Bridge lo vuelve a hashear localmente y lo combina con un nombre
+acotado de proyecto derivado de `projectRoot`, `cwd` o rutas bajo `C:\Dev` /
+`D:\Dev`; no guarda el identificador original ni argumentos completos. Esto
+permite separar, por ejemplo, actividad Web de `bridge-mcp` y `LLM-Rig`.
+La metadata oficial del cliente no incluye el modelo ni el nivel de
+razonamiento: permanecen `unknown` en ChatGPT Web salvo declaración explícita.
+`openai/userAgent` no se usa para inferirlos porque OpenAI lo define como una
+pista opcional y best-effort.
+
+Las métricas generales clasifican cada llamada como `bootstrap`, `exempt`,
+`traced` o `unrouted`. La cobertura MSSR usa sólo tools elegibles
+(`traced + unrouted`), de modo que health, métricas y el propio bootstrap no
+deprimen artificialmente el porcentaje. Una llamada elegible sin traza emite
+`mssr-unrouted-tool-call` con rate limit, pero no se bloquea: MSSR sigue siendo
+asesor y no sustituye permisos ni ejecución. Al retomar un `traceId` explícito
+después de reiniciar, Bridge reconstruye rutas y skills cargadas desde SQLite
+antes de evaluar los gates de fase.
 
 `skill_route_plan` y `skill_recommend` usan `responseMode=compact` por defecto:
 devuelven la ruta accionable, nombres, razón corta, obligatoriedad, orden y

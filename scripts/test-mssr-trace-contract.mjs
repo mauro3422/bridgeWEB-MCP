@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -268,6 +269,63 @@ try {
   assert.equal(genericWebMetric?.caller, 'chatgpt-web');
   assert.equal(genericWebMetric?.client_name, 'ChatGPT Web');
   assert.equal(genericWebMetric?.trace_id, nextRoute.traceId, 'Stateless generic tools must inherit the unique Web MSSR trace for metrics.');
+
+  const sessionMeta = { 'openai/session': 'web-session-fixture-001' };
+  const fixtureProject = path.join(sandbox, 'fixture-project');
+  fs.mkdirSync(fixtureProject, { recursive: true });
+  await callFresh('project_context_load', {
+    projectRoot: fixtureProject,
+    task: 'Load bounded fixture project context.',
+  }, sessionMeta, 'openai-mcp');
+  const untracedWeb = await callFresh('search_files', {
+    path: fixtureProject,
+    pattern: 'nothing-to-find',
+    maxResults: 5,
+  }, sessionMeta, 'openai-mcp');
+  assert.ok(
+    untracedWeb.bridgeNotices?.items?.some((notice) => notice.code === 'mssr-unrouted-tool-call'),
+    'An eligible Web tool without a compatible trace must emit an observable non-blocking warning.',
+  );
+  const expectedSessionKey = `session-${createHash('sha256').update('web-session-fixture-001').digest('hex').slice(0, 16)}`;
+  const scopedProfiles = metrics.getMetricsOverview('active').agentProfiles;
+  const fixtureProfile = scopedProfiles.find((profile) =>
+    profile.caller === 'chatgpt-web'
+    && profile.project === 'fixture-project'
+    && profile.session_key === expectedSessionKey);
+  assert.equal(fixtureProfile?.eligible_calls, 1);
+  assert.equal(fixtureProfile?.traced_calls, 0);
+  assert.equal(fixtureProfile?.untraced_calls, 1);
+  assert.equal(fixtureProfile?.mssr_trace_coverage, 0);
+
+  const nextRequired = nextRoute.activeSkills.filter((skill) => skill.required).map((skill) => skill.name);
+  for (const name of nextRequired) {
+    await callFresh('skill_load', {
+      name,
+      source: 'codex',
+      traceId: nextRoute.traceId,
+      required: true,
+      stage: 'start',
+    });
+  }
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const restartSchemas = [
+    { name: 'skill_route_plan', inputSchema: { type: 'object', properties: { traceId: { type: 'string' } } } },
+    { name: 'skill_load', inputSchema: { type: 'object', properties: { traceId: { type: 'string' } } } },
+    { name: 'mssr_trace_record', inputSchema: { type: 'object', properties: { traceId: { type: 'string' } } } },
+  ];
+  const afterRestart = traceContext.createMssrTraceSessionCoordinator(restartSchemas);
+  const resumedAfterRestart = afterRestart.prepare('skill_route_plan', {
+    task: 'Start a separate MSSR task after the previous outcome closed.',
+    caller: 'chatgpt-web',
+    stage: 'verify',
+    traceId: nextRoute.traceId,
+  });
+  assert.equal(
+    resumedAfterRestart.notices.some((notice) => notice.code === 'mssr-required-skill-not-loaded'),
+    false,
+    'Explicit resume after a process restart must restore successful persisted skill loads.',
+  );
+  assert.deepEqual(afterRestart.snapshot().missingRequiredSkills, []);
 
   traceContext.resetSharedMssrTraceRegistryForTests();
   const schemas = [

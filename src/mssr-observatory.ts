@@ -89,6 +89,23 @@ type MssrStoredEvent = {
   details: JsonRecord;
 };
 
+export type PersistedMssrTraceState = {
+  traceId: string;
+  stage: string;
+  taskHash: string;
+  caller: string;
+  model: string;
+  reasoningEffort: string;
+  sessionKey: string;
+  project: string;
+  requiredSkills: string[];
+  selectedSkills: string[];
+  loadedSkills: string[];
+  routeCount: number;
+  closed: boolean;
+  updatedAt: number;
+};
+
 const require = createRequire(import.meta.url);
 const observatoryEnabled = process.env.BRIDGE_MCP_METRICS_ENABLED !== "0";
 const metricsDir = path.resolve(process.env.BRIDGE_MCP_METRICS_DIR || path.join(process.cwd(), "data"));
@@ -413,6 +430,70 @@ function decodeRow(row: JsonRecord): MssrStoredEvent {
     ok: row.ok === null || row.ok === undefined ? undefined : Number(row.ok) === 1,
     taskHash: typeof row.task_hash === "string" ? row.task_hash : undefined,
     details,
+  };
+}
+
+export function readPersistedMssrTraceState(traceId: string): PersistedMssrTraceState | null {
+  if (!validTraceId(traceId)) return null;
+  const database = getDb();
+  if (!database) return null;
+  const events = database.prepare(`
+    SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
+           skill_name, required, ok, task_hash, details_json
+    FROM mssr_events
+    WHERE trace_id = ?
+    ORDER BY occurred_at ASC
+    LIMIT 1000
+  `).all(traceId).map(decodeRow);
+  const routes = events.filter((event) => event.eventType === "route_planned");
+  if (routes.length === 0) return null;
+  const latestRoute = routes[routes.length - 1];
+  const requiredSkills = new Set<string>();
+  const selectedSkills = new Set<string>();
+  for (const route of routes) {
+    const active = Array.isArray(route.details.activeSkills) ? route.details.activeSkills : [];
+    for (const item of active) {
+      if (!item || typeof item !== "object" || typeof (item as JsonRecord).name !== "string") continue;
+      const name = String((item as JsonRecord).name);
+      selectedSkills.add(name);
+      if ((item as JsonRecord).required === true) requiredSkills.add(name);
+    }
+  }
+  const loadedSkills = new Set(events
+    .filter((event) => event.eventType === "skill_loaded" && event.ok === true && event.skillName)
+    .map((event) => String(event.skillName)));
+  const latestOutcome = [...events].reverse().find((event) => event.eventType === "outcome");
+  const latestEvent = events[events.length - 1];
+  const profile = latestRoute.details.agentProfile && typeof latestRoute.details.agentProfile === "object"
+    ? latestRoute.details.agentProfile as JsonRecord
+    : {};
+  let metricContext: JsonRecord = {};
+  try {
+    metricContext = database.prepare(`
+      SELECT session_key, project
+      FROM tool_calls
+      WHERE trace_id = ?
+      ORDER BY started_at DESC
+      LIMIT 1
+    `).get(traceId) ?? {};
+  } catch {
+    metricContext = {};
+  }
+  return {
+    traceId,
+    stage: latestRoute.stage ?? "start",
+    taskHash: latestRoute.taskHash ?? "",
+    caller: latestRoute.caller ?? "other",
+    model: typeof profile.model === "string" ? profile.model : "unknown",
+    reasoningEffort: typeof profile.reasoningEffort === "string" ? profile.reasoningEffort : "unknown",
+    sessionKey: typeof metricContext.session_key === "string" ? metricContext.session_key : "unknown",
+    project: typeof metricContext.project === "string" ? metricContext.project : "unknown",
+    requiredSkills: [...requiredSkills].sort(),
+    selectedSkills: [...selectedSkills].sort(),
+    loadedSkills: [...loadedSkills].sort(),
+    routeCount: routes.length,
+    closed: Boolean(latestOutcome && Date.parse(latestOutcome.occurredAt) >= Date.parse(latestRoute.occurredAt)),
+    updatedAt: Date.parse(latestEvent.occurredAt) || Date.now(),
   };
 }
 

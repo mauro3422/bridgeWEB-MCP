@@ -110,11 +110,11 @@ export const dashboardMarkup = `
       </article>
 
       <article class="card span-12">
-        <div class="card-header"><div><div class="card-kicker">Atribución de llamadas y errores</div><h2 class="card-title">Resultados por cliente y modelo</h2><p class="card-description">Separa Codex, ChatGPT Web, modelo y esfuerzo cuando el host los expone. Los valores no observables aparecen como unknown.</p></div></div>
+        <div class="card-header"><div><div class="card-kicker">Atribución de llamadas, routing y errores</div><h2 class="card-title">Resultados por cliente, proyecto y sesión</h2><p class="card-description">Separa superficie, modelo, esfuerzo, proyecto y conversación anónima. MSSR mide sólo tools elegibles; bootstrap y diagnóstico quedan fuera del denominador.</p></div></div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Cliente</th><th>Modelo</th><th>Esfuerzo</th><th>Llamadas</th><th>Errores</th><th>Duración media</th></tr></thead>
-            <tbody id="agent-profiles"><tr><td colspan="6" class="muted">Cargando perfiles…</td></tr></tbody>
+            <thead><tr><th>Cliente</th><th>Modelo</th><th>Esfuerzo</th><th>Proyecto / sesión</th><th>Llamadas</th><th>Cobertura MSSR</th><th>Errores</th><th>Duración media</th></tr></thead>
+            <tbody id="agent-profiles"><tr><td colspan="8" class="muted">Cargando perfiles…</td></tr></tbody>
           </table>
         </div>
       </article>

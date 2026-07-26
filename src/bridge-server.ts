@@ -1,4 +1,6 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { createHash } from "node:crypto";
+import path from "node:path";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -31,6 +33,40 @@ const largeOutputExemptTools = new Set([
   "blender_review_bundle",
 ]);
 const noticeInspectionTools = new Set(["bridge_notice_status", "bridge_notice_drain"]);
+const mssrBootstrapTools = new Set([
+  "project_context_load",
+  "workflow_guide_recommend",
+  "workflow_guide_load",
+  "skill_catalog",
+  "skill_recommend",
+  "skill_route_audit",
+  "skill_route_vocabulary",
+  "skill_route_plan",
+  "skill_bootstrap",
+]);
+const mssrExemptTools = new Set([
+  "system_info",
+  "tunnel_health",
+  "bridge_health",
+  "bridge_self_check",
+  "bridge_restart_status",
+  "bridge_metrics_status",
+  "bridge_metrics_summary",
+  "bridge_metrics_recent",
+  "bridge_metrics_query",
+  "bridge_visualization_catalog",
+  "bridge_visualize_metrics",
+  "mssr_observatory_query",
+  "bridge_notice_status",
+  "bridge_notice_drain",
+]);
+const sessionProjects = new Map<string, string>();
+const unroutedWarnings = new Map<string, number>();
+const maxScopedMetricEntries = 2048;
+const unroutedWarningIntervalMs = Math.max(
+  10_000,
+  Number(process.env.BRIDGE_MCP_MSSR_UNROUTED_WARNING_MS) || 60_000,
+);
 
 function validNoticeInput(value: unknown): value is BridgeNoticeInput {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -132,19 +168,20 @@ const profiledMssrTools = new Set([
 function withObservableAgentProfile(
   toolName: string,
   args: Record<string, unknown>,
-  requestMeta: unknown,
+  host: BridgeMetricProfile,
 ): Record<string, unknown> {
-  if (!profiledMssrTools.has(toolName) || !requestMeta || typeof requestMeta !== "object") return args;
-  const envelope = requestMeta as Record<string, unknown>;
-  const codexMetadata = envelope["x-codex-turn-metadata"];
-  if (!codexMetadata || typeof codexMetadata !== "object") return args;
-  const metadata = codexMetadata as Record<string, unknown>;
+  if (!profiledMssrTools.has(toolName)) return args;
   return {
     ...args,
-    model: args.model ?? (typeof metadata.model === "string" ? metadata.model : undefined),
-    reasoningEffort: args.reasoningEffort
-      ?? (typeof metadata.reasoning_effort === "string" ? metadata.reasoning_effort : undefined),
+    caller: args.caller ?? host.caller,
+    model: args.model ?? host.model,
+    reasoningEffort: args.reasoningEffort ?? host.reasoningEffort,
   };
+}
+
+function hashedSessionKey(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  return `session-${createHash("sha256").update(value.trim()).digest("hex").slice(0, 16)}`;
 }
 
 function requestAgentProfile(requestMeta: unknown, clientVersion: unknown): BridgeMetricProfile {
@@ -158,13 +195,16 @@ function requestAgentProfile(requestMeta: unknown, clientVersion: unknown): Brid
     : normalizedClient.includes("chatgpt") || normalizedClient.includes("openai")
       ? "chatgpt-web"
       : undefined;
+  const envelope = requestMeta && typeof requestMeta === "object"
+    ? requestMeta as Record<string, unknown>
+    : {};
+  const sessionKey = hashedSessionKey(envelope["openai/session"]);
   if (!requestMeta || typeof requestMeta !== "object") {
-    return { caller: inferredCaller, clientName };
+    return { caller: inferredCaller, clientName, sessionKey };
   }
-  const envelope = requestMeta as Record<string, unknown>;
   const codexMetadata = envelope["x-codex-turn-metadata"];
   if (!codexMetadata || typeof codexMetadata !== "object") {
-    return { caller: inferredCaller, clientName };
+    return { caller: inferredCaller, clientName, sessionKey };
   }
   const metadata = codexMetadata as Record<string, unknown>;
   return {
@@ -172,7 +212,58 @@ function requestAgentProfile(requestMeta: unknown, clientVersion: unknown): Brid
     model: typeof metadata.model === "string" ? metadata.model : undefined,
     reasoningEffort: typeof metadata.reasoning_effort === "string" ? metadata.reasoning_effort : undefined,
     clientName,
+    sessionKey,
   };
+}
+
+function delegatedArgs(toolName: string, args: Record<string, unknown>): { toolName: string; args: Record<string, unknown> } {
+  if ((toolName === "bridge_tool_query" || toolName === "bridge_tool_action")
+      && typeof args.toolName === "string"
+      && args.arguments && typeof args.arguments === "object" && !Array.isArray(args.arguments)) {
+    return { toolName: args.toolName, args: args.arguments as Record<string, unknown> };
+  }
+  return { toolName, args };
+}
+
+function projectFromArgs(toolName: string, args: Record<string, unknown>): string | undefined {
+  const delegated = delegatedArgs(toolName, args);
+  const candidates = [delegated.args.projectRoot, delegated.args.cwd, delegated.args.path];
+  for (const value of candidates) {
+    if (typeof value !== "string" || !value.trim()) continue;
+    const normalized = value.trim().replace(/\//g, "\\");
+    const devMatch = normalized.match(/^[A-Za-z]:\\Dev\\([^\\]+)/i);
+    if (devMatch) return devMatch[1].toLowerCase().slice(0, 120);
+    if (value === delegated.args.projectRoot || value === delegated.args.cwd) {
+      const base = path.win32.basename(normalized).trim().toLowerCase();
+      if (base && base !== "." && base !== "\\") return base.slice(0, 120);
+    }
+  }
+  return undefined;
+}
+
+function resolveProject(toolName: string, args: Record<string, unknown>, host: BridgeMetricProfile): string | undefined {
+  const observed = projectFromArgs(toolName, args);
+  if (observed && host.sessionKey) {
+    sessionProjects.delete(host.sessionKey);
+    sessionProjects.set(host.sessionKey, observed);
+    while (sessionProjects.size > maxScopedMetricEntries) {
+      const oldest = sessionProjects.keys().next().value;
+      if (typeof oldest !== "string") break;
+      sessionProjects.delete(oldest);
+    }
+  }
+  return observed ?? (host.sessionKey ? sessionProjects.get(host.sessionKey) : undefined);
+}
+
+function routingStatus(
+  toolName: string,
+  traceId: string | null,
+  args: Record<string, unknown>,
+): NonNullable<BridgeMetricProfile["routingStatus"]> {
+  const effective = delegatedArgs(toolName, args).toolName;
+  if (mssrBootstrapTools.has(effective)) return "bootstrap";
+  if (mssrExemptTools.has(effective)) return "exempt";
+  return traceId ? "traced" : "unrouted";
 }
 
 function metricProfile(
@@ -180,10 +271,14 @@ function metricProfile(
   args: Record<string, unknown>,
   host: BridgeMetricProfile,
   traceSnapshot: ReturnType<ReturnType<typeof createMssrTraceSessionCoordinator>["snapshot"]>,
+  project: string | undefined,
 ): BridgeMetricProfile {
   const isNewRoute = profiledMssrTools.has(toolName) && typeof args.task === "string";
+  const traceId = typeof args.traceId === "string"
+    ? args.traceId
+    : isNewRoute ? undefined : traceSnapshot.traceId ?? undefined;
   return {
-    traceId: typeof args.traceId === "string" ? args.traceId : isNewRoute ? undefined : traceSnapshot.traceId ?? undefined,
+    traceId,
     caller: typeof args.caller === "string"
       ? args.caller
       : isNewRoute ? host.caller : traceSnapshot.caller ?? host.caller,
@@ -194,7 +289,42 @@ function metricProfile(
       ? args.reasoningEffort
       : isNewRoute ? host.reasoningEffort : traceSnapshot.reasoningEffort ?? host.reasoningEffort,
     clientName: host.clientName,
+    sessionKey: host.sessionKey,
+    project,
+    routingStatus: routingStatus(toolName, traceId ?? null, args),
   };
+}
+
+function emitUnroutedNotice(
+  toolName: string,
+  metric: ReturnType<typeof beginToolMetric>,
+  destructive: boolean,
+): void {
+  if (metric.routingStatus !== "unrouted") return;
+  const key = `${metric.sessionKey}:${metric.project}:${metric.caller}`;
+  const now = Date.now();
+  if (now - (unroutedWarnings.get(key) ?? 0) < unroutedWarningIntervalMs) return;
+  unroutedWarnings.set(key, now);
+  for (const [candidate, warnedAt] of unroutedWarnings) {
+    if (now - warnedAt > unroutedWarningIntervalMs * 4 || unroutedWarnings.size > maxScopedMetricEntries) {
+      unroutedWarnings.delete(candidate);
+    }
+  }
+  emitBridgeNotice({
+    severity: destructive ? "warning" : "info",
+    code: "mssr-unrouted-tool-call",
+    source: toolName,
+    message: `${toolName} se ejecutó sin una traza MSSR activa. Antes de continuar trabajo sustancial, abre skill_route_plan o skill_bootstrap; la llamada no fue bloqueada.`,
+    details: {
+      toolName,
+      caller: metric.caller,
+      project: metric.project,
+      sessionKey: metric.sessionKey,
+      destructive,
+      policy: "observe-and-warn; MSSR does not grant permissions or proxy execution",
+    },
+    dedupeKey: `mssr-unrouted-tool-call:${key}`,
+  });
 }
 
 export function createBridgeServer() {
@@ -213,6 +343,7 @@ export function createBridgeServer() {
         "When the user asks you to write, explain, diagram, annotate, or place an existing image inside TabletWhiteboard, use whiteboard_add_text for structured prose, whiteboard_add_diagram for safe shapes, arrows, polylines and Bezier paths, whiteboard_add_svg only for sanitized SVG markup, and whiteboard_insert_image only for an existing local PNG, JPEG, or WebP. These tools write to ChatGPT's separate locked layer; do not claim an object exists until the tool confirms it.",
         "Bridge anomaly notices are delivered inside normal tool responses as bridgeNotices and are removed from the pending queue after delivery. Inspect them before continuing a long workflow.",
         "Bridge automatically propagates an MSSR trace inside the current MCP session and, when calls are stateless, through a bounded process-shared lease only when exactly one compatible trace exists. Keep explicit traceId for restart/cross-process resume or deliberate trace selection; treat ambiguous trace, mismatch, orphan load, missing required skill, and outcome-without-route notices as control evidence that may require replanning.",
+        "Bridge correlates ChatGPT tool calls with the anonymized openai/session metadata when the host provides it. An mssr-unrouted-tool-call notice means an eligible tool ran without a compatible route; continue safely, but bootstrap MSSR before the next substantial chain. Bootstrap and diagnostic tools are excluded from trace-coverage denominators.",
         "For chatgpt-web work, record an MSSR outcome and return a concise user-visible result or concrete blocker when the task ends. Bridge may emit mssr-web-outcome-missing-after-idle after tool activity without an observable outcome; treat it as a lifecycle reminder, not proof that the UI failed to render.",
         "Never claim that a guide, file, image, build, Blender scene, or other side effect exists until a tool result confirms it.",
       ].join(" "),
@@ -245,23 +376,32 @@ export function createBridgeServer() {
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const name = request.params.name;
+    const hostProfile = requestAgentProfile(request.params._meta, server.getClientVersion());
     const profiledArgs = withObservableAgentProfile(
       name,
       (request.params.arguments ?? {}) as Record<string, unknown>,
-      request.params._meta,
+      hostProfile,
     );
-    const prepared = mssrTraceSession.prepare(name, profiledArgs);
+    const project = resolveProject(name, profiledArgs, hostProfile);
+    const prepared = mssrTraceSession.prepare(name, profiledArgs, {
+      caller: hostProfile.caller,
+      sessionKey: hostProfile.sessionKey,
+      project,
+    });
     for (const notice of prepared.notices) emitBridgeNotice(notice);
     const args = prepared.args;
-    const hostProfile = requestAgentProfile(request.params._meta, server.getClientVersion());
-    const traceSnapshot = mssrTraceSession.resolveMetricContext(
-      typeof args.caller === "string" ? args.caller : hostProfile.caller,
-    );
+    const traceSnapshot = mssrTraceSession.resolveMetricContext({
+      caller: typeof args.caller === "string" ? args.caller : hostProfile.caller,
+      sessionKey: hostProfile.sessionKey,
+      project,
+    });
     const metric = beginToolMetric(
       name,
       args,
-      metricProfile(name, args, hostProfile, traceSnapshot),
+      metricProfile(name, args, hostProfile, traceSnapshot, project),
     );
+    const toolSchema = modularToolRegistry.tools.find((tool) => tool.name === name);
+    emitUnroutedNotice(name, metric, toolSchema?.annotations?.destructiveHint === true);
 
     const complete = (rawData: unknown, ok = true, error?: string) => {
       if (rawData && typeof rawData === "object" && !Array.isArray(rawData)) {
