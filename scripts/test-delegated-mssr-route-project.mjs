@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { spawnSync } from "node:child_process";
 
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "bridge-delegated-mssr-route-"));
 const codexHome = path.join(sandbox, "codex");
@@ -56,7 +57,10 @@ traceContext.resetSharedMssrTraceRegistryForTests();
 const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 const server = createBridgeServer();
 const client = new Client({ name: "openai-mcp", version: "1.0.0" }, { capabilities: {} });
-const requestMeta = { "openai/session": "delegated-route-project-session" };
+const sessionMode = process.env.BRIDGE_TEST_SESSION_MODE === "unknown" ? "unknown" : "named";
+const requestMeta = sessionMode === "named"
+  ? { "openai/session": "delegated-route-project-session" }
+  : {};
 const call = async (name, args = {}) => payload(await client.callTool({ name, arguments: args, _meta: requestMeta }));
 
 const intent = {
@@ -129,7 +133,9 @@ try {
     "A project tool after a delegated route must not be reported as unrouted.",
   );
 
-  const expectedSessionKey = `session-${createHash("sha256").update("delegated-route-project-session").digest("hex").slice(0, 16)}`;
+  const expectedSessionKey = sessionMode === "named"
+    ? `session-${createHash("sha256").update("delegated-route-project-session").digest("hex").slice(0, 16)}`
+    : "unknown";
   const recent = metrics.getRecentMetrics(50, "active").recent;
   const routeMetric = recent.find((row) => row.tool === "bridge_tool_query");
   const searchMetric = recent.find((row) => row.tool === "search_files");
@@ -184,4 +190,18 @@ try {
   metrics.closeMetricsForTests();
   observatory.closeMssrObservatoryForTests();
   fs.rmSync(sandbox, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+}
+
+if (sessionMode === "named") {
+  const anonymous = spawnSync(process.execPath, [process.argv[1]], {
+    cwd: process.cwd(),
+    env: { ...process.env, BRIDGE_TEST_SESSION_MODE: "unknown" },
+    encoding: "utf8",
+  });
+  assert.equal(
+    anonymous.status,
+    0,
+    `Anonymous-session delegated route regression failed.\n${anonymous.stderr || anonymous.stdout}`,
+  );
+  process.stdout.write(anonymous.stdout);
 }

@@ -1,3 +1,8 @@
+## 0.6.30 - 2026-07-26
+
+- Recover the uniquely fresh delegated MSSR route when ChatGPT Web provides no stable session metadata, while preserving ambiguity when multiple fresh routes remain compatible.
+- Extend delegated-route regression coverage to run with both named and unknown sessions.
+
 # Changelog
 
 ## Unreleased

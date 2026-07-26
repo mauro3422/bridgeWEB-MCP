@@ -686,3 +686,18 @@ relacionados independientes sin duplicar filas por cada llamada.
 **Regresión:** `scripts/test-delegated-mssr-route-project.mjs` crea tres rutas históricas abiertas, envejece sus eventos, reinicia el registro en memoria, crea una ruta fresca delegada y vuelve a reiniciar para forzar recuperación SQLite. Exige proyecto correcto, sesión anonimizada estable, mismo `traceId`, `routing_status=traced`, ausencia de `mssr-unrouted-tool-call` y cierre MSSR exitoso. La prueba está integrada en `test:regressions` y expuesta como `test:mssr-delegated-routing`.
 
 **Seguimiento:** Verificar 0.6.29 vivo desde ChatGPT Web y cerrar las trazas históricas de mantenimiento ya reemplazadas. No autoenlazar si existen dos o más rutas frescas compatibles.
+
+## Delegated MSSR route lost when ChatGPT Web session is unknown
+
+**Date:** 2026-07-26
+**Status:** Fixed in Bridge 0.6.30.
+
+**Symptom:** After `project_context_load` and a delegated `skill_route_plan`, a stateless follow-up tool could be reported as `mssr-unrouted-tool-call` when `_meta.openai/session` was absent, even though one fresh compatible route existed.
+
+**Reproduction:** Run `scripts/test-delegated-mssr-route-project.mjs` with `BRIDGE_TEST_SESSION_MODE=unknown`, age three historical routes, reset the in-memory registry, and invoke `search_files` without copying `traceId`.
+
+**Cause:** Persisted candidate recovery narrowed by project or caller but did not let one fresh route dominate stale compatible routes unless both exact session and project scope were known.
+
+**Correction:** Apply freshness dominance after project/caller scoping. Exactly one fresh route is recovered; two or more fresh routes remain ambiguous.
+
+**Regression:** `npm run test:mssr-delegated-routing` now executes both named-session and unknown-session variants.

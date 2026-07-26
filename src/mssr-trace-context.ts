@@ -330,6 +330,13 @@ export function createMssrTraceSessionCoordinator(
     return freshRoutes.length === 1 ? freshRoutes : exact;
   }
 
+  function dominantFreshRouteCandidate(candidates: ActiveTraceState[]): ActiveTraceState[] {
+    if (candidates.length <= 1) return candidates;
+    const now = Date.now();
+    const freshRoutes = candidates.filter((state) => now - state.lastRoutePlannedAt <= EXACT_HOST_ROUTE_DOMINANCE_MS);
+    return freshRoutes.length === 1 ? freshRoutes : candidates;
+  }
+
   function scopedCandidateResolution(candidates: ActiveTraceState[]): {
     candidates: ActiveTraceState[];
     relaxedHostScope: boolean;
@@ -344,7 +351,9 @@ export function createMssrTraceSessionCoordinator(
     }
     if (hostContext.project !== "unknown") {
       const projectMatches = candidates.filter((state) => state.project === hostContext.project);
-      if (projectMatches.length > 0) return { candidates: projectMatches, relaxedHostScope: false };
+      if (projectMatches.length > 0) {
+        return { candidates: dominantFreshRouteCandidate(projectMatches), relaxedHostScope: false };
+      }
       relaxedHostScope = true;
     }
     if (hostContext.caller !== "other") {
@@ -389,14 +398,17 @@ export function createMssrTraceSessionCoordinator(
         maxAgeMs: TRACE_LEASE_MS,
         limit: 16,
       }));
-      if (projectMatches.length > 0) return { candidates: projectMatches, relaxedHostScope: false };
+      if (projectMatches.length > 0) {
+        return { candidates: dominantFreshRouteCandidate(projectMatches), relaxedHostScope: false };
+      }
     }
+    const callerMatches = restorePersistedCandidates(findPersistedMssrTraceCandidates({
+      caller: hostContext.caller,
+      maxAgeMs: TRACE_LEASE_MS,
+      limit: 16,
+    }));
     return {
-      candidates: restorePersistedCandidates(findPersistedMssrTraceCandidates({
-        caller: hostContext.caller,
-        maxAgeMs: TRACE_LEASE_MS,
-        limit: 16,
-      })),
+      candidates: dominantFreshRouteCandidate(callerMatches),
       relaxedHostScope: hostContext.sessionKey !== "unknown" || hostContext.project !== "unknown",
     };
   }

@@ -4,7 +4,7 @@ Verified against the live HTTP bridge runtime on 2026-07-26.
 
 ```text
 Project root:       C:\Dev\bridge-mcp
-Server:             bridge-mcp 0.6.29
+Server:             bridge-mcp 0.6.30
 Mode:               Streamable HTTP production
 Bridge MCP:         http://127.0.0.1:3001/mcp
 Tunnel admin:       http://127.0.0.1:8081
@@ -69,7 +69,7 @@ npm run docs:tools:check
 For a release or runtime-sensitive change:
 
 ```text
-bridge_verify_all(expectedServerVersion="0.6.29", strictGit=true)
+bridge_verify_all(expectedServerVersion="0.6.30", strictGit=true)
 ```
 
 The latest strict verification passed doctor, typecheck, build, HTTP smoke, regressions, MSSR routing, generated tool docs, watchdog, metrics and tools/list sanity.
