@@ -33,7 +33,7 @@ export const dashboardMarkup = `
     </article>
     <article class="health-item">
       <span id="health-sessions-dot" class="dot"></span>
-      <div class="health-copy"><div class="health-label">Sesiones</div><div id="health-sessions" class="health-value">—</div></div>
+      <div class="health-copy"><div class="health-label">Conexiones MCP</div><div id="health-sessions" class="health-value">—</div></div>
     </article>
   </section>
 
@@ -72,8 +72,8 @@ export const dashboardMarkup = `
       <article class="card span-4">
         <div class="card-header"><div><div class="card-kicker">Ahora</div><h2 class="card-title">Estado actual</h2></div></div>
         <div class="status-list">
-          <div class="status-row"><span class="status-key">Sesiones HTTP</span><span id="current-sessions" class="status-value">—</span></div>
-          <div class="status-row"><span class="status-key">Sesiones activas</span><span id="current-active-sessions" class="status-value">—</span></div>
+          <div class="status-row"><span class="status-key">Conexiones retenidas</span><span id="current-sessions" class="status-value">—</span></div>
+          <div class="status-row"><span class="status-key">Con solicitud activa</span><span id="current-active-sessions" class="status-value">—</span></div>
           <div class="status-row"><span class="status-key">Transportes anónimos</span><span id="current-anonymous" class="status-value">—</span></div>
           <div class="status-row"><span class="status-key">PID</span><span id="current-pid" class="status-value">—</span></div>
           <div class="status-row"><span class="status-key">Uptime</span><span id="current-uptime" class="status-value">—</span></div>
@@ -169,7 +169,7 @@ export const dashboardMarkup = `
       </article>
 
       <article class="card span-6">
-        <div class="card-header"><div><div class="card-kicker">Uso individual del sistema</div><h2 class="card-title">Activación MSSR por modelo</h2><p class="card-description">Comprueba si cada perfil enruta, carga lo requerido y verifica. La muestra siempre queda visible.</p></div></div>
+        <div class="card-header"><div><div class="card-kicker">Uso individual del sistema</div><h2 class="card-title">Activación MSSR por modelo</h2><p class="card-description">Comprueba si cada perfil enruta, carga lo requerido y verifica. Una tarea todavía abierta muestra sus fases finales como pendientes.</p></div></div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Perfil</th><th>Tareas</th><th>Routing</th><th>Route → load</th><th>Requeridas</th><th>Verificación</th></tr></thead>
@@ -179,10 +179,10 @@ export const dashboardMarkup = `
       </article>
 
       <article class="card span-6">
-        <div class="card-header"><div><div class="card-kicker">Resultado individual</div><h2 class="card-title">Rendimiento MSSR por modelo</h2><p class="card-description">Compara cierres, calidad, velocidad y fricción. No declara un ganador con una muestra insuficiente.</p></div></div>
+        <div class="card-header"><div><div class="card-kicker">Resultado individual</div><h2 class="card-title">Rendimiento MSSR por modelo</h2><p class="card-description">Se completa al registrar outcomes. “Pendiente” significa que la tarea sigue abierta; no equivale a 0% de calidad ni a un fallo.</p></div></div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Perfil</th><th>Cierre</th><th>Éxito</th><th>Aceptación</th><th>Score</th><th>Tiempo</th><th>Loop / correcciones</th></tr></thead>
+            <thead><tr><th>Perfil</th><th>Cierre / estado</th><th>Éxito</th><th>Aceptación</th><th>Score</th><th>Tiempo</th><th>Loop / correcciones</th></tr></thead>
             <tbody id="mssr-agent-results"><tr><td colspan="7" class="muted">Cargando perfiles…</td></tr></tbody>
           </table>
         </div>
@@ -224,7 +224,7 @@ export const dashboardMarkup = `
           <div class="system-field"><div class="system-label">Host</div><div id="system-host" class="system-value">—</div></div>
           <div class="system-field"><div class="system-label">MCP path</div><div id="system-mcp-path" class="system-value">—</div></div>
           <div class="system-field"><div class="system-label">Inicio</div><div id="system-started" class="system-value">—</div></div>
-          <div class="system-field"><div class="system-label">Máximo de sesiones</div><div id="system-max-sessions" class="system-value">—</div></div>
+          <div class="system-field"><div class="system-label">Máximo de conexiones MCP</div><div id="system-max-sessions" class="system-value">—</div></div>
         </div>
       </article>
 

@@ -7,7 +7,7 @@ El objetivo es tener un puente local controlado por nosotros para operar filesys
 ## Estado actual
 
 ```text
-bridge-mcp v0.6.18
+bridge-mcp v0.6.19
 Mode: HTTP production-candidate
 Project root: C:\dev\bridge-mcp
 Bridge MCP: http://127.0.0.1:3001/mcp
@@ -333,7 +333,7 @@ Estado esperado:
 
 ```text
 bridge_self_check.ok = true
-server.version = 0.6.18
+server.version = 0.6.19
 tunnel.baseUrl = http://127.0.0.1:8081
 tunnel healthz = live
 tunnel readyz = ready
@@ -461,6 +461,14 @@ La telemetría actual usa una época persistida `trace-contract-v1`. `/api/mssr/
 La misma época gobierna ahora las métricas generales de tools. `/api/metrics/*` y `bridge_metrics_*` usan `scope=active` por defecto, mientras `scope=all` conserva el acumulado. Cada llamada nueva guarda `traceId`, `caller`, `model` y `reasoningEffort` cuando son observables; el dashboard muestra llamadas, errores y latencia agrupados por ese perfil para no mezclar Codex con ChatGPT Web ni variantes de modelo.
 
 La identidad de superficie también se obtiene del `clientInfo` del handshake MCP. Una tool genérica o stateless hereda la única traza abierta compatible con su caller para fines de observabilidad, sin inyectar argumentos fuera de schema ni volver a ejecutar MSSR entre llamadas. El dashboard MSSR separa por perfil routing estructurado, route→load, cargas requeridas, verificación, cierre, éxito, aceptación, score, duración, recordatorios de loop y correcciones del usuario.
+
+El contador HTTP muestra conexiones MCP retenidas por el servidor, no cantidad
+de chats de usuario. Una conexión puede quedar idle hasta `sessionIdleMs` y el
+límite protege capacidad de transporte. En rendimiento, una traza enrutada sin
+outcome todavía se muestra como `pendiente`; no se interpreta como 0% de calidad.
+Los valores de modelo o esfuerzo no expuestos por el host se presentan como
+`modelo no expuesto` / `esfuerzo no expuesto`. `work_once` es el alias corto de
+`run_command` para ejecutar una única acción local acotada.
 
 ChatGPT también entrega `_meta["openai/session"]`, un identificador anónimo de
 conversación. Bridge lo vuelve a hashear localmente y lo combina con un nombre

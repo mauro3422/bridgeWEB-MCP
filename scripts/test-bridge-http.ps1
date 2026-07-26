@@ -51,7 +51,7 @@ Invoke-Check "status" {
 
 Invoke-Check "MSSR dashboard" {
   $dashboard = Invoke-WebRequest -UseBasicParsing "$BaseUrl/dashboard"
-  if ($dashboard.Content -notmatch 'id="mssr-structured"' -or $dashboard.Content -notmatch 'id="mssr-continuity"' -or $dashboard.Content -notmatch 'id="mssr-skill-outcomes"' -or $dashboard.Content -notmatch 'id="agent-profiles"' -or $dashboard.Content -notmatch 'id="mssr-agent-activation"' -or $dashboard.Content -notmatch 'id="mssr-agent-results"' -or $dashboard.Content -notmatch 'Cobertura MSSR') {
+  if ($dashboard.Content -notmatch 'id="mssr-structured"' -or $dashboard.Content -notmatch 'id="mssr-continuity"' -or $dashboard.Content -notmatch 'id="mssr-skill-outcomes"' -or $dashboard.Content -notmatch 'id="agent-profiles"' -or $dashboard.Content -notmatch 'id="mssr-agent-activation"' -or $dashboard.Content -notmatch 'id="mssr-agent-results"' -or $dashboard.Content -notmatch 'Cobertura MSSR' -or $dashboard.Content -notmatch 'Conexiones MCP' -or $dashboard.Content -notmatch 'modelo no expuesto' -or $dashboard.Content -notmatch 'pendiente') {
     throw "Dashboard does not expose MSSR and per-agent profile sections"
   }
   $mssr = Invoke-RestMethod "$BaseUrl/api/mssr/summary?days=30&scope=active"

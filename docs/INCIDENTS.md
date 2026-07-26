@@ -439,3 +439,36 @@ faltantes y cero aviso falso.
 
 **Seguimiento:** Mantener la restauración acotada a un trace explícito; no
 adivinar automáticamente entre varias trazas históricas después de reiniciar.
+
+---
+
+## 2026-07-26 — El dashboard confundía tareas abiertas y conexiones MCP con fallos y chats
+
+**Estado:** Corregido en source 0.6.19.
+
+**Capa / owner:** Dashboard operativo / `bridge-mcp`.
+
+**Síntoma:** Una traza recién abierta mostraba activación MSSR con una tarea,
+pero rendimiento indicaba cierre 0%, éxito vacío y verificación 0%. El estado
+HTTP mostraba hasta 55 “sesiones totales”, interpretables como chats. Los
+perfiles Web volvían a enseñar `unknown` y `work_once` no explicaba su función.
+
+**Evidencia:** El readback vivo tenía una ruta, tres cargas y cero outcomes
+porque la tarea seguía ejecutándose. `/status` informó conexiones retenidas,
+activas e idle; no contiene un contador de conversaciones de usuario.
+
+**Causa:** La UI representaba la ausencia temporal de outcome como porcentaje
+cero y reutilizaba la palabra “sesión” para el transporte MCP. También mostraba
+los valores internos de ausencia sin traducirlos.
+
+**Corrección:** Las fases finales y el cierre se muestran como `pendiente`
+mientras existan más trazas enrutadas que outcomes. El panel nombra conexiones
+MCP retenidas y solicitudes activas; `unknown` se presenta como dato no expuesto
+y `work_once` incluye su descripción de alias para un comando local corto.
+
+**Regresión:** El smoke HTTP exige las etiquetas `Conexiones MCP`,
+`modelo no expuesto` y `pendiente`. Typecheck y build validan el renderer.
+
+**Seguimiento:** Mantener separadas métricas de transporte, conversación,
+activación, fase y resultado; ninguna ausencia temporal debe presentarse como
+calidad cero.

@@ -11,6 +11,20 @@ const ms = (value) => num(Math.round(Number(value || 0))) + ' ms';
 const clock = (iso) => iso ? new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—';
 const dateTime = (iso) => iso ? new Date(iso).toLocaleString('es-AR') : '—';
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+const exposed = (value, fallback) => value && value !== 'unknown' ? String(value) : fallback;
+
+function toolHint(name) {
+  if (name === 'work_once') return 'Alias de run_command para un comando local corto';
+  return name;
+}
+
+function pendingMetric(value, pending, detail) {
+  if (pending) {
+    return '<span class="status-pill" data-tone="info"><span class="dot info"></span><span>pendiente</span></span>' +
+      '<div class="recent-detail">' + esc(detail) + '</div>';
+  }
+  return pct(value);
+}
 
 function setText(id, value) {
   const element = byId(id);
@@ -114,10 +128,11 @@ function renderRecent(targetId, inputRows, limit, includeDetail) {
   }
   target.innerHTML = rows.map((row) => {
     const profile = [row.caller, row.model, row.reasoning_effort].filter((value) => value && value !== 'unknown').join(' · ');
-    const detail = [row.error || row.input_keys || '', profile].filter(Boolean).join(' · ');
+    const alias = row.tool === 'work_once' ? toolHint(row.tool) : '';
+    const detail = [row.error || row.input_keys || '', alias, profile].filter(Boolean).join(' · ');
     return '<tr>' +
       '<td>' + esc(clock(row.started_at)) + '</td>' +
-      '<td><code title="' + esc(row.tool) + '">' + esc(row.tool) + '</code></td>' +
+      '<td><code title="' + esc(toolHint(row.tool)) + '">' + esc(row.tool) + '</code></td>' +
       (includeDetail ? '<td>' + esc(ms(row.duration_ms)) + '</td><td>' + recentStatus(row.ok) + '</td><td class="recent-detail">' + esc(detail) + '</td>' : '<td>' + recentStatus(row.ok) + '</td><td>' + esc(ms(row.duration_ms)) + '</td>') +
     '</tr>';
   }).join('');
@@ -132,11 +147,11 @@ function renderAgentProfiles(inputRows) {
     return;
   }
   target.innerHTML = rows.map((row) => '<tr>' +
-    '<td><code>' + esc(row.caller || 'other') + '</code></td>' +
-    '<td>' + esc(row.model || 'unknown') + '</td>' +
-    '<td>' + esc(row.reasoning_effort || 'unknown') + '</td>' +
-    '<td><code>' + esc(row.project || 'unknown') + '</code><div class="recent-detail" title="' + esc(row.session_key || 'unknown') + '">' +
-      esc(row.session_key && row.session_key !== 'unknown' ? String(row.session_key).slice(-10) : 'sesión unknown') + '</div></td>' +
+    '<td><code>' + esc(exposed(row.caller, 'cliente no identificado')) + '</code></td>' +
+    '<td>' + esc(exposed(row.model, 'modelo no expuesto')) + '</td>' +
+    '<td>' + esc(exposed(row.reasoning_effort, 'esfuerzo no expuesto')) + '</td>' +
+    '<td><code>' + esc(exposed(row.project, 'proyecto no identificado')) + '</code><div class="recent-detail" title="' + esc(row.session_key || 'unknown') + '">' +
+      esc(row.session_key && row.session_key !== 'unknown' ? String(row.session_key).slice(-10) : 'sesión no expuesta') + '</div></td>' +
     '<td>' + num(row.calls) + '</td>' +
     '<td title="' + esc(num(row.traced_calls) + ' / ' + num(row.eligible_calls) + ' tools elegibles') + '">' +
       pct(row.mssr_trace_coverage) + '<div class="recent-detail">' + num(row.untraced_calls) + ' sin traza</div></td>' +
@@ -259,8 +274,8 @@ function renderSkillOutcomes(inputRows) {
 }
 
 function profileIdentity(row) {
-  return '<code>' + esc(row.caller || 'other') + '</code><div class="recent-detail">' +
-    esc((row.model || 'unknown') + ' · ' + (row.reasoningEffort || 'unknown')) + '</div>';
+  return '<code>' + esc(exposed(row.caller, 'cliente no identificado')) + '</code><div class="recent-detail">' +
+    esc(exposed(row.model, 'modelo no expuesto') + ' · ' + exposed(row.reasoningEffort, 'esfuerzo no expuesto')) + '</div>';
 }
 
 function renderMssrAgentProfiles(inputRows) {
@@ -268,25 +283,32 @@ function renderMssrAgentProfiles(inputRows) {
   const results = byId('mssr-agent-results');
   const rows = inputRows || [];
   if (activation) {
-    activation.innerHTML = rows.length ? rows.map((row) => '<tr>' +
-      '<td>' + profileIdentity(row) + '</td>' +
-      '<td>' + num(row.routedTraces) + '</td>' +
-      '<td>' + pct(row.structuredRouteRate) + '</td>' +
-      '<td>' + pct(row.routeLoadCoverage) + '</td>' +
-      '<td title="' + esc(num(row.requiredSkillLoadsSatisfied) + ' / ' + num(row.requiredSkillLoadsExpected)) + '">' + pct(row.requiredLoadCompliance) + '</td>' +
-      '<td>' + pct(row.verificationCoverage) + '</td>' +
-    '</tr>').join('') : '<tr><td colspan="6" class="muted">Sin perfiles MSSR en la época activa.</td></tr>';
+    activation.innerHTML = rows.length ? rows.map((row) => {
+      const open = Number(row.routedTraces || 0) > Number(row.outcomeTraces || 0);
+      return '<tr>' +
+        '<td>' + profileIdentity(row) + '</td>' +
+        '<td>' + num(row.routedTraces) + '</td>' +
+        '<td>' + pct(row.structuredRouteRate) + '</td>' +
+        '<td>' + pct(row.routeLoadCoverage) + '</td>' +
+        '<td title="' + esc(num(row.requiredSkillLoadsSatisfied) + ' / ' + num(row.requiredSkillLoadsExpected)) + '">' + pct(row.requiredLoadCompliance) + '</td>' +
+        '<td>' + pendingMetric(row.verificationCoverage, open && Number(row.verificationCoverage || 0) === 0, 'tarea todavía abierta') + '</td>' +
+      '</tr>';
+    }).join('') : '<tr><td colspan="6" class="muted">Sin perfiles MSSR en la época activa.</td></tr>';
   }
   if (results) {
-    results.innerHTML = rows.length ? rows.map((row) => '<tr>' +
-      '<td>' + profileIdentity(row) + '</td>' +
-      '<td>' + pct(row.outcomeCoverage) + '</td>' +
-      '<td>' + pct(row.outcomeSuccessRate) + '</td>' +
-      '<td>' + pct(row.outcomeAcceptanceRate) + '</td>' +
-      '<td>' + score(row.averageOutcomeScore) + '</td>' +
-      '<td>' + (row.averageCompletionMs === null || row.averageCompletionMs === undefined ? '—' : ms(row.averageCompletionMs)) + '</td>' +
-      '<td>' + num(row.closureReminderEvents) + ' / ' + num(row.userCorrections) + '</td>' +
-    '</tr>').join('') : '<tr><td colspan="7" class="muted">Sin outcomes por perfil en la época activa.</td></tr>';
+    results.innerHTML = rows.length ? rows.map((row) => {
+      const open = Number(row.routedTraces || 0) > Number(row.outcomeTraces || 0);
+      const outcomeDetail = num(row.outcomeTraces) + ' / ' + num(row.routedTraces) + ' outcomes';
+      return '<tr>' +
+        '<td>' + profileIdentity(row) + '</td>' +
+        '<td>' + pendingMetric(row.outcomeCoverage, open && Number(row.outcomeTraces || 0) === 0, outcomeDetail) + '</td>' +
+        '<td>' + pct(row.outcomeSuccessRate) + '</td>' +
+        '<td>' + pct(row.outcomeAcceptanceRate) + '</td>' +
+        '<td>' + score(row.averageOutcomeScore) + '</td>' +
+        '<td>' + (row.averageCompletionMs === null || row.averageCompletionMs === undefined ? '—' : ms(row.averageCompletionMs)) + '</td>' +
+        '<td>' + num(row.closureReminderEvents) + ' / ' + num(row.userCorrections) + '</td>' +
+      '</tr>';
+    }).join('') : '<tr><td colspan="7" class="muted">Sin outcomes por perfil en la época activa.</td></tr>';
   }
 }
 
@@ -305,7 +327,7 @@ function updateHealth(status, overview, mssr) {
   setDot('health-mssr-dot', mssrOk ? 'ok' : 'warn');
   setText('health-mssr', mssrOk ? 'observando' : 'degradado');
   setDot('health-sessions-dot', Number(status.activeSessions || 0) > 0 ? 'info' : 'ok');
-  setText('health-sessions', num(status.sessions) + ' totales · ' + num(status.activeSessions) + ' activas');
+  setText('health-sessions', num(status.sessions) + ' retenidas · ' + num(status.activeSessions) + ' con solicitud');
 
   const overall = byId('overall-status');
   if (overall) overall.dataset.tone = overallOk ? 'ok' : bridgeOk ? 'warn' : 'bad';
