@@ -171,6 +171,13 @@ function withObservableAgentProfile(
   args: Record<string, unknown>,
   host: BridgeMetricProfile,
 ): Record<string, unknown> {
+  const delegated = delegatedArgs(toolName, args);
+  if (delegated.toolName !== toolName) {
+    return {
+      ...args,
+      arguments: withObservableAgentProfile(delegated.toolName, delegated.args, host),
+    };
+  }
   if (!profiledMssrTools.has(toolName)) return args;
   return {
     ...args,
@@ -224,6 +231,16 @@ function delegatedArgs(toolName: string, args: Record<string, unknown>): { toolN
     return { toolName: args.toolName, args: args.arguments as Record<string, unknown> };
   }
   return { toolName, args };
+}
+
+function emittedTraceId(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (typeof record.traceId === "string") return record.traceId;
+  return record.result && typeof record.result === "object" && !Array.isArray(record.result)
+    && typeof (record.result as Record<string, unknown>).traceId === "string"
+    ? (record.result as Record<string, unknown>).traceId as string
+    : undefined;
 }
 
 function projectFromArgs(toolName: string, args: Record<string, unknown>): string | undefined {
@@ -283,20 +300,23 @@ function metricProfile(
   taskKey: string | undefined,
   relatedProject: string | undefined,
 ): BridgeMetricProfile {
-  const isNewRoute = profiledMssrTools.has(toolName) && typeof args.task === "string";
-  const traceId = typeof args.traceId === "string"
-    ? args.traceId
+  const delegated = delegatedArgs(toolName, args);
+  const effectiveToolName = delegated.toolName;
+  const effectiveArgs = delegated.args;
+  const isNewRoute = profiledMssrTools.has(effectiveToolName) && typeof effectiveArgs.task === "string";
+  const traceId = typeof effectiveArgs.traceId === "string"
+    ? effectiveArgs.traceId
     : isNewRoute ? undefined : traceSnapshot.traceId ?? undefined;
   return {
     traceId,
-    caller: typeof args.caller === "string"
-      ? args.caller
+    caller: typeof effectiveArgs.caller === "string"
+      ? effectiveArgs.caller
       : isNewRoute ? host.caller : traceSnapshot.caller ?? host.caller,
-    model: typeof args.model === "string"
-      ? args.model
+    model: typeof effectiveArgs.model === "string"
+      ? effectiveArgs.model
       : isNewRoute ? host.model : traceSnapshot.model ?? host.model,
-    reasoningEffort: typeof args.reasoningEffort === "string"
-      ? args.reasoningEffort
+    reasoningEffort: typeof effectiveArgs.reasoningEffort === "string"
+      ? effectiveArgs.reasoningEffort
       : isNewRoute ? host.reasoningEffort : traceSnapshot.reasoningEffort ?? host.reasoningEffort,
     clientName: host.clientName,
     sessionKey: host.sessionKey,
@@ -396,6 +416,7 @@ export function createBridgeServer() {
       (request.params.arguments ?? {}) as Record<string, unknown>,
       hostProfile,
     );
+    const effectiveCall = delegatedArgs(name, profiledArgs);
     const observedProject = projectFromArgs(name, profiledArgs);
     if (name === "project_context_load" && observedProject) pendingContextProjects.add(observedProject);
     if (name === "project_context_load") {
@@ -413,9 +434,11 @@ export function createBridgeServer() {
         }
       }
     }
-    const startsNewRoute = (name === "skill_recommend" || name === "skill_route_plan" || name === "skill_bootstrap")
-      && (profiledArgs.stage === undefined || profiledArgs.stage === "start")
-      && typeof profiledArgs.traceId !== "string";
+    const startsNewRoute = (effectiveCall.toolName === "skill_recommend"
+      || effectiveCall.toolName === "skill_route_plan"
+      || effectiveCall.toolName === "skill_bootstrap")
+      && (effectiveCall.args.stage === undefined || effectiveCall.args.stage === "start")
+      && typeof effectiveCall.args.traceId !== "string";
     const pendingProject = startsNewRoute && pendingContextProjects.size > 0
       ? pendingContextProjects.size === 1
         ? [...pendingContextProjects][0]
@@ -436,8 +459,9 @@ export function createBridgeServer() {
     });
     for (const notice of prepared.notices) emitBridgeNotice(notice);
     const args = prepared.args;
+    const effectivePrepared = delegatedArgs(name, args);
     const traceSnapshot = mssrTraceSession.resolveMetricContext({
-      caller: typeof args.caller === "string" ? args.caller : hostProfile.caller,
+      caller: typeof effectivePrepared.args.caller === "string" ? effectivePrepared.args.caller : hostProfile.caller,
       sessionKey: hostProfile.sessionKey,
       project,
     });
@@ -447,7 +471,7 @@ export function createBridgeServer() {
     const taskKey = (hostProfile.sessionKey ? sessionTaskKeys.get(hostProfile.sessionKey) : undefined)
       ?? localTaskKey
       ?? (traceSnapshot.taskHash ? `task_${traceSnapshot.taskHash.slice(0, 16)}` : undefined)
-      ?? taskKeyFromText(args.task);
+      ?? taskKeyFromText(effectivePrepared.args.task);
     const relatedProject = observedProject && observedProject !== metricProject
       ? observedProject
       : undefined;
@@ -465,12 +489,8 @@ export function createBridgeServer() {
         const delegatedResult = result.result && typeof result.result === "object" && !Array.isArray(result.result)
           ? result.result as Record<string, unknown>
           : undefined;
-        const emittedTraceId = typeof result.traceId === "string"
-          ? result.traceId
-          : typeof delegatedResult?.traceId === "string"
-            ? delegatedResult.traceId
-            : undefined;
-        if (!metric.traceId && emittedTraceId) metric.traceId = emittedTraceId.slice(0, 128);
+        const traceIdFromResult = emittedTraceId(rawData);
+        if (!metric.traceId && traceIdFromResult) metric.traceId = traceIdFromResult.slice(0, 128);
         const resultProfile = result.agentProfile ?? delegatedResult?.agentProfile;
         if (resultProfile && typeof resultProfile === "object" && !Array.isArray(resultProfile)) {
           const profile = resultProfile as Record<string, unknown>;
@@ -500,7 +520,7 @@ export function createBridgeServer() {
       if (!modularToolRegistry.has(name)) throw new Error(`Unknown tool: ${name}`);
       const result = await modularToolRegistry.call(name, args);
       for (const notice of mssrTraceSession.observe(name, args, result)) emitBridgeNotice(notice);
-      if (startsNewRoute && result && typeof result === "object" && typeof (result as Record<string, unknown>).traceId === "string") {
+      if (startsNewRoute && emittedTraceId(result)) {
         pendingContextProjects.clear();
       }
       return complete(result);

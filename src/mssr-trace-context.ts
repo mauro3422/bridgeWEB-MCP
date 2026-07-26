@@ -23,6 +23,7 @@ type ActiveTraceState = {
   routeCount: number;
   closed: boolean;
   updatedAt: number;
+  lastRoutePlannedAt: number;
   lastToolCompletedAt: number | null;
   lastToolName: string | null;
   toolActivityVersion: number;
@@ -47,6 +48,7 @@ const TRACE_BOUNDARY_STAGES = new Set(["verify", "persist", "close"]);
 const TRACE_BOUNDARY_EVENTS = new Set(["verification", "persistence", "outcome"]);
 const TRACE_LEASE_MS = Math.max(60_000, Number(process.env.BRIDGE_MCP_MSSR_TRACE_LEASE_MS) || 2 * 60 * 60 * 1_000);
 const CLOSED_TRACE_RETENTION_MS = Math.min(TRACE_LEASE_MS, 15 * 60 * 1_000);
+const EXACT_HOST_ROUTE_DOMINANCE_MS = Math.max(15_000, Number(process.env.BRIDGE_MCP_MSSR_EXACT_ROUTE_DOMINANCE_MS) || 90_000);
 const MAX_SHARED_TRACES = 128;
 const sharedTraces = new Map<string, ActiveTraceState>();
 const closureTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -306,6 +308,7 @@ export function createMssrTraceSessionCoordinator(
       requiredSkills: new Set(persisted.requiredSkills),
       selectedSkills: new Set(persisted.selectedSkills),
       loadedSkills: new Set(persisted.loadedSkills),
+      lastRoutePlannedAt: persisted.updatedAt,
       lastToolCompletedAt: null,
       lastToolName: null,
       toolActivityVersion: 0,
@@ -313,6 +316,18 @@ export function createMssrTraceSessionCoordinator(
     };
     sharedTraces.set(traceId, state);
     return state;
+  }
+  function dominantExactHostCandidate(candidates: ActiveTraceState[]): ActiveTraceState[] {
+    if (candidates.length <= 1
+      || hostContext.sessionKey === "unknown"
+      || hostContext.project === "unknown") return candidates;
+    const exact = candidates.filter((state) => state.sessionKey === hostContext.sessionKey
+      && state.project === hostContext.project
+      && (hostContext.caller === "other" || state.caller === hostContext.caller));
+    if (exact.length <= 1) return exact.length === 1 ? exact : candidates;
+    const now = Date.now();
+    const freshRoutes = exact.filter((state) => now - state.lastRoutePlannedAt <= EXACT_HOST_ROUTE_DOMINANCE_MS);
+    return freshRoutes.length === 1 ? freshRoutes : exact;
   }
 
   function scopedCandidateResolution(candidates: ActiveTraceState[]): {
@@ -322,7 +337,9 @@ export function createMssrTraceSessionCoordinator(
     let relaxedHostScope = false;
     if (hostContext.sessionKey !== "unknown") {
       const sessionMatches = candidates.filter((state) => state.sessionKey === hostContext.sessionKey);
-      if (sessionMatches.length > 0) return { candidates: sessionMatches, relaxedHostScope: false };
+      if (sessionMatches.length > 0) {
+        return { candidates: dominantExactHostCandidate(sessionMatches), relaxedHostScope: false };
+      }
       relaxedHostScope = true;
     }
     if (hostContext.project !== "unknown") {
@@ -361,7 +378,9 @@ export function createMssrTraceSessionCoordinator(
         maxAgeMs: TRACE_LEASE_MS,
         limit: 16,
       }));
-      if (sessionMatches.length > 0) return { candidates: sessionMatches, relaxedHostScope: false };
+      if (sessionMatches.length > 0) {
+        return { candidates: dominantExactHostCandidate(sessionMatches), relaxedHostScope: false };
+      }
     }
     if (hostContext.project !== "unknown") {
       const projectMatches = restorePersistedCandidates(findPersistedMssrTraceCandidates({
@@ -635,6 +654,7 @@ export function createMssrTraceSessionCoordinator(
         routeCount: previous ? previous.routeCount + 1 : 1,
         closed: false,
         updatedAt: now,
+        lastRoutePlannedAt: now,
         lastToolCompletedAt: previous?.lastToolCompletedAt ?? null,
         lastToolName: previous?.lastToolName ?? null,
         toolActivityVersion: previous?.toolActivityVersion ?? 0,

@@ -667,3 +667,22 @@ relacionados independientes sin duplicar filas por cada llamada.
 **Regresión:** `test-mssr-trace-contract.mjs` cubre `route → reset → herramienta genérica search_files` con sesión/proyecto rotados y exige el trace original en métricas sin aviso `unrouted`; también cubre `dispatch route(close) → reset → skill_load/checkpoint` y un caso con dos trazas abiertas que debe permanecer sin autoenlace.
 
 **Seguimiento:** Verificar Bridge 0.6.27 vivo con una llamada genérica real desde un repositorio relacionado y confirmar ausencia de `mssr-unrouted-tool-call`; mantener la ambigüedad bloqueada con tareas concurrentes.
+---
+
+## 2026-07-26 — Una ruta MSSR delegada nacía sin proyecto o quedaba tapada por trazas históricas
+
+**Estado:** Corregido y cubierto por regresión en Bridge 0.6.29.
+
+**Capa / owner:** Adaptador MCP de `src/bridge-server.ts` y resolución de continuidad en `src/mssr-trace-context.ts`.
+
+**Síntoma:** Después de `project_context_load`, invocar `skill_route_plan` mediante `bridge_tool_query` devolvía un `traceId`, pero la herramienta siguiente del mismo proyecto podía emitir `mssr-unrouted-tool-call`; `skill_load` también podía aparecer como huérfana. La primera corrección propagó proyecto y trace, pero la prueba viva reveló otra variante: varias trazas históricas abiertas con la misma sesión/proyecto hacían ambigua la recuperación persistida aunque acabara de iniciarse una ruta nueva.
+
+**Reproducción mínima:** `project_context_load(proyecto A) → bridge_tool_query(toolName=skill_route_plan, stage=start) → search_files(proyecto A)`. En la variante real había tres rutas viejas abiertas para la misma sesión/proyecto y una ruta fresca creada segundos antes.
+
+**Causa:** El adaptador exterior calculaba `startsNewRoute`, perfil de agente, task key y consumo del proyecto pendiente usando únicamente el wrapper `bridge_tool_query`; además sólo detectaba `traceId` en el resultado exterior. Tras corregir eso, la recuperación persistida seguía viendo todas las rutas exactas de sesión/proyecto como equivalentes, porque los outcomes faltantes de sesiones interrumpidas permanecían abiertos.
+
+**Corrección:** El adaptador resuelve primero el tool efectivo, perfila el payload delegado, reconoce rutas delegadas como nuevas rutas, consume el proyecto cargado, usa el task efectivo y extrae `traceId` directo o anidado. La continuidad conserva la ambigüedad segura entre tareas realmente simultáneas, pero cuando existe exactamente una ruta planificada recientemente para la misma combinación exacta de sesión, proyecto y caller, esa ruta fresca domina sobre trazas históricas abiertas; dos rutas frescas continúan siendo ambiguas.
+
+**Regresión:** `scripts/test-delegated-mssr-route-project.mjs` crea tres rutas históricas abiertas, envejece sus eventos, reinicia el registro en memoria, crea una ruta fresca delegada y vuelve a reiniciar para forzar recuperación SQLite. Exige proyecto correcto, sesión anonimizada estable, mismo `traceId`, `routing_status=traced`, ausencia de `mssr-unrouted-tool-call` y cierre MSSR exitoso. La prueba está integrada en `test:regressions` y expuesta como `test:mssr-delegated-routing`.
+
+**Seguimiento:** Verificar 0.6.29 vivo desde ChatGPT Web y cerrar las trazas históricas de mantenimiento ya reemplazadas. No autoenlazar si existen dos o más rutas frescas compatibles.
