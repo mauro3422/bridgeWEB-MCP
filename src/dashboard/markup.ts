@@ -95,7 +95,7 @@ export const dashboardMarkup = `
       </article>
 
       <article class="card span-7">
-        <div class="card-header"><div><div class="card-kicker">Ejecución MCP · época activa</div><h2 class="card-title">Herramientas MCP más usadas</h2><p class="card-description">Son llamadas ejecutables. Una skill puede orientar varias herramientas; <code>skill_load</code> es la herramienta que carga su guía.</p></div></div>
+        <div class="card-header"><div><div class="card-kicker">Ejecución MCP · época activa</div><h2 class="card-title">Herramientas MCP más usadas</h2><p class="card-description">Son llamadas ejecutables. <code>skill_load</code> entrega una guía al contexto y registra cuál fue; cargarla no demuestra todavía que se aplicó correctamente. Eso se confirma con verificación y outcome.</p></div></div>
         <div id="summary-tools" class="tool-list"><div class="empty-state">Cargando herramientas…</div></div>
       </article>
 

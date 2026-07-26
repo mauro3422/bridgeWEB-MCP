@@ -546,3 +546,39 @@ seguro de la skill en la llamada reciente.
 **Seguimiento:** Medir silencios Web sólo con tiempos y eventos observables. No
 atribuirlos a razonamiento interno ni almacenar prompts, transcripciones o
 cookies.
+
+---
+
+## 2026-07-26 — `skill_load` y continuidad tras compactación eran ambiguos
+
+**Estado:** Corregido en source 0.6.22.
+
+**Capa / owner:** Documentación operativa y proyección del dashboard /
+`bridge-mcp`.
+
+**Síntoma:** Las filas recientes mostraban varias llamadas `skill_load` sin el
+nombre de la skill, por lo que podían confundirse con uso efectivo o duplicado.
+También faltaba un contrato explícito para reanudar una traza cuando Codex
+compacta el contexto.
+
+**Evidencia:** Las métricas ya guardaban `operation_subject`, pero el resumen
+compacto de “Últimas operaciones” no lo renderizaba. El contenido cargado por
+`skill_load` depende del contexto del host; Bridge sólo conserva el evento y la
+traza, no el texto privado descartado por una compactación.
+
+**Causa:** El detalle del objetivo sólo aparecía en la tabla extensa. La
+documentación explicaba que la skill estaba sujeta a compactación, pero no
+separaba selección, carga, aplicación y outcome ni definía el resume.
+
+**Corrección:** El resumen muestra `skill: <nombre>`, `proyecto: <nombre>`,
+`fase: <fase>` o `evento: <tipo>` bajo la tool. La UI y README aclaran que
+`skill_load` prueba entrega, no cumplimiento. El resume conserva contexto
+acotado y `traceId`, usa `stage=resume` y recarga sólo las skills activas que el
+host ya no tenga disponibles.
+
+**Regresión:** Typecheck/build y smoke HTTP exigen la semántica visible del
+dashboard; la revisión de source comprueba el mapeo de objetivos permitidos.
+
+**Seguimiento:** Si Codex expone en el futuro un hook observable de compactación,
+registrar un checkpoint `resume` sin almacenar el resumen bruto. Mientras no
+exista, no inferir compactación a partir de pausas o cantidad de tokens.

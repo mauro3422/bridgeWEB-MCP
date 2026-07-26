@@ -327,6 +327,7 @@ tr:last-child td { border-bottom: 0; }
 td code { display: inline-block; max-width: 22rem; padding: 0.1rem 0.28rem; overflow: hidden; border-radius: 5px; background: rgba(255,255,255,0.06); text-overflow: ellipsis; white-space: nowrap; }
 
 .recent-detail { max-width: 28rem; color: var(--muted); font-size: 0.7rem; overflow-wrap: anywhere; }
+.recent-subject { max-width: 14rem; margin-top: 0.2rem; color: var(--muted); font-size: 0.66rem; overflow-wrap: anywhere; }
 
 .mssr-list { display: grid; gap: 0.78rem; padding: 0.75rem 1rem 1rem; }
 .mssr-row { display: grid; grid-template-columns: minmax(12rem, 1.3fr) minmax(10rem, 2fr) 5rem; align-items: center; gap: 0.9rem; }

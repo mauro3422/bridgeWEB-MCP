@@ -506,6 +506,33 @@ warnings. `responseMode=debug` conserva scores, planes de fase y metadata comple
 El contenido de `SKILL.md` sólo se entrega mediante `skill_load`; permanece sujeto
 al contexto y compactación del host, no a una inyección oculta del Bridge.
 
+En el dashboard, `skill_route_plan` significa **seleccionada/recomendada** y
+`skill_load` significa **guía entregada al contexto y carga registrada**. No
+significa por sí solo que la guía se haya seguido ni que la tarea haya salido
+bien: la aplicación se demuestra con checkpoints de verificación/persistencia y
+un outcome final atribuido a una `primarySkill`. Varias filas `skill_load` a la
+misma hora son cargas distintas; el objetivo visible identifica cuál skill fue
+entregada.
+
+Codex puede compactar una conversación larga. Bridge no recibe un evento privado
+de compactación y no debe adivinarlo. La recuperación durable es conservar en el
+resumen operativo el objetivo aceptado, proyecto, fase, restricciones, trabajo
+completado, referencias pendientes y `traceId`; al continuar, usar
+`project_context_load` cuando corresponda y replanificar con `stage=resume`,
+pasando ese contexto acotado y el `traceId` explícito. Sólo se recargan las skills
+activas que ya no estén disponibles en el contexto; no se vuelve a cargar todo el
+grafo. Tras un reinicio del Bridge, el coordinador reconstruye desde SQLite la
+ruta y las cargas observables de una traza explícita, pero no puede reconstruir
+texto de skill que el host haya descartado.
+
+Para ChatGPT Web, las métricas confiables son las llamadas que atravesaron
+Bridge, caller, sesión anónima cuando el host la expone, proyecto declarado,
+route/load/checkpoints/outcome, errores y duraciones. El chat completo, la salida
+final de UI, tools nativas del host y el razonamiento privado no son observables;
+no se copian ni se infieren. Los silencios se estudian como intervalos entre
+eventos: tiempo hasta primera ruta, desvíos de descubrimiento, duración de tools
+y pausa desde la última tool hasta un cierre observable.
+
 ## Modelo de uso desde laptop
 
 Si ChatGPT se usa desde la laptop pero el conector apunta al tunel que corre en MauroPrime, las tools se ejecutan en MauroPrime.

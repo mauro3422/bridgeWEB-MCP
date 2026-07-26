@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Clarified `skill_load` as guide delivery rather than proof of application, exposed each recent operation subject in the compact dashboard, and documented bounded MSSR resume after Codex context compaction.
 - Block successful MSSR outcomes while routed required skills remain unloaded, preserving the trace for one bounded recovery and preventing the Web load-after-close / duplicate-outcome loop.
 - Store an allow-listed privacy-safe operation subject for recent metrics, so `skill_load` rows identify the loaded skill and context/routing/checkpoint rows expose their bounded target without retaining prompts.
 - Added `trace-contract-v1` propagation across direct tools and generic dispatch wrappers. Bridge keeps local session continuity and a bounded process-shared lease for stateless calls, selects only a unique compatible trace, and emits `mssr-trace-ambiguous` instead of mixing concurrent agents or tasks.

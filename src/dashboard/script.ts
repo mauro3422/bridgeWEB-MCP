@@ -137,6 +137,21 @@ function recentStatus(ok) {
   return '<span class="status-pill" data-tone="' + tone + '"><span class="dot ' + tone + '"></span><span>' + label + '</span></span>';
 }
 
+function operationSubjectLabel(row) {
+  if (!row.operation_subject) return '';
+  const labels = {
+    skill_load: 'skill',
+    project_context_load: 'proyecto',
+    skill_route_plan: 'fase',
+    skill_bootstrap: 'fase',
+    skill_recommend: 'fase',
+    mssr_trace_record: 'evento',
+    bridge_tool_query: 'tool',
+    bridge_tool_action: 'tool'
+  };
+  return (labels[row.tool] || 'objetivo') + ': ' + row.operation_subject;
+}
+
 function renderRecent(targetId, inputRows, limit, includeDetail) {
   const target = byId(targetId);
   if (!target) return;
@@ -149,11 +164,14 @@ function renderRecent(targetId, inputRows, limit, includeDetail) {
   target.innerHTML = rows.map((row) => {
     const profile = [row.caller, row.model, row.reasoning_effort].filter((value) => value && value !== 'unknown').join(' · ');
     const alias = row.tool === 'work_once' ? toolHint(row.tool) : '';
-    const subject = row.operation_subject ? 'objetivo: ' + row.operation_subject : '';
+    const subject = operationSubjectLabel(row);
+    const summarySubject = targetId === 'summary-recent' && subject
+      ? '<div class="recent-subject">' + esc(subject) + '</div>'
+      : '';
     const detail = [row.error || subject || row.input_keys || '', alias, profile].filter(Boolean).join(' · ');
     return '<tr>' +
       '<td>' + esc(clock(row.started_at)) + '</td>' +
-      '<td><code title="' + esc(toolHint(row.tool)) + '">' + esc(row.tool) + '</code></td>' +
+      '<td><code title="' + esc(toolHint(row.tool)) + '">' + esc(row.tool) + '</code>' + summarySubject + '</td>' +
       (includeDetail ? '<td>' + esc(ms(row.duration_ms)) + '</td><td>' + recentStatus(row.ok) + '</td><td class="recent-detail">' + esc(detail) + '</td>' : '<td>' + recentStatus(row.ok) + '</td><td>' + esc(ms(row.duration_ms)) + '</td>') +
     '</tr>';
   }).join('');
