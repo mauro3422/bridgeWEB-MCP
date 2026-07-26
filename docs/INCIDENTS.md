@@ -652,7 +652,7 @@ relacionados independientes sin duplicar filas por cada llamada.
 
 ## 2026-07-26 — La rotación de sesión del conector dejaba llamadas multi-repo como `unrouted`
 
-**Estado:** Corregido y cubierto por regresión en source 0.6.26.
+**Estado:** Corregido para tools trace-aware en 0.6.26; cerrado completamente para tools genéricas y métricas en source 0.6.27.
 
 **Capa / owner:** Resolución de contexto y candidatos MSSR / `bridge-mcp`.
 
@@ -660,10 +660,10 @@ relacionados independientes sin duplicar filas por cada llamada.
 
 **Reproducción mínima:** Abrir una ruta `caller=chatgpt-web`, cambiar simultáneamente `sessionKey` y proyecto en la siguiente llamada elegible, y consultar el contexto métrico sin copiar manualmente el `traceId`.
 
-**Causa:** `scopedCandidates` devolvía inmediatamente cero candidatos cuando el nuevo `sessionKey` no coincidía. La recuperación persistida aplicaba el mismo filtro estricto y el nombre de la skill podía terminar siendo el único criterio restante, lo que no es seguro cuando hay tareas concurrentes.
+**Causa:** `scopedCandidates` devolvía inmediatamente cero candidatos cuando el nuevo `sessionKey` no coincidía. La primera corrección extendió el fallback a tools trace-aware, pero `resolveMetricContext` —usado por tools genéricas como `git_status`— seguía consultando sólo memoria compartida del proceso después del restart. Además, el nombre de la skill no podía convertirse en criterio para elegir entre tareas concurrentes.
 
-**Corrección:** La resolución conserva esta prioridad: sesión exacta, proyecto exacto, y sólo después fallback al caller. El fallback relajado se acepta únicamente cuando existe una sola traza abierta del caller antes de filtrar por skill. Dos o más trazas producen ambigüedad y requieren `traceId` explícito. La misma regla se aplica a estado en memoria y SQLite.
+**Corrección:** La resolución conserva esta prioridad: sesión exacta, proyecto exacto, y sólo después fallback al caller. El fallback relajado se acepta únicamente cuando existe una sola traza abierta del caller antes de filtrar por skill. Dos o más trazas producen ambigüedad y requieren `traceId` explícito. La misma función de resolución se usa ahora para tools trace-aware y para `resolveMetricContext`, tanto sobre memoria como SQLite.
 
-**Regresión:** `test-mssr-trace-contract.mjs` cubre atribución métrica con sesión/proyecto rotados, `dispatch route(close) → reset → skill_load/checkpoint` con otro id de sesión, y un caso con dos trazas abiertas que debe permanecer sin autoenlace.
+**Regresión:** `test-mssr-trace-contract.mjs` cubre `route → reset → herramienta genérica search_files` con sesión/proyecto rotados y exige el trace original en métricas sin aviso `unrouted`; también cubre `dispatch route(close) → reset → skill_load/checkpoint` y un caso con dos trazas abiertas que debe permanecer sin autoenlace.
 
-**Seguimiento:** Verificar Bridge 0.6.26 vivo y confirmar que una cadena multi-repo real deja de emitir `mssr-unrouted-tool-call` sin mezclar tareas concurrentes.
+**Seguimiento:** Verificar Bridge 0.6.27 vivo con una llamada genérica real desde un repositorio relacionado y confirmar ausencia de `mssr-unrouted-tool-call`; mantener la ambigüedad bloqueada con tareas concurrentes.

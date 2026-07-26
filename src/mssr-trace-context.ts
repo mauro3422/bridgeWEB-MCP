@@ -343,6 +343,45 @@ export function createMssrTraceSessionCoordinator(
     return scopedCandidateResolution(candidates).candidates;
   }
 
+  function restorePersistedCandidates(candidates: Array<{ traceId: string }>): ActiveTraceState[] {
+    return candidates.flatMap((candidate) => {
+      const restored = restore(candidate.traceId);
+      return restored ? [restored] : [];
+    });
+  }
+
+  function persistedCandidateResolution(): {
+    candidates: ActiveTraceState[];
+    relaxedHostScope: boolean;
+  } {
+    if (hostContext.sessionKey !== "unknown") {
+      const sessionMatches = restorePersistedCandidates(findPersistedMssrTraceCandidates({
+        caller: hostContext.caller,
+        sessionKey: hostContext.sessionKey,
+        maxAgeMs: TRACE_LEASE_MS,
+        limit: 16,
+      }));
+      if (sessionMatches.length > 0) return { candidates: sessionMatches, relaxedHostScope: false };
+    }
+    if (hostContext.project !== "unknown") {
+      const projectMatches = restorePersistedCandidates(findPersistedMssrTraceCandidates({
+        caller: hostContext.caller,
+        project: hostContext.project,
+        maxAgeMs: TRACE_LEASE_MS,
+        limit: 16,
+      }));
+      if (projectMatches.length > 0) return { candidates: projectMatches, relaxedHostScope: false };
+    }
+    return {
+      candidates: restorePersistedCandidates(findPersistedMssrTraceCandidates({
+        caller: hostContext.caller,
+        maxAgeMs: TRACE_LEASE_MS,
+        limit: 16,
+      })),
+      relaxedHostScope: hostContext.sessionKey !== "unknown" || hostContext.project !== "unknown",
+    };
+  }
+
   function ambiguousNotice(toolName: string, candidates: ActiveTraceState[]): BridgeNoticeInput {
     return notice(
       "warning",
@@ -384,50 +423,12 @@ export function createMssrTraceSessionCoordinator(
   }
 
   function findToolCandidate(toolName: string, args: JsonRecord, notices: BridgeNoticeInput[]): ActiveTraceState | null {
-    const inMemoryScope = scopedCandidateResolution(openSharedTraces());
-    let traces = inMemoryScope.candidates;
-    if (inMemoryScope.relaxedHostScope && traces.length > 1) {
+    let resolution = scopedCandidateResolution(openSharedTraces());
+    if (resolution.candidates.length === 0) resolution = persistedCandidateResolution();
+    const traces = resolution.candidates;
+    if (resolution.relaxedHostScope && traces.length > 1) {
       uniqueCandidate(toolName, traces, notices);
       return null;
-    }
-    if (traces.length === 0) {
-      let persisted = hostContext.sessionKey !== "unknown"
-        ? findPersistedMssrTraceCandidates({
-          caller: hostContext.caller,
-          sessionKey: hostContext.sessionKey,
-          maxAgeMs: TRACE_LEASE_MS,
-          limit: 16,
-        })
-        : [];
-      if (persisted.length === 0 && hostContext.project !== "unknown") {
-        persisted = findPersistedMssrTraceCandidates({
-          caller: hostContext.caller,
-          project: hostContext.project,
-          maxAgeMs: TRACE_LEASE_MS,
-          limit: 16,
-        });
-      }
-      if (persisted.length === 0) {
-        const relaxed = findPersistedMssrTraceCandidates({
-          caller: hostContext.caller,
-          maxAgeMs: TRACE_LEASE_MS,
-          limit: 16,
-        });
-        const restoredRelaxed = relaxed.flatMap((candidate) => {
-          const restored = restore(candidate.traceId);
-          return restored ? [restored] : [];
-        });
-        if (restoredRelaxed.length > 1) {
-          uniqueCandidate(toolName, restoredRelaxed, notices);
-          return null;
-        }
-        traces = restoredRelaxed;
-      } else {
-        traces = persisted.flatMap((candidate) => {
-          const restored = restore(candidate.traceId);
-          return restored ? [restored] : [];
-        });
-      }
     }
     if (toolName === "skill_load") {
       const skillName = typeof args.name === "string" ? args.name : "";
@@ -706,9 +707,10 @@ export function createMssrTraceSessionCoordinator(
     };
     let state = localState(true);
     if (!state || state.closed) {
-      const compatible = scopedCandidates(openSharedTraces());
-      if (compatible.length === 1) {
-        state = adopt(compatible[0]);
+      let resolution = scopedCandidateResolution(openSharedTraces());
+      if (resolution.candidates.length === 0) resolution = persistedCandidateResolution();
+      if (resolution.candidates.length === 1) {
+        state = adopt(resolution.candidates[0]);
       } else {
         localTraceId = null;
         state = null;

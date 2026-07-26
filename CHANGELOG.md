@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Extend persisted MSSR recovery to generic eligible tools and metric attribution after a Bridge restart; `resolveMetricContext` now uses the same exact-session/project then unique-caller fallback as trace-aware tools.
+- Added a live-equivalent regression for `route → coordinator reset → generic search_files from a rotated session/project`, requiring the original trace in metrics and no `mssr-unrouted-tool-call`.
 - Preserve MSSR continuity when the OpenAI connector rotates its anonymized session id or the same task moves across related repositories: exact session/project matches still win, otherwise Bridge adopts only the single open trace for that caller and refuses to use a skill name to disambiguate concurrent tasks.
 - Added regressions for rotated-session metric attribution, persisted `stage=close` recovery with a different session id, and two-open-trace ambiguity.
 - Recover a unique open MSSR trace from persisted SQLite state when a stateless or restarted Web call loses the in-memory coordinator, scoped by anonymized session or project/caller and selected skill; ambiguous candidates remain unpropagated.

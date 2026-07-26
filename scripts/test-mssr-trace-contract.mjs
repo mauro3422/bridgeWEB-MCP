@@ -409,6 +409,23 @@ try {
   const closeSelectedSkill = closeRoute.activeSkills[0]?.name;
   assert.equal(typeof closeSelectedSkill, 'string', 'Close-stage fixture must select at least one skill.');
   traceContext.resetSharedMssrTraceRegistryForTests();
+  const recoveredGenericTool = await callFresh('search_files', {
+    path: sandbox,
+    pattern: 'rotated-session-generic-metric-fixture',
+    maxResults: 3,
+  }, closeRecoveryRotatedMeta, 'openai-mcp');
+  assert.equal(
+    recoveredGenericTool.bridgeNotices?.items?.some((notice) => notice.code === 'mssr-unrouted-tool-call') ?? false,
+    false,
+    'A generic eligible tool must recover the unique persisted trace after memory and session/project rotation.',
+  );
+  const recoveredGenericMetric = metrics.getRecentMetrics(20, 'active').recent.find((row) => row.tool === 'search_files');
+  assert.equal(
+    recoveredGenericMetric?.trace_id,
+    closeRoute.traceId,
+    'Generic tool metrics must keep the persisted routed trace after coordinator-memory loss.',
+  );
+  traceContext.resetSharedMssrTraceRegistryForTests();
   const recoveredCloseLoad = await callFresh('skill_load', {
     name: closeSelectedSkill,
     source: 'codex',
