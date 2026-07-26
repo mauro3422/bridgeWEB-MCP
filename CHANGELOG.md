@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added privacy-safe `task_key` attribution and explicit primary/related project roles to general Bridge metrics, so concurrent ChatGPT Web tasks no longer collapse into session-only rows or let auxiliary repositories replace the primary project.
+- Updated the dashboard to group one row per observable task/session/primary project and aggregate auxiliary repositories, with concurrent Web regression coverage.
 - Clarified `skill_load` as guide delivery rather than proof of application, exposed each recent operation subject in the compact dashboard, and documented bounded MSSR resume after Codex context compaction.
 - Block successful MSSR outcomes while routed required skills remain unloaded, preserving the trace for one bounded recovery and preventing the Web load-after-close / duplicate-outcome loop.
 - Store an allow-listed privacy-safe operation subject for recent metrics, so `skill_load` rows identify the loaded skill and context/routing/checkpoint rows expose their bounded target without retaining prompts.

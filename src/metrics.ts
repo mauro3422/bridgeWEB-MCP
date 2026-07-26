@@ -9,12 +9,14 @@ type JsonRecord = Record<string, unknown>;
 export type BridgeMetricsScope = "active" | "all";
 export type BridgeMetricProfile = {
   traceId?: string;
+  taskKey?: string;
   caller?: string;
   model?: string;
   reasoningEffort?: string;
   clientName?: string;
   sessionKey?: string;
   project?: string;
+  relatedProject?: string;
   routingStatus?: "traced" | "unrouted" | "bootstrap" | "exempt";
 };
 type StatementSync = {
@@ -40,12 +42,14 @@ export type BridgeMetricStart = {
   operationSubject?: string;
   observabilityEpoch: string;
   traceId?: string;
+  taskKey: string;
   caller: string;
   model: string;
   reasoningEffort: string;
   clientName: string;
   sessionKey: string;
   project: string;
+  relatedProject: string;
   routingStatus: "traced" | "unrouted" | "bootstrap" | "exempt";
   mssrEligible: boolean;
 };
@@ -78,12 +82,14 @@ function ensureToolCallProfileColumns(database: DatabaseSync): void {
   const additions = [
     ["observability_epoch", "TEXT"],
     ["trace_id", "TEXT"],
+    ["task_key", "TEXT"],
     ["caller", "TEXT"],
     ["model", "TEXT"],
     ["reasoning_effort", "TEXT"],
     ["client_name", "TEXT"],
     ["session_key", "TEXT"],
     ["project", "TEXT"],
+    ["related_project", "TEXT"],
     ["routing_status", "TEXT"],
     ["mssr_eligible", "INTEGER"],
     ["operation_subject", "TEXT"],
@@ -139,12 +145,14 @@ function getDb(): DatabaseSync | null {
       cwd TEXT NOT NULL,
       observability_epoch TEXT,
       trace_id TEXT,
+      task_key TEXT,
       caller TEXT,
       model TEXT,
       reasoning_effort TEXT,
       client_name TEXT,
       session_key TEXT,
       project TEXT,
+      related_project TEXT,
       routing_status TEXT,
       mssr_eligible INTEGER,
       operation_subject TEXT
@@ -169,9 +177,11 @@ function getDb(): DatabaseSync | null {
     CREATE INDEX IF NOT EXISTS idx_tool_calls_epoch_started_at ON tool_calls(observability_epoch, started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_profile ON tool_calls(caller, model, reasoning_effort, started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_trace_id ON tool_calls(trace_id);
+    CREATE INDEX IF NOT EXISTS idx_tool_calls_task_key ON tool_calls(task_key, started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_client_name ON tool_calls(client_name, started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_session_key ON tool_calls(session_key, started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_project ON tool_calls(project, started_at);
+    CREATE INDEX IF NOT EXISTS idx_tool_calls_related_project ON tool_calls(related_project, started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_routing_status ON tool_calls(routing_status, started_at);
   `);
   insertToolCall = db.prepare(`
@@ -179,8 +189,9 @@ function getDb(): DatabaseSync | null {
       id, started_at, ended_at, duration_ms, tool, ok, error, input_keys,
       output_chars, server_name, server_version, pid, hostname, platform, cwd,
       observability_epoch, trace_id, caller, model, reasoning_effort, client_name,
-      session_key, project, routing_status, mssr_eligible, operation_subject
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      session_key, project, routing_status, mssr_eligible, operation_subject,
+      task_key, related_project
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   return db;
 }
@@ -239,12 +250,14 @@ export function beginToolMetric(tool: string, args: unknown, profile: BridgeMetr
     operationSubject: operationSubject(tool, args),
     observabilityEpoch: epoch.activeEpoch,
     traceId: typeof profile.traceId === "string" ? profile.traceId.slice(0, 128) : undefined,
+    taskKey: boundedProfileText(profile.taskKey, "unknown", 80),
     caller: boundedProfileText(profile.caller, "other", 80),
     model: boundedProfileText(profile.model, "unknown", 80),
     reasoningEffort: boundedProfileText(profile.reasoningEffort, "unknown", 20),
     clientName: boundedProfileText(profile.clientName, "unknown", 120),
     sessionKey: boundedProfileText(profile.sessionKey, "unknown", 80),
     project: boundedProfileText(profile.project, "unknown", 120),
+    relatedProject: boundedProfileText(profile.relatedProject, "none", 120),
     routingStatus,
     mssrEligible: routingStatus === "traced" || routingStatus === "unrouted",
   };
@@ -278,12 +291,14 @@ export function finishToolMetric(metric: BridgeMetricStart, ok: boolean, outputC
     observability: {
       epoch: metric.observabilityEpoch,
       traceId: metric.traceId,
+      taskKey: metric.taskKey,
       caller: metric.caller,
       model: metric.model,
       reasoningEffort: metric.reasoningEffort,
       clientName: metric.clientName,
       sessionKey: metric.sessionKey,
       project: metric.project,
+      relatedProject: metric.relatedProject,
       routingStatus: metric.routingStatus,
       mssrEligible: metric.mssrEligible,
     },
@@ -320,6 +335,8 @@ export function finishToolMetric(metric: BridgeMetricStart, ok: boolean, outputC
       metric.routingStatus,
       metric.mssrEligible ? 1 : 0,
       metric.operationSubject ?? null,
+      metric.taskKey,
+      metric.relatedProject,
     );
   } catch (sqliteError) {
     writeJsonl({
@@ -383,7 +400,14 @@ function getMetricsProfiles(database: DatabaseSync, scope: BridgeMetricsScope) {
       COALESCE(model, 'unknown') AS model,
       COALESCE(reasoning_effort, 'unknown') AS reasoning_effort,
       COALESCE(project, 'unknown') AS project,
+      COALESCE(
+        GROUP_CONCAT(DISTINCT CASE
+          WHEN related_project IS NOT NULL AND related_project <> 'none' THEN related_project
+        END),
+        'none'
+      ) AS related_project,
       COALESCE(session_key, 'unknown') AS session_key,
+      COALESCE(task_key, 'unknown') AS task_key,
       COUNT(*) AS calls,
       SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS error_calls,
       ROUND(AVG(duration_ms), 2) AS avg_duration_ms,
@@ -397,8 +421,9 @@ function getMetricsProfiles(database: DatabaseSync, scope: BridgeMetricsScope) {
     FROM tool_calls
     WHERE ${filter.where}
     GROUP BY COALESCE(caller, 'other'), COALESCE(model, 'unknown'), COALESCE(reasoning_effort, 'unknown'),
-      COALESCE(project, 'unknown'), COALESCE(session_key, 'unknown')
-    ORDER BY calls DESC, caller ASC, model ASC, reasoning_effort ASC, project ASC, session_key ASC
+      COALESCE(project, 'unknown'),
+      COALESCE(session_key, 'unknown'), COALESCE(task_key, 'unknown')
+    ORDER BY calls DESC, caller ASC, model ASC, reasoning_effort ASC, project ASC, session_key ASC, task_key ASC
   `).all(...filter.params);
   return { surfaces, agentProfiles };
 }
@@ -430,7 +455,7 @@ export function getRecentMetrics(limit = 25, scope: BridgeMetricsScope = "active
   const filter = metricsFilter(scope);
   const rows = sqlite.prepare(`
     SELECT started_at, duration_ms, tool, ok, error, input_keys, operation_subject, output_chars, pid,
-      trace_id, caller, model, reasoning_effort, client_name, session_key, project,
+      trace_id, task_key, caller, model, reasoning_effort, client_name, session_key, project, related_project,
       routing_status, mssr_eligible
     FROM tool_calls
     WHERE ${filter.where}
@@ -446,7 +471,7 @@ export function getMetricsErrors(limit = 25, scope: BridgeMetricsScope = "active
   const filter = metricsFilter(scope);
   const rows = sqlite.prepare(`
     SELECT started_at, duration_ms, tool, error, input_keys, operation_subject, output_chars, pid,
-      trace_id, caller, model, reasoning_effort, client_name, session_key, project,
+      trace_id, task_key, caller, model, reasoning_effort, client_name, session_key, project, related_project,
       routing_status, mssr_eligible
     FROM tool_calls
     WHERE ok = 0 AND ${filter.where}

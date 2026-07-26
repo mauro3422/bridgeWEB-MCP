@@ -304,15 +304,50 @@ try {
     'An eligible Web tool without a compatible trace must emit an observable non-blocking warning.',
   );
   const expectedSessionKey = `session-${createHash('sha256').update('web-session-fixture-001').digest('hex').slice(0, 16)}`;
+  const expectedTaskKey = `task_${createHash('sha256').update('load bounded fixture project context.').digest('hex').slice(0, 16)}`;
   const scopedProfiles = metrics.getMetricsOverview('active').agentProfiles;
   const fixtureProfile = scopedProfiles.find((profile) =>
     profile.caller === 'chatgpt-web'
     && profile.project === 'fixture-project'
     && profile.session_key === expectedSessionKey);
+  assert.equal(fixtureProfile?.task_key, expectedTaskKey);
+  assert.equal(fixtureProfile?.related_project, 'none');
   assert.equal(fixtureProfile?.eligible_calls, 1);
   assert.equal(fixtureProfile?.traced_calls, 0);
   assert.equal(fixtureProfile?.untraced_calls, 1);
   assert.equal(fixtureProfile?.mssr_trace_coverage, 0);
+
+  const concurrentProjects = [
+    path.join(sandbox, 'web-concurrent-primary-a'),
+    path.join(sandbox, 'web-concurrent-primary-b'),
+  ];
+  const concurrentSupporting = [
+    path.join(sandbox, 'web-concurrent-support-a'),
+    path.join(sandbox, 'web-concurrent-support-b'),
+  ];
+  for (const target of [...concurrentProjects, ...concurrentSupporting]) fs.mkdirSync(target, { recursive: true });
+  await Promise.all(concurrentProjects.map((projectRoot, index) =>
+    withClientSession('openai-mcp', async (call) => {
+      const requestMeta = { 'openai/session': `web-concurrent-session-${index + 1}` };
+      await call('project_context_load', {
+        projectRoot,
+        task: `Concurrent Web benchmark task ${index + 1}.`,
+      }, requestMeta);
+      await call('work_once', {
+        cwd: concurrentSupporting[index],
+        command: 'node --version',
+        timeoutMs: 10_000,
+      }, requestMeta);
+    })));
+  const concurrentProfiles = metrics.getMetricsOverview('active').agentProfiles
+    .filter((profile) => String(profile.project).startsWith('web-concurrent-primary-'));
+  assert.equal(new Set(concurrentProfiles.map((profile) => profile.session_key)).size, 2);
+  assert.equal(new Set(concurrentProfiles.map((profile) => profile.task_key)).size, 2);
+  assert.deepEqual(
+    new Set(concurrentProfiles.map((profile) => profile.related_project)),
+    new Set(['web-concurrent-support-a', 'web-concurrent-support-b']),
+    'Concurrent Web tasks must preserve primary projects while exposing their auxiliary repositories.',
+  );
 
   const nextRequired = nextRoute.activeSkills.filter((skill) => skill.required).map((skill) => skill.name);
   for (const name of nextRequired) {

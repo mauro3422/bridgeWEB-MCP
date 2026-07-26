@@ -182,15 +182,20 @@ function renderAgentProfiles(inputRows) {
   if (!target) return;
   const rows = inputRows || [];
   if (!rows.length) {
-    target.innerHTML = '<tr><td colspan="8" class="muted">Sin llamadas en la época activa.</td></tr>';
+    target.innerHTML = '<tr><td colspan="9" class="muted">Sin llamadas en la época activa.</td></tr>';
     return;
   }
+  const sessions = new Set(rows.map((row) => row.session_key).filter((value) => value && value !== 'unknown'));
+  const tasks = new Set(rows.map((row) => row.task_key).filter((value) => value && value !== 'unknown'));
+  setText('agent-profile-summary', num(tasks.size) + ' tareas observables · ' + num(sessions.size) + ' sesiones anónimas · ' + num(rows.length) + ' agrupaciones. Una agrupación no equivale a un agente.');
   target.innerHTML = rows.map((row) => '<tr>' +
     '<td><code>' + esc(exposed(row.caller, 'cliente no identificado')) + '</code></td>' +
     '<td>' + esc(exposed(row.model, 'modelo no expuesto')) + '</td>' +
     '<td>' + esc(exposed(row.reasoning_effort, 'esfuerzo no expuesto')) + '</td>' +
-    '<td><code>' + esc(exposed(row.project, 'ámbito global o proyecto no expuesto')) + '</code><div class="recent-detail" title="' + esc(row.session_key || 'unknown') + '">' +
-      esc(row.session_key && row.session_key !== 'unknown' ? String(row.session_key).slice(-10) : 'sesión no expuesta') + '</div></td>' +
+    '<td><code>' + esc(exposed(row.task_key, 'tarea no identificada')) + '</code><div class="recent-detail" title="' + esc(row.session_key || 'unknown') + '">' +
+      esc(row.session_key && row.session_key !== 'unknown' ? 'sesión ' + String(row.session_key).slice(-10) : 'sesión no expuesta') + '</div></td>' +
+    '<td><code>' + esc(exposed(row.project, 'proyecto primario no expuesto')) + '</code><div class="recent-detail">' +
+      esc(row.related_project && row.related_project !== 'none' ? 'relacionados: ' + row.related_project : 'sin repositorio auxiliar') + '</div></td>' +
     '<td>' + num(row.calls) + '</td>' +
     '<td title="' + esc(num(row.traced_calls) + ' / ' + num(row.eligible_calls) + ' tools elegibles') + '">' +
       pct(row.mssr_trace_coverage) + '<div class="recent-detail">' + num(row.untraced_calls) + ' sin traza</div></td>' +

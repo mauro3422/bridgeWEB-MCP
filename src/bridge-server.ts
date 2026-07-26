@@ -61,6 +61,7 @@ const mssrExemptTools = new Set([
   "bridge_notice_drain",
 ]);
 const sessionProjects = new Map<string, string>();
+const sessionTaskKeys = new Map<string, string>();
 const unroutedWarnings = new Map<string, number>();
 const maxScopedMetricEntries = 2048;
 const unroutedWarningIntervalMs = Math.max(
@@ -241,6 +242,12 @@ function projectFromArgs(toolName: string, args: Record<string, unknown>): strin
   return undefined;
 }
 
+function taskKeyFromText(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const normalized = value.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
+  return `task_${createHash("sha256").update(normalized).digest("hex").slice(0, 16)}`;
+}
+
 function resolveProject(toolName: string, args: Record<string, unknown>, host: BridgeMetricProfile): string | undefined {
   const observed = projectFromArgs(toolName, args);
   if (toolName === "project_context_load" && observed && host.sessionKey) {
@@ -273,6 +280,8 @@ function metricProfile(
   host: BridgeMetricProfile,
   traceSnapshot: ReturnType<ReturnType<typeof createMssrTraceSessionCoordinator>["snapshot"]>,
   project: string | undefined,
+  taskKey: string | undefined,
+  relatedProject: string | undefined,
 ): BridgeMetricProfile {
   const isNewRoute = profiledMssrTools.has(toolName) && typeof args.task === "string";
   const traceId = typeof args.traceId === "string"
@@ -292,6 +301,8 @@ function metricProfile(
     clientName: host.clientName,
     sessionKey: host.sessionKey,
     project,
+    taskKey,
+    relatedProject,
     routingStatus: routingStatus(toolName, traceId ?? null, args),
   };
 }
@@ -352,6 +363,7 @@ export function createBridgeServer() {
   );
   const modularToolRegistry = createDefaultToolRegistry();
   const pendingContextProjects = new Set<string>();
+  let localTaskKey: string | undefined;
   const mssrTraceSession = createMssrTraceSessionCoordinator(modularToolRegistry.tools, {
     onClosureReminder: (reminder) => {
       emitBridgeNotice(reminder.notice);
@@ -386,6 +398,21 @@ export function createBridgeServer() {
     );
     const observedProject = projectFromArgs(name, profiledArgs);
     if (name === "project_context_load" && observedProject) pendingContextProjects.add(observedProject);
+    if (name === "project_context_load") {
+      const nextTaskKey = taskKeyFromText(profiledArgs.task);
+      if (nextTaskKey) {
+        localTaskKey = nextTaskKey;
+        if (hostProfile.sessionKey) {
+          sessionTaskKeys.delete(hostProfile.sessionKey);
+          sessionTaskKeys.set(hostProfile.sessionKey, nextTaskKey);
+          while (sessionTaskKeys.size > maxScopedMetricEntries) {
+            const oldest = sessionTaskKeys.keys().next().value;
+            if (typeof oldest !== "string") break;
+            sessionTaskKeys.delete(oldest);
+          }
+        }
+      }
+    }
     const startsNewRoute = (name === "skill_recommend" || name === "skill_route_plan" || name === "skill_bootstrap")
       && (profiledArgs.stage === undefined || profiledArgs.stage === "start")
       && typeof profiledArgs.traceId !== "string";
@@ -417,10 +444,17 @@ export function createBridgeServer() {
     const metricProject = (traceSnapshot.project && traceSnapshot.project !== "unknown"
       ? traceSnapshot.project
       : undefined) ?? project;
+    const taskKey = (hostProfile.sessionKey ? sessionTaskKeys.get(hostProfile.sessionKey) : undefined)
+      ?? localTaskKey
+      ?? (traceSnapshot.taskHash ? `task_${traceSnapshot.taskHash.slice(0, 16)}` : undefined)
+      ?? taskKeyFromText(args.task);
+    const relatedProject = observedProject && observedProject !== metricProject
+      ? observedProject
+      : undefined;
     const metric = beginToolMetric(
       name,
       args,
-      metricProfile(name, args, hostProfile, traceSnapshot, metricProject),
+      metricProfile(name, args, hostProfile, traceSnapshot, metricProject, taskKey, relatedProject),
     );
     const toolSchema = modularToolRegistry.tools.find((tool) => tool.name === name);
     emitUnroutedNotice(name, metric, toolSchema?.annotations?.destructiveHint === true);

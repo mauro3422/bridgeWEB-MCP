@@ -110,11 +110,11 @@ export const dashboardMarkup = `
       </article>
 
       <article class="card span-12">
-        <div class="card-header"><div><div class="card-kicker">Atribución de llamadas, routing y errores</div><h2 class="card-title">Resultados por cliente, proyecto y sesión</h2><p class="card-description">Separa superficie, modelo, esfuerzo, proyecto y conversación anónima. MSSR mide sólo tools elegibles; bootstrap y diagnóstico quedan fuera del denominador.</p></div></div>
+        <div class="card-header"><div><div class="card-kicker">Atribución de llamadas, routing y errores</div><h2 class="card-title">Resultados por tarea, sesión y proyecto</h2><p id="agent-profile-summary" class="card-description">Cada fila es una agrupación de tarea, sesión y proyecto; no representa un agente nuevo. MSSR mide sólo tools elegibles.</p></div></div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Cliente</th><th>Modelo</th><th>Esfuerzo</th><th>Proyecto / sesión</th><th>Llamadas</th><th>Cobertura MSSR</th><th>Errores</th><th>Duración media</th></tr></thead>
-            <tbody id="agent-profiles"><tr><td colspan="8" class="muted">Cargando perfiles…</td></tr></tbody>
+            <thead><tr><th>Cliente</th><th>Modelo</th><th>Esfuerzo</th><th>Tarea / sesión</th><th>Proyecto primario / relacionado</th><th>Llamadas</th><th>Cobertura MSSR</th><th>Errores</th><th>Duración media</th></tr></thead>
+            <tbody id="agent-profiles"><tr><td colspan="9" class="muted">Cargando perfiles…</td></tr></tbody>
           </table>
         </div>
       </article>

@@ -606,6 +606,8 @@ hay contexto primario y no lo reemplazan.
 `work_once` en un repositorio auxiliar y exige que la métrica permanezca
 atribuida al proyecto primario.
 
-**Seguimiento:** Incorporar roles explícitos `primaryProject` y
-`relatedProject`, y una identidad de tarea/benchmark distinta de sesión y traza,
-para comparar ejecuciones concurrentes sin agrupar por cambios de cwd.
+**Seguimiento:** Completado en Bridge v0.6.24. Las métricas guardan un `task_key`
+privacy-safe separado de sesión y traza, mantienen el proyecto primario fijado por
+contexto y agregan los repositorios auxiliares como `related_project`. La regresión
+con dos sesiones Web concurrentes exige tareas, proyectos primarios y repositorios
+relacionados independientes sin duplicar filas por cada llamada.

@@ -167,6 +167,7 @@ export type MssrTracePreparation = {
 export type MssrTraceSessionSnapshot = {
   active: boolean;
   traceId: string | null;
+  taskHash: string | null;
   stage: string | null;
   caller: string | null;
   model: string | null;
@@ -618,6 +619,7 @@ export function createMssrTraceSessionCoordinator(
     return {
       active: Boolean(state),
       traceId: state?.traceId ?? null,
+      taskHash: state?.taskHash ?? null,
       stage: state?.stage ?? null,
       caller: state?.caller ?? null,
       model: state?.model ?? null,
