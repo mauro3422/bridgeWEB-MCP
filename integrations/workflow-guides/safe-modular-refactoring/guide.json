@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "name": "safe-modular-refactoring",
+  "title": "Safe Modular Refactoring",
+  "description": "Refactoriza aplicaciones y herramientas monolíticas por módulos sin cambiar su contrato visible ni su flujo de datos. Congela baseline, mapea ownership y dependencias, extrae responsabilidades en pasos pequeños, preserva compatibilidad y verifica equivalencia estructural, funcional y visual antes de cerrar.",
+  "activation": {
+    "keywords": [
+      "refactor",
+      "refactoring",
+      "modularizar",
+      "modularización",
+      "monolito",
+      "app.js grande",
+      "flujo de datos",
+      "dependencias",
+      "sin cambiar comportamiento",
+      "preservar UI",
+      "evitar roturas"
+    ],
+    "phrases": [
+      "modularizá esto sin cambiar cómo se ve",
+      "separá este archivo grande por responsabilidades",
+      "refactorizá manteniendo exactamente el comportamiento",
+      "seguí el flujo de datos para evitar roturas",
+      "extraé módulos gradualmente y verificá equivalencia"
+    ],
+    "negativeKeywords": [
+      "rediseñar interfaz",
+      "cambiar funcionalidad",
+      "reescribir desde cero",
+      "migrar de framework",
+      "prototipo descartable"
+    ],
+    "examples": [
+      "Modularizá este dashboard estático manteniendo el DOM, CSS y routing actuales.",
+      "Separá este script monolítico en módulos sin romper compatibilidad ni tests.",
+      "Refactorizá el flujo de datos y eventos en pasos pequeños, con baseline visual y rollback."
+    ]
+  },
+  "entrypoint": "GUIDE.md",
+  "phases": {
+    "freeze-baseline": "phases/freeze-baseline.md",
+    "map-ownership-and-data-flow": "phases/map-ownership-and-data-flow.md",
+    "extract-pure-modules": "phases/extract-pure-modules.md",
+    "extract-state-and-interactions": "phases/extract-state-and-interactions.md",
+    "preserve-render-contract": "phases/preserve-render-contract.md",
+    "verify-equivalence": "phases/verify-equivalence.md",
+    "persist-maintenance": "phases/persist-maintenance.md"
+  },
+  "recommendedTools": [
+    "project_context_load",
+    "workflow_guide_load",
+    "read_many_files",
+    "list_files_smart",
+    "analyze_code",
+    "impact_analysis",
+    "import_graph",
+    "call_graph",
+    "find_dead_code",
+    "find_duplicate_symbols",
+    "workspace_snapshot",
+    "workspace_diff",
+    "apply_patch",
+    "edit_lines",
+    "write_text_file",
+    "work_once",
+    "binary_file_info",
+    "image_file_attach",
+    "git_status"
+  ],
+  "scopeNotes": "Global guide available to all projects connected through Mauro's Bridge MCP."
+}
