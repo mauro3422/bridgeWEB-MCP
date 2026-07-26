@@ -243,7 +243,7 @@ function projectFromArgs(toolName: string, args: Record<string, unknown>): strin
 
 function resolveProject(toolName: string, args: Record<string, unknown>, host: BridgeMetricProfile): string | undefined {
   const observed = projectFromArgs(toolName, args);
-  if (observed && host.sessionKey) {
+  if (toolName === "project_context_load" && observed && host.sessionKey) {
     sessionProjects.delete(host.sessionKey);
     sessionProjects.set(host.sessionKey, observed);
     while (sessionProjects.size > maxScopedMetricEntries) {
@@ -252,7 +252,8 @@ function resolveProject(toolName: string, args: Record<string, unknown>, host: B
       sessionProjects.delete(oldest);
     }
   }
-  return observed ?? (host.sessionKey ? sessionProjects.get(host.sessionKey) : undefined);
+  if (toolName === "project_context_load") return observed;
+  return (host.sessionKey ? sessionProjects.get(host.sessionKey) : undefined) ?? observed;
 }
 
 function routingStatus(
@@ -393,7 +394,14 @@ export function createBridgeServer() {
         ? [...pendingContextProjects][0]
         : "multi-project"
       : undefined;
-    const project = resolveProject(name, profiledArgs, hostProfile) ?? pendingProject;
+    const activeTraceBeforeCall = mssrTraceSession.snapshot();
+    const activeTraceProject = activeTraceBeforeCall.active
+      && !activeTraceBeforeCall.closed
+      && activeTraceBeforeCall.project
+      && activeTraceBeforeCall.project !== "unknown"
+      ? activeTraceBeforeCall.project
+      : undefined;
+    const project = activeTraceProject ?? resolveProject(name, profiledArgs, hostProfile) ?? pendingProject;
     const prepared = mssrTraceSession.prepare(name, profiledArgs, {
       caller: hostProfile.caller,
       sessionKey: hostProfile.sessionKey,
@@ -406,8 +414,9 @@ export function createBridgeServer() {
       sessionKey: hostProfile.sessionKey,
       project,
     });
-    const metricProject = project
-      ?? (traceSnapshot.project && traceSnapshot.project !== "unknown" ? traceSnapshot.project : undefined);
+    const metricProject = (traceSnapshot.project && traceSnapshot.project !== "unknown"
+      ? traceSnapshot.project
+      : undefined) ?? project;
     const metric = beginToolMetric(
       name,
       args,

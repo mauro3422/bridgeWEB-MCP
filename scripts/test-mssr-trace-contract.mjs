@@ -457,8 +457,10 @@ try {
   await withClientSession('Codex', async (call) => {
     const codexProject = path.join(sandbox, 'codex-project-attribution');
     const laterProject = path.join(sandbox, 'later-project-context');
+    const supportingProject = path.join(sandbox, 'supporting-repository');
     fs.mkdirSync(codexProject, { recursive: true });
     fs.mkdirSync(laterProject, { recursive: true });
+    fs.mkdirSync(supportingProject, { recursive: true });
     await call('project_context_load', {
       projectRoot: codexProject,
       task: 'Load the project before opening its routed task.',
@@ -481,6 +483,11 @@ try {
         stage: 'start',
       });
     }
+    await call('work_once', {
+      cwd: supportingProject,
+      command: 'node --version',
+      timeoutMs: 10_000,
+    });
     await call('mssr_trace_record', {
       traceId: codexRoute.traceId,
       eventType: 'outcome',
@@ -505,6 +512,13 @@ try {
     const attributedLoad = recentProjectMetrics.find((row) =>
       row.tool === 'skill_load' && row.trace_id === codexRoute.traceId);
     assert.equal(attributedLoad?.project, 'codex-project-attribution');
+    const supportingCall = recentProjectMetrics.find((row) =>
+      row.tool === 'work_once' && row.trace_id === codexRoute.traceId);
+    assert.equal(
+      supportingCall?.project,
+      'codex-project-attribution',
+      'An auxiliary cwd must not replace the primary project loaded for the session.',
+    );
     assert.ok(
       codexRoute.activeSkills.some((skill) => skill.name === attributedLoad?.operation_subject),
       'Recent metrics must expose the privacy-safe skill name loaded by skill_load.',

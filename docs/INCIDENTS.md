@@ -582,3 +582,30 @@ dashboard; la revisión de source comprueba el mapeo de objetivos permitidos.
 **Seguimiento:** Si Codex expone en el futuro un hook observable de compactación,
 registrar un checkpoint `resume` sin almacenar el resumen bruto. Mientras no
 exista, no inferir compactación a partir de pausas o cantidad de tokens.
+
+## 2026-07-26 — Un cwd auxiliar reemplazaba el proyecto primario de ChatGPT Web
+
+**Estado:** Corregido en fuente; pendiente de verificación y publicación.
+
+**Capa / owner:** Atribución de métricas por sesión / `bridge-mcp`.
+
+**Síntoma y evidencia:** Dos tareas Web simultáneas de MyceliumFront aparecieron
+repartidas entre `unknown`, `myceliumfront` y `bridge-mcp`. La misma sesión
+anónima cambió a `bridge-mcp` al inspeccionar allí el esquema de
+`skill_route_plan`, aunque la tarea primaria seguía siendo MyceliumFront.
+
+**Causa:** `resolveProject` persistía cualquier proyecto inferido desde
+`projectRoot`, `cwd` o `path`. Un comando auxiliar en otro repositorio
+sobrescribía el contexto primario fijado por `project_context_load`.
+
+**Corrección:** Sólo `project_context_load` actualiza el proyecto primario de la
+sesión. Las rutas observadas por `cwd` o `path` quedan como fallback cuando no
+hay contexto primario y no lo reemplazan.
+
+**Regresión:** `test-mssr-trace-contract.mjs` carga un proyecto primario, ejecuta
+`work_once` en un repositorio auxiliar y exige que la métrica permanezca
+atribuida al proyecto primario.
+
+**Seguimiento:** Incorporar roles explícitos `primaryProject` y
+`relatedProject`, y una identidad de tarea/benchmark distinta de sesión y traza,
+para comparar ejecuciones concurrentes sin agrupar por cambios de cwd.

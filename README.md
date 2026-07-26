@@ -477,8 +477,10 @@ Los valores de modelo o esfuerzo no expuestos por el host se presentan como
 
 ChatGPT también entrega `_meta["openai/session"]`, un identificador anónimo de
 conversación. Bridge lo vuelve a hashear localmente y lo combina con un nombre
-acotado de proyecto derivado de `projectRoot`, `cwd` o rutas bajo `C:\Dev` /
-`D:\Dev`; no guarda el identificador original ni argumentos completos. Esto
+acotado de proyecto. `project_context_load` fija el proyecto primario de la
+sesión; un `cwd` o `path` auxiliar sólo sirve como fallback cuando todavía no
+existe ese contexto y nunca reemplaza el proyecto primario. Bridge no guarda el
+identificador original ni argumentos completos. Esto
 permite separar, por ejemplo, actividad Web de `bridge-mcp` y `LLM-Rig`.
 Cuando Codex no expone ese identificador, una conexión MCP conserva los proyectos
 cargados con `project_context_load` hasta abrir la siguiente ruta: uno se atribuye
