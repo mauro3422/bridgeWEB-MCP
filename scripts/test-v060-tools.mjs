@@ -55,6 +55,33 @@ fs.writeFileSync(path.join(fixtureSkillRoot, '_dashboard', 'skill-routing-overri
     {phase:'persistence',skills:['roblox-save-backup-recovery'],required:true,when:{risks:['write','destructive']}},
   ]}],
 }, null, 2));
+const fixtureOwnedSkills = [
+  'roblox-mcp-skill-router',
+  'roblox-safe-editing',
+  'roblox-connection-network-authoring',
+  'roblox-playtest',
+  'roblox-studio-qa',
+  'roblox-save-backup-recovery',
+  'skill-maintenance-loop',
+  'linked-junction-skill',
+];
+fs.writeFileSync(path.join(fixtureSkillRoot, '_dashboard', 'skill-routing-fixtures.json'), JSON.stringify({
+  schemaVersion: 1,
+  cases: fixtureOwnedSkills.flatMap((name) => [
+    {
+      name: `fixture-positive-${name}`,
+      task: `Activate ${name} in the isolated Bridge routing fixture.`,
+      stage: 'start',
+      expect: {activeIncludes: [name]},
+    },
+    {
+      name: `fixture-negative-${name}`,
+      task: `Exclude ${name} from a nearby isolated Bridge routing fixture.`,
+      stage: 'start',
+      expect: {activeExcludes: [name], deferredExcludes: [name]},
+    },
+  ]),
+}, null, 2));
 process.env.BRIDGE_MCP_SKILL_ROUTING_PATH = path.join(fixtureSkillRoot, '_dashboard', 'skill-routing-overrides.json');
 process.env.BRIDGE_MCP_SKILL_ROUTING_FIXTURES_PATH = path.join(fixtureSkillRoot, '_dashboard', 'skill-routing-fixtures.json');
 

@@ -611,3 +611,40 @@ privacy-safe separado de sesión y traza, mantienen el proyecto primario fijado 
 contexto y agregan los repositorios auxiliares como `related_project`. La regresión
 con dos sesiones Web concurrentes exige tareas, proyectos primarios y repositorios
 relacionados independientes sin duplicar filas por cada llamada.
+---
+
+## 2026-07-26 — Una ruta delegada perdía continuidad al cambiar de sesión MCP
+
+**Estado:** Corregido y cubierto por regresión en source 0.6.25.
+
+**Capa / owner:** Adaptador de dispatch, métricas y coordinador de trazas / `bridge-mcp`.
+
+**Síntoma:** Después de `bridge_tool_query → skill_route_plan(stage=close)`, un `skill_load` dedicado podía recibir `mssr-orphan-skill-load`, crear otra traza y dejar la ruta original abierta. Repetir la carga con el `traceId` explícito funcionaba.
+
+**Reproducción mínima:** Ruta Web delegada con metadata `openai/session`, pérdida deliberada del registro en memoria y posterior `skill_load` dedicado sin copiar manualmente el ID.
+
+**Causa:** El wrapper conservaba el resultado MSSR pero la métrica exterior no extraía el `traceId` anidado en `result.result`. SQLite podía reconstruir la ruta, aunque no asociarla a la sesión anónima. Además, la recuperación automática sólo consultaba el registro compartido del proceso y no las trazas abiertas persistidas.
+
+**Corrección:** El adaptador propaga `traceId` y perfil de agente desde resultados delegados. Si no existe una candidata en memoria, el coordinador consulta un conjunto acotado de trazas recientes, abiertas y persistidas; exige coincidencia exacta de sesión anónima o proyecto/caller, filtra por skill seleccionada y sólo adopta una candidata inequívoca. La ambigüedad continúa bloqueando la propagación automática.
+
+**Regresión:** `test-mssr-trace-contract.mjs` ejecuta `dispatch route(close) → reset de memoria → skill_load dedicado → reset → checkpoint` y exige el mismo `traceId`, cero orphan load y continuidad del checkpoint.
+
+**Seguimiento:** Verificar el servicio vivo 0.6.25 después del restart y observar que no reaparezca el patrón en la época activa.
+
+---
+
+## 2026-07-26 — El watchdog confundía preparación MSSR con trabajo inconcluso
+
+**Estado:** Corregido y cubierto por regresión en source 0.6.25.
+
+**Capa / owner:** Lifecycle Web y `closure_reminder` / `bridge-mcp`.
+
+**Síntoma:** Una ruta, recomendación o carga de skill sin ninguna acción de dominio generaba `mssr-web-outcome-missing-after-idle` a los 60 segundos. Esto producía ruido y hacía parecer que una tarea había quedado colgada cuando sólo se había consultado el router.
+
+**Causa:** El temporizador se armaba después de casi toda llamada observada, sin distinguir preparación, consulta y ejecución sustantiva.
+
+**Corrección:** Routing, carga de contexto, catálogo/audit/vocabulario, consultas del observatorio y `skill_load` quedan exentos. El timer se inicia o reinicia después de herramientas sustantivas trazadas y checkpoints no finales; `outcome` lo cancela.
+
+**Regresión:** La prueba espera cero recordatorios después de route y load, exactamente uno después de una herramienta de dominio sin outcome, cero para Codex y cancelación al cerrar.
+
+**Seguimiento:** Revisar la tasa de reminders en la época activa; no aumentar el timeout salvo nueva evidencia.

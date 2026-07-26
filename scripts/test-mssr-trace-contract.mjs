@@ -349,6 +349,51 @@ try {
     'Concurrent Web tasks must preserve primary projects while exposing their auxiliary repositories.',
   );
 
+  const closeRecoveryMeta = { 'openai/session': 'web-close-recovery-session-001' };
+  const closeRoute = (await callFresh('bridge_tool_query', {
+    toolName: 'skill_route_plan',
+    arguments: {
+      task: 'Close a routed maintenance task and load its required close-phase skill after session memory is lost.',
+      context: 'Verification completed; enter close and preserve the trace across a stateless dedicated skill_load.',
+      intent,
+      caller: 'chatgpt-web',
+      stage: 'close',
+      completedPhases: ['discovery', 'implementation', 'verification'],
+      sources: ['codex-local'],
+      maxSkills: 12,
+    },
+  }, closeRecoveryMeta, 'openai-mcp')).result;
+  const closeSelectedSkill = closeRoute.activeSkills[0]?.name;
+  assert.equal(typeof closeSelectedSkill, 'string', 'Close-stage fixture must select at least one skill.');
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const recoveredCloseLoad = await callFresh('skill_load', {
+    name: closeSelectedSkill,
+    source: 'codex',
+  }, closeRecoveryMeta, 'openai-mcp');
+  assert.equal(
+    recoveredCloseLoad.traceId,
+    closeRoute.traceId,
+    'A dedicated skill_load must recover the unique persisted close-stage trace after in-memory state is lost.',
+  );
+  assert.equal(
+    recoveredCloseLoad.bridgeNotices?.items?.some((notice) => notice.code === 'mssr-orphan-skill-load') ?? false,
+    false,
+    'Persisted close-stage recovery must not emit an orphan load warning.',
+  );
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const recoveredCloseCheckpoint = await callFresh('mssr_trace_record', {
+    eventType: 'friction',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    status: 'partial',
+    summary: 'Persisted close-stage checkpoint recovery fixture.',
+  }, closeRecoveryMeta, 'openai-mcp');
+  assert.equal(
+    recoveredCloseCheckpoint.traceId,
+    closeRoute.traceId,
+    'A trace-aware checkpoint must recover the same unique persisted Web trace after memory loss.',
+  );
+
   const nextRequired = nextRoute.activeSkills.filter((skill) => skill.required).map((skill) => skill.name);
   for (const name of nextRequired) {
     await callFresh('skill_load', {
@@ -458,12 +503,20 @@ try {
     onClosureReminder: (reminder) => reminders.push(reminder),
   });
   watchdog.observe('skill_route_plan', { task: 'web closure watchdog', caller: 'chatgpt-web', stage: 'implement' }, {
-    traceId: 'trace-watchdog-web-001', stage: 'implement', activeSkills: [],
+    traceId: 'trace-watchdog-web-001',
+    stage: 'implement',
+    activeSkills: [{ name: 'watchdog-skill', required: false }],
   });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(reminders.length, 0, 'Route planning alone must not imply unfinished execution.');
+  const watchdogLoad = watchdog.prepare('skill_load', { name: 'watchdog-skill' });
+  watchdog.observe('skill_load', watchdogLoad.args, { traceId: 'trace-watchdog-web-001' });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(reminders.length, 0, 'Loading routed guidance alone must not trigger a closure reminder.');
   const watchdogTool = watchdog.prepare('trace-domain-tool', { payload: 'fixture' });
   watchdog.observe('trace-domain-tool', watchdogTool.args, { ok: true });
   await new Promise((resolve) => setTimeout(resolve, 40));
-  assert.equal(reminders.length, 1, 'Web tool activity without outcome should emit one closure reminder.');
+  assert.equal(reminders.length, 1, 'Substantive Web tool activity without outcome should emit one closure reminder.');
   assert.equal(reminders[0].notice.code, 'mssr-web-outcome-missing-after-idle');
 
   watchdog.observe('trace-domain-tool', watchdogTool.args, { ok: true });

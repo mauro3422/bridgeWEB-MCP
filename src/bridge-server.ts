@@ -354,7 +354,7 @@ export function createBridgeServer() {
         "When the user asks you to look at, inspect, read, or review the current TabletWhiteboard view, call whiteboard_capture_pc_view so the connected PC creates a fresh viewport PNG at its exact pan and zoom and the image is attached to the result. Use whiteboard_latest_capture only when the user explicitly wants the last saved image without taking a new one.",
         "When the user asks you to write, explain, diagram, annotate, or place an existing image inside TabletWhiteboard, use whiteboard_add_text for structured prose, whiteboard_add_diagram for safe shapes, arrows, polylines and Bezier paths, whiteboard_add_svg only for sanitized SVG markup, and whiteboard_insert_image only for an existing local PNG, JPEG, or WebP. These tools write to ChatGPT's separate locked layer; do not claim an object exists until the tool confirms it.",
         "Bridge anomaly notices are delivered inside normal tool responses as bridgeNotices and are removed from the pending queue after delivery. Inspect them before continuing a long workflow.",
-        "Bridge automatically propagates an MSSR trace inside the current MCP session and, when calls are stateless, through a bounded process-shared lease only when exactly one compatible trace exists. Keep explicit traceId for restart/cross-process resume or deliberate trace selection; treat ambiguous trace, mismatch, orphan load, missing required skill, and outcome-without-route notices as control evidence that may require replanning.",
+        "Bridge automatically propagates an MSSR trace inside the current MCP session, through a bounded process-shared lease and, after coordinator-memory loss, from persisted SQLite state only when exactly one open trace matches the anonymized session or project/caller and requested skill. Keep explicit traceId for ambiguous, historical or deliberately selected resumes; treat ambiguous trace, mismatch, orphan load, missing required skill, and outcome-without-route notices as control evidence that may require replanning.",
         "Bridge correlates ChatGPT tool calls with the anonymized openai/session metadata when the host provides it. An mssr-unrouted-tool-call notice means an eligible tool ran without a compatible route; continue safely, but bootstrap MSSR before the next substantial chain. Bootstrap and diagnostic tools are excluded from trace-coverage denominators.",
         "For chatgpt-web work, record an MSSR outcome and return a concise user-visible result or concrete blocker when the task ends. Bridge may emit mssr-web-outcome-missing-after-idle after tool activity without an observable outcome; treat it as a lifecycle reminder, not proof that the UI failed to render.",
         "Never claim that a guide, file, image, build, Blender scene, or other side effect exists until a tool result confirms it.",
@@ -462,8 +462,16 @@ export function createBridgeServer() {
     const complete = (rawData: unknown, ok = true, error?: string) => {
       if (rawData && typeof rawData === "object" && !Array.isArray(rawData)) {
         const result = rawData as Record<string, unknown>;
-        if (!metric.traceId && typeof result.traceId === "string") metric.traceId = result.traceId.slice(0, 128);
-        const resultProfile = result.agentProfile;
+        const delegatedResult = result.result && typeof result.result === "object" && !Array.isArray(result.result)
+          ? result.result as Record<string, unknown>
+          : undefined;
+        const emittedTraceId = typeof result.traceId === "string"
+          ? result.traceId
+          : typeof delegatedResult?.traceId === "string"
+            ? delegatedResult.traceId
+            : undefined;
+        if (!metric.traceId && emittedTraceId) metric.traceId = emittedTraceId.slice(0, 128);
+        const resultProfile = result.agentProfile ?? delegatedResult?.agentProfile;
         if (resultProfile && typeof resultProfile === "object" && !Array.isArray(resultProfile)) {
           const profile = resultProfile as Record<string, unknown>;
           if (metric.model === "unknown" && typeof profile.model === "string") metric.model = profile.model.slice(0, 80);

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Recover a unique open MSSR trace from persisted SQLite state when a stateless or restarted Web call loses the in-memory coordinator, scoped by anonymized session or project/caller and selected skill; ambiguous candidates remain unpropagated.
+- Preserve nested `traceId` and agent profile metadata emitted by tools delegated through `bridge_tool_query` / `bridge_tool_action`, allowing later dedicated calls to resume the same trace.
+- Make `mssr-web-outcome-missing-after-idle` execution-aware: routing, context loading, catalog/audit queries and `skill_load` no longer start the closure timer, while substantive traced work and non-outcome checkpoints still do.
+- Added regressions for `dispatch route(close) → coordinator-memory loss → dedicated skill_load/checkpoint` and for route/load-only reminder suppression.
 - Added privacy-safe `task_key` attribution and explicit primary/related project roles to general Bridge metrics, so concurrent ChatGPT Web tasks no longer collapse into session-only rows or let auxiliary repositories replace the primary project.
 - Updated the dashboard to group one row per observable task/session/primary project and aggregate auxiliary repositories, with concurrent Web regression coverage.
 - Clarified `skill_load` as guide delivery rather than proof of application, exposed each recent operation subject in the compact dashboard, and documented bounded MSSR resume after Codex context compaction.

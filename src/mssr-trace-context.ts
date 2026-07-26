@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { BridgeNoticeInput } from "./notices.js";
-import { readPersistedMssrTraceState } from "./mssr-observatory.js";
+import { findPersistedMssrTraceCandidates, readPersistedMssrTraceState } from "./mssr-observatory.js";
 
 type JsonRecord = Record<string, unknown>;
 type ToolSchemaLike = {
@@ -33,6 +33,13 @@ const ROUTE_TOOLS = new Set(["skill_recommend", "skill_route_plan", "skill_boots
 const TRACE_QUERY_TOOLS = new Set(["mssr_observatory_query"]);
 const TRACE_DISPATCH_TOOLS = new Set(["bridge_tool_query", "bridge_tool_action"]);
 const CLOSURE_ACTIVITY_EXEMPT_TOOLS = new Set([
+  ...ROUTE_TOOLS,
+  ...TRACE_QUERY_TOOLS,
+  "skill_load",
+  "skill_catalog",
+  "skill_route_audit",
+  "skill_route_vocabulary",
+  "project_context_load",
   "bridge_notice_status",
   "bridge_notice_drain",
 ]);
@@ -365,7 +372,21 @@ export function createMssrTraceSessionCoordinator(
   }
 
   function findToolCandidate(toolName: string, args: JsonRecord, notices: BridgeNoticeInput[]): ActiveTraceState | null {
-    const traces = scopedCandidates(openSharedTraces());
+    let traces = scopedCandidates(openSharedTraces());
+    if (traces.length === 0) {
+      const skillName = toolName === "skill_load" && typeof args.name === "string" ? args.name : undefined;
+      traces = findPersistedMssrTraceCandidates({
+        caller: hostContext.caller,
+        sessionKey: hostContext.sessionKey,
+        project: hostContext.project,
+        skillName,
+        maxAgeMs: TRACE_LEASE_MS,
+        limit: 16,
+      }).flatMap((candidate) => {
+        const restored = restore(candidate.traceId);
+        return restored ? [restored] : [];
+      });
+    }
     if (toolName === "skill_load") {
       const skillName = typeof args.name === "string" ? args.name : "";
       if (!skillName) return null;

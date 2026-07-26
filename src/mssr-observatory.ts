@@ -497,6 +497,50 @@ export function readPersistedMssrTraceState(traceId: string): PersistedMssrTrace
   };
 }
 
+export function findPersistedMssrTraceCandidates(args: {
+  caller?: string;
+  sessionKey?: string;
+  project?: string;
+  skillName?: string;
+  maxAgeMs?: number;
+  limit?: number;
+}): PersistedMssrTraceState[] {
+  const database = getDb();
+  if (!database) return [];
+  const maxAgeMs = Math.max(60_000, Math.min(24 * 60 * 60 * 1_000, args.maxAgeMs ?? 2 * 60 * 60 * 1_000));
+  const limit = Math.max(1, Math.min(32, args.limit ?? 8));
+  const since = new Date(Date.now() - maxAgeMs).toISOString();
+  const caller = typeof args.caller === "string" ? args.caller.trim().toLowerCase() : "";
+  const sessionKey = typeof args.sessionKey === "string" ? args.sessionKey.trim().toLowerCase() : "";
+  const project = typeof args.project === "string" ? args.project.trim().toLowerCase() : "";
+  const skillName = typeof args.skillName === "string" ? args.skillName.trim() : "";
+  const rows = database.prepare(`
+    SELECT trace_id, MAX(occurred_at) AS latest_route_at
+    FROM mssr_events
+    WHERE event_type = 'route_planned'
+      AND occurred_at >= ?
+    GROUP BY trace_id
+    ORDER BY latest_route_at DESC
+    LIMIT 64
+  `).all(since);
+  const candidates: PersistedMssrTraceState[] = [];
+  for (const row of rows) {
+    if (typeof row.trace_id !== "string") continue;
+    const state = readPersistedMssrTraceState(row.trace_id);
+    if (!state || state.closed || Date.now() - state.updatedAt > maxAgeMs) continue;
+    if (caller && caller !== "other" && state.caller !== caller) continue;
+    if (sessionKey && sessionKey !== "unknown") {
+      if (state.sessionKey !== sessionKey) continue;
+    } else if (project && project !== "unknown" && state.project !== project) {
+      continue;
+    }
+    if (skillName && (!state.selectedSkills.includes(skillName) || state.loadedSkills.includes(skillName))) continue;
+    candidates.push(state);
+    if (candidates.length >= limit) break;
+  }
+  return candidates;
+}
+
 function rate(numerator: number, denominator: number): number | null {
   return denominator > 0 ? Math.round((numerator / denominator) * 10_000) / 100 : null;
 }
