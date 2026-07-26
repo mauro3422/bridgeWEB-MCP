@@ -585,7 +585,7 @@ exista, no inferir compactación a partir de pausas o cantidad de tokens.
 
 ## 2026-07-26 — Un cwd auxiliar reemplazaba el proyecto primario de ChatGPT Web
 
-**Estado:** Corregido en fuente; pendiente de verificación y publicación.
+**Estado:** Corregido, verificado y publicado en Bridge v0.6.23.
 
 **Capa / owner:** Atribución de métricas por sesión / `bridge-mcp`.
 
