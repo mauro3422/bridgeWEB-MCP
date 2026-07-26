@@ -7,7 +7,7 @@ El objetivo es tener un puente local controlado por nosotros para operar filesys
 ## Estado actual
 
 ```text
-bridge-mcp v0.6.19
+bridge-mcp v0.6.20
 Mode: HTTP production-candidate
 Project root: C:\dev\bridge-mcp
 Bridge MCP: http://127.0.0.1:3001/mcp
@@ -333,7 +333,7 @@ Estado esperado:
 
 ```text
 bridge_self_check.ok = true
-server.version = 0.6.19
+server.version = 0.6.20
 tunnel.baseUrl = http://127.0.0.1:8081
 tunnel healthz = live
 tunnel readyz = ready
@@ -462,6 +462,11 @@ La misma época gobierna ahora las métricas generales de tools. `/api/metrics/*
 
 La identidad de superficie también se obtiene del `clientInfo` del handshake MCP. Una tool genérica o stateless hereda la única traza abierta compatible con su caller para fines de observabilidad, sin inyectar argumentos fuera de schema ni volver a ejecutar MSSR entre llamadas. El dashboard MSSR separa por perfil routing estructurado, route→load, cargas requeridas, verificación, cierre, éxito, aceptación, score, duración, recordatorios de loop y correcciones del usuario.
 
+El dashboard distingue herramientas MCP de skills. Las herramientas son llamadas
+ejecutables y se agregan por nombre, latencia y error. MSSR registra por separado
+skills seleccionadas por el router, skills realmente cargadas y un único outcome
+por `primarySkill`; las `supportingSkills` no duplican el éxito de la tarea.
+
 El contador HTTP muestra conexiones MCP retenidas por el servidor, no cantidad
 de chats de usuario. Una conexión puede quedar idle hasta `sessionIdleMs` y el
 límite protege capacidad de transporte. En rendimiento, una traza enrutada sin
@@ -475,6 +480,12 @@ conversación. Bridge lo vuelve a hashear localmente y lo combina con un nombre
 acotado de proyecto derivado de `projectRoot`, `cwd` o rutas bajo `C:\Dev` /
 `D:\Dev`; no guarda el identificador original ni argumentos completos. Esto
 permite separar, por ejemplo, actividad Web de `bridge-mcp` y `LLM-Rig`.
+Cuando Codex no expone ese identificador, una conexión MCP conserva los proyectos
+cargados con `project_context_load` hasta abrir la siguiente ruta: uno se atribuye
+por nombre y varios se clasifican como `multi-project`. Las llamadas posteriores
+heredan el proyecto de la traza; una traza cerrada nunca se pega a otra carga de
+contexto. Sin evidencia suficiente, la UI muestra `ámbito global o proyecto no
+expuesto` y no inventa MyceliumFront desde el directorio del proceso Bridge.
 La metadata oficial del cliente no incluye el modelo ni el nivel de
 razonamiento: permanecen `unknown` en ChatGPT Web salvo declaración explícita.
 `openai/userAgent` no se usa para inferirlos porque OpenAI lo define como una

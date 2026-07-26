@@ -65,6 +65,23 @@ async function callFresh(name, args = {}, requestMeta, clientName) {
   }
 }
 
+async function withClientSession(clientName, callback) {
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const server = createBridgeServer();
+  const client = new Client({ name: clientName, version: '1.0.0' }, { capabilities: {} });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  try {
+    await callback(async (name, args = {}, requestMeta) => payload(await client.callTool({
+      name,
+      arguments: args,
+      ...(requestMeta ? { _meta: requestMeta } : {}),
+    })));
+  } finally {
+    await client.close().catch(() => {});
+    await server.close().catch(() => {});
+  }
+}
+
 const task = 'Implement and verify automatic MSSR trace propagation in the Bridge adapter.';
 const intent = {
   summary: 'Implement and verify trace continuity for MSSR.',
@@ -416,6 +433,63 @@ try {
   codexWatchdog.observe('trace-domain-tool', codexTool.args, { ok: true });
   await new Promise((resolve) => setTimeout(resolve, 40));
   assert.equal(reminders.length, 1, 'Codex activity must not emit the ChatGPT Web reminder.');
+
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  await withClientSession('Codex', async (call) => {
+    const codexProject = path.join(sandbox, 'codex-project-attribution');
+    const laterProject = path.join(sandbox, 'later-project-context');
+    fs.mkdirSync(codexProject, { recursive: true });
+    fs.mkdirSync(laterProject, { recursive: true });
+    await call('project_context_load', {
+      projectRoot: codexProject,
+      task: 'Load the project before opening its routed task.',
+    });
+    const codexRoute = await call('skill_route_plan', {
+      task: 'Verify project attribution for a Codex session without exposed session metadata.',
+      context: 'The project context was loaded immediately before this route in the same MCP session.',
+      intent,
+      caller: 'codex-local',
+      stage: 'start',
+      sources: ['codex-local'],
+      maxSkills: 12,
+    });
+    for (const skill of codexRoute.activeSkills.filter((item) => item.required)) {
+      await call('skill_load', {
+        name: skill.name,
+        source: 'codex',
+        traceId: codexRoute.traceId,
+        required: true,
+        stage: 'start',
+      });
+    }
+    await call('mssr_trace_record', {
+      traceId: codexRoute.traceId,
+      eventType: 'outcome',
+      caller: 'codex-local',
+      stage: 'close',
+      status: 'success',
+      primarySkill: codexRoute.activeSkills[0].name,
+      supportingSkills: [],
+      verificationPassed: true,
+      persisted: false,
+      summary: 'Project attribution fixture closed.',
+    });
+    await call('project_context_load', {
+      projectRoot: laterProject,
+      task: 'Load another project after the previous trace closed.',
+    });
+
+    const recentProjectMetrics = metrics.getRecentMetrics(20, 'active').recent;
+    const attributedRoute = recentProjectMetrics.find((row) =>
+      row.tool === 'skill_route_plan' && row.trace_id === codexRoute.traceId);
+    assert.equal(attributedRoute?.project, 'codex-project-attribution');
+    const attributedLoad = recentProjectMetrics.find((row) =>
+      row.tool === 'skill_load' && row.trace_id === codexRoute.traceId);
+    assert.equal(attributedLoad?.project, 'codex-project-attribution');
+    const laterContextMetric = recentProjectMetrics.find((row) =>
+      row.tool === 'project_context_load' && row.project === 'later-project-context');
+    assert.equal(laterContextMetric?.trace_id, null, 'A closed trace must not leak into later context-load metrics.');
+  });
 
   console.log(JSON.stringify({
     ok: true,

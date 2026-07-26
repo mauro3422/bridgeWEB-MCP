@@ -95,8 +95,8 @@ export const dashboardMarkup = `
       </article>
 
       <article class="card span-7">
-        <div class="card-header"><div><div class="card-kicker">Época activa</div><h2 class="card-title">Tools más usadas</h2></div></div>
-        <div id="summary-tools" class="tool-list"><div class="empty-state">Cargando tools…</div></div>
+        <div class="card-header"><div><div class="card-kicker">Ejecución MCP · época activa</div><h2 class="card-title">Herramientas MCP más usadas</h2><p class="card-description">Son llamadas ejecutables. Una skill puede orientar varias herramientas; <code>skill_load</code> es la herramienta que carga su guía.</p></div></div>
+        <div id="summary-tools" class="tool-list"><div class="empty-state">Cargando herramientas…</div></div>
       </article>
 
       <article class="card span-5">
@@ -131,8 +131,8 @@ export const dashboardMarkup = `
         </div>
       </article>
       <article class="card span-5">
-        <div class="card-header"><div><div class="card-kicker">Volumen y latencia</div><h2 class="card-title">Tools más usadas</h2></div></div>
-        <div id="activity-tools" class="tool-list"><div class="empty-state">Cargando tools…</div></div>
+        <div class="card-header"><div><div class="card-kicker">Volumen y latencia MCP</div><h2 class="card-title">Herramientas MCP más usadas</h2></div></div>
+        <div id="activity-tools" class="tool-list"><div class="empty-state">Cargando herramientas…</div></div>
       </article>
       <article class="card span-7">
         <div class="card-header"><div><div class="card-kicker">Últimas 20</div><h2 class="card-title">Llamadas recientes</h2></div></div>
@@ -169,6 +169,16 @@ export const dashboardMarkup = `
       </article>
 
       <article class="card span-6">
+        <div class="card-header"><div><div class="card-kicker">Decisión del router</div><h2 class="card-title">Skills seleccionadas</h2><p class="card-description">Candidatas activas de cada fase. Seleccionar no prueba que el agente haya cargado o aplicado la guía.</p></div></div>
+        <div id="mssr-selected-skills" class="tool-list"><div class="empty-state">Cargando selección…</div></div>
+      </article>
+
+      <article class="card span-6">
+        <div class="card-header"><div><div class="card-kicker">Activación comprobada</div><h2 class="card-title">Skills cargadas</h2><p class="card-description">Cargas exitosas de <code>SKILL.md</code> correlacionadas con una traza. No son tool calls de dominio.</p></div></div>
+        <div id="mssr-loaded-skills" class="tool-list"><div class="empty-state">Cargando activaciones…</div></div>
+      </article>
+
+      <article class="card span-6">
         <div class="card-header"><div><div class="card-kicker">Uso individual del sistema</div><h2 class="card-title">Activación MSSR por modelo</h2><p class="card-description">Comprueba si cada perfil enruta, carga lo requerido y verifica. Una tarea todavía abierta muestra sus fases finales como pendientes.</p></div></div>
         <div class="table-wrap">
           <table>
@@ -189,7 +199,7 @@ export const dashboardMarkup = `
       </article>
 
       <article class="card span-12">
-        <div class="card-header"><div><div class="card-kicker">Atribución primaria</div><h2 class="card-title">Outcomes por skill</h2></div></div>
+        <div class="card-header"><div><div class="card-kicker">Atribución primaria</div><h2 class="card-title">Outcomes por skill primaria</h2><p class="card-description">Cada tarea cerrada acredita una sola skill primaria para no multiplicar el éxito. Las skills de apoyo siguen visibles en la traza, pero no reciben otro outcome.</p></div></div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Skill</th><th>Tareas</th><th>Éxito</th><th>Aceptación</th><th>Score</th><th>Distribución</th></tr></thead>

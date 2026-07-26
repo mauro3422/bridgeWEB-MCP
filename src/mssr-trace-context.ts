@@ -615,7 +615,12 @@ export function createMssrTraceSessionCoordinator(
     let state = localState(true);
     if (!state || state.closed) {
       const compatible = scopedCandidates(openSharedTraces());
-      if (compatible.length === 1) state = adopt(compatible[0]);
+      if (compatible.length === 1) {
+        state = adopt(compatible[0]);
+      } else {
+        localTraceId = null;
+        state = null;
+      }
     }
     return snapshot();
   }

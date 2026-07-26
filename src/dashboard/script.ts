@@ -111,6 +111,26 @@ function renderTools(targetId, inputRows, limit) {
   }).join('');
 }
 
+function renderSkillCounts(targetId, inputRows, emptyText) {
+  const target = byId(targetId);
+  if (!target) return;
+  const rows = inputRows || [];
+  if (!rows.length) {
+    target.innerHTML = '<div class="empty-state">' + esc(emptyText) + '</div>';
+    return;
+  }
+  const maxCount = Math.max(1, ...rows.map((row) => Number(row.count || 0)));
+  target.innerHTML = rows.map((row) => {
+    const count = Number(row.count || 0);
+    const width = Math.max(3, (count / maxCount) * 100);
+    return '<div class="tool-row">' +
+      '<div class="tool-name"><strong>' + esc(row.name) + '</strong></div>' +
+      '<div class="tool-count">' + num(count) + '</div>' +
+      '<div class="progress-track"><span class="progress-fill" style="--width:' + width.toFixed(1) + '%"></span></div>' +
+    '</div>';
+  }).join('');
+}
+
 function recentStatus(ok) {
   const tone = Number(ok) === 1 ? 'ok' : 'bad';
   const label = Number(ok) === 1 ? 'ok' : 'error';
@@ -150,7 +170,7 @@ function renderAgentProfiles(inputRows) {
     '<td><code>' + esc(exposed(row.caller, 'cliente no identificado')) + '</code></td>' +
     '<td>' + esc(exposed(row.model, 'modelo no expuesto')) + '</td>' +
     '<td>' + esc(exposed(row.reasoning_effort, 'esfuerzo no expuesto')) + '</td>' +
-    '<td><code>' + esc(exposed(row.project, 'proyecto no identificado')) + '</code><div class="recent-detail" title="' + esc(row.session_key || 'unknown') + '">' +
+    '<td><code>' + esc(exposed(row.project, 'ámbito global o proyecto no expuesto')) + '</code><div class="recent-detail" title="' + esc(row.session_key || 'unknown') + '">' +
       esc(row.session_key && row.session_key !== 'unknown' ? String(row.session_key).slice(-10) : 'sesión no expuesta') + '</div></td>' +
     '<td>' + num(row.calls) + '</td>' +
     '<td title="' + esc(num(row.traced_calls) + ' / ' + num(row.eligible_calls) + ' tools elegibles') + '">' +
@@ -395,6 +415,8 @@ function updateMssr(mssr) {
 
   renderMssrProgress(benchmark);
   renderMssrAgentProfiles(mssr.agentProfiles || []);
+  renderSkillCounts('mssr-selected-skills', mssr.top && mssr.top.selectedSkills ? mssr.top.selectedSkills : [], 'Sin skills seleccionadas en la época activa.');
+  renderSkillCounts('mssr-loaded-skills', mssr.top && mssr.top.loadedSkills ? mssr.top.loadedSkills : [], 'Sin skills cargadas en la época activa.');
   renderSkillOutcomes(mssr.top && mssr.top.skillOutcomes ? mssr.top.skillOutcomes : []);
 }
 

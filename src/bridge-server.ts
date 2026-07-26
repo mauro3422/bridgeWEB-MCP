@@ -350,6 +350,7 @@ export function createBridgeServer() {
     },
   );
   const modularToolRegistry = createDefaultToolRegistry();
+  const pendingContextProjects = new Set<string>();
   const mssrTraceSession = createMssrTraceSessionCoordinator(modularToolRegistry.tools, {
     onClosureReminder: (reminder) => {
       emitBridgeNotice(reminder.notice);
@@ -382,7 +383,17 @@ export function createBridgeServer() {
       (request.params.arguments ?? {}) as Record<string, unknown>,
       hostProfile,
     );
-    const project = resolveProject(name, profiledArgs, hostProfile);
+    const observedProject = projectFromArgs(name, profiledArgs);
+    if (name === "project_context_load" && observedProject) pendingContextProjects.add(observedProject);
+    const startsNewRoute = (name === "skill_recommend" || name === "skill_route_plan" || name === "skill_bootstrap")
+      && (profiledArgs.stage === undefined || profiledArgs.stage === "start")
+      && typeof profiledArgs.traceId !== "string";
+    const pendingProject = startsNewRoute && pendingContextProjects.size > 0
+      ? pendingContextProjects.size === 1
+        ? [...pendingContextProjects][0]
+        : "multi-project"
+      : undefined;
+    const project = resolveProject(name, profiledArgs, hostProfile) ?? pendingProject;
     const prepared = mssrTraceSession.prepare(name, profiledArgs, {
       caller: hostProfile.caller,
       sessionKey: hostProfile.sessionKey,
@@ -395,10 +406,12 @@ export function createBridgeServer() {
       sessionKey: hostProfile.sessionKey,
       project,
     });
+    const metricProject = project
+      ?? (traceSnapshot.project && traceSnapshot.project !== "unknown" ? traceSnapshot.project : undefined);
     const metric = beginToolMetric(
       name,
       args,
-      metricProfile(name, args, hostProfile, traceSnapshot, project),
+      metricProfile(name, args, hostProfile, traceSnapshot, metricProject),
     );
     const toolSchema = modularToolRegistry.tools.find((tool) => tool.name === name);
     emitUnroutedNotice(name, metric, toolSchema?.annotations?.destructiveHint === true);
@@ -433,6 +446,9 @@ export function createBridgeServer() {
       if (!modularToolRegistry.has(name)) throw new Error(`Unknown tool: ${name}`);
       const result = await modularToolRegistry.call(name, args);
       for (const notice of mssrTraceSession.observe(name, args, result)) emitBridgeNotice(notice);
+      if (startsNewRoute && result && typeof result === "object" && typeof (result as Record<string, unknown>).traceId === "string") {
+        pendingContextProjects.clear();
+      }
       return complete(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

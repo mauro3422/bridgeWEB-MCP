@@ -472,3 +472,42 @@ y `work_once` incluye su descripción de alias para un comando local corto.
 **Seguimiento:** Mantener separadas métricas de transporte, conversación,
 activación, fase y resultado; ninguna ausencia temporal debe presentarse como
 calidad cero.
+
+---
+
+## 2026-07-26 — Tools, skills y proyecto de traza aparecían mezclados
+
+**Estado:** Corregido en source 0.6.20.
+
+**Capa / owner:** Adaptación MCP, trazas y dashboard / `bridge-mcp`.
+
+**Síntoma:** “Tools más usadas” podía interpretarse como conteo de skills; el
+panel sólo hacía visible el outcome de la skill primaria. En Codex sin
+`openai/session`, una carga de contexto seguida por route y `skill_load`
+registraba esas llamadas como proyecto `unknown`. Además, una traza cerrada podía
+seguir apareciendo en métricas bootstrap posteriores.
+
+**Evidencia:** La época activa contenía `skill_load=9`, mientras el observatorio
+registraba por separado siete skills seleccionadas, seis cargadas y un único
+outcome primario. Las llamadas `project_context_load` tenían proyecto, pero la
+ruta y sus loads compartían traceId con `project=unknown`; cargas posteriores al
+outcome heredaban el traceId cerrado.
+
+**Causa:** La UI no mostraba los agregados `selectedSkills`/`loadedSkills`. La
+atribución de proyecto dependía de argumentos o del hash de sesión Web; no
+conservaba el contexto previo dentro de una conexión Codex. El resolver métrico
+devolvía el snapshot local cerrado cuando no encontraba otra traza abierta.
+
+**Corrección:** El dashboard nombra “Herramientas MCP” y añade listas separadas
+de skills seleccionadas y cargadas; explica que sólo una `primarySkill` recibe el
+outcome. Una conexión conserva los proyectos cargados antes de la siguiente ruta
+(`multi-project` si son varios), y las tools posteriores heredan el proyecto de
+la traza. El resolver limpia la referencia local cuando la traza está cerrada.
+
+**Regresión:** El contrato crea una sesión Codex sin metadata de conversación,
+carga un proyecto, abre route, carga skills y exige atribución consistente.
+Después cierra el outcome, carga otro contexto y exige `trace_id = null`.
+
+**Seguimiento:** Cuando no exista evidencia de proyecto, conservar el estado como
+global/no expuesto; nunca inferir un proyecto desde latencia, texto libre o el
+`cwd` fijo del proceso Bridge.
