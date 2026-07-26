@@ -37,6 +37,7 @@ export type BridgeMetricStart = {
   startedAtIso: string;
   startedAtMs: number;
   inputKeys: string;
+  operationSubject?: string;
   observabilityEpoch: string;
   traceId?: string;
   caller: string;
@@ -85,6 +86,7 @@ function ensureToolCallProfileColumns(database: DatabaseSync): void {
     ["project", "TEXT"],
     ["routing_status", "TEXT"],
     ["mssr_eligible", "INTEGER"],
+    ["operation_subject", "TEXT"],
   ] as const;
   for (const [name, type] of additions) {
     if (!columns.has(name)) database.exec(`ALTER TABLE tool_calls ADD COLUMN ${name} ${type};`);
@@ -144,7 +146,8 @@ function getDb(): DatabaseSync | null {
       session_key TEXT,
       project TEXT,
       routing_status TEXT,
-      mssr_eligible INTEGER
+      mssr_eligible INTEGER,
+      operation_subject TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_tool_calls_started_at ON tool_calls(started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_tool_started_at ON tool_calls(tool, started_at);
@@ -176,8 +179,8 @@ function getDb(): DatabaseSync | null {
       id, started_at, ended_at, duration_ms, tool, ok, error, input_keys,
       output_chars, server_name, server_version, pid, hostname, platform, cwd,
       observability_epoch, trace_id, caller, model, reasoning_effort, client_name,
-      session_key, project, routing_status, mssr_eligible
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      session_key, project, routing_status, mssr_eligible, operation_subject
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   return db;
 }
@@ -201,6 +204,24 @@ function boundedProfileText(value: unknown, fallback: string, maxChars: number):
     : fallback;
 }
 
+function operationSubject(tool: string, args: unknown): string | undefined {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return undefined;
+  const record = args as Record<string, unknown>;
+  const value = (() => {
+    if (tool === "skill_load") return record.name;
+    if (tool === "project_context_load" && typeof record.projectRoot === "string") {
+      return path.basename(path.resolve(record.projectRoot));
+    }
+    if (tool === "skill_route_plan" || tool === "skill_bootstrap" || tool === "skill_recommend") {
+      return record.stage ?? "start";
+    }
+    if (tool === "mssr_trace_record") return record.eventType;
+    if (tool === "bridge_tool_query" || tool === "bridge_tool_action") return record.toolName;
+    return undefined;
+  })();
+  return typeof value === "string" && value.trim() ? redactText(value.trim(), 120) : undefined;
+}
+
 export function beginToolMetric(tool: string, args: unknown, profile: BridgeMetricProfile = {}): BridgeMetricStart {
   const now = Date.now();
   const epoch = getMssrObservabilityEpoch();
@@ -215,6 +236,7 @@ export function beginToolMetric(tool: string, args: unknown, profile: BridgeMetr
     startedAtIso: new Date(now).toISOString(),
     startedAtMs: now,
     inputKeys,
+    operationSubject: operationSubject(tool, args),
     observabilityEpoch: epoch.activeEpoch,
     traceId: typeof profile.traceId === "string" ? profile.traceId.slice(0, 128) : undefined,
     caller: boundedProfileText(profile.caller, "other", 80),
@@ -297,6 +319,7 @@ export function finishToolMetric(metric: BridgeMetricStart, ok: boolean, outputC
       metric.project,
       metric.routingStatus,
       metric.mssrEligible ? 1 : 0,
+      metric.operationSubject ?? null,
     );
   } catch (sqliteError) {
     writeJsonl({
@@ -406,7 +429,7 @@ export function getRecentMetrics(limit = 25, scope: BridgeMetricsScope = "active
   if (!sqlite) return { ...getMetricsStatus(), scope, recent: [] };
   const filter = metricsFilter(scope);
   const rows = sqlite.prepare(`
-    SELECT started_at, duration_ms, tool, ok, error, input_keys, output_chars, pid,
+    SELECT started_at, duration_ms, tool, ok, error, input_keys, operation_subject, output_chars, pid,
       trace_id, caller, model, reasoning_effort, client_name, session_key, project,
       routing_status, mssr_eligible
     FROM tool_calls
@@ -422,7 +445,7 @@ export function getMetricsErrors(limit = 25, scope: BridgeMetricsScope = "active
   if (!sqlite) return { ...getMetricsStatus(), scope, errors: [] };
   const filter = metricsFilter(scope);
   const rows = sqlite.prepare(`
-    SELECT started_at, duration_ms, tool, error, input_keys, output_chars, pid,
+    SELECT started_at, duration_ms, tool, error, input_keys, operation_subject, output_chars, pid,
       trace_id, caller, model, reasoning_effort, client_name, session_key, project,
       routing_status, mssr_eligible
     FROM tool_calls
@@ -459,7 +482,7 @@ export function getMetricsOverview(scope: BridgeMetricsScope = "active") {
   `).get(...filter.params) ?? { calls: 0, okCalls: 0, errorCalls: 0, avgDurationMs: 0, maxDurationMs: 0 };
 
   const slowest = sqlite.prepare(`
-    SELECT started_at, duration_ms, tool, ok, error, input_keys, output_chars, pid
+    SELECT started_at, duration_ms, tool, ok, error, input_keys, operation_subject, output_chars, pid
     FROM tool_calls
     WHERE ${filter.where}
     ORDER BY duration_ms DESC

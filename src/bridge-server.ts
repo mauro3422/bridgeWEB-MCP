@@ -443,6 +443,9 @@ export function createBridgeServer() {
     };
 
     try {
+      if (prepared.blocked) {
+        throw new Error(`${prepared.blocked.code}: ${prepared.blocked.message}`);
+      }
       if (!modularToolRegistry.has(name)) throw new Error(`Unknown tool: ${name}`);
       const result = await modularToolRegistry.call(name, args);
       for (const notice of mssrTraceSession.observe(name, args, result)) emitBridgeNotice(notice);

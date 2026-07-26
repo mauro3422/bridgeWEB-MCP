@@ -511,3 +511,38 @@ Después cierra el outcome, carga otro contexto y exige `trace_id = null`.
 **Seguimiento:** Cuando no exista evidencia de proyecto, conservar el estado como
 global/no expuesto; nunca inferir un proyecto desde latencia, texto libre o el
 `cwd` fijo del proceso Bridge.
+
+---
+
+## 2026-07-26 — ChatGPT Web cerró antes de cargar una skill requerida
+
+**Estado:** Corregido en source 0.6.21.
+
+**Capa / owner:** Ciclo de vida MSSR y proyección operativa / `bridge-mcp`.
+
+**Síntoma:** Una auditoría real desde ChatGPT Web registró un outcome exitoso,
+cargó después la segunda skill requerida y registró otro outcome. Durante la
+misma ejecución hubo una pausa extensa y un desvío de descubrimiento antes de
+usar las tools correctas.
+
+**Evidencia:** La traza observable contenía `route_planned`, un primer
+`skill_loaded`, `outcome`, el segundo `skill_loaded` y otro `outcome`, en ese
+orden. Bridge sólo advertía el faltante; no impedía el cierre exitoso.
+
+**Causa:** El coordinador trataba `mssr-required-skill-not-loaded` como aviso en
+todos los límites. El handler de outcome podía persistir éxito y cerrar la traza
+aunque `missingRequiredSkills` no estuviera vacío.
+
+**Corrección:** Un outcome con `status=success` queda bloqueado mientras falte
+una skill requerida. La traza permanece abierta y devuelve la lista exacta para
+cargarla antes de un único reintento. Las métricas recientes guardan además un
+`operation_subject` acotado para distinguir qué skill cargó cada `skill_load`.
+
+**Regresión:** El contrato reproduce el outcome prematuro, exige bloqueo y traza
+abierta, carga la skill faltante mediante el wrapper genérico y confirma que el
+outcome recuperado ya no se bloquea. La regresión de métricas exige el nombre
+seguro de la skill en la llamada reciente.
+
+**Seguimiento:** Medir silencios Web sólo con tiempos y eventos observables. No
+atribuirlos a razonamiento interno ni almacenar prompts, transcripciones o
+cookies.

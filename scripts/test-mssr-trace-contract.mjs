@@ -369,6 +369,18 @@ try {
   assert.equal(Object.prototype.hasOwnProperty.call(domainTool.args, 'stage'), false, 'Do not inject fields absent from the target schema.');
   const boundary = negative.prepare('mssr_trace_record', { eventType: 'verification' });
   assert.ok(boundary.notices.some((item) => item.code === 'mssr-required-skill-not-loaded'));
+  const prematureSuccess = negative.prepare('mssr_trace_record', {
+    eventType: 'outcome',
+    status: 'success',
+    caller: 'chatgpt-web',
+    stage: 'close',
+  });
+  assert.equal(prematureSuccess.blocked?.code, 'mssr-success-outcome-blocked-required-skills');
+  assert.ok(
+    prematureSuccess.notices.some((item) => item.code === 'mssr-success-outcome-blocked-required-skills'),
+    'A successful outcome must be rejected until every required skill is loaded.',
+  );
+  assert.equal(negative.snapshot().closed, false, 'A rejected outcome must leave the trace open for recovery.');
   const mismatch = negative.prepare('skill_load', { name: 'required-skill', traceId: 'trace-negative-999' });
   assert.ok(mismatch.notices.some((item) => item.code === 'mssr-trace-mismatch'));
   const delegated = negative.prepare('bridge_tool_query', { toolName: 'skill_load', arguments: { name: 'required-skill' } });
@@ -380,6 +392,13 @@ try {
     result: { traceId: 'trace-negative-001' },
   });
   assert.deepEqual(negative.snapshot().missingRequiredSkills, []);
+  const recoveredSuccess = negative.prepare('mssr_trace_record', {
+    eventType: 'outcome',
+    status: 'success',
+    caller: 'chatgpt-web',
+    stage: 'close',
+  });
+  assert.equal(recoveredSuccess.blocked, undefined, 'The same trace may close after the missing load is repaired.');
   const replacement = negative.prepare('skill_route_plan', { task: 'different unfinished task', stage: 'start' });
   assert.ok(replacement.notices.some((item) => item.code === 'mssr-active-trace-replaced-before-outcome'));
 
@@ -486,6 +505,10 @@ try {
     const attributedLoad = recentProjectMetrics.find((row) =>
       row.tool === 'skill_load' && row.trace_id === codexRoute.traceId);
     assert.equal(attributedLoad?.project, 'codex-project-attribution');
+    assert.ok(
+      codexRoute.activeSkills.some((skill) => skill.name === attributedLoad?.operation_subject),
+      'Recent metrics must expose the privacy-safe skill name loaded by skill_load.',
+    );
     const laterContextMetric = recentProjectMetrics.find((row) =>
       row.tool === 'project_context_load' && row.project === 'later-project-context');
     assert.equal(laterContextMetric?.trace_id, null, 'A closed trace must not leak into later context-load metrics.');

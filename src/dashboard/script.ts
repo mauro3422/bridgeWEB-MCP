@@ -149,7 +149,8 @@ function renderRecent(targetId, inputRows, limit, includeDetail) {
   target.innerHTML = rows.map((row) => {
     const profile = [row.caller, row.model, row.reasoning_effort].filter((value) => value && value !== 'unknown').join(' · ');
     const alias = row.tool === 'work_once' ? toolHint(row.tool) : '';
-    const detail = [row.error || row.input_keys || '', alias, profile].filter(Boolean).join(' · ');
+    const subject = row.operation_subject ? 'objetivo: ' + row.operation_subject : '';
+    const detail = [row.error || subject || row.input_keys || '', alias, profile].filter(Boolean).join(' · ');
     return '<tr>' +
       '<td>' + esc(clock(row.started_at)) + '</td>' +
       '<td><code title="' + esc(toolHint(row.tool)) + '">' + esc(row.tool) + '</code></td>' +

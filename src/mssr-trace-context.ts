@@ -157,6 +157,11 @@ function candidateDetails(candidates: ActiveTraceState[]): JsonRecord {
 export type MssrTracePreparation = {
   args: JsonRecord;
   notices: BridgeNoticeInput[];
+  blocked?: {
+    code: string;
+    message: string;
+    details: JsonRecord;
+  };
 };
 
 export type MssrTraceSessionSnapshot = {
@@ -398,7 +403,7 @@ export function createMssrTraceSessionCoordinator(
       const delegated = prepare(delegatedTool, asRecord(args.arguments) ?? {}, hostContext);
       args.arguments = delegated.args;
       notices.push(...delegated.notices);
-      return { args, notices };
+      return { args, notices, blocked: delegated.blocked };
     }
 
     const explicitTrace = validTraceId(args.traceId) ? String(args.traceId).trim() : null;
@@ -491,6 +496,28 @@ export function createMssrTraceSessionCoordinator(
     if (toolName === "mssr_trace_record") {
       const eventType = typeof args.eventType === "string" ? args.eventType : "";
       if (TRACE_BOUNDARY_EVENTS.has(eventType)) notices.push(...boundaryNotice(toolName, eventType, state));
+      const missing = missingRequired(state);
+      if (eventType === "outcome" && args.status === "success" && state && !state.closed && missing.length > 0) {
+        const blocked = {
+          code: "mssr-success-outcome-blocked-required-skills",
+          message: `No se puede cerrar con éxito la traza ${state.traceId}: faltan ${missing.length} skill(s) requerida(s).`,
+          details: {
+            traceId: state.traceId,
+            stage: state.stage,
+            missingSkills: missing,
+            recovery: "Carga las skills requeridas y vuelve a registrar un único outcome.",
+          },
+        };
+        notices.push(notice(
+          "error",
+          blocked.code,
+          toolName,
+          blocked.message,
+          blocked.details,
+          `${blocked.code}:${state.traceId}:${missing.join(",")}`,
+        ));
+        return { args, notices, blocked };
+      }
       if (eventType === "outcome" && !state) {
         notices.push(notice(
           "warning",
