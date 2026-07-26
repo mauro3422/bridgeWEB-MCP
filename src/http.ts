@@ -433,27 +433,27 @@ async function main() {
       }
 
       if (req.method === "GET" && url.pathname === "/api/metrics/overview") {
-        sendJson(res, 200, getMetricsOverview());
+        sendJson(res, 200, getMetricsOverview(url.searchParams.get("scope") === "all" ? "all" : "active"));
         return;
       }
 
       if (req.method === "GET" && url.pathname === "/api/metrics/summary") {
-        sendJson(res, 200, getMetricsSummary(getLimit(url, 50, 200)));
+        sendJson(res, 200, getMetricsSummary(getLimit(url, 50, 200), url.searchParams.get("scope") === "all" ? "all" : "active"));
         return;
       }
 
       if (req.method === "GET" && url.pathname === "/api/metrics/recent") {
-        sendJson(res, 200, getRecentMetrics(getLimit(url, 25, 200)));
+        sendJson(res, 200, getRecentMetrics(getLimit(url, 25, 200), url.searchParams.get("scope") === "all" ? "all" : "active"));
         return;
       }
 
       if (req.method === "GET" && url.pathname === "/api/metrics/errors") {
-        sendJson(res, 200, getMetricsErrors(getLimit(url, 25, 200)));
+        sendJson(res, 200, getMetricsErrors(getLimit(url, 25, 200), url.searchParams.get("scope") === "all" ? "all" : "active"));
         return;
       }
 
       if (req.method === "GET" && url.pathname === "/api/metrics/timeline") {
-        sendJson(res, 200, getMetricsTimeline(getLimit(url, 500, 2000)));
+        sendJson(res, 200, getMetricsTimeline(getLimit(url, 500, 2000), url.searchParams.get("scope") === "all" ? "all" : "active"));
         return;
       }
 

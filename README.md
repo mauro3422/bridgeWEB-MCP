@@ -7,7 +7,7 @@ El objetivo es tener un puente local controlado por nosotros para operar filesys
 ## Estado actual
 
 ```text
-bridge-mcp v0.6.14
+bridge-mcp v0.6.17
 Mode: HTTP production-candidate
 Project root: C:\dev\bridge-mcp
 Bridge MCP: http://127.0.0.1:3001/mcp
@@ -250,6 +250,7 @@ bridge_visualization_catalog
 bridge_visualize_metrics
 mssr_observatory_query
 mssr_trace_record
+mssr_observatory_epoch_start
 ```
 
 ### Inteligencia de codigo
@@ -332,7 +333,7 @@ Estado esperado:
 
 ```text
 bridge_self_check.ok = true
-server.version = 0.6.14
+server.version = 0.6.17
 tunnel.baseUrl = http://127.0.0.1:8081
 tunnel healthz = live
 tunnel readyz = ready
@@ -443,6 +444,7 @@ BRIDGE_MCP_EVENTS_JSONL=...
 BRIDGE_MCP_MSSR_EVENTS_JSONL=...
 BRIDGE_MCP_MSSR_STATE=...
 BRIDGE_MCP_MSSR_TRACE_LEASE_MS=7200000
+BRIDGE_MCP_WEB_CLOSURE_IDLE_MS=60000
 ```
 
 Las métricas generales guardan nombres de tools, duración, éxito/error, claves de input y tamaño de salida. No guardan argumentos completos.
@@ -451,7 +453,19 @@ El MSSR Observatory agrega trazas correlacionadas para rutas, cargas, replans, f
 
 Cada outcome sustancial declara una sola `primarySkill`; las `supportingSkills` quedan como contribución sin duplicar éxito. Reintentos y revisiones reutilizan el mismo trace y el resumen cuenta el último outcome. El dashboard separa routing semántico, continuidad route→load, required-load compliance, verificación/persistencia, éxito, aceptación y score por skill primaria.
 
-La telemetría actual usa una época persistida `trace-contract-v1`. `/api/mssr/summary?scope=active` y el dashboard muestran sólo la línea base actual; `scope=all` conserva la historia anterior para comparar sin borrarla. MSSR se consulta antes de cadenas especializadas y se replantea al cambiar de fase, ante fallos materiales, cambios de provider/schema, capabilities nuevas o fricción reusable; no se ejecuta entre cada lectura o comando exitoso de la misma fase.
+Para `caller=chatgpt-web`, el coordinador arma un watchdog interno después de cada herramienta. Si la traza queda abierta sin `outcome` durante `BRIDGE_MCP_WEB_CLOSURE_IDLE_MS`, emite `mssr-web-outcome-missing-after-idle` y persiste un evento privado `closure_reminder`. Una nueva herramienta reinicia la ventana y un `outcome` la cancela. El resumen MSSR expone `surfaces` para comparar cobertura de outcomes y recordatorios entre `chatgpt-web`, `codex-local` y otros callers. Este control observa el lifecycle MCP; no puede probar que el navegador haya renderizado el texto final.
+
+La telemetría actual usa una época persistida `trace-contract-v1`. `/api/mssr/summary?scope=active` y el dashboard muestran sólo la línea base actual; `scope=all` conserva la historia anterior para comparar sin borrarla. `mssr_observatory_epoch_start` abre deliberadamente una línea base activa nueva con confirmación y razón, sin eliminar eventos previos. Las métricas `surfaces` separan `codex-local`, `chatgpt-web` y `other`; `agentProfiles` cruza ese caller con `model` y `reasoningEffort` (`gpt-5.6-terra`, `gpt-5.6-sol`, `low`, `medium`, `high`, etc.). En Codex, Bridge toma automáticamente esos campos de `x-codex-turn-metadata` cuando el host los entrega; otros hosts pueden declararlos explícitamente. Bridge no los infiere por latencia, longitud o conducta: cuando no puede probarlos registra `unknown`. MSSR se consulta antes de cadenas especializadas y se replantea al cambiar de fase, ante fallos materiales, cambios de provider/schema, capabilities nuevas o fricción reusable; no se ejecuta entre cada lectura o comando exitoso de la misma fase.
+
+La misma época gobierna ahora las métricas generales de tools. `/api/metrics/*` y `bridge_metrics_*` usan `scope=active` por defecto, mientras `scope=all` conserva el acumulado. Cada llamada nueva guarda `traceId`, `caller`, `model` y `reasoningEffort` cuando son observables; el dashboard muestra llamadas, errores y latencia agrupados por ese perfil para no mezclar Codex con ChatGPT Web ni variantes de modelo.
+
+La identidad de superficie también se obtiene del `clientInfo` del handshake MCP. Una tool genérica o stateless hereda la única traza abierta compatible con su caller para fines de observabilidad, sin inyectar argumentos fuera de schema ni volver a ejecutar MSSR entre llamadas. El dashboard MSSR separa por perfil routing estructurado, route→load, cargas requeridas, verificación, cierre, éxito, aceptación, score, duración, recordatorios de loop y correcciones del usuario.
+
+`skill_route_plan` y `skill_recommend` usan `responseMode=compact` por defecto:
+devuelven la ruta accionable, nombres, razón corta, obligatoriedad, orden y
+warnings. `responseMode=debug` conserva scores, planes de fase y metadata completa.
+El contenido de `SKILL.md` sólo se entrega mediante `skill_load`; permanece sujeto
+al contexto y compactación del host, no a una inyección oculta del Bridge.
 
 ## Modelo de uso desde laptop
 

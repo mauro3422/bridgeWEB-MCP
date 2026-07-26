@@ -3,6 +3,7 @@ import {
   getMetricsOverview,
   getMetricsSummary,
   getMetricsTimeline,
+  type BridgeMetricsScope,
 } from "./metrics.js";
 
 type ChartType = "bar" | "line" | "pie" | "scatter";
@@ -78,9 +79,9 @@ function makeResult(chartSpec: ChartSpec): VisualizationResult {
   };
 }
 
-export function getMetricsVisualization(kind: MetricsVisualizationKind, limit = 10): VisualizationResult {
+export function getMetricsVisualization(kind: MetricsVisualizationKind, limit = 10, scope: BridgeMetricsScope = "active"): VisualizationResult {
   if (kind === "calls_by_tool") {
-    const rows = topRows(asRows(getMetricsSummary(limit), "summary"), limit).map((row) => ({
+    const rows = topRows(asRows(getMetricsSummary(limit, scope), "summary"), limit).map((row) => ({
       tool: String(row.tool ?? "unknown"),
       calls: asNumber(row.calls),
     }));
@@ -100,7 +101,7 @@ export function getMetricsVisualization(kind: MetricsVisualizationKind, limit = 
   }
 
   if (kind === "avg_duration_by_tool") {
-    const rows = topRows(asRows(getMetricsSummary(limit), "summary"), limit).map((row) => ({
+    const rows = topRows(asRows(getMetricsSummary(limit, scope), "summary"), limit).map((row) => ({
       tool: String(row.tool ?? "unknown"),
       avgDurationMs: asNumber(row.avg_duration_ms),
     }));
@@ -120,7 +121,7 @@ export function getMetricsVisualization(kind: MetricsVisualizationKind, limit = 
   }
 
   if (kind === "errors_by_tool") {
-    const rows = topRows(asRows(getMetricsSummary(limit), "summary"), limit)
+    const rows = topRows(asRows(getMetricsSummary(limit, scope), "summary"), limit)
       .map((row) => ({ tool: String(row.tool ?? "unknown"), errors: asNumber(row.error_calls) }))
       .filter((row) => row.errors > 0);
 
@@ -139,7 +140,7 @@ export function getMetricsVisualization(kind: MetricsVisualizationKind, limit = 
   }
 
   if (kind === "activity_timeline") {
-    const rows = asRows(getMetricsTimeline(500), "timeline").map((row) => ({
+    const rows = asRows(getMetricsTimeline(500, scope), "timeline").map((row) => ({
       time: compactDateLabel(row.bucket),
       calls: asNumber(row.calls),
       errors: asNumber(row.errors),
@@ -161,7 +162,7 @@ export function getMetricsVisualization(kind: MetricsVisualizationKind, limit = 
     });
   }
 
-  const overview = getMetricsOverview() as Record<string, unknown>;
+  const overview = getMetricsOverview(scope) as Record<string, unknown>;
   const totals = (overview.totals && typeof overview.totals === "object") ? overview.totals as Record<string, unknown> : {};
   const okCalls = asNumber(totals.okCalls);
   const errorCalls = asNumber(totals.errorCalls);

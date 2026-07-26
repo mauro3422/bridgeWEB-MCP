@@ -4,7 +4,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { SERVER_NAME, SERVER_VERSION } from "./config.js";
-import { beginToolMetric, finishToolMetric } from "./metrics.js";
+import { beginToolMetric, finishToolMetric, type BridgeMetricProfile } from "./metrics.js";
 import {
   drainBridgeNotices,
   emitBridgeNotice,
@@ -13,6 +13,7 @@ import {
 } from "./notices.js";
 import { createDefaultToolRegistry } from "./tool-registry.js";
 import { createMssrTraceSessionCoordinator } from "./mssr-trace-context.js";
+import { recordMssrEvent } from "./mssr-observatory.js";
 
 export { SERVER_NAME, SERVER_VERSION } from "./config.js";
 export { bridgeRestartStatus } from "./tools/bridge-ops.js";
@@ -121,6 +122,81 @@ function emitAutomaticMetricNotices(toolName: string, event: ReturnType<typeof f
   }
 }
 
+const profiledMssrTools = new Set([
+  "skill_recommend",
+  "skill_route_plan",
+  "skill_bootstrap",
+  "mssr_trace_record",
+]);
+
+function withObservableAgentProfile(
+  toolName: string,
+  args: Record<string, unknown>,
+  requestMeta: unknown,
+): Record<string, unknown> {
+  if (!profiledMssrTools.has(toolName) || !requestMeta || typeof requestMeta !== "object") return args;
+  const envelope = requestMeta as Record<string, unknown>;
+  const codexMetadata = envelope["x-codex-turn-metadata"];
+  if (!codexMetadata || typeof codexMetadata !== "object") return args;
+  const metadata = codexMetadata as Record<string, unknown>;
+  return {
+    ...args,
+    model: args.model ?? (typeof metadata.model === "string" ? metadata.model : undefined),
+    reasoningEffort: args.reasoningEffort
+      ?? (typeof metadata.reasoning_effort === "string" ? metadata.reasoning_effort : undefined),
+  };
+}
+
+function requestAgentProfile(requestMeta: unknown, clientVersion: unknown): BridgeMetricProfile {
+  const client = clientVersion && typeof clientVersion === "object"
+    ? clientVersion as Record<string, unknown>
+    : {};
+  const clientName = typeof client.name === "string" ? client.name.trim().slice(0, 120) : undefined;
+  const normalizedClient = clientName?.toLowerCase() ?? "";
+  const inferredCaller = normalizedClient.includes("codex")
+    ? "codex-local"
+    : normalizedClient.includes("chatgpt") || normalizedClient.includes("openai")
+      ? "chatgpt-web"
+      : undefined;
+  if (!requestMeta || typeof requestMeta !== "object") {
+    return { caller: inferredCaller, clientName };
+  }
+  const envelope = requestMeta as Record<string, unknown>;
+  const codexMetadata = envelope["x-codex-turn-metadata"];
+  if (!codexMetadata || typeof codexMetadata !== "object") {
+    return { caller: inferredCaller, clientName };
+  }
+  const metadata = codexMetadata as Record<string, unknown>;
+  return {
+    caller: "codex-local",
+    model: typeof metadata.model === "string" ? metadata.model : undefined,
+    reasoningEffort: typeof metadata.reasoning_effort === "string" ? metadata.reasoning_effort : undefined,
+    clientName,
+  };
+}
+
+function metricProfile(
+  toolName: string,
+  args: Record<string, unknown>,
+  host: BridgeMetricProfile,
+  traceSnapshot: ReturnType<ReturnType<typeof createMssrTraceSessionCoordinator>["snapshot"]>,
+): BridgeMetricProfile {
+  const isNewRoute = profiledMssrTools.has(toolName) && typeof args.task === "string";
+  return {
+    traceId: typeof args.traceId === "string" ? args.traceId : isNewRoute ? undefined : traceSnapshot.traceId ?? undefined,
+    caller: typeof args.caller === "string"
+      ? args.caller
+      : isNewRoute ? host.caller : traceSnapshot.caller ?? host.caller,
+    model: typeof args.model === "string"
+      ? args.model
+      : isNewRoute ? host.model : traceSnapshot.model ?? host.model,
+    reasoningEffort: typeof args.reasoningEffort === "string"
+      ? args.reasoningEffort
+      : isNewRoute ? host.reasoningEffort : traceSnapshot.reasoningEffort ?? host.reasoningEffort,
+    clientName: host.clientName,
+  };
+}
+
 export function createBridgeServer() {
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
@@ -137,12 +213,31 @@ export function createBridgeServer() {
         "When the user asks you to write, explain, diagram, annotate, or place an existing image inside TabletWhiteboard, use whiteboard_add_text for structured prose, whiteboard_add_diagram for safe shapes, arrows, polylines and Bezier paths, whiteboard_add_svg only for sanitized SVG markup, and whiteboard_insert_image only for an existing local PNG, JPEG, or WebP. These tools write to ChatGPT's separate locked layer; do not claim an object exists until the tool confirms it.",
         "Bridge anomaly notices are delivered inside normal tool responses as bridgeNotices and are removed from the pending queue after delivery. Inspect them before continuing a long workflow.",
         "Bridge automatically propagates an MSSR trace inside the current MCP session and, when calls are stateless, through a bounded process-shared lease only when exactly one compatible trace exists. Keep explicit traceId for restart/cross-process resume or deliberate trace selection; treat ambiguous trace, mismatch, orphan load, missing required skill, and outcome-without-route notices as control evidence that may require replanning.",
+        "For chatgpt-web work, record an MSSR outcome and return a concise user-visible result or concrete blocker when the task ends. Bridge may emit mssr-web-outcome-missing-after-idle after tool activity without an observable outcome; treat it as a lifecycle reminder, not proof that the UI failed to render.",
         "Never claim that a guide, file, image, build, Blender scene, or other side effect exists until a tool result confirms it.",
       ].join(" "),
     },
   );
   const modularToolRegistry = createDefaultToolRegistry();
-  const mssrTraceSession = createMssrTraceSessionCoordinator(modularToolRegistry.tools);
+  const mssrTraceSession = createMssrTraceSessionCoordinator(modularToolRegistry.tools, {
+    onClosureReminder: (reminder) => {
+      emitBridgeNotice(reminder.notice);
+      recordMssrEvent({
+        traceId: reminder.traceId,
+        eventType: "closure_reminder",
+        caller: reminder.caller,
+        stage: reminder.stage,
+        ok: false,
+        details: {
+          lastToolName: reminder.toolName,
+          idleMs: reminder.idleMs,
+          activityVersion: reminder.activityVersion,
+          surface: "chatgpt-web",
+          limitation: "MCP outcome missing; final UI render is not observable by Bridge.",
+        },
+      });
+    },
+  });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: modularToolRegistry.tools,
@@ -150,12 +245,37 @@ export function createBridgeServer() {
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const name = request.params.name;
-    const prepared = mssrTraceSession.prepare(name, (request.params.arguments ?? {}) as Record<string, unknown>);
+    const profiledArgs = withObservableAgentProfile(
+      name,
+      (request.params.arguments ?? {}) as Record<string, unknown>,
+      request.params._meta,
+    );
+    const prepared = mssrTraceSession.prepare(name, profiledArgs);
     for (const notice of prepared.notices) emitBridgeNotice(notice);
     const args = prepared.args;
-    const metric = beginToolMetric(name, args);
+    const hostProfile = requestAgentProfile(request.params._meta, server.getClientVersion());
+    const traceSnapshot = mssrTraceSession.resolveMetricContext(
+      typeof args.caller === "string" ? args.caller : hostProfile.caller,
+    );
+    const metric = beginToolMetric(
+      name,
+      args,
+      metricProfile(name, args, hostProfile, traceSnapshot),
+    );
 
     const complete = (rawData: unknown, ok = true, error?: string) => {
+      if (rawData && typeof rawData === "object" && !Array.isArray(rawData)) {
+        const result = rawData as Record<string, unknown>;
+        if (!metric.traceId && typeof result.traceId === "string") metric.traceId = result.traceId.slice(0, 128);
+        const resultProfile = result.agentProfile;
+        if (resultProfile && typeof resultProfile === "object" && !Array.isArray(resultProfile)) {
+          const profile = resultProfile as Record<string, unknown>;
+          if (metric.model === "unknown" && typeof profile.model === "string") metric.model = profile.model.slice(0, 80);
+          if (metric.reasoningEffort === "unknown" && typeof profile.reasoningEffort === "string") {
+            metric.reasoningEffort = profile.reasoningEffort.slice(0, 20);
+          }
+        }
+      }
       const extracted = extractInternalNotices(rawData);
       for (const notice of extracted.notices) emitBridgeNotice(notice);
       const preview = toolContent(extracted.payload);

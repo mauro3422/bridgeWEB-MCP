@@ -274,6 +274,9 @@ export function recordMssrRoute(args: {
 }): MssrStoredEvent {
   const intent = args.route.intent && typeof args.route.intent === "object" ? args.route.intent as JsonRecord : {};
   const coverage = args.route.coverage && typeof args.route.coverage === "object" ? args.route.coverage as JsonRecord : {};
+  const agentProfile = args.route.agentProfile && typeof args.route.agentProfile === "object"
+    ? args.route.agentProfile as JsonRecord
+    : {};
   return recordMssrEvent({
     traceId: args.traceId,
     eventType: "route_planned",
@@ -284,6 +287,10 @@ export function recordMssrRoute(args: {
     ok: true,
     details: {
       action: args.action,
+      agentProfile: {
+        model: typeof agentProfile.model === "string" ? agentProfile.model : "unknown",
+        reasoningEffort: typeof agentProfile.reasoningEffort === "string" ? agentProfile.reasoningEffort : "unknown",
+      },
       contextUsed: args.route.contextUsed === true,
       contextCharacters: typeof args.route.contextCharacters === "number" ? args.route.contextCharacters : 0,
       workflows: Array.isArray(args.route.workflows) ? args.route.workflows : [],
@@ -346,6 +353,8 @@ export function recordMssrCheckpoint(args: {
   persisted?: boolean;
   summary?: string;
   signals?: string[];
+  model?: string;
+  reasoningEffort?: string;
 }): MssrStoredEvent {
   const ok = args.status === undefined ? undefined : args.status === "success";
   const primarySkill = args.primarySkill ?? args.skillName;
@@ -376,6 +385,10 @@ export function recordMssrCheckpoint(args: {
       evidenceRef: args.evidenceRef ? redactText(args.evidenceRef, 300) : undefined,
       summary: args.summary ? redactText(args.summary, 300) : undefined,
       signals: args.signals ?? [],
+      agentProfile: {
+        model: args.model ? redactText(args.model, 80) : "unknown",
+        reasoningEffort: args.reasoningEffort ? redactText(args.reasoningEffort, 20) : "unknown",
+      },
     },
   });
 }
@@ -510,6 +523,7 @@ function summary(days: number, scope: MssrObservatoryScope) {
   const verificationTraces = new Set(events.filter((event) => event.eventType === "verification" && (event.ok === true || event.details.verificationPassed === true)).map((event) => event.traceId));
   const persistenceTraces = new Set(events.filter((event) => event.eventType === "persistence" && (event.ok === true || event.details.persisted === true)).map((event) => event.traceId));
   const outcomeEvents = events.filter((event) => event.eventType === "outcome");
+  const closureReminderEvents = events.filter((event) => event.eventType === "closure_reminder");
   const latestOutcomeByTrace = new Map<string, MssrStoredEvent>();
   for (const event of outcomeEvents) latestOutcomeByTrace.set(event.traceId, event);
   const latestOutcomes = [...latestOutcomeByTrace.values()];
@@ -578,6 +592,110 @@ function summary(days: number, scope: MssrObservatoryScope) {
   const userCorrections = events.reduce((total, event) => total + (typeof event.details.userCorrections === "number" ? event.details.userCorrections : 0), 0);
   const structuredRoutes = routes.filter((event) => event.classificationMode === "structured-semantic").length;
   const orphanLoads = loads.filter((event) => !traceIdsWithRoutes.has(event.traceId)).length;
+  const surfaceNames = new Set(
+    [...routes, ...outcomeEvents, ...closureReminderEvents]
+      .map((event) => event.caller || "other"),
+  );
+  const surfaceBenchmarks = [...surfaceNames]
+    .map((caller) => {
+      const surfaceRouteTraces = new Set(routes.filter((event) => (event.caller || "other") === caller).map((event) => event.traceId));
+      const surfaceOutcomeTraces = new Set(latestOutcomes.filter((event) => (event.caller || "other") === caller).map((event) => event.traceId));
+      const surfaceReminderTraces = new Set(closureReminderEvents.filter((event) => (event.caller || "other") === caller).map((event) => event.traceId));
+      return {
+        caller,
+        routedTraces: surfaceRouteTraces.size,
+        outcomeTraces: surfaceOutcomeTraces.size,
+        outcomeCoverage: rate(surfaceOutcomeTraces.size, surfaceRouteTraces.size),
+        closureReminderEvents: closureReminderEvents.filter((event) => (event.caller || "other") === caller).length,
+        closureReminderTraces: surfaceReminderTraces.size,
+        closureReminderRate: rate(surfaceReminderTraces.size, surfaceRouteTraces.size),
+      };
+    })
+    .sort((a, b) => b.routedTraces - a.routedTraces || a.caller.localeCompare(b.caller));
+  const profileKeys = new Set(routes.map((event) => {
+    const profile = event.details.agentProfile && typeof event.details.agentProfile === "object"
+      ? event.details.agentProfile as JsonRecord
+      : {};
+    return JSON.stringify([
+      event.caller || "other",
+      typeof profile.model === "string" ? profile.model : "unknown",
+      typeof profile.reasoningEffort === "string" ? profile.reasoningEffort : "unknown",
+    ]);
+  }));
+  const agentProfiles = [...profileKeys].map((key) => {
+    const [caller, model, reasoningEffort] = JSON.parse(key) as [string, string, string];
+    const profileRoutes = routes.filter((event) => {
+      const profile = event.details.agentProfile && typeof event.details.agentProfile === "object"
+        ? event.details.agentProfile as JsonRecord
+        : {};
+      return (event.caller || "other") === caller
+        && (typeof profile.model === "string" ? profile.model : "unknown") === model
+        && (typeof profile.reasoningEffort === "string" ? profile.reasoningEffort : "unknown") === reasoningEffort;
+    });
+    const profileTraceIds = new Set(profileRoutes.map((event) => event.traceId));
+    const profileLoads = successfulLoads.filter((event) => profileTraceIds.has(event.traceId));
+    const profileTraceIdsWithLoads = new Set(profileLoads.map((event) => event.traceId));
+    const profileRequired = new Set<string>();
+    for (const route of profileRoutes) {
+      const active = Array.isArray(route.details.activeSkills) ? route.details.activeSkills : [];
+      for (const item of active) {
+        if (!item || typeof item !== "object" || typeof (item as JsonRecord).name !== "string") continue;
+        if ((item as JsonRecord).required === true) {
+          profileRequired.add(`${route.traceId}\u0000${String((item as JsonRecord).name)}`);
+        }
+      }
+    }
+    const profileLoadedKeys = new Set(profileLoads
+      .filter((event) => event.skillName)
+      .map((event) => `${event.traceId}\u0000${event.skillName}`));
+    const profileRequiredSatisfied = [...profileRequired].filter((item) => profileLoadedKeys.has(item)).length;
+    const profileOutcomeTraces = new Set(latestOutcomes.filter((event) => profileTraceIds.has(event.traceId)).map((event) => event.traceId));
+    const profilePrimaryOutcomes = primaryOutcomeEvents.filter((event) => profileTraceIds.has(event.traceId));
+    const profileSuccessfulOutcomes = profilePrimaryOutcomes.filter((event) => event.details.status === "success" || event.ok === true);
+    const profileMeasuredOutcomes = profilePrimaryOutcomes.filter((event) => typeof event.details.accepted === "boolean");
+    const profileAcceptedOutcomes = profileMeasuredOutcomes.filter((event) => event.details.accepted === true);
+    const profileScoredOutcomes = profilePrimaryOutcomes.filter((event) => typeof event.details.score === "number");
+    const profileReminderEvents = closureReminderEvents.filter((event) => profileTraceIds.has(event.traceId));
+    const profileEvents = events.filter((event) => profileTraceIds.has(event.traceId));
+    const completionDurations = latestOutcomes.flatMap((outcome) => {
+      if (!profileTraceIds.has(outcome.traceId)) return [];
+      const firstRoute = profileRoutes.find((route) => route.traceId === outcome.traceId);
+      if (!firstRoute) return [];
+      const duration = Date.parse(outcome.occurredAt) - Date.parse(firstRoute.occurredAt);
+      return Number.isFinite(duration) && duration >= 0 ? [duration] : [];
+    });
+    return {
+      caller,
+      model,
+      reasoningEffort,
+      routedTraces: profileTraceIds.size,
+      routeEvents: profileRoutes.length,
+      structuredRouteRate: rate(profileRoutes.filter((event) => event.classificationMode === "structured-semantic").length, profileRoutes.length),
+      routeLoadCoverage: rate([...profileTraceIds].filter((traceId) => profileTraceIdsWithLoads.has(traceId)).length, profileTraceIds.size),
+      requiredSkillLoadsExpected: profileRequired.size,
+      requiredSkillLoadsSatisfied: profileRequiredSatisfied,
+      requiredLoadCompliance: rate(profileRequiredSatisfied, profileRequired.size),
+      verificationCoverage: rate([...profileTraceIds].filter((traceId) => verificationTraces.has(traceId)).length, profileTraceIds.size),
+      persistenceCoverage: rate([...profileTraceIds].filter((traceId) => persistenceTraces.has(traceId)).length, profileTraceIds.size),
+      outcomeTraces: profileOutcomeTraces.size,
+      outcomeCoverage: rate(profileOutcomeTraces.size, profileTraceIds.size),
+      outcomeSuccessRate: rate(profileSuccessfulOutcomes.length, profilePrimaryOutcomes.length),
+      outcomeAcceptanceRate: rate(profileAcceptedOutcomes.length, profileMeasuredOutcomes.length),
+      averageOutcomeScore: profileScoredOutcomes.length > 0
+        ? Math.round((profileScoredOutcomes.reduce((total, event) => total + Number(event.details.score), 0) / profileScoredOutcomes.length) * 10_000) / 10_000
+        : null,
+      averageCompletionMs: completionDurations.length > 0
+        ? Math.round(completionDurations.reduce((total, duration) => total + duration, 0) / completionDurations.length)
+        : null,
+      replannedTraces: [...profileTraceIds].filter((traceId) => profileRoutes.filter((event) => event.traceId === traceId).length > 1).length,
+      closureReminderEvents: profileReminderEvents.length,
+      closureReminderRate: rate(new Set(profileReminderEvents.map((event) => event.traceId)).size, profileTraceIds.size),
+      userCorrections: profileEvents.reduce((total, event) => total + (typeof event.details.userCorrections === "number" ? event.details.userCorrections : 0), 0),
+    };
+  }).sort((a, b) => b.routedTraces - a.routedTraces
+    || a.caller.localeCompare(b.caller)
+    || a.model.localeCompare(b.model)
+    || a.reasoningEffort.localeCompare(b.reasoningEffort));
 
   return {
     ...observatoryStatus(),
@@ -621,8 +739,12 @@ function summary(days: number, scope: MssrObservatoryScope) {
       averageOutcomeScore: scoredOutcomes.length > 0
         ? Math.round((scoredOutcomes.reduce((total, event) => total + Number(event.details.score), 0) / scoredOutcomes.length) * 10_000) / 10_000
         : null,
+      closureReminderEvents: closureReminderEvents.length,
+      closureReminderTraces: new Set(closureReminderEvents.map((event) => event.traceId)).size,
       userCorrections,
     },
+    surfaces: surfaceBenchmarks,
+    agentProfiles,
     top: {
       selectedSkills: topCounts(selectedSkillNames),
       loadedSkills: topCounts(successfulLoads.flatMap((event) => event.skillName ? [event.skillName] : [])),

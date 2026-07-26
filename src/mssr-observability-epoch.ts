@@ -20,6 +20,18 @@ export const mssrObservabilityStatePath = path.resolve(
 
 let cachedState: MssrObservabilityEpochState | null = null;
 
+function createState(now = new Date().toISOString()): MssrObservabilityEpochState {
+  const timestamp = now.replace(/[-:.TZ]/g, "").slice(0, 14);
+  return {
+    schemaVersion: 1,
+    contractVersion: MSSR_TRACE_CONTRACT_VERSION,
+    activeEpoch: `${MSSR_TRACE_CONTRACT_VERSION}-${timestamp}-${randomUUID().slice(0, 8)}`,
+    baselineAt: now,
+    createdAt: now,
+    legacyScope: "preserved",
+  };
+}
+
 function validState(value: unknown): value is MssrObservabilityEpochState {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const state = value as Record<string, unknown>;
@@ -56,19 +68,21 @@ export function getMssrObservabilityEpoch(): MssrObservabilityEpochState {
     // Missing, stale, or invalid state starts a new logical epoch without deleting legacy telemetry.
   }
 
-  const now = new Date().toISOString();
-  const timestamp = now.replace(/[-:.TZ]/g, "").slice(0, 14);
-  const state: MssrObservabilityEpochState = {
-    schemaVersion: 1,
-    contractVersion: MSSR_TRACE_CONTRACT_VERSION,
-    activeEpoch: `${MSSR_TRACE_CONTRACT_VERSION}-${timestamp}-${randomUUID().slice(0, 8)}`,
-    baselineAt: now,
-    createdAt: now,
-    legacyScope: "preserved",
-  };
+  const state = createState();
   writeState(state);
   cachedState = state;
   return state;
+}
+
+export function startMssrObservabilityEpoch(): {
+  previous: MssrObservabilityEpochState;
+  current: MssrObservabilityEpochState;
+} {
+  const previous = getMssrObservabilityEpoch();
+  const current = createState();
+  writeState(current);
+  cachedState = current;
+  return { previous, current };
 }
 
 export function resetMssrObservabilityEpochForTests(): void {

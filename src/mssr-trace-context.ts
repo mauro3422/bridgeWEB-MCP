@@ -12,23 +12,34 @@ type ActiveTraceState = {
   stage: string;
   taskHash: string;
   caller: string;
+  model: string;
+  reasoningEffort: string;
   requiredSkills: Set<string>;
   selectedSkills: Set<string>;
   loadedSkills: Set<string>;
   routeCount: number;
   closed: boolean;
   updatedAt: number;
+  lastToolCompletedAt: number | null;
+  lastToolName: string | null;
+  toolActivityVersion: number;
+  closureReminderVersion: number;
 };
 
 const ROUTE_TOOLS = new Set(["skill_recommend", "skill_route_plan", "skill_bootstrap"]);
 const TRACE_QUERY_TOOLS = new Set(["mssr_observatory_query"]);
 const TRACE_DISPATCH_TOOLS = new Set(["bridge_tool_query", "bridge_tool_action"]);
+const CLOSURE_ACTIVITY_EXEMPT_TOOLS = new Set([
+  "bridge_notice_status",
+  "bridge_notice_drain",
+]);
 const TRACE_BOUNDARY_STAGES = new Set(["verify", "persist", "close"]);
 const TRACE_BOUNDARY_EVENTS = new Set(["verification", "persistence", "outcome"]);
 const TRACE_LEASE_MS = Math.max(60_000, Number(process.env.BRIDGE_MCP_MSSR_TRACE_LEASE_MS) || 2 * 60 * 60 * 1_000);
 const CLOSED_TRACE_RETENTION_MS = Math.min(TRACE_LEASE_MS, 15 * 60 * 1_000);
 const MAX_SHARED_TRACES = 128;
 const sharedTraces = new Map<string, ActiveTraceState>();
+const closureTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function asRecord(value: unknown): JsonRecord | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : null;
@@ -94,14 +105,26 @@ function notice(
   return { severity, code, source, message, details, dedupeKey };
 }
 
+function clearClosureTimer(traceId: string): void {
+  const timer = closureTimers.get(traceId);
+  if (timer) clearTimeout(timer);
+  closureTimers.delete(traceId);
+}
+
 function pruneSharedTraces(now = Date.now()): void {
   for (const [traceId, state] of sharedTraces) {
     const retention = state.closed ? CLOSED_TRACE_RETENTION_MS : TRACE_LEASE_MS;
-    if (now - state.updatedAt > retention) sharedTraces.delete(traceId);
+    if (now - state.updatedAt > retention) {
+      clearClosureTimer(traceId);
+      sharedTraces.delete(traceId);
+    }
   }
   if (sharedTraces.size <= MAX_SHARED_TRACES) return;
   const oldest = [...sharedTraces.values()].sort((a, b) => a.updatedAt - b.updatedAt);
-  for (const state of oldest.slice(0, sharedTraces.size - MAX_SHARED_TRACES)) sharedTraces.delete(state.traceId);
+  for (const state of oldest.slice(0, sharedTraces.size - MAX_SHARED_TRACES)) {
+    clearClosureTimer(state.traceId);
+    sharedTraces.delete(state.traceId);
+  }
 }
 
 function openSharedTraces(): ActiveTraceState[] {
@@ -131,6 +154,9 @@ export type MssrTraceSessionSnapshot = {
   active: boolean;
   traceId: string | null;
   stage: string | null;
+  caller: string | null;
+  model: string | null;
+  reasoningEffort: string | null;
   routeCount: number;
   closed: boolean;
   requiredSkills: string[];
@@ -139,7 +165,25 @@ export type MssrTraceSessionSnapshot = {
   sharedOpenTraces: number;
 };
 
-export function createMssrTraceSessionCoordinator(toolSchemas: readonly ToolSchemaLike[]) {
+export type MssrClosureReminder = {
+  traceId: string;
+  caller: string;
+  stage: string;
+  toolName: string;
+  idleMs: number;
+  activityVersion: number;
+  notice: BridgeNoticeInput;
+};
+
+export type MssrTraceCoordinatorOptions = {
+  closureIdleMs?: number;
+  onClosureReminder?: (reminder: MssrClosureReminder) => void;
+};
+
+export function createMssrTraceSessionCoordinator(
+  toolSchemas: readonly ToolSchemaLike[],
+  options: MssrTraceCoordinatorOptions = {},
+) {
   const traceAwareTools = new Set(
     toolSchemas
       .filter((schema) => schemaPropertyExists(schema, "traceId"))
@@ -150,6 +194,60 @@ export function createMssrTraceSessionCoordinator(toolSchemas: readonly ToolSche
     toolSchemas.filter((schema) => schemaPropertyExists(schema, "stage")).map((schema) => schema.name),
   );
   let localTraceId: string | null = null;
+  const closureIdleMs = Math.max(
+    10,
+    options.closureIdleMs
+      ?? (Number(process.env.BRIDGE_MCP_WEB_CLOSURE_IDLE_MS) || 60_000),
+  );
+
+  function scheduleClosureReminder(state: ActiveTraceState, toolName: string): void {
+    if (state.caller !== "chatgpt-web" || state.closed || CLOSURE_ACTIVITY_EXEMPT_TOOLS.has(toolName)) return;
+    const now = Date.now();
+    state.lastToolCompletedAt = now;
+    state.lastToolName = toolName;
+    state.toolActivityVersion += 1;
+    state.updatedAt = now;
+    const activityVersion = state.toolActivityVersion;
+    clearClosureTimer(state.traceId);
+    const timer = setTimeout(() => {
+      closureTimers.delete(state.traceId);
+      const current = sharedTraces.get(state.traceId);
+      if (!current || current.closed || current.caller !== "chatgpt-web") return;
+      if (current.toolActivityVersion !== activityVersion || current.closureReminderVersion >= activityVersion) return;
+      current.closureReminderVersion = activityVersion;
+      current.updatedAt = Date.now();
+      const reminderNotice = notice(
+        "warning",
+        "mssr-web-outcome-missing-after-idle",
+        "mssr-trace-context",
+        `La traza Web ${current.traceId} usó herramientas y quedó ${closureIdleMs} ms sin outcome observable. Si la tarea terminó, registra el cierre MSSR y devuelve el resultado; si sigue activa, comunica progreso o un bloqueo concreto antes de otra cadena larga.`,
+        {
+          traceId: current.traceId,
+          caller: current.caller,
+          stage: current.stage,
+          lastToolName: current.lastToolName,
+          lastToolCompletedAt: current.lastToolCompletedAt
+            ? new Date(current.lastToolCompletedAt).toISOString()
+            : null,
+          idleMs: closureIdleMs,
+          activityVersion,
+          limitation: "Bridge observes MCP lifecycle, not whether ChatGPT rendered final text.",
+        },
+        `mssr-web-outcome-missing-after-idle:${current.traceId}:${activityVersion}`,
+      );
+      options.onClosureReminder?.({
+        traceId: current.traceId,
+        caller: current.caller,
+        stage: current.stage,
+        toolName: current.lastToolName ?? toolName,
+        idleMs: closureIdleMs,
+        activityVersion,
+        notice: reminderNotice,
+      });
+    }, closureIdleMs);
+    timer.unref?.();
+    closureTimers.set(state.traceId, timer);
+  }
 
   function localState(allowClosed = false): ActiveTraceState | null {
     pruneSharedTraces();
@@ -241,6 +339,8 @@ export function createMssrTraceSessionCoordinator(toolSchemas: readonly ToolSche
 
     const explicitTrace = validTraceId(args.traceId) ? String(args.traceId).trim() : null;
     if (explicitTrace && sharedTraces.has(explicitTrace)) adopt(sharedTraces.get(explicitTrace)!);
+    const activeBeforeCall = localState(toolName === "mssr_trace_record");
+    if (activeBeforeCall) clearClosureTimer(activeBeforeCall.traceId);
 
     if (ROUTE_TOOLS.has(toolName)) {
       const stage = typeof args.stage === "string" ? args.stage : "start";
@@ -283,6 +383,7 @@ export function createMssrTraceSessionCoordinator(toolSchemas: readonly ToolSche
 
     let state = localState(toolName === "mssr_trace_record");
     if (!explicitTrace && !state) state = findToolCandidate(toolName, args, notices);
+    if (state) clearClosureTimer(state.traceId);
 
     if (!explicitTrace && state) {
       args.traceId = state.traceId;
@@ -357,6 +458,10 @@ export function createMssrTraceSessionCoordinator(toolSchemas: readonly ToolSche
         stage: typeof record.stage === "string" ? record.stage : typeof args.stage === "string" ? args.stage : "start",
         taskHash: taskFingerprint(args.task),
         caller: normalizedCaller(args.caller),
+        model: normalizedText(asRecord(record.agentProfile)?.model, 80) || normalizedText(args.model, 80) || "unknown",
+        reasoningEffort: normalizedText(asRecord(record.agentProfile)?.reasoningEffort, 20)
+          || normalizedText(args.reasoningEffort, 20)
+          || "unknown",
         requiredSkills: new Set([
           ...(previous ? previous.requiredSkills : []),
           ...skills.filter((skill) => skill.required).map((skill) => skill.name),
@@ -369,6 +474,10 @@ export function createMssrTraceSessionCoordinator(toolSchemas: readonly ToolSche
         routeCount: previous ? previous.routeCount + 1 : 1,
         closed: false,
         updatedAt: now,
+        lastToolCompletedAt: previous?.lastToolCompletedAt ?? null,
+        lastToolName: previous?.lastToolName ?? null,
+        toolActivityVersion: previous?.toolActivityVersion ?? 0,
+        closureReminderVersion: previous?.closureReminderVersion ?? 0,
       };
       if (toolName === "skill_bootstrap") {
         for (const name of loadedSkillNames(record.loaded)) state.loadedSkills.add(name);
@@ -376,6 +485,7 @@ export function createMssrTraceSessionCoordinator(toolSchemas: readonly ToolSche
       sharedTraces.set(traceId, state);
       adopt(state);
       pruneSharedTraces(now);
+      scheduleClosureReminder(state, toolName);
       return notices;
     }
 
@@ -391,12 +501,19 @@ export function createMssrTraceSessionCoordinator(toolSchemas: readonly ToolSche
     if (toolName === "mssr_trace_record" && record && validTraceId(record.traceId)) {
       const state = sharedTraces.get(String(record.traceId));
       if (state) {
-        if (args.eventType === "outcome") state.closed = true;
+        if (args.eventType === "outcome") {
+          state.closed = true;
+          clearClosureTimer(state.traceId);
+        }
         if (typeof args.stage === "string") state.stage = args.stage;
         adopt(state);
+        if (args.eventType !== "outcome") scheduleClosureReminder(state, toolName);
       }
+      return notices;
     }
 
+    const state = localState();
+    if (state) scheduleClosureReminder(state, toolName);
     return notices;
   }
 
@@ -406,6 +523,9 @@ export function createMssrTraceSessionCoordinator(toolSchemas: readonly ToolSche
       active: Boolean(state),
       traceId: state?.traceId ?? null,
       stage: state?.stage ?? null,
+      caller: state?.caller ?? null,
+      model: state?.model ?? null,
+      reasoningEffort: state?.reasoningEffort ?? null,
       routeCount: state?.routeCount ?? 0,
       closed: state?.closed ?? false,
       requiredSkills: state ? [...state.requiredSkills].sort() : [],
@@ -415,9 +535,23 @@ export function createMssrTraceSessionCoordinator(toolSchemas: readonly ToolSche
     };
   }
 
-  return { prepare, observe, snapshot };
+  function resolveMetricContext(caller?: string): MssrTraceSessionSnapshot {
+    let state = localState(true);
+    if (!state || state.closed) {
+      const normalized = normalizedCaller(caller);
+      const open = openSharedTraces();
+      const compatible = normalized === "other"
+        ? open
+        : open.filter((candidate) => candidate.caller === normalized);
+      if (compatible.length === 1) state = adopt(compatible[0]);
+    }
+    return snapshot();
+  }
+
+  return { prepare, observe, snapshot, resolveMetricContext };
 }
 
 export function resetSharedMssrTraceRegistryForTests(): void {
+  for (const traceId of closureTimers.keys()) clearClosureTimer(traceId);
   sharedTraces.clear();
 }

@@ -39,6 +39,63 @@ import {
 
 const MAX_SKILL_FILE_CHARS = 160_000;
 const MAX_DISCOVERED_SKILLS = 600;
+const routeResponseModes = ["compact", "debug"] as const;
+const reasoningEfforts = ["low", "medium", "high", "xhigh", "max", "ultra", "unknown"] as const;
+
+function agentProfile(args: Record<string, unknown>): Record<string, string> {
+  return {
+    model: z.string().trim().min(1).max(80).catch("unknown").parse(args.model ?? "unknown"),
+    reasoningEffort: z.enum(reasoningEfforts).catch("unknown").parse(args.reasoningEffort ?? "unknown"),
+  };
+}
+
+function compactRoutedSkill(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const skill = value as Record<string, unknown>;
+  const reasons = [
+    ...(Array.isArray(skill.requiredBy) ? skill.requiredBy : []),
+    ...(Array.isArray(skill.reasons) ? skill.reasons : []),
+  ].filter((item): item is string => typeof item === "string");
+  return {
+    name: skill.name,
+    source: skill.source,
+    phase: skill.phase,
+    required: skill.required === true,
+    reason: reasons.slice(0, 2).join("; "),
+  };
+}
+
+function compactSkillRoute<T extends Record<string, unknown>>(route: T): Record<string, unknown> {
+  const compactSkills = (value: unknown) => Array.isArray(value)
+    ? value.map(compactRoutedSkill).filter((item): item is Record<string, unknown> => Boolean(item))
+    : [];
+  return {
+    responseMode: "compact",
+    traceId: route.traceId,
+    stage: route.stage,
+    caller: route.caller,
+    agentProfile: route.agentProfile,
+    classificationMode: route.classificationMode,
+    contextUsed: route.contextUsed,
+    contextCharacters: route.contextCharacters,
+    classifier: route.classifier,
+    semanticSignals: route.semanticSignals,
+    intent: route.intent,
+    workflows: route.workflows,
+    activeSkills: compactSkills(route.activeSkills),
+    deferredSkills: compactSkills(route.deferredSkills),
+    matches: compactSkills(route.matches),
+    loadOrder: route.loadOrder,
+    deferredLoadOrder: route.deferredLoadOrder,
+    selectionBudget: route.selectionBudget,
+    coverage: route.coverage,
+    selectionPolicy: route.selectionPolicy,
+    executionGuidance: route.executionGuidance,
+    warnings: route.warnings,
+    activationInstruction: route.activationInstruction,
+    sourceHealth: route.sourceHealth,
+  };
+}
 
 function codexHome(): string {
   return path.resolve(process.env.CODEX_HOME?.trim() || path.join(os.homedir(), ".codex"));
@@ -434,10 +491,13 @@ export const skillCatalogToolModule: BridgeToolModule = {
           context: { type: "string", maxLength: 4000, description: "Bounded resolved continuation context, never a full transcript or hidden reasoning." },
           intent: structuredIntentInputSchema,
           caller: { type: "string", enum: [...SKILL_CALLERS], default: "other" },
+          model: { type: "string", maxLength: 80, description: "Observable host-reported model identifier, for example gpt-5.6-terra or gpt-5.6-sol. Use unknown when the host cannot prove it." },
+          reasoningEffort: { type: "string", enum: reasoningEfforts, default: "unknown", description: "Observable host-reported reasoning effort. Never infer it from latency or answer length." },
           stage: { type: "string", enum: [...SKILL_STAGES], default: "start" },
           completedPhases: { type: "array", items: { type: "string", enum: [...SKILL_PHASES] }, default: [] },
           sources: { type: "array", items: { type: "string", enum: ["codex-local", "codex-system", "codex-plugin", "roblox"] } },
           maxResults: { type: "number", default: 8, minimum: 1, maximum: 16 },
+          responseMode: { type: "string", enum: routeResponseModes, default: "compact", description: "compact returns the actionable phase route; debug includes full scores, metadata and phase diagnostics." },
           traceId: { type: "string", description: "Optional existing MSSR trace id for a replan. A new id is generated when omitted." },
         },
         required: ["task"],
@@ -474,10 +534,13 @@ export const skillCatalogToolModule: BridgeToolModule = {
           context: { type: "string", maxLength: 4000, description: "Bounded resolved context from the recent relevant conversation. For multi-turn specialized work, normally pass a 500-2000 character summary covering the accepted goal, constraints, completed work/current phase, and unresolved references, even when the current message is not an obvious acknowledgment. Omit only for a genuinely standalone first turn. Do not send hidden chain-of-thought, irrelevant history, or a full transcript." },
           intent: structuredIntentInputSchema,
           caller: { type: "string", enum: [...SKILL_CALLERS], default: "other", description: "Client executing the route. Use codex-local when direct shell/filesystem tools exist, chatgpt-web when local access is mediated by Bridge, or other when unknown." },
+          model: { type: "string", maxLength: 80, description: "Observable host-reported model identifier, for example gpt-5.6-terra or gpt-5.6-sol. Use unknown when the host cannot prove it." },
+          reasoningEffort: { type: "string", enum: reasoningEfforts, default: "unknown", description: "Observable host-reported reasoning effort. Never infer it from latency or answer length." },
           stage: { type: "string", enum: [...SKILL_STAGES], default: "start" },
           completedPhases: { type: "array", items: { type: "string", enum: [...SKILL_PHASES] }, default: [] },
           sources: { type: "array", items: { type: "string", enum: ["codex-local", "codex-system", "codex-plugin", "roblox"] } },
           maxSkills: { type: "number", default: 8, minimum: 1, maximum: 16 },
+          responseMode: { type: "string", enum: routeResponseModes, default: "compact", description: "compact returns the actionable phase route; debug includes full scores, metadata and phase diagnostics." },
           traceId: { type: "string", description: "Optional existing MSSR trace id for a replan. A new id is generated when omitted." },
         },
         required: ["task"],
@@ -494,6 +557,8 @@ export const skillCatalogToolModule: BridgeToolModule = {
           context: { type: "string", maxLength: 4000, description: "Bounded resolved context from the recent relevant conversation. For multi-turn specialized work, normally pass a 500-2000 character summary covering the accepted goal, constraints, completed work/current phase, and unresolved references, even when the current message is not an obvious acknowledgment. Omit only for a genuinely standalone first turn. Do not send hidden chain-of-thought, irrelevant history, or a full transcript." },
           intent: structuredIntentInputSchema,
           caller: { type: "string", enum: [...SKILL_CALLERS], default: "other", description: "Client executing the route. Use codex-local when direct shell/filesystem tools exist, chatgpt-web when local access is mediated by Bridge, or other when unknown." },
+          model: { type: "string", maxLength: 80, description: "Observable host-reported model identifier, for example gpt-5.6-terra or gpt-5.6-sol. Use unknown when the host cannot prove it." },
+          reasoningEffort: { type: "string", enum: reasoningEfforts, default: "unknown", description: "Observable host-reported reasoning effort. Never infer it from latency or answer length." },
           stage: { type: "string", enum: [...SKILL_STAGES], default: "start" },
           completedPhases: { type: "array", items: { type: "string", enum: [...SKILL_PHASES] }, default: [] },
           sources: { type: "array", items: { type: "string", enum: ["codex-local", "codex-system", "codex-plugin", "roblox"] } },
@@ -602,6 +667,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const task = z.string().min(1).parse(args.task);
       const selectedSources = sourceFilter(args.sources);
       const maxResults = z.number().int().min(1).max(16).catch(8).parse(args.maxResults ?? 8);
+      const responseMode = z.enum(routeResponseModes).catch("compact").parse(args.responseMode ?? "compact");
       const discovered = await discoverAllSkills(!selectedSources || selectedSources.includes("roblox"));
       const skills = discovered.skills.filter((skill) => !selectedSources || selectedSources.includes(skill.source));
       const route = await planSkillRoute({
@@ -615,12 +681,14 @@ export const skillCatalogToolModule: BridgeToolModule = {
         maxSkills: maxResults,
       });
       const traceId = resolveMssrTraceId(args.traceId);
-      recordMssrRoute({ traceId, action: "recommend", task, route: route as unknown as Record<string, unknown> });
+      const profile = agentProfile(args);
+      const observedRoute = { ...route, agentProfile: profile };
+      recordMssrRoute({ traceId, action: "recommend", task, route: observedRoute as unknown as Record<string, unknown> });
       const matches = [...route.activeSkills, ...route.deferredSkills]
         .filter((skill, index, all) => all.findIndex((candidate) => candidate.name === skill.name) === index)
         .slice(0, maxResults);
-      return {
-        ...route,
+      const response = {
+        ...observedRoute,
         traceId,
         matches,
         sourceHealth: discovered.sourceHealth,
@@ -629,6 +697,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
           ? "Use loadOrder for the active phase. Bridge automatically propagates traceId in-session and across stateless calls only when one compatible process-shared trace exists; provide it explicitly after restart, for ambiguous candidates, or deliberate trace selection. Re-plan after a stage change, material failure, new capability need, or verification/persistence boundary."
           : "This recommendation used lexical fallback. Before mutations, infer a compact structured intent and call skill_recommend or skill_route_plan again; Bridge will retain or uniquely recover the active trace when safe.",
       };
+      return responseMode === "debug" ? { ...response, responseMode } : compactSkillRoute(response);
     },
     skill_route_audit: async (args) => {
       const selectedSources = sourceFilter(args.sources);
@@ -668,6 +737,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
     skill_route_plan: async (args) => {
       const task = z.string().min(1).parse(args.task);
       const selectedSources = sourceFilter(args.sources);
+      const responseMode = z.enum(routeResponseModes).catch("compact").parse(args.responseMode ?? "compact");
       const discovered = await discoverAllSkills(!selectedSources || selectedSources.includes("roblox"));
       const skills = discovered.skills.filter((skill) => !selectedSources || selectedSources.includes(skill.source));
       const route = await planSkillRoute({
@@ -681,8 +751,11 @@ export const skillCatalogToolModule: BridgeToolModule = {
         maxSkills: z.number().int().min(1).max(16).catch(8).parse(args.maxSkills ?? 8),
       });
       const traceId = resolveMssrTraceId(args.traceId);
-      recordMssrRoute({ traceId, action: "plan", task, route: route as unknown as Record<string, unknown> });
-      return { ...route, traceId, sourceHealth: discovered.sourceHealth, warnings: [...discovered.warnings, ...route.warnings] };
+      const profile = agentProfile(args);
+      const observedRoute = { ...route, agentProfile: profile };
+      recordMssrRoute({ traceId, action: "plan", task, route: observedRoute as unknown as Record<string, unknown> });
+      const response = { ...observedRoute, traceId, sourceHealth: discovered.sourceHealth, warnings: [...discovered.warnings, ...route.warnings] };
+      return responseMode === "debug" ? { ...response, responseMode } : compactSkillRoute(response);
     },
     skill_bootstrap: async (args) => {
       const task = z.string().min(1).parse(args.task);
@@ -700,7 +773,9 @@ export const skillCatalogToolModule: BridgeToolModule = {
         maxSkills: z.number().int().min(1).max(16).catch(8).parse(args.maxSkills ?? 8),
       });
       const traceId = resolveMssrTraceId(args.traceId);
-      recordMssrRoute({ traceId, action: "bootstrap", task, route: route as unknown as Record<string, unknown> });
+      const profile = agentProfile(args);
+      const observedRoute = { ...route, agentProfile: profile };
+      recordMssrRoute({ traceId, action: "bootstrap", task, route: observedRoute as unknown as Record<string, unknown> });
       const activeByName = new Map(route.activeSkills.map((skill) => [skill.name, skill]));
       const loaded: Array<Record<string, unknown>> = [];
       for (const name of route.loadOrder) {
@@ -732,7 +807,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         }
       }
       return {
-        ...route,
+        ...observedRoute,
         traceId,
         canonicalCodexSkillRoot: path.join(codexHome(), "skills"),
         loaded,

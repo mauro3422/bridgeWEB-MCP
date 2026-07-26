@@ -51,8 +51,8 @@ Invoke-Check "status" {
 
 Invoke-Check "MSSR dashboard" {
   $dashboard = Invoke-WebRequest -UseBasicParsing "$BaseUrl/dashboard"
-  if ($dashboard.Content -notmatch "MSSR routing" -or $dashboard.Content -notmatch "Continuidad route" -or $dashboard.Content -notmatch "mssr-skill-outcomes") {
-    throw "Dashboard does not expose MSSR routing/continuity/outcome sections"
+  if ($dashboard.Content -notmatch 'id="mssr-structured"' -or $dashboard.Content -notmatch 'id="mssr-continuity"' -or $dashboard.Content -notmatch 'id="mssr-skill-outcomes"' -or $dashboard.Content -notmatch 'id="agent-profiles"' -or $dashboard.Content -notmatch 'id="mssr-agent-activation"' -or $dashboard.Content -notmatch 'id="mssr-agent-results"') {
+    throw "Dashboard does not expose MSSR and per-agent profile sections"
   }
   $mssr = Invoke-RestMethod "$BaseUrl/api/mssr/summary?days=30&scope=active"
   $all = Invoke-RestMethod "$BaseUrl/api/mssr/summary?days=30&scope=all"
@@ -64,6 +64,17 @@ Invoke-Check "MSSR dashboard" {
   }
   if ([int]$all.eventCount -lt [int]$mssr.eventCount) { throw "All-history scope cannot contain fewer events than active scope" }
   Write-Host "  OK epoch=$($mssr.observability.activeEpoch) routes=$($mssr.benchmark.routeEvents) outcomes=$($mssr.benchmark.attributedOutcomeTraces) allEvents=$($all.eventCount)"
+}
+
+Invoke-Check "active Bridge metrics" {
+  $activeMetrics = Invoke-RestMethod "$BaseUrl/api/metrics/overview?scope=active"
+  $allMetrics = Invoke-RestMethod "$BaseUrl/api/metrics/overview?scope=all"
+  $activeMssr = Invoke-RestMethod "$BaseUrl/api/mssr/summary?days=30&scope=active"
+  if ($activeMetrics.scope -ne "active" -or $allMetrics.scope -ne "all") { throw "Bridge metrics scope contract is invalid" }
+  if ([int]$allMetrics.totals.calls -lt [int]$activeMetrics.totals.calls) { throw "All-history Bridge metrics cannot contain fewer calls than active scope" }
+  if ($null -eq $activeMetrics.agentProfiles -or $null -eq $activeMetrics.surfaces) { throw "Bridge metrics are missing surface/profile attribution" }
+  if ($activeMetrics.observability.activeEpoch -ne $activeMssr.observability.activeEpoch) { throw "Bridge and MSSR metrics must share one active epoch" }
+  Write-Host "  OK activeCalls=$($activeMetrics.totals.calls) allCalls=$($allMetrics.totals.calls) profiles=$($activeMetrics.agentProfiles.Count)"
 }
 
 Invoke-Check "mcp session lifecycle" {

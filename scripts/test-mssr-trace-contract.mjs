@@ -47,13 +47,17 @@ function payload(result) {
 
 traceContext.resetSharedMssrTraceRegistryForTests();
 let sessionCounter = 0;
-async function callFresh(name, args = {}) {
+async function callFresh(name, args = {}, requestMeta, clientName) {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const server = createBridgeServer();
-  const client = new Client({ name: `trace-contract-test-${++sessionCounter}`, version: '1.0.0' }, { capabilities: {} });
+  const client = new Client({ name: clientName || `trace-contract-test-${++sessionCounter}`, version: '1.0.0' }, { capabilities: {} });
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   try {
-    return payload(await client.callTool({ name, arguments: args }));
+    return payload(await client.callTool({
+      name,
+      arguments: args,
+      ...(requestMeta ? { _meta: requestMeta } : {}),
+    }));
   } finally {
     await client.close().catch(() => {});
     await server.close().catch(() => {});
@@ -81,6 +85,11 @@ try {
     stage: 'implement',
     sources: ['codex-local'],
     maxSkills: 12,
+  }, {
+    'x-codex-turn-metadata': {
+      model: 'gpt-5.6-terra',
+      reasoning_effort: 'high',
+    },
   });
   assert.match(route.traceId, /^mssr-/);
   const traceId = route.traceId;
@@ -154,6 +163,14 @@ try {
   });
   assert.equal(outcome.traceId, traceId);
 
+  observatory.recordMssrEvent({
+    traceId,
+    eventType: 'closure_reminder',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    ok: false,
+    details: { idleMs: 25, surface: 'chatgpt-web', fixture: true },
+  });
   const summary = await callFresh('mssr_observatory_query', { kind: 'summary', scope: 'active', days: 30 });
   assert.equal(summary.scope, 'active');
   assert.equal(summary.observability.contractVersion, 'trace-contract-v1');
@@ -165,6 +182,26 @@ try {
   assert.equal(summary.benchmark.persistenceCoverage, 100);
   assert.equal(summary.benchmark.outcomeCoverage, 100);
   assert.equal(summary.benchmark.outcomeSuccessRate, 100);
+  assert.equal(summary.benchmark.closureReminderEvents, 1);
+  const webSurface = summary.surfaces.find((surface) => surface.caller === 'chatgpt-web');
+  assert.equal(webSurface?.closureReminderEvents, 1);
+  assert.equal(webSurface?.outcomeCoverage, 100);
+  const terraProfile = summary.agentProfiles.find((profile) =>
+    profile.caller === 'chatgpt-web'
+    && profile.model === 'gpt-5.6-terra'
+    && profile.reasoningEffort === 'high');
+  assert.equal(terraProfile?.routedTraces, 1);
+  assert.equal(terraProfile?.outcomeCoverage, 100);
+  assert.equal(terraProfile?.structuredRouteRate, 100);
+  assert.equal(terraProfile?.routeLoadCoverage, 100);
+  assert.equal(terraProfile?.requiredLoadCompliance, 100);
+  assert.equal(terraProfile?.verificationCoverage, 100);
+  assert.equal(terraProfile?.persistenceCoverage, 100);
+  assert.equal(terraProfile?.outcomeSuccessRate, 100);
+  assert.equal(terraProfile?.outcomeAcceptanceRate, 100);
+  assert.equal(terraProfile?.averageOutcomeScore, 1);
+  assert.ok(Number(terraProfile?.averageCompletionMs) >= 0);
+  assert.equal(terraProfile?.userCorrections, 0);
 
   const legacyDb = new DatabaseSync(path.join(metricsDir, 'bridge-metrics.sqlite'));
   try {
@@ -189,6 +226,22 @@ try {
   assert.equal(allAfterLegacy.eventCount, summary.eventCount + 1, 'All-history scope must preserve legacy telemetry.');
   assert.equal(allAfterLegacy.benchmark.routeEvents, summary.benchmark.routeEvents + 1);
 
+  const epochChange = await callFresh('mssr_observatory_epoch_start', {
+    confirm: 'start-new-active-epoch',
+    reason: 'trace-contract regression boundary',
+  });
+  assert.equal(epochChange.historyDeleted, false);
+  assert.notEqual(epochChange.current.activeEpoch, epochChange.previous.activeEpoch);
+  const cleanBridgeMetrics = metrics.getMetricsOverview('active');
+  const preservedBridgeMetrics = metrics.getMetricsOverview('all');
+  assert.equal(cleanBridgeMetrics.scope, 'active');
+  assert.equal(cleanBridgeMetrics.totals.calls, 0, 'The shared epoch must also reset active Bridge tool metrics.');
+  assert.ok(Number(preservedBridgeMetrics.totals.calls) > 0, 'All-history Bridge metrics must preserve prior calls.');
+  const cleanActive = await callFresh('mssr_observatory_query', { kind: 'summary', scope: 'active', days: 30 });
+  const preservedAll = await callFresh('mssr_observatory_query', { kind: 'summary', scope: 'all', days: 30 });
+  assert.equal(cleanActive.eventCount, 0, 'A new active epoch must start with no current events.');
+  assert.equal(preservedAll.eventCount, allAfterLegacy.eventCount, 'Starting an epoch must not delete historical telemetry.');
+
   const nextRoute = await callFresh('skill_route_plan', {
     task: 'Start a separate MSSR task after the previous outcome closed.',
     context: 'This is intentionally a new task.',
@@ -197,8 +250,24 @@ try {
     stage: 'start',
     sources: ['codex-local'],
     maxSkills: 12,
-  });
+  }, undefined, 'ChatGPT Web');
   assert.notEqual(nextRoute.traceId, traceId, 'A new task after outcome must receive a new trace.');
+  await callFresh('system_info', {}, undefined, 'ChatGPT Web');
+  const activeBridgeSummary = metrics.getMetricsSummary(50, 'active');
+  const routedMetric = activeBridgeSummary.summary.find((row) => row.tool === 'skill_route_plan');
+  assert.equal(routedMetric?.calls, 1);
+  const webBridgeProfile = activeBridgeSummary.agentProfiles.find((profile) =>
+    profile.caller === 'chatgpt-web'
+    && profile.model === 'unknown'
+    && profile.reasoning_effort === 'unknown');
+  assert.equal(webBridgeProfile?.calls, 2, 'Client handshake identity must attribute route and generic Web calls to the Web profile.');
+  const activeRecent = metrics.getRecentMetrics(20, 'active').recent;
+  const recentRouteMetric = activeRecent.find((row) => row.tool === 'skill_route_plan');
+  assert.equal(recentRouteMetric?.trace_id, nextRoute.traceId, 'Tool metrics must correlate route calls with the emitted trace.');
+  const genericWebMetric = activeRecent.find((row) => row.tool === 'system_info');
+  assert.equal(genericWebMetric?.caller, 'chatgpt-web');
+  assert.equal(genericWebMetric?.client_name, 'ChatGPT Web');
+  assert.equal(genericWebMetric?.trace_id, nextRoute.traceId, 'Stateless generic tools must inherit the unique Web MSSR trace for metrics.');
 
   traceContext.resetSharedMssrTraceRegistryForTests();
   const schemas = [
@@ -252,6 +321,43 @@ try {
   const ambiguous = statelessCaller.prepare('skill_load', { name: 'required-skill' });
   assert.equal(Object.prototype.hasOwnProperty.call(ambiguous.args, 'traceId'), false);
   assert.ok(ambiguous.notices.some((item) => item.code === 'mssr-trace-ambiguous'));
+
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const reminders = [];
+  const watchdog = traceContext.createMssrTraceSessionCoordinator(schemas, {
+    closureIdleMs: 20,
+    onClosureReminder: (reminder) => reminders.push(reminder),
+  });
+  watchdog.observe('skill_route_plan', { task: 'web closure watchdog', caller: 'chatgpt-web', stage: 'implement' }, {
+    traceId: 'trace-watchdog-web-001', stage: 'implement', activeSkills: [],
+  });
+  const watchdogTool = watchdog.prepare('trace-domain-tool', { payload: 'fixture' });
+  watchdog.observe('trace-domain-tool', watchdogTool.args, { ok: true });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(reminders.length, 1, 'Web tool activity without outcome should emit one closure reminder.');
+  assert.equal(reminders[0].notice.code, 'mssr-web-outcome-missing-after-idle');
+
+  watchdog.observe('trace-domain-tool', watchdogTool.args, { ok: true });
+  watchdog.observe('mssr_trace_record', {
+    traceId: 'trace-watchdog-web-001',
+    eventType: 'outcome',
+    caller: 'chatgpt-web',
+    stage: 'close',
+  }, { traceId: 'trace-watchdog-web-001' });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(reminders.length, 1, 'Outcome should cancel a pending closure reminder.');
+
+  const codexWatchdog = traceContext.createMssrTraceSessionCoordinator(schemas, {
+    closureIdleMs: 20,
+    onClosureReminder: (reminder) => reminders.push(reminder),
+  });
+  codexWatchdog.observe('skill_route_plan', { task: 'codex closure watchdog', caller: 'codex-local', stage: 'implement' }, {
+    traceId: 'trace-watchdog-codex-001', stage: 'implement', activeSkills: [],
+  });
+  const codexTool = codexWatchdog.prepare('trace-domain-tool', { payload: 'fixture' });
+  codexWatchdog.observe('trace-domain-tool', codexTool.args, { ok: true });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(reminders.length, 1, 'Codex activity must not emit the ChatGPT Web reminder.');
 
   console.log(JSON.stringify({
     ok: true,

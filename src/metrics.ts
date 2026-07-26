@@ -3,8 +3,17 @@ import path from "node:path";
 import os from "node:os";
 import { createRequire } from "node:module";
 import { SERVER_NAME, SERVER_VERSION } from "./config.js";
+import { getMssrObservabilityEpoch } from "./mssr-observability-epoch.js";
 
 type JsonRecord = Record<string, unknown>;
+export type BridgeMetricsScope = "active" | "all";
+export type BridgeMetricProfile = {
+  traceId?: string;
+  caller?: string;
+  model?: string;
+  reasoningEffort?: string;
+  clientName?: string;
+};
 type StatementSync = {
   run: (...args: unknown[]) => unknown;
   get: (...args: unknown[]) => JsonRecord | undefined;
@@ -25,6 +34,12 @@ export type BridgeMetricStart = {
   startedAtIso: string;
   startedAtMs: number;
   inputKeys: string;
+  observabilityEpoch: string;
+  traceId?: string;
+  caller: string;
+  model: string;
+  reasoningEffort: string;
+  clientName: string;
 };
 
 export type BridgeMetricEnd = BridgeMetricStart & {
@@ -44,6 +59,26 @@ const jsonlPath = path.resolve(process.env.BRIDGE_MCP_EVENTS_JSONL || path.join(
 
 let db: DatabaseSync | null | undefined;
 let insertToolCall: StatementSync | null = null;
+
+function tableColumns(database: DatabaseSync, table: string): Set<string> {
+  return new Set(database.prepare(`PRAGMA table_info(${table})`).all()
+    .flatMap((row) => typeof row.name === "string" ? [row.name] : []));
+}
+
+function ensureToolCallProfileColumns(database: DatabaseSync): void {
+  const columns = tableColumns(database, "tool_calls");
+  const additions = [
+    ["observability_epoch", "TEXT"],
+    ["trace_id", "TEXT"],
+    ["caller", "TEXT"],
+    ["model", "TEXT"],
+    ["reasoning_effort", "TEXT"],
+    ["client_name", "TEXT"],
+  ] as const;
+  for (const [name, type] of additions) {
+    if (!columns.has(name)) database.exec(`ALTER TABLE tool_calls ADD COLUMN ${name} ${type};`);
+  }
+}
 
 function ensureDirs() {
   fs.mkdirSync(metricsDir, { recursive: true });
@@ -88,7 +123,13 @@ function getDb(): DatabaseSync | null {
       pid INTEGER NOT NULL,
       hostname TEXT NOT NULL,
       platform TEXT NOT NULL,
-      cwd TEXT NOT NULL
+      cwd TEXT NOT NULL,
+      observability_epoch TEXT,
+      trace_id TEXT,
+      caller TEXT,
+      model TEXT,
+      reasoning_effort TEXT
+      ,client_name TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_tool_calls_started_at ON tool_calls(started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_tool_started_at ON tool_calls(tool, started_at);
@@ -105,11 +146,19 @@ function getDb(): DatabaseSync | null {
       FROM tool_calls
       GROUP BY tool;
   `);
+  ensureToolCallProfileColumns(db);
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_tool_calls_epoch_started_at ON tool_calls(observability_epoch, started_at);
+    CREATE INDEX IF NOT EXISTS idx_tool_calls_profile ON tool_calls(caller, model, reasoning_effort, started_at);
+    CREATE INDEX IF NOT EXISTS idx_tool_calls_trace_id ON tool_calls(trace_id);
+    CREATE INDEX IF NOT EXISTS idx_tool_calls_client_name ON tool_calls(client_name, started_at);
+  `);
   insertToolCall = db.prepare(`
     INSERT INTO tool_calls (
       id, started_at, ended_at, duration_ms, tool, ok, error, input_keys,
-      output_chars, server_name, server_version, pid, hostname, platform, cwd
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      output_chars, server_name, server_version, pid, hostname, platform, cwd,
+      observability_epoch, trace_id, caller, model, reasoning_effort, client_name
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   return db;
 }
@@ -127,8 +176,15 @@ function writeJsonl(event: JsonRecord) {
   fs.appendFileSync(jsonlPath, `${JSON.stringify(event)}\n`, "utf8");
 }
 
-export function beginToolMetric(tool: string, args: unknown): BridgeMetricStart {
+function boundedProfileText(value: unknown, fallback: string, maxChars: number): string {
+  return typeof value === "string" && value.trim()
+    ? redactText(value.trim(), maxChars)
+    : fallback;
+}
+
+export function beginToolMetric(tool: string, args: unknown, profile: BridgeMetricProfile = {}): BridgeMetricStart {
   const now = Date.now();
+  const epoch = getMssrObservabilityEpoch();
   const inputKeys = args && typeof args === "object" && !Array.isArray(args)
     ? Object.keys(args as Record<string, unknown>).sort().join(",")
     : "";
@@ -139,6 +195,12 @@ export function beginToolMetric(tool: string, args: unknown): BridgeMetricStart 
     startedAtIso: new Date(now).toISOString(),
     startedAtMs: now,
     inputKeys,
+    observabilityEpoch: epoch.activeEpoch,
+    traceId: typeof profile.traceId === "string" ? profile.traceId.slice(0, 128) : undefined,
+    caller: boundedProfileText(profile.caller, "other", 80),
+    model: boundedProfileText(profile.model, "unknown", 80),
+    reasoningEffort: boundedProfileText(profile.reasoningEffort, "unknown", 20),
+    clientName: boundedProfileText(profile.clientName, "unknown", 120),
   };
 }
 
@@ -167,6 +229,14 @@ export function finishToolMetric(metric: BridgeMetricStart, ok: boolean, outputC
     endedAtIso: endedAt.toISOString(),
     server: { name: SERVER_NAME, version: SERVER_VERSION, pid: process.pid },
     host: { hostname: os.hostname(), platform: os.platform(), cwd: process.cwd() },
+    observability: {
+      epoch: metric.observabilityEpoch,
+      traceId: metric.traceId,
+      caller: metric.caller,
+      model: metric.model,
+      reasoningEffort: metric.reasoningEffort,
+      clientName: metric.clientName,
+    },
   });
 
   const database = getDb();
@@ -189,6 +259,12 @@ export function finishToolMetric(metric: BridgeMetricStart, ok: boolean, outputC
       os.hostname(),
       os.platform(),
       process.cwd(),
+      metric.observabilityEpoch,
+      metric.traceId ?? null,
+      metric.caller,
+      metric.model,
+      metric.reasoningEffort,
+      metric.clientName,
     );
   } catch (sqliteError) {
     writeJsonl({
@@ -202,6 +278,7 @@ export function finishToolMetric(metric: BridgeMetricStart, ok: boolean, outputC
 
 export function getMetricsStatus() {
   const sqlite = getDb();
+  const epoch = getMssrObservabilityEpoch();
   return {
     enabled: metricsEnabled,
     sqliteAvailable: Boolean(sqlite),
@@ -209,58 +286,116 @@ export function getMetricsStatus() {
     jsonlPath,
     metricsDir,
     logsDir,
+    observability: {
+      defaultScope: "active",
+      activeEpoch: epoch.activeEpoch,
+      baselineAt: epoch.baselineAt,
+      legacyScope: epoch.legacyScope,
+    },
   };
 }
 
-export function getMetricsSummary(limit = 50) {
+function metricsFilter(scope: BridgeMetricsScope): { where: string; params: unknown[] } {
+  if (scope === "all") return { where: OPERATIONAL_METRIC_WHERE, params: [] };
+  const epoch = getMssrObservabilityEpoch();
+  return {
+    where: `${OPERATIONAL_METRIC_WHERE} AND observability_epoch = ? AND started_at >= ?`,
+    params: [epoch.activeEpoch, epoch.baselineAt],
+  };
+}
+
+function getMetricsProfiles(database: DatabaseSync, scope: BridgeMetricsScope) {
+  const filter = metricsFilter(scope);
+  const surfaces = database.prepare(`
+    SELECT COALESCE(caller, 'other') AS caller,
+      COUNT(*) AS calls,
+      SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS error_calls,
+      ROUND(AVG(duration_ms), 2) AS avg_duration_ms
+    FROM tool_calls
+    WHERE ${filter.where}
+    GROUP BY COALESCE(caller, 'other')
+    ORDER BY calls DESC, caller ASC
+  `).all(...filter.params);
+  const agentProfiles = database.prepare(`
+    SELECT COALESCE(caller, 'other') AS caller,
+      COALESCE(model, 'unknown') AS model,
+      COALESCE(reasoning_effort, 'unknown') AS reasoning_effort,
+      COUNT(*) AS calls,
+      SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS error_calls,
+      ROUND(AVG(duration_ms), 2) AS avg_duration_ms
+    FROM tool_calls
+    WHERE ${filter.where}
+    GROUP BY COALESCE(caller, 'other'), COALESCE(model, 'unknown'), COALESCE(reasoning_effort, 'unknown')
+    ORDER BY calls DESC, caller ASC, model ASC, reasoning_effort ASC
+  `).all(...filter.params);
+  return { surfaces, agentProfiles };
+}
+
+export function getMetricsSummary(limit = 50, scope: BridgeMetricsScope = "active") {
   const sqlite = getDb();
-  if (!sqlite) return { ...getMetricsStatus(), summary: [] };
+  if (!sqlite) return { ...getMetricsStatus(), scope, summary: [], surfaces: [], agentProfiles: [] };
+  const filter = metricsFilter(scope);
   const rows = sqlite.prepare(`
-    SELECT tool, calls, ok_calls, error_calls, avg_duration_ms, max_duration_ms, last_started_at
-    FROM tool_call_summary
-    WHERE ${OPERATIONAL_METRIC_WHERE}
+    SELECT tool,
+      COUNT(*) AS calls,
+      SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END) AS ok_calls,
+      SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS error_calls,
+      ROUND(AVG(duration_ms), 2) AS avg_duration_ms,
+      MAX(duration_ms) AS max_duration_ms,
+      MAX(started_at) AS last_started_at
+    FROM tool_calls
+    WHERE ${filter.where}
+    GROUP BY tool
     ORDER BY calls DESC, tool ASC
     LIMIT ?
-  `).all(limit);
-  return { ...getMetricsStatus(), summary: rows };
+  `).all(...filter.params, limit);
+  return { ...getMetricsStatus(), scope, summary: rows, ...getMetricsProfiles(sqlite, scope) };
 }
 
-export function getRecentMetrics(limit = 25) {
+export function getRecentMetrics(limit = 25, scope: BridgeMetricsScope = "active") {
   const sqlite = getDb();
-  if (!sqlite) return { ...getMetricsStatus(), recent: [] };
+  if (!sqlite) return { ...getMetricsStatus(), scope, recent: [] };
+  const filter = metricsFilter(scope);
   const rows = sqlite.prepare(`
-    SELECT started_at, duration_ms, tool, ok, error, input_keys, output_chars, pid
+    SELECT started_at, duration_ms, tool, ok, error, input_keys, output_chars, pid,
+      trace_id, caller, model, reasoning_effort, client_name
     FROM tool_calls
-    WHERE ${OPERATIONAL_METRIC_WHERE}
+    WHERE ${filter.where}
     ORDER BY started_at DESC
     LIMIT ?
-  `).all(limit);
-  return { ...getMetricsStatus(), recent: rows };
+  `).all(...filter.params, limit);
+  return { ...getMetricsStatus(), scope, recent: rows };
 }
 
-export function getMetricsErrors(limit = 25) {
+export function getMetricsErrors(limit = 25, scope: BridgeMetricsScope = "active") {
   const sqlite = getDb();
-  if (!sqlite) return { ...getMetricsStatus(), errors: [] };
+  if (!sqlite) return { ...getMetricsStatus(), scope, errors: [] };
+  const filter = metricsFilter(scope);
   const rows = sqlite.prepare(`
-    SELECT started_at, duration_ms, tool, error, input_keys, output_chars, pid
+    SELECT started_at, duration_ms, tool, error, input_keys, output_chars, pid,
+      trace_id, caller, model, reasoning_effort, client_name
     FROM tool_calls
-    WHERE ok = 0 AND ${OPERATIONAL_METRIC_WHERE}
+    WHERE ok = 0 AND ${filter.where}
     ORDER BY started_at DESC
     LIMIT ?
-  `).all(limit);
-  return { ...getMetricsStatus(), errors: rows };
+  `).all(...filter.params, limit);
+  return { ...getMetricsStatus(), scope, errors: rows };
 }
 
-export function getMetricsOverview() {
+export function getMetricsOverview(scope: BridgeMetricsScope = "active") {
   const sqlite = getDb();
   if (!sqlite) {
     return {
       ...getMetricsStatus(),
+      scope,
       totals: { calls: 0, okCalls: 0, errorCalls: 0, avgDurationMs: 0, maxDurationMs: 0 },
       slowest: [],
+      surfaces: [],
+      agentProfiles: [],
     };
   }
 
+  const filter = metricsFilter(scope);
   const totals = sqlite.prepare(`
     SELECT
       COUNT(*) AS calls,
@@ -269,30 +404,31 @@ export function getMetricsOverview() {
       ROUND(AVG(duration_ms), 2) AS avgDurationMs,
       MAX(duration_ms) AS maxDurationMs
     FROM tool_calls
-    WHERE ${OPERATIONAL_METRIC_WHERE}
-  `).get() ?? { calls: 0, okCalls: 0, errorCalls: 0, avgDurationMs: 0, maxDurationMs: 0 };
+    WHERE ${filter.where}
+  `).get(...filter.params) ?? { calls: 0, okCalls: 0, errorCalls: 0, avgDurationMs: 0, maxDurationMs: 0 };
 
   const slowest = sqlite.prepare(`
     SELECT started_at, duration_ms, tool, ok, error, input_keys, output_chars, pid
     FROM tool_calls
-    WHERE ${OPERATIONAL_METRIC_WHERE}
+    WHERE ${filter.where}
     ORDER BY duration_ms DESC
     LIMIT 10
-  `).all();
+  `).all(...filter.params);
 
-  return { ...getMetricsStatus(), totals, slowest };
+  return { ...getMetricsStatus(), scope, totals, slowest, ...getMetricsProfiles(sqlite, scope) };
 }
 
-export function getMetricsTimeline(limit = 500) {
+export function getMetricsTimeline(limit = 500, scope: BridgeMetricsScope = "active") {
   const sqlite = getDb();
-  if (!sqlite) return { ...getMetricsStatus(), timeline: [] };
+  if (!sqlite) return { ...getMetricsStatus(), scope, timeline: [] };
+  const filter = metricsFilter(scope);
   const rows = sqlite.prepare(`
     SELECT started_at, duration_ms, ok
     FROM tool_calls
-    WHERE ${OPERATIONAL_METRIC_WHERE}
+    WHERE ${filter.where}
     ORDER BY started_at DESC
     LIMIT ?
-  `).all(limit);
+  `).all(...filter.params, limit);
 
   const buckets = new Map<string, { bucket: string; calls: number; errors: number; totalDurationMs: number }>();
   for (const row of rows) {
@@ -317,7 +453,7 @@ export function getMetricsTimeline(limit = 500) {
       avgDurationMs: bucket.calls > 0 ? Math.round((bucket.totalDurationMs / bucket.calls) * 100) / 100 : 0,
     }));
 
-  return { ...getMetricsStatus(), timeline };
+  return { ...getMetricsStatus(), scope, timeline };
 }
 
 export function closeMetricsForTests(): void {
