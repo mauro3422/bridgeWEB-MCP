@@ -315,20 +315,32 @@ export function createMssrTraceSessionCoordinator(
     return state;
   }
 
-  function scopedCandidates(candidates: ActiveTraceState[]): ActiveTraceState[] {
-    let scoped = candidates;
+  function scopedCandidateResolution(candidates: ActiveTraceState[]): {
+    candidates: ActiveTraceState[];
+    relaxedHostScope: boolean;
+  } {
+    let relaxedHostScope = false;
     if (hostContext.sessionKey !== "unknown") {
-      return scoped.filter((state) => state.sessionKey === hostContext.sessionKey);
+      const sessionMatches = candidates.filter((state) => state.sessionKey === hostContext.sessionKey);
+      if (sessionMatches.length > 0) return { candidates: sessionMatches, relaxedHostScope: false };
+      relaxedHostScope = true;
     }
     if (hostContext.project !== "unknown") {
-      const projectMatches = scoped.filter((state) => state.project === hostContext.project);
-      if (projectMatches.length > 0) scoped = projectMatches;
+      const projectMatches = candidates.filter((state) => state.project === hostContext.project);
+      if (projectMatches.length > 0) return { candidates: projectMatches, relaxedHostScope: false };
+      relaxedHostScope = true;
     }
     if (hostContext.caller !== "other") {
-      const callerMatches = scoped.filter((state) => state.caller === hostContext.caller);
-      if (callerMatches.length > 0) scoped = callerMatches;
+      return {
+        candidates: candidates.filter((state) => state.caller === hostContext.caller),
+        relaxedHostScope,
+      };
     }
-    return scoped;
+    return { candidates, relaxedHostScope };
+  }
+
+  function scopedCandidates(candidates: ActiveTraceState[]): ActiveTraceState[] {
+    return scopedCandidateResolution(candidates).candidates;
   }
 
   function ambiguousNotice(toolName: string, candidates: ActiveTraceState[]): BridgeNoticeInput {
@@ -372,20 +384,50 @@ export function createMssrTraceSessionCoordinator(
   }
 
   function findToolCandidate(toolName: string, args: JsonRecord, notices: BridgeNoticeInput[]): ActiveTraceState | null {
-    let traces = scopedCandidates(openSharedTraces());
+    const inMemoryScope = scopedCandidateResolution(openSharedTraces());
+    let traces = inMemoryScope.candidates;
+    if (inMemoryScope.relaxedHostScope && traces.length > 1) {
+      uniqueCandidate(toolName, traces, notices);
+      return null;
+    }
     if (traces.length === 0) {
-      const skillName = toolName === "skill_load" && typeof args.name === "string" ? args.name : undefined;
-      traces = findPersistedMssrTraceCandidates({
-        caller: hostContext.caller,
-        sessionKey: hostContext.sessionKey,
-        project: hostContext.project,
-        skillName,
-        maxAgeMs: TRACE_LEASE_MS,
-        limit: 16,
-      }).flatMap((candidate) => {
-        const restored = restore(candidate.traceId);
-        return restored ? [restored] : [];
-      });
+      let persisted = hostContext.sessionKey !== "unknown"
+        ? findPersistedMssrTraceCandidates({
+          caller: hostContext.caller,
+          sessionKey: hostContext.sessionKey,
+          maxAgeMs: TRACE_LEASE_MS,
+          limit: 16,
+        })
+        : [];
+      if (persisted.length === 0 && hostContext.project !== "unknown") {
+        persisted = findPersistedMssrTraceCandidates({
+          caller: hostContext.caller,
+          project: hostContext.project,
+          maxAgeMs: TRACE_LEASE_MS,
+          limit: 16,
+        });
+      }
+      if (persisted.length === 0) {
+        const relaxed = findPersistedMssrTraceCandidates({
+          caller: hostContext.caller,
+          maxAgeMs: TRACE_LEASE_MS,
+          limit: 16,
+        });
+        const restoredRelaxed = relaxed.flatMap((candidate) => {
+          const restored = restore(candidate.traceId);
+          return restored ? [restored] : [];
+        });
+        if (restoredRelaxed.length > 1) {
+          uniqueCandidate(toolName, restoredRelaxed, notices);
+          return null;
+        }
+        traces = restoredRelaxed;
+      } else {
+        traces = persisted.flatMap((candidate) => {
+          const restored = restore(candidate.traceId);
+          return restored ? [restored] : [];
+        });
+      }
     }
     if (toolName === "skill_load") {
       const skillName = typeof args.name === "string" ? args.name : "";

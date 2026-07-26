@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserve MSSR continuity when the OpenAI connector rotates its anonymized session id or the same task moves across related repositories: exact session/project matches still win, otherwise Bridge adopts only the single open trace for that caller and refuses to use a skill name to disambiguate concurrent tasks.
+- Added regressions for rotated-session metric attribution, persisted `stage=close` recovery with a different session id, and two-open-trace ambiguity.
 - Recover a unique open MSSR trace from persisted SQLite state when a stateless or restarted Web call loses the in-memory coordinator, scoped by anonymized session or project/caller and selected skill; ambiguous candidates remain unpropagated.
 - Preserve nested `traceId` and agent profile metadata emitted by tools delegated through `bridge_tool_query` / `bridge_tool_action`, allowing later dedicated calls to resume the same trace.
 - Make `mssr-web-outcome-missing-after-idle` execution-aware: routing, context loading, catalog/audit queries and `skill_load` no longer start the closure timer, while substantive traced work and non-outcome checkpoints still do.

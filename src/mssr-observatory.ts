@@ -529,11 +529,8 @@ export function findPersistedMssrTraceCandidates(args: {
     const state = readPersistedMssrTraceState(row.trace_id);
     if (!state || state.closed || Date.now() - state.updatedAt > maxAgeMs) continue;
     if (caller && caller !== "other" && state.caller !== caller) continue;
-    if (sessionKey && sessionKey !== "unknown") {
-      if (state.sessionKey !== sessionKey) continue;
-    } else if (project && project !== "unknown" && state.project !== project) {
-      continue;
-    }
+    if (sessionKey && sessionKey !== "unknown" && state.sessionKey !== sessionKey) continue;
+    if ((!sessionKey || sessionKey === "unknown") && project && project !== "unknown" && state.project !== project) continue;
     if (skillName && (!state.selectedSkills.includes(skillName) || state.loadedSkills.includes(skillName))) continue;
     candidates.push(state);
     if (candidates.length >= limit) break;

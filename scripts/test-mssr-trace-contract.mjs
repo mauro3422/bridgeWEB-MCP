@@ -294,14 +294,15 @@ try {
     projectRoot: fixtureProject,
     task: 'Load bounded fixture project context.',
   }, sessionMeta, 'openai-mcp');
-  const untracedWeb = await callFresh('search_files', {
+  const rotatedWeb = await callFresh('search_files', {
     path: fixtureProject,
     pattern: 'nothing-to-find',
     maxResults: 5,
   }, sessionMeta, 'openai-mcp');
-  assert.ok(
-    untracedWeb.bridgeNotices?.items?.some((notice) => notice.code === 'mssr-unrouted-tool-call'),
-    'An eligible Web tool without a compatible trace must emit an observable non-blocking warning.',
+  assert.equal(
+    rotatedWeb.bridgeNotices?.items?.some((notice) => notice.code === 'mssr-unrouted-tool-call') ?? false,
+    false,
+    'A unique open Web trace must survive connector session/project rotation without an unrouted warning.',
   );
   const expectedSessionKey = `session-${createHash('sha256').update('web-session-fixture-001').digest('hex').slice(0, 16)}`;
   const expectedTaskKey = `task_${createHash('sha256').update('load bounded fixture project context.').digest('hex').slice(0, 16)}`;
@@ -313,9 +314,9 @@ try {
   assert.equal(fixtureProfile?.task_key, expectedTaskKey);
   assert.equal(fixtureProfile?.related_project, 'none');
   assert.equal(fixtureProfile?.eligible_calls, 1);
-  assert.equal(fixtureProfile?.traced_calls, 0);
-  assert.equal(fixtureProfile?.untraced_calls, 1);
-  assert.equal(fixtureProfile?.mssr_trace_coverage, 0);
+  assert.equal(fixtureProfile?.traced_calls, 1);
+  assert.equal(fixtureProfile?.untraced_calls, 0);
+  assert.equal(fixtureProfile?.mssr_trace_coverage, 100);
 
   const concurrentProjects = [
     path.join(sandbox, 'web-concurrent-primary-a'),
@@ -349,51 +350,6 @@ try {
     'Concurrent Web tasks must preserve primary projects while exposing their auxiliary repositories.',
   );
 
-  const closeRecoveryMeta = { 'openai/session': 'web-close-recovery-session-001' };
-  const closeRoute = (await callFresh('bridge_tool_query', {
-    toolName: 'skill_route_plan',
-    arguments: {
-      task: 'Close a routed maintenance task and load its required close-phase skill after session memory is lost.',
-      context: 'Verification completed; enter close and preserve the trace across a stateless dedicated skill_load.',
-      intent,
-      caller: 'chatgpt-web',
-      stage: 'close',
-      completedPhases: ['discovery', 'implementation', 'verification'],
-      sources: ['codex-local'],
-      maxSkills: 12,
-    },
-  }, closeRecoveryMeta, 'openai-mcp')).result;
-  const closeSelectedSkill = closeRoute.activeSkills[0]?.name;
-  assert.equal(typeof closeSelectedSkill, 'string', 'Close-stage fixture must select at least one skill.');
-  traceContext.resetSharedMssrTraceRegistryForTests();
-  const recoveredCloseLoad = await callFresh('skill_load', {
-    name: closeSelectedSkill,
-    source: 'codex',
-  }, closeRecoveryMeta, 'openai-mcp');
-  assert.equal(
-    recoveredCloseLoad.traceId,
-    closeRoute.traceId,
-    'A dedicated skill_load must recover the unique persisted close-stage trace after in-memory state is lost.',
-  );
-  assert.equal(
-    recoveredCloseLoad.bridgeNotices?.items?.some((notice) => notice.code === 'mssr-orphan-skill-load') ?? false,
-    false,
-    'Persisted close-stage recovery must not emit an orphan load warning.',
-  );
-  traceContext.resetSharedMssrTraceRegistryForTests();
-  const recoveredCloseCheckpoint = await callFresh('mssr_trace_record', {
-    eventType: 'friction',
-    caller: 'chatgpt-web',
-    stage: 'close',
-    status: 'partial',
-    summary: 'Persisted close-stage checkpoint recovery fixture.',
-  }, closeRecoveryMeta, 'openai-mcp');
-  assert.equal(
-    recoveredCloseCheckpoint.traceId,
-    closeRoute.traceId,
-    'A trace-aware checkpoint must recover the same unique persisted Web trace after memory loss.',
-  );
-
   const nextRequired = nextRoute.activeSkills.filter((skill) => skill.required).map((skill) => skill.name);
   for (const name of nextRequired) {
     await callFresh('skill_load', {
@@ -423,6 +379,83 @@ try {
     'Explicit resume after a process restart must restore successful persisted skill loads.',
   );
   assert.deepEqual(afterRestart.snapshot().missingRequiredSkills, []);
+  await callFresh('mssr_trace_record', {
+    traceId: nextRoute.traceId,
+    eventType: 'outcome',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    status: 'success',
+    verificationPassed: true,
+    persisted: true,
+    primarySkill: nextRoute.activeSkills[0]?.name,
+    summary: 'Close the explicit restart fixture before testing rotated-session fallback.',
+  });
+
+  const closeRecoveryMeta = { 'openai/session': 'web-close-recovery-session-001' };
+  const closeRecoveryRotatedMeta = { 'openai/session': 'web-close-recovery-session-rotated-002' };
+  const closeRoute = (await callFresh('bridge_tool_query', {
+    toolName: 'skill_route_plan',
+    arguments: {
+      task: 'Close a routed maintenance task and load its required close-phase skill after session memory is lost.',
+      context: 'Verification completed; enter close and preserve the trace across a stateless dedicated skill_load.',
+      intent,
+      caller: 'chatgpt-web',
+      stage: 'close',
+      completedPhases: ['discovery', 'implementation', 'verification'],
+      sources: ['codex-local'],
+      maxSkills: 12,
+    },
+  }, closeRecoveryMeta, 'openai-mcp')).result;
+  const closeSelectedSkill = closeRoute.activeSkills[0]?.name;
+  assert.equal(typeof closeSelectedSkill, 'string', 'Close-stage fixture must select at least one skill.');
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const recoveredCloseLoad = await callFresh('skill_load', {
+    name: closeSelectedSkill,
+    source: 'codex',
+  }, closeRecoveryRotatedMeta, 'openai-mcp');
+  assert.equal(
+    recoveredCloseLoad.traceId,
+    closeRoute.traceId,
+    'A dedicated skill_load must recover the unique persisted close-stage trace after in-memory state is lost.',
+  );
+  assert.equal(
+    recoveredCloseLoad.bridgeNotices?.items?.some((notice) => notice.code === 'mssr-orphan-skill-load') ?? false,
+    false,
+    'Persisted close-stage recovery must not emit an orphan load warning.',
+  );
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const recoveredCloseCheckpoint = await callFresh('mssr_trace_record', {
+    eventType: 'friction',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    status: 'partial',
+    summary: 'Persisted close-stage checkpoint recovery fixture.',
+  }, closeRecoveryRotatedMeta, 'openai-mcp');
+  assert.equal(
+    recoveredCloseCheckpoint.traceId,
+    closeRoute.traceId,
+    'A trace-aware checkpoint must recover the same unique persisted Web trace after memory loss.',
+  );
+  for (const skill of closeRoute.activeSkills.filter((item) => item.required)) {
+    await callFresh('skill_load', {
+      name: skill.name,
+      source: 'codex',
+      traceId: closeRoute.traceId,
+      required: true,
+      stage: 'close',
+    }, closeRecoveryRotatedMeta, 'openai-mcp');
+  }
+  await callFresh('mssr_trace_record', {
+    traceId: closeRoute.traceId,
+    eventType: 'outcome',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    status: 'success',
+    verificationPassed: true,
+    persisted: true,
+    primarySkill: closeRoute.activeSkills[0]?.name,
+    summary: 'Close the rotated-session recovery fixture after continuity is proven.',
+  }, closeRecoveryRotatedMeta, 'openai-mcp');
 
   traceContext.resetSharedMssrTraceRegistryForTests();
   const schemas = [
@@ -481,6 +514,61 @@ try {
   assert.equal(recoveredSuccess.blocked, undefined, 'The same trace may close after the missing load is repaired.');
   const replacement = negative.prepare('skill_route_plan', { task: 'different unfinished task', stage: 'start' });
   assert.ok(replacement.notices.some((item) => item.code === 'mssr-active-trace-replaced-before-outcome'));
+
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const rotatedOwner = traceContext.createMssrTraceSessionCoordinator(schemas);
+  rotatedOwner.resolveMetricContext({
+    caller: 'chatgpt-web',
+    sessionKey: 'session-before-rotation',
+    project: 'bridge-mcp',
+  });
+  rotatedOwner.observe('skill_route_plan', {
+    task: 'rotated connector session fixture',
+    caller: 'chatgpt-web',
+    stage: 'implement',
+  }, {
+    traceId: 'trace-rotated-session-001',
+    stage: 'implement',
+    activeSkills: [{ name: 'required-skill', required: true }],
+  });
+  const rotatedResolver = traceContext.createMssrTraceSessionCoordinator(schemas);
+  const rotatedSnapshot = rotatedResolver.resolveMetricContext({
+    caller: 'chatgpt-web',
+    sessionKey: 'session-after-rotation',
+    project: 'mauroprime-skills',
+  });
+  assert.equal(
+    rotatedSnapshot.traceId,
+    'trace-rotated-session-001',
+    'A rotated connector session and related repository must recover the only open trace for the same caller.',
+  );
+  const secondRotatedOwner = traceContext.createMssrTraceSessionCoordinator(schemas);
+  secondRotatedOwner.resolveMetricContext({
+    caller: 'chatgpt-web',
+    sessionKey: 'session-second-task',
+    project: 'mssr',
+  });
+  secondRotatedOwner.observe('skill_route_plan', {
+    task: 'second concurrent rotated session fixture',
+    caller: 'chatgpt-web',
+    stage: 'implement',
+  }, {
+    traceId: 'trace-rotated-session-002',
+    stage: 'implement',
+    activeSkills: [{ name: 'required-skill', required: true }],
+  });
+  const ambiguousRotatedResolver = traceContext.createMssrTraceSessionCoordinator(schemas);
+  const ambiguousRotatedSnapshot = ambiguousRotatedResolver.resolveMetricContext({
+    caller: 'chatgpt-web',
+    sessionKey: 'session-third-unknown',
+    project: 'another-repository',
+  });
+  assert.equal(ambiguousRotatedSnapshot.traceId, null);
+  assert.equal(
+    ambiguousRotatedSnapshot.sharedOpenTraces,
+    2,
+    'Session rotation must not guess when two open traces remain compatible with the same caller.',
+  );
 
   traceContext.resetSharedMssrTraceRegistryForTests();
   const agentA = traceContext.createMssrTraceSessionCoordinator(schemas);

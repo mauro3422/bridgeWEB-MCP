@@ -648,3 +648,22 @@ relacionados independientes sin duplicar filas por cada llamada.
 **Regresión:** La prueba espera cero recordatorios después de route y load, exactamente uno después de una herramienta de dominio sin outcome, cero para Codex y cancelación al cerrar.
 
 **Seguimiento:** Revisar la tasa de reminders en la época activa; no aumentar el timeout salvo nueva evidencia.
+---
+
+## 2026-07-26 — La rotación de sesión del conector dejaba llamadas multi-repo como `unrouted`
+
+**Estado:** Corregido y cubierto por regresión en source 0.6.26.
+
+**Capa / owner:** Resolución de contexto y candidatos MSSR / `bridge-mcp`.
+
+**Síntoma:** Una tarea Web podía mantener la misma intención y `traceId`, pero al pasar entre `bridge-mcp`, `mssr` y `mauroprime-skills` algunas llamadas llegaban con otro hash anónimo de sesión o con el repositorio auxiliar como proyecto observado. Bridge emitía `mssr-unrouted-tool-call` aunque existía una sola traza Web abierta.
+
+**Reproducción mínima:** Abrir una ruta `caller=chatgpt-web`, cambiar simultáneamente `sessionKey` y proyecto en la siguiente llamada elegible, y consultar el contexto métrico sin copiar manualmente el `traceId`.
+
+**Causa:** `scopedCandidates` devolvía inmediatamente cero candidatos cuando el nuevo `sessionKey` no coincidía. La recuperación persistida aplicaba el mismo filtro estricto y el nombre de la skill podía terminar siendo el único criterio restante, lo que no es seguro cuando hay tareas concurrentes.
+
+**Corrección:** La resolución conserva esta prioridad: sesión exacta, proyecto exacto, y sólo después fallback al caller. El fallback relajado se acepta únicamente cuando existe una sola traza abierta del caller antes de filtrar por skill. Dos o más trazas producen ambigüedad y requieren `traceId` explícito. La misma regla se aplica a estado en memoria y SQLite.
+
+**Regresión:** `test-mssr-trace-contract.mjs` cubre atribución métrica con sesión/proyecto rotados, `dispatch route(close) → reset → skill_load/checkpoint` con otro id de sesión, y un caso con dos trazas abiertas que debe permanecer sin autoenlace.
+
+**Seguimiento:** Verificar Bridge 0.6.26 vivo y confirmar que una cadena multi-repo real deja de emitir `mssr-unrouted-tool-call` sin mezclar tareas concurrentes.
