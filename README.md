@@ -575,6 +575,7 @@ Las tools Git filtran archivos sensibles de diffs y commits mostrados. `git_comm
 
 ```text
 STATUS_CURRENT.md
+docs/REPOSITORY_STRUCTURE.md
 TOOLS.md
 CONNECTOR_CONTEXT.md
 CONNECTOR_PLAYBOOK.md

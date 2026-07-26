@@ -1,94 +1,94 @@
 # bridge-mcp current status
 
-Snapshot verified against the live HTTP bridge runtime.
+Verified against the live HTTP bridge runtime on 2026-07-26.
 
 ```text
-Project root: C:\dev\bridge-mcp
-Server: bridge-mcp v0.6.8
-Mode: HTTP production-candidate
-Bridge MCP: http://127.0.0.1:3001/mcp
-Bridge status: http://127.0.0.1:3001/status
-Tunnel admin: http://127.0.0.1:8081
-Tunnel profile: bridge-local-http
-Runtime tools: 109
-Runtime modules: 22
-Git expected: ## main...origin/main
+Project root:       C:\Dev\bridge-mcp
+Server:             bridge-mcp 0.6.29
+Mode:               Streamable HTTP production
+Bridge MCP:         http://127.0.0.1:3001/mcp
+Tunnel admin:       http://127.0.0.1:8081
+Tunnel profile:     bridge-local-http
+Runtime tools:      123
+Runtime modules:    25
+Git branch:         main
 ```
 
-## Confirmed working
-
-- TypeScript typecheck passes with `npm run check`.
-- Build passes with `npm run build`.
-- `npm audit` reports 0 vulnerabilities; `@hono/node-server` is pinned through an override to the patched 2.0.11 release and the full MCP regression suite passes with it.
-- Regression suite passes with `npm run test:regressions`.
-- TabletWhiteboard capture module passes `npm run test:whiteboard`, including fresh PNG attachment, latest/list access, proxy image hoisting and private-network URL guards.
-- HTTP health, readiness, MCP initialize, session lifecycle and `tools/list` pass.
-- `TOOLS.md` is generated from the registry and reports 109 tools with no neutral risk annotations.
-- Tunnel health is live/ready on `http://127.0.0.1:8081`.
-- Restart flow uses request/ack files; do not kill active bridge processes directly.
-- `bridge_verify_all` passes against live server v0.6.8.
-- Live `blender_review_bundle` testing against the CBAnimal fox returned four renders, structured scene context, completed restoration, and mixed MCP content containing both JSON text and an attached `image/png` contact sheet.
-
-## Tool modules
+## Live health
 
 ```text
-core
-file-navigation
-file-writing
-workflow-guides
-binary-files
-images
-process
-git
-project
-workspace
-cache
-bridge-ops
-metrics
-code-intelligence
-code-graph
-python-analysis
-blender
-tablet-whiteboard
-bridge-workflow
+Bridge:             healthy
+Tunnel healthz:     live
+Tunnel readyz:      ready
+Restart pending:    no
+Roblox MCP:         healthy
+Roblox tools:       27 live, no cached catalog
 ```
 
-## Current capabilities
+The watchdog owns restart coordination. Do not kill the active Node or tunnel processes from an MCP call. Use `bridge_request_restart`, then verify the acknowledgment and live version.
 
-- Safe project/file navigation and verified text edits.
-- Project context bootstrap from `AGENTS.md` and `.bridge` documents.
-- Reusable workflow-guide recommendation, loading and creation.
-- Image persistence, character-view normalization and Blender reference setup.
-- Direct and resumable binary transfers with base64/base64url/hex, sequence checkpoints, byte/SHA-256 validation, bounded chunk reads, atomic writes and stale-session cleanup.
-- Persistent terminal work, bounded commands and process-tree cleanup.
-- Git inspection and controlled mutations with sensitive-path filtering.
-- Workspace snapshots, diff and guarded rollback.
-- TypeScript/JavaScript and Python static analysis.
-- Blender 5.1.2 interactive and batch control, including multi-view review bundles with attached contact-sheet previews and structured model/rig/animation diagnostics.
-- TabletWhiteboard viewport inspection: fresh PC capture at exact pan/zoom, latest saved capture and bounded album metadata, with PNG attachments returned directly to ChatGPT.
-- Metrics, visualization specs, health checks and watchdog-coordinated restart.
-
-## Binary transfer rule
-
-Do not route encoded binary data through `write_text_file`.
+## Source boundaries
 
 ```text
-small payload:
-  binary_file_write
-  -> binary_file_info
+src/
+  Bridge server, HTTP transport, metrics, observability, integrations and tool modules.
 
-large/resumable payload:
-  binary_upload_begin
-  -> binary_upload_append (ordered chunks)
-  -> binary_upload_status (as needed)
-  -> binary_upload_finish
-  -> binary_file_info
+scripts/
+  Verification, watchdog, diagnostics, regression and generated-document commands.
+
+integrations/workflow-guides/
+  Reusable Bridge-delivered workflows; not a second skill repository.
+
+config/
+  Versioned configuration that belongs to Bridge.
+
+docs/
+  Durable architecture, incidents and repository guidance.
+
+TOOLS.md
+  Generated registry documentation. Regenerate; do not hand-maintain tool entries.
+
+data/ logs/ sandbox/ tmp/ .tmp/
+  Local runtime or diagnostic state, ignored by Git.
 ```
 
-Use `binary_upload_abort` to discard an incomplete session without touching its target. Sessions expire after 24 hours and stale sessions are cleaned when a new upload begins.
+MSSR remains independent under `C:\Dev\mssr`. `src/tools/skill-routing.ts` is intentionally a compatibility re-export from `@mauroprime/mssr`, not a duplicate routing engine.
 
-## Remaining considerations
+## Required verification
 
-- Tool catalogs can remain cached in an already-open ChatGPT conversation; reopen the connector or begin a new chat when newly published tools do not appear as direct actions.
-- The path policy reduces blast radius, but trusted shell tools are not an operating-system sandbox.
-- Call graphs remain intentionally conservative; improve them only from evidence gathered on real projects.
+For source changes:
+
+```powershell
+npm run check
+npm run build
+npm run test:regressions
+npm run test:skill-routing
+npm run docs:tools:check
+```
+
+For a release or runtime-sensitive change:
+
+```text
+bridge_verify_all(expectedServerVersion="0.6.29", strictGit=true)
+```
+
+The latest strict verification passed doctor, typecheck, build, HTTP smoke, regressions, MSSR routing, generated tool docs, watchdog, metrics and tools/list sanity.
+
+## Current maintenance priorities
+
+1. Keep `bridge-server.ts`, `mssr-trace-context.ts` and observability changes covered by stateless/delegated-route regressions.
+2. Refactor large tool modules only around proven ownership boundaries and behavior-preserving tests; file size alone is not a reason to split.
+3. Keep persistent `data/` and operational `logs/` untouched during ordinary repository cleanup.
+4. Prune only disposable ignored `tmp/`, `.tmp/`, smoke artifacts and explicitly expired cache entries.
+5. Use live health and generated registry output instead of copying version/tool counts into chat handoff prompts.
+
+## Authoritative references
+
+- `README.md`
+- `AGENTS.md`
+- `docs/REPOSITORY_STRUCTURE.md`
+- `docs/INCIDENTS.md`
+- `TOOLS.md`
+- `CONNECTOR_PLAYBOOK.md`
+- `RESTART_FLOW.md`
+- `BRIDGE_WATCHDOG.md`
