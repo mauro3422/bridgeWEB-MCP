@@ -92,7 +92,7 @@ const { extractRobloxMcpImage } = await import('../dist/tools/roblox-studio-tool
 const { clearBridgeNotices, drainBridgeNotices, emitBridgeNotice, getBridgeNoticeStatus, peekBridgeNoticeHistory } = await import('../dist/notices.js');
 const { closeMssrObservatoryForTests } = await import('../dist/mssr-observatory.js');
 const { buildToolAudit } = await import('../dist/tool-audit.js');
-const { classifyToolAuditError, closeMetricsForTests } = await import('../dist/metrics.js');
+const { beginToolMetric, classifyToolAuditError, closeMetricsForTests, finishToolMetric, getToolAuditMetrics } = await import('../dist/metrics.js');
 const registry = createDefaultToolRegistry();
 const call = (name, args = {}) => registry.call(name, args);
 const root = path.join(sandbox, 'project');
@@ -177,6 +177,13 @@ try {
   if (!skillLoadSchema.tool?.metadata?.usage?.recovery?.some((rule) => rule.code === 'mssr-orphan-skill-load' && rule.toolName === 'skill_bootstrap')) throw new Error('skill_load MSSR recovery metadata failed');
   const aliasAudit = await call('bridge_tool_audit', {view:'aliases',scope:'active',days:30,limit:20});
   if (aliasAudit.summary?.registeredTools !== 125 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
+  const delegatedMetric = beginToolMetric('bridge_tool_query', {toolName:'bridge_tool_audit',arguments:{view:'all'}}, {caller:'chatgpt-web',sessionKey:'fixture-session',project:'fixture-project'});
+  finishToolMetric(delegatedMetric, true, 128);
+  const delegatedSnapshot = getToolAuditMetrics(30, 'active');
+  const wrapperEvidence = delegatedSnapshot.rows.find((row) => row.tool === 'bridge_tool_query');
+  const targetEvidence = delegatedSnapshot.rows.find((row) => row.tool === 'bridge_tool_audit');
+  if (!wrapperEvidence || wrapperEvidence.calls < 1) throw new Error('delegated wrapper audit evidence missing');
+  if (!targetEvidence || targetEvidence.calls < 1 || targetEvidence.okCalls < 1) throw new Error('delegated target audit evidence missing');
   if (classifyToolAuditError('Expected 1 replacement(s), found 0.') !== 'patch-conflict') throw new Error('patch conflict classification failed');
   if (classifyToolAuditError('confirmToolName must exactly match target') !== 'permission-or-risk-mismatch') throw new Error('risk mismatch classification failed');
   if (classifyToolAuditError('Unknown terminal session: missing-session') !== 'target-not-found') throw new Error('missing target classification failed');

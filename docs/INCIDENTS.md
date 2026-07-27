@@ -721,3 +721,16 @@ relacionados independientes sin duplicar filas por cada llamada.
 **Seguimiento 0.6.35:** El smoke test vivo posterior a 0.6.34 detectó que `skill_bootstrap` registraba cargas Codex exitosas en observabilidad, pero omitía `loaded: true` en su respuesta; el coordinador no podía incorporarlas a `loadedSkills` y bloqueaba correctamente el outcome. Se unificó el contrato Codex/Roblox y la regresión delegada ahora exige `bridge_tool_query -> skill_bootstrap -> outcome` sin `skill_load` manual, tanto con sesión identificada como anónima.
 
 **Seguimiento:** Observar el audit vivo durante varias sesiones. No convertir una recomendación o un aviso en reparación, deprecación o mutación automática; exigir reproducción y evidencia suficiente.
+---
+
+## 2026-07-27 - Tool Portfolio ignoraba el uso real detrás de fallbacks delegados
+
+**Estado:** Corregido en Bridge 0.6.36.
+
+**Síntoma:** Una ejecución correcta de `bridge_tool_query -> bridge_tool_audit` aumentaba el contador del fallback, pero `bridge_tool_audit` seguía apareciendo con cero llamadas y sin evidencia. El mismo sesgo afectaba a cualquier tool accesible sólo mediante el catálogo runtime, inflando `fallback-overuse` y la cantidad de tools aparentemente no usadas.
+
+**Causa:** SQLite ya guardaba el target delegado como `operation_subject`, pero `getToolAuditMetrics()` agrupaba exclusivamente por la columna `tool` exterior.
+
+**Corrección:** La proyección del audit conserva la fila física del fallback y agrega una segunda atribución virtual al `operation_subject` cuando la tool exterior es `bridge_tool_query` o `bridge_tool_action`. No se duplica almacenamiento ni se guardan argumentos crudos.
+
+**Regresión:** `test-v060-tools.mjs` registra una llamada delegada y exige evidencia simultánea para `bridge_tool_query` y `bridge_tool_audit`, incluyendo éxito del target.

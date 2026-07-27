@@ -426,7 +426,18 @@ export function getToolAuditMetrics(days = 30, scope: BridgeMetricsScope = "acti
 
   const filter = metricsFilter(scope);
   const rows = database.prepare(`
-    SELECT tool,
+    WITH projected_calls AS (
+      SELECT tool AS audited_tool, started_at, duration_ms, ok, session_key, project
+      FROM tool_calls
+      WHERE ${filter.where} AND started_at >= ?
+      UNION ALL
+      SELECT operation_subject AS audited_tool, started_at, duration_ms, ok, session_key, project
+      FROM tool_calls
+      WHERE ${filter.where} AND started_at >= ?
+        AND tool IN ('bridge_tool_query', 'bridge_tool_action')
+        AND operation_subject IS NOT NULL AND operation_subject <> ''
+    )
+    SELECT audited_tool AS tool,
       COUNT(*) AS calls,
       SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END) AS ok_calls,
       SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS error_calls,
@@ -437,17 +448,22 @@ export function getToolAuditMetrics(days = 30, scope: BridgeMetricsScope = "acti
       MAX(CASE WHEN ok = 0 THEN started_at END) AS last_error_at,
       COUNT(DISTINCT CASE WHEN session_key IS NOT NULL AND session_key <> 'unknown' THEN session_key END) AS unique_sessions,
       COUNT(DISTINCT CASE WHEN project IS NOT NULL AND project <> 'unknown' THEN project END) AS unique_projects
-    FROM tool_calls
-    WHERE ${filter.where} AND started_at >= ?
-    GROUP BY tool
-    ORDER BY calls DESC, tool ASC
-  `).all(...filter.params, since);
+    FROM projected_calls
+    GROUP BY audited_tool
+    ORDER BY calls DESC, audited_tool ASC
+  `).all(...filter.params, since, ...filter.params, since);
 
   const errors = database.prepare(`
     SELECT tool, error
     FROM tool_calls
     WHERE ok = 0 AND ${filter.where} AND started_at >= ?
-  `).all(...filter.params, since);
+    UNION ALL
+    SELECT operation_subject AS tool, error
+    FROM tool_calls
+    WHERE ok = 0 AND ${filter.where} AND started_at >= ?
+      AND tool IN ('bridge_tool_query', 'bridge_tool_action')
+      AND operation_subject IS NOT NULL AND operation_subject <> ''
+  `).all(...filter.params, since, ...filter.params, since);
   const categoriesByTool = new Map<string, Map<string, number>>();
   for (const row of errors) {
     const tool = typeof row.tool === "string" ? row.tool : "unknown";

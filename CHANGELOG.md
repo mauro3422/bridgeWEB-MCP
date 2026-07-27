@@ -1,3 +1,10 @@
+## 0.6.36 - 2026-07-27
+
+- Attribute delegated fallback executions to both the fallback wrapper and the actual runtime target in Tool Portfolio evidence.
+- Preserve fallback-overuse visibility while preventing delegated tools such as `bridge_tool_audit`, `skill_bootstrap`, or `mssr_observatory_query` from appearing unused.
+- Add regression coverage proving one delegated call contributes evidence to both `bridge_tool_query` and its target without storing raw arguments.
+
+
 ## 0.6.35 - 2026-07-27
 
 - Mark successful Codex skill loads explicitly with `loaded: true`, matching the existing Roblox skill-load contract.
