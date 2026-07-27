@@ -91,6 +91,8 @@ const { classifyRobloxMcpToolCatalog, getRobloxMcpToolRequestOptions, parseRoblo
 const { extractRobloxMcpImage } = await import('../dist/tools/roblox-studio-tools.js');
 const { clearBridgeNotices, drainBridgeNotices, emitBridgeNotice, getBridgeNoticeStatus } = await import('../dist/notices.js');
 const { closeMssrObservatoryForTests } = await import('../dist/mssr-observatory.js');
+const { buildToolAudit } = await import('../dist/tool-audit.js');
+const { classifyToolAuditError, closeMetricsForTests } = await import('../dist/metrics.js');
 const registry = createDefaultToolRegistry();
 const call = (name, args = {}) => registry.call(name, args);
 const root = path.join(sandbox, 'project');
@@ -144,7 +146,7 @@ try {
   const drainedNotices = drainBridgeNotices();
   if (drainedNotices.length !== 1 || getBridgeNoticeStatus().pendingCount !== 0) throw new Error('Bridge notice one-shot drain failed');
 
-  if (registry.tools.length !== 124) throw new Error(`expected 124 tools, got ${registry.tools.length}`);
+  if (registry.tools.length !== 125) throw new Error(`expected 125 tools, got ${registry.tools.length}`);
   const delegatedQueryTool = registry.tools.find((tool) => tool.name === 'bridge_tool_query');
   const delegatedActionTool = registry.tools.find((tool) => tool.name === 'bridge_tool_action');
   if (!delegatedQueryTool?.description?.includes('First inspect the target with bridge_tool_schema')) throw new Error('bridge_tool_query must require schema-first delegation');
@@ -152,7 +154,7 @@ try {
   const expectedNeutral = ['whiteboard_capture_pc_view', 'whiteboard_add_text', 'whiteboard_add_svg', 'whiteboard_add_diagram', 'whiteboard_insert_image', 'mssr_trace_record', 'mssr_observatory_epoch_start'];
   if (registry.riskSummary.neutral.length !== expectedNeutral.length || expectedNeutral.some((name) => !registry.riskSummary.neutral.includes(name))) throw new Error(`unexpected neutral tools: ${registry.riskSummary.neutral.join(', ')}`);
   for (const moduleName of ['project','workspace','cache','workflow-guides','skill-catalog-and-roblox-proxy','roblox-studio-ops','roblox-photo-capture','notices','mssr-observatory','binary-files','images','blender','tablet-whiteboard']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
-  for (const toolName of ['project_context_load','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','bridge_tool_schema','skill_catalog','skill_recommend','skill_route_audit','skill_route_vocabulary','skill_route_plan','skill_bootstrap','skill_load','mssr_observatory_query','mssr_trace_record','mssr_observatory_epoch_start','bridge_notice_status','bridge_notice_drain','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_studio_list','roblox_mcp_query','roblox_mcp_action','roblox_studio_window_capture_save','roblox_screen_capture_save','roblox_photo_capture_job','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_file_attach','image_asset_save','image_character_views_prepare','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_review_bundle','blender_execute_code','blender_batch_script','blender_setup_character_references','blender_character_loop_status','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list','whiteboard_add_text','whiteboard_add_svg','whiteboard_add_diagram','whiteboard_insert_image']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/Blender/whiteboard tool ${toolName}`);
+  for (const toolName of ['project_context_load','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','bridge_tool_schema','bridge_tool_audit','skill_catalog','skill_recommend','skill_route_audit','skill_route_vocabulary','skill_route_plan','skill_bootstrap','skill_load','mssr_observatory_query','mssr_trace_record','mssr_observatory_epoch_start','bridge_notice_status','bridge_notice_drain','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_studio_list','roblox_mcp_query','roblox_mcp_action','roblox_studio_window_capture_save','roblox_screen_capture_save','roblox_photo_capture_job','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_file_attach','image_asset_save','image_character_views_prepare','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_review_bundle','blender_execute_code','blender_batch_script','blender_setup_character_references','blender_character_loop_status','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list','whiteboard_add_text','whiteboard_add_svg','whiteboard_add_diagram','whiteboard_insert_image']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/Blender/whiteboard tool ${toolName}`);
   if (!registry.riskSummary.destructive.includes('roblox_mcp_action') || !registry.riskSummary.destructive.includes('roblox_studio_window_capture_save') || !registry.riskSummary.destructive.includes('roblox_screen_capture_save') || !registry.riskSummary.destructive.includes('roblox_photo_capture_job') || !registry.riskSummary.destructive.includes('roblox_place_save')) throw new Error('Roblox action/capture/save risk classification failed');
   if (!registry.riskSummary.readOnly.includes('bridge_notice_status') || !registry.riskSummary.readOnly.includes('bridge_notice_drain')) throw new Error('Bridge notice risk classification failed');
   const reviewTool = registry.tools.find((tool) => tool.name === 'blender_review_bundle');
@@ -161,6 +163,37 @@ try {
   const imageAttachTool = registry.tools.find((tool) => tool.name === 'image_file_attach');
   if (!imageAttachTool || !registry.riskSummary.readOnly.includes('image_file_attach')) throw new Error('Local image attachment classification failed');
   if (!imageAttachTool.inputSchema?.properties?.items) throw new Error('Local image attachment schema failed');
+  const workOnceTool = registry.tools.find((tool) => tool.name === 'work_once');
+  const auditTool = registry.tools.find((tool) => tool.name === 'bridge_tool_audit');
+  if (workOnceTool?.metadata?.role !== 'alias' || workOnceTool.metadata.aliasOf !== 'run_command' || workOnceTool.metadata.family !== 'process') throw new Error('tool alias metadata failed');
+  if (auditTool?.metadata?.lifecycle !== 'protected' || auditTool.metadata.family !== 'tool-dispatch' || !registry.riskSummary.readOnly.includes('bridge_tool_audit')) throw new Error('bridge_tool_audit metadata/risk failed');
+  const auditSchema = await call('bridge_tool_schema', {toolName:'bridge_tool_audit'});
+  if (auditSchema.tool?.metadata?.lifecycle !== 'protected' || !auditSchema.tool?.inputSchema?.properties?.view) throw new Error('bridge_tool_schema did not expose audit metadata');
+  const aliasAudit = await call('bridge_tool_audit', {view:'aliases',scope:'active',days:30,limit:20});
+  if (aliasAudit.summary?.registeredTools !== 125 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
+  if (classifyToolAuditError('Expected 1 replacement(s), found 0.') !== 'patch-conflict') throw new Error('patch conflict classification failed');
+  if (classifyToolAuditError('confirmToolName must exactly match target') !== 'permission-or-risk-mismatch') throw new Error('risk mismatch classification failed');
+  const syntheticAudit = buildToolAudit([
+    {name:'schema_fail_tool',description:'fixture',inputSchema:{},annotations:{readOnlyHint:true},metadata:{role:'dedicated',family:'fixture',lifecycle:'stable'}},
+    {name:'fallback_tool',description:'fixture',inputSchema:{},annotations:{readOnlyHint:true},metadata:{role:'fallback',family:'fixture',lifecycle:'stable'}},
+    {name:'unused_tool',description:'fixture',inputSchema:{},annotations:{readOnlyHint:true},metadata:{role:'dedicated',family:'fixture',lifecycle:'stable'}},
+    {name:'low_sample_tool',description:'fixture',inputSchema:{},annotations:{readOnlyHint:true},metadata:{role:'dedicated',family:'fixture',lifecycle:'stable'}},
+  ], {
+    enabled:true,
+    sqliteAvailable:true,
+    scope:'active',
+    days:30,
+    since:'2026-07-01T00:00:00.000Z',
+    rows:[
+      {tool:'schema_fail_tool',calls:5,okCalls:1,errorCalls:4,avgDurationMs:10,maxDurationMs:20,lastStartedAt:'2026-07-26T00:00:00.000Z',lastSuccessAt:'2026-07-25T00:00:00.000Z',lastErrorAt:'2026-07-26T00:00:00.000Z',uniqueSessions:2,uniqueProjects:1,errorCategories:[{name:'schema-validation',count:4}]},
+      {tool:'fallback_tool',calls:4,okCalls:4,errorCalls:0,avgDurationMs:5,maxDurationMs:8,lastStartedAt:'2026-07-26T00:00:00.000Z',lastSuccessAt:'2026-07-26T00:00:00.000Z',lastErrorAt:null,uniqueSessions:1,uniqueProjects:1,errorCategories:[]},
+      {tool:'low_sample_tool',calls:2,okCalls:0,errorCalls:2,avgDurationMs:4,maxDurationMs:6,lastStartedAt:'2026-07-26T00:00:00.000Z',lastSuccessAt:null,lastErrorAt:'2026-07-26T00:00:00.000Z',uniqueSessions:1,uniqueProjects:1,errorCategories:[{name:'runtime-internal',count:2}]},
+    ],
+  }, {view:'needs-attention',limit:20});
+  if (!syntheticAudit.items.some((item) => item.tool === 'schema_fail_tool' && item.status === 'fix-ux-schema')) throw new Error('schema recommendation failed');
+  if (!syntheticAudit.items.some((item) => item.tool === 'fallback_tool' && item.status === 'prefer-dedicated')) throw new Error('fallback recommendation failed');
+  if (!syntheticAudit.items.some((item) => item.tool === 'unused_tool' && item.status === 'no-evidence')) throw new Error('missing-evidence recommendation failed');
+  if (!syntheticAudit.items.some((item) => item.tool === 'low_sample_tool' && item.status === 'no-evidence' && item.reason.includes('sample is too small'))) throw new Error('low-sample recommendation failed');
 
   const junctionCatalog = await call('skill_catalog', {sources:['codex-local'],maxResults:50});
   if (!junctionCatalog.skills.some((skill) => skill.name === 'linked-junction-skill')) throw new Error('skill catalog did not follow an allowed directory junction');
@@ -526,5 +559,6 @@ try {
   console.log(JSON.stringify({ok:true,tools:registry.tools.length,profile:profile.name,snapshotChanges:snapshotDiff.totalChanges,cacheEntries:cacheAfter.entries},null,2));
 } finally {
   closeMssrObservatoryForTests();
+  closeMetricsForTests();
   fs.rmSync(sandbox,{recursive:true,force:true});
 }

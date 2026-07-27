@@ -18,7 +18,7 @@ const groupRules = [
   ["Tablet Whiteboard", ["whiteboard_capture_pc_view", "whiteboard_latest_capture", "whiteboard_capture_list"]],
   ["Git", ["git_status", "git_set_remote", "git_commit_all", "git_push_current_branch"]],
   ["Bridge ops", ["tunnel_health", "bridge_self_check", "bridge_verify_all", "bridge_request_restart", "bridge_restart_status"]],
-  ["Metricas / visualizaciones", ["bridge_metrics_status", "bridge_metrics_summary", "bridge_metrics_recent", "bridge_visualization_catalog", "bridge_visualize_metrics"]],
+  ["Metricas / visualizaciones", ["bridge_metrics_status", "bridge_metrics_summary", "bridge_metrics_recent", "bridge_tool_audit", "bridge_visualization_catalog", "bridge_visualize_metrics"]],
   ["Inteligencia de codigo", ["analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code"]],
 ];
 
@@ -40,6 +40,18 @@ function propsList(schema) {
     return `- \`${name}\`: ${type}${en}${def}${range ? ` ${range}` : ""}`;
   });
   return rows.join("\n") || "- sin parametros";
+}
+
+function metadataLine(tool) {
+  const metadata = tool.metadata ?? {};
+  const parts = [
+    metadata.role ? `role=${metadata.role}` : null,
+    metadata.family ? `family=${metadata.family}` : null,
+    metadata.lifecycle ? `lifecycle=${metadata.lifecycle}` : null,
+    metadata.aliasOf ? `aliasOf=${metadata.aliasOf}` : null,
+    metadata.preferredTool ? `preferred=${metadata.preferredTool}` : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "sin metadata";
 }
 
 function normalizeNewlines(text) {
@@ -75,6 +87,7 @@ function buildToolsDoc() {
       seen.add(name);
       out += `#### \`${tool.name}\`\n\n`;
       out += `${tool.description}\n\n`;
+      out += `Metadata: ${metadataLine(tool)}\n\n`;
       out += `Required: ${requiredList(tool.inputSchema)}\n\n`;
       out += `Parametros:\n\n${propsList(tool.inputSchema)}\n\n`;
       out += "<details>\n<summary>Input schema</summary>\n\n";
@@ -87,7 +100,7 @@ function buildToolsDoc() {
   if (leftovers.length > 0) {
     out += "### Otras tools\n\n";
     for (const tool of leftovers) {
-      out += `#### \`${tool.name}\`\n\n${tool.description}\n\n`;
+      out += `#### \`${tool.name}\`\n\n${tool.description}\n\nMetadata: ${metadataLine(tool)}\n\n`;
       out += `\`\`\`json\n${schemaBlock(tool.inputSchema)}\n\`\`\`\n\n`;
     }
   }

@@ -1,3 +1,11 @@
+## 0.6.33 - 2026-07-27
+
+- Add canonical tool metadata for role, family, lifecycle, aliases, and preferred tools across the runtime registry.
+- Add read-only `bridge_tool_audit` to combine registry metadata with privacy-safe aggregate metrics and return evidence-backed maintenance recommendations without automatic mutations.
+- Classify bounded tool errors for schema, risk, provider, timeout, patch, target, safety, runtime, and unknown failure families.
+- Expose tool metadata through `bridge_tool_schema`, regenerate tool documentation, and add focused registry/audit regressions.
+
+
 ## 0.6.32 - 2026-07-27
 
 - Require `bridge_tool_schema` inspection in delegated fallback descriptions before callers build runtime arguments.

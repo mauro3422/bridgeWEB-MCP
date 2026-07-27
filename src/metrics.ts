@@ -7,6 +7,30 @@ import { getMssrObservabilityEpoch } from "./mssr-observability-epoch.js";
 
 type JsonRecord = Record<string, unknown>;
 export type BridgeMetricsScope = "active" | "all";
+
+export type ToolAuditMetricRow = {
+  tool: string;
+  calls: number;
+  okCalls: number;
+  errorCalls: number;
+  avgDurationMs: number | null;
+  maxDurationMs: number | null;
+  lastStartedAt: string | null;
+  lastSuccessAt: string | null;
+  lastErrorAt: string | null;
+  uniqueSessions: number;
+  uniqueProjects: number;
+  errorCategories: Array<{ name: string; count: number }>;
+};
+
+export type ToolAuditMetricSnapshot = {
+  enabled: boolean;
+  sqliteAvailable: boolean;
+  scope: BridgeMetricsScope;
+  days: number;
+  since: string;
+  rows: ToolAuditMetricRow[];
+};
 export type BridgeMetricProfile = {
   traceId?: string;
   taskKey?: string;
@@ -374,6 +398,87 @@ function metricsFilter(scope: BridgeMetricsScope): { where: string; params: unkn
     where: `${OPERATIONAL_METRIC_WHERE} AND observability_epoch = ? AND started_at >= ?`,
     params: [epoch.activeEpoch, epoch.baselineAt],
   };
+}
+
+export function classifyToolAuditError(value: string | null | undefined): string {
+  const error = String(value ?? "").toLowerCase();
+  if (!error) return "unknown";
+  if (/invalid_type|unrecognized_keys|zod|required|expected .* received|must be a (json object|non-empty string)|invalid .* expected/.test(error)) return "schema-validation";
+  if (/confirmtoolname|classified read-only|not classified read-only|destructive action|risk classification/.test(error)) return "permission-or-risk-mismatch";
+  if (/timed? out|timeout|etimedout/.test(error)) return "timeout";
+  if (/expected \d+ replacement|expected replacement|patch conflict|context mismatch/.test(error)) return "patch-conflict";
+  if (/unknown modular tool|not found|enoent|target .*missing|does not exist/.test(error)) return "target-not-found";
+  if (/econnrefused|provider unavailable|connection closed|disconnected|tools\/list returned zero|no last-known tool cache/.test(error)) return "provider-unavailable";
+  if (/refusing|not allowed|outside allowed|denied path|escaped|requires exact|truncated snapshot rollback/.test(error)) return "expected-safety-guard";
+  if (/internal|sqlite|assertion|unexpected/.test(error)) return "runtime-internal";
+  return "unknown";
+}
+
+export function getToolAuditMetrics(days = 30, scope: BridgeMetricsScope = "active"): ToolAuditMetricSnapshot {
+  const boundedDays = Math.max(1, Math.min(365, Math.trunc(days)));
+  const epoch = getMssrObservabilityEpoch();
+  const windowSince = new Date(Date.now() - boundedDays * 86_400_000).toISOString();
+  const since = scope === "active" && epoch.baselineAt > windowSince ? epoch.baselineAt : windowSince;
+  const database = getDb();
+  if (!database) {
+    return { enabled: metricsEnabled, sqliteAvailable: false, scope, days: boundedDays, since, rows: [] };
+  }
+
+  const filter = metricsFilter(scope);
+  const rows = database.prepare(`
+    SELECT tool,
+      COUNT(*) AS calls,
+      SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END) AS ok_calls,
+      SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS error_calls,
+      ROUND(AVG(duration_ms), 2) AS avg_duration_ms,
+      MAX(duration_ms) AS max_duration_ms,
+      MAX(started_at) AS last_started_at,
+      MAX(CASE WHEN ok = 1 THEN started_at END) AS last_success_at,
+      MAX(CASE WHEN ok = 0 THEN started_at END) AS last_error_at,
+      COUNT(DISTINCT CASE WHEN session_key IS NOT NULL AND session_key <> 'unknown' THEN session_key END) AS unique_sessions,
+      COUNT(DISTINCT CASE WHEN project IS NOT NULL AND project <> 'unknown' THEN project END) AS unique_projects
+    FROM tool_calls
+    WHERE ${filter.where} AND started_at >= ?
+    GROUP BY tool
+    ORDER BY calls DESC, tool ASC
+  `).all(...filter.params, since);
+
+  const errors = database.prepare(`
+    SELECT tool, error
+    FROM tool_calls
+    WHERE ok = 0 AND ${filter.where} AND started_at >= ?
+  `).all(...filter.params, since);
+  const categoriesByTool = new Map<string, Map<string, number>>();
+  for (const row of errors) {
+    const tool = typeof row.tool === "string" ? row.tool : "unknown";
+    const category = classifyToolAuditError(typeof row.error === "string" ? row.error : null);
+    const categories = categoriesByTool.get(tool) ?? new Map<string, number>();
+    categories.set(category, (categories.get(category) ?? 0) + 1);
+    categoriesByTool.set(tool, categories);
+  }
+
+  const mapped: ToolAuditMetricRow[] = rows.map((row) => {
+    const tool = typeof row.tool === "string" ? row.tool : "unknown";
+    const categories = [...(categoriesByTool.get(tool)?.entries() ?? [])]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    return {
+      tool,
+      calls: Number(row.calls ?? 0),
+      okCalls: Number(row.ok_calls ?? 0),
+      errorCalls: Number(row.error_calls ?? 0),
+      avgDurationMs: row.avg_duration_ms === null || row.avg_duration_ms === undefined ? null : Number(row.avg_duration_ms),
+      maxDurationMs: row.max_duration_ms === null || row.max_duration_ms === undefined ? null : Number(row.max_duration_ms),
+      lastStartedAt: typeof row.last_started_at === "string" ? row.last_started_at : null,
+      lastSuccessAt: typeof row.last_success_at === "string" ? row.last_success_at : null,
+      lastErrorAt: typeof row.last_error_at === "string" ? row.last_error_at : null,
+      uniqueSessions: Number(row.unique_sessions ?? 0),
+      uniqueProjects: Number(row.unique_projects ?? 0),
+      errorCategories: categories,
+    };
+  });
+
+  return { enabled: metricsEnabled, sqliteAvailable: true, scope, days: boundedDays, since, rows: mapped };
 }
 
 function getMetricsProfiles(database: DatabaseSync, scope: BridgeMetricsScope) {

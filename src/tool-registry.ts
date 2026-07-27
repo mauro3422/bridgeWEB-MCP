@@ -22,7 +22,9 @@ import { skillCatalogToolModule } from "./tools/skill-catalog-tools.js";
 import { workspaceToolModule } from "./tools/workspace-tools.js";
 import { workflowGuideToolModule } from "./tools/workflow-guide-tools.js";
 import { whiteboardToolModule } from "./tools/whiteboard-tools.js";
-import type { BridgeToolModule, BridgeToolRegistry, BridgeToolSchema } from "./tools/types.js";
+import { buildToolAudit, TOOL_AUDIT_VIEWS, type ToolAuditView } from "./tool-audit.js";
+import { getToolAuditMetrics, type BridgeMetricsScope } from "./metrics.js";
+import type { BridgeToolMetadata, BridgeToolModule, BridgeToolRegistry, BridgeToolSchema } from "./tools/types.js";
 
 const readOnlyToolNames = new Set([
   "system_info", "list_dir", "read_text_file", "list_files_smart", "read_file_lines", "read_many_files", "search_files",
@@ -32,7 +34,7 @@ const readOnlyToolNames = new Set([
   "bridge_metrics_status", "bridge_metrics_summary", "bridge_metrics_recent", "bridge_metrics_query", "mssr_observatory_query", "bridge_visualization_catalog", "bridge_visualize_metrics", "bridge_notice_status", "bridge_notice_drain",
   "path_policy_status", "project_profile", "workspace_diff", "workspace_snapshot_list", "cache_status",
   "analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code",
-  "project_context_load", "workflow_guide_recommend", "workflow_guide_load", "bridge_tool_schema", "bridge_tool_query",
+  "project_context_load", "workflow_guide_recommend", "workflow_guide_load", "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query",
   "skill_catalog", "skill_recommend", "skill_route_audit", "skill_route_vocabulary", "skill_route_plan", "skill_bootstrap", "skill_load", "roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list", "roblox_mcp_query",
   "binary_file_info", "binary_file_read_chunk", "binary_upload_status", "image_file_attach",
   "blender_status", "blender_scene_info", "blender_character_loop_status",
@@ -51,10 +53,50 @@ const destructiveToolNames = new Set([
   "blender_open", "blender_viewport_screenshot", "blender_review_bundle", "blender_execute_code", "blender_batch_script", "blender_store_reference_image", "blender_setup_character_references",
 ]);
 
-function annotateTool(tool: BridgeToolSchema): BridgeToolSchema {
-  if (readOnlyToolNames.has(tool.name)) return { ...tool, annotations: { readOnlyHint: true, destructiveHint: false, ...(tool.annotations ?? {}) } };
-  if (destructiveToolNames.has(tool.name)) return { ...tool, annotations: { readOnlyHint: false, destructiveHint: true, ...(tool.annotations ?? {}) } };
-  return { ...tool, annotations: { readOnlyHint: false, destructiveHint: false, ...(tool.annotations ?? {}) } };
+const aliasTargets = new Map<string, string>([
+  ["work_once", "run_command"],
+  ["work_begin", "terminal_start"],
+  ["work_feed", "terminal_write"],
+  ["work_peek", "terminal_read"],
+  ["work_show", "terminal_list"],
+  ["work_finish", "terminal_stop"],
+]);
+
+const fallbackToolNames = new Set(["bridge_tool_query", "bridge_tool_action"]);
+const aggregatorToolNames = new Set(["bridge_metrics_query", "bridge_verify_all", "bridge_health", "bridge_self_check", "skill_bootstrap"]);
+const providerProxyToolNames = new Set(["roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list", "roblox_mcp_query", "roblox_mcp_action"]);
+const protectedToolNames = new Set([
+  "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query", "bridge_tool_action", "project_context_load",
+  "skill_route_plan", "skill_bootstrap", "skill_load", "mssr_trace_record", "bridge_verify_all", "roblox_place_save",
+]);
+
+function toolMetadata(tool: BridgeToolSchema, moduleName: string): BridgeToolMetadata {
+  const aliasOf = aliasTargets.get(tool.name);
+  const role = aliasOf
+    ? "alias"
+    : fallbackToolNames.has(tool.name)
+      ? "fallback"
+      : providerProxyToolNames.has(tool.name)
+        ? "provider-proxy"
+        : aggregatorToolNames.has(tool.name)
+          ? "aggregator"
+          : "dedicated";
+  return {
+    role,
+    family: moduleName,
+    lifecycle: protectedToolNames.has(tool.name) ? "protected" : "stable",
+    ...(aliasOf ? { aliasOf, preferredTool: aliasOf } : {}),
+    ...(tool.metadata ?? {}),
+  };
+}
+
+function annotateTool(tool: BridgeToolSchema, moduleName: string): BridgeToolSchema {
+  const annotations = readOnlyToolNames.has(tool.name)
+    ? { readOnlyHint: true, destructiveHint: false, ...(tool.annotations ?? {}) }
+    : destructiveToolNames.has(tool.name)
+      ? { readOnlyHint: false, destructiveHint: true, ...(tool.annotations ?? {}) }
+      : { readOnlyHint: false, destructiveHint: false, ...(tool.annotations ?? {}) };
+  return { ...tool, annotations, metadata: toolMetadata(tool, moduleName) };
 }
 
 function riskSummary(tools: BridgeToolSchema[]) {
@@ -76,7 +118,7 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
       if (handlers.has(tool.name)) throw new Error(`Duplicate bridge tool registered: ${tool.name}`);
       const handler = module.handlers[tool.name];
       if (!handler) throw new Error(`Tool module '${module.name}' declares '${tool.name}' without a handler.`);
-      tools.push(annotateTool(tool));
+      tools.push(annotateTool(tool, module.name));
       handlers.set(tool.name, handler);
     }
   }
@@ -108,6 +150,21 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
       additionalProperties: false,
     },
   };
+  const auditTool: BridgeToolSchema = {
+    name: "bridge_tool_audit",
+    description: "Audit registered Bridge tools against privacy-safe operational metrics and return evidence-backed maintenance recommendations. Use views for one tool, aliases, fallback overuse, unused tools, all tools, or only items needing attention. This tool never changes lifecycle or visibility automatically.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        view: { type: "string", enum: TOOL_AUDIT_VIEWS, default: "needs-attention" },
+        toolName: { type: "string", description: "Exact registered tool name; required when view=tool." },
+        scope: { type: "string", enum: ["active", "all"], default: "active" },
+        days: { type: "number", default: 30, minimum: 1, maximum: 365 },
+        limit: { type: "number", default: 50, minimum: 1, maximum: 200 },
+      },
+      additionalProperties: false,
+    },
+  };
   const queryTool: BridgeToolSchema = {
     name: "bridge_tool_query",
     description: "Use this read-only fallback when a runtime Bridge tool exists but its dedicated schema is missing from the current connector catalog. First inspect the target with bridge_tool_schema and then pass arguments that match that exact runtime contract. Delegates only to tools classified read-only.",
@@ -135,7 +192,12 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
       additionalProperties: false,
     },
   };
-  tools.push(annotateTool(schemaTool), annotateTool(queryTool), annotateTool(actionTool));
+  tools.push(
+    annotateTool(schemaTool, "tool-dispatch"),
+    annotateTool(auditTool, "tool-dispatch"),
+    annotateTool(queryTool, "tool-dispatch"),
+    annotateTool(actionTool, "tool-dispatch"),
+  );
   handlers.set("bridge_tool_schema", async (args) => {
     const name = delegatedToolName(args.toolName);
     const tool = tools.find((candidate) => candidate.name === name);
@@ -146,8 +208,36 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
         description: tool.description,
         inputSchema: tool.inputSchema,
         annotations: tool.annotations ?? {},
+        metadata: tool.metadata ?? {},
       },
     };
+  });
+  handlers.set("bridge_tool_audit", async (args) => {
+    const rawView = args.view === undefined ? "needs-attention" : args.view;
+    if (typeof rawView !== "string" || !TOOL_AUDIT_VIEWS.includes(rawView as ToolAuditView)) {
+      throw new Error(`view must be one of: ${TOOL_AUDIT_VIEWS.join(", ")}.`);
+    }
+    const rawScope = args.scope === undefined ? "active" : args.scope;
+    if (rawScope !== "active" && rawScope !== "all") throw new Error("scope must be active or all.");
+    const parseBoundedInteger = (value: unknown, fallback: number, min: number, max: number, name: string) => {
+      const numeric = value === undefined ? fallback : value;
+      if (typeof numeric !== "number" || !Number.isInteger(numeric) || numeric < min || numeric > max) {
+        throw new Error(`${name} must be an integer from ${min} to ${max}.`);
+      }
+      return numeric;
+    };
+    const days = parseBoundedInteger(args.days, 30, 1, 365, "days");
+    const limit = parseBoundedInteger(args.limit, 50, 1, 200, "limit");
+    const toolName = args.toolName === undefined
+      ? undefined
+      : typeof args.toolName === "string" && args.toolName.trim()
+        ? args.toolName.trim()
+        : (() => { throw new Error("toolName must be a non-empty string when provided."); })();
+    return buildToolAudit(
+      tools,
+      getToolAuditMetrics(days, rawScope as BridgeMetricsScope),
+      { view: rawView as ToolAuditView, toolName, limit },
+    );
   });
   handlers.set("bridge_tool_query", async (args) => {
     const name = delegatedToolName(args.toolName);
