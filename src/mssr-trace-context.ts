@@ -10,6 +10,7 @@ type ToolSchemaLike = {
 
 type ActiveTraceState = {
   traceId: string;
+  workflowKey: string;
   stage: string;
   taskHash: string;
   caller: string;
@@ -154,6 +155,7 @@ function candidateDetails(candidates: ActiveTraceState[]): JsonRecord {
     candidateCount: candidates.length,
     candidates: candidates.slice(0, 8).map((state) => ({
       traceId: state.traceId,
+      workflowKey: state.workflowKey,
       stage: state.stage,
       caller: state.caller,
       sessionKey: state.sessionKey,
@@ -177,6 +179,7 @@ export type MssrTracePreparation = {
 export type MssrTraceSessionSnapshot = {
   active: boolean;
   traceId: string | null;
+  workflowKey: string | null;
   taskHash: string | null;
   stage: string | null;
   caller: string | null;
@@ -679,6 +682,8 @@ export function createMssrTraceSessionCoordinator(
       const now = Date.now();
       const state: ActiveTraceState = {
         traceId,
+        workflowKey: previous?.workflowKey
+          ?? (normalizedText(record.workflowKey, 80) || normalizedText(args.workflowKey, 80) || "unscoped"),
         stage: typeof record.stage === "string" ? record.stage : typeof args.stage === "string" ? args.stage : "start",
         taskHash: taskFingerprint(args.task),
         caller: normalizedCaller(args.caller ?? hostContext.caller),
@@ -752,6 +757,7 @@ export function createMssrTraceSessionCoordinator(
     return {
       active: Boolean(state),
       traceId: state?.traceId ?? null,
+      workflowKey: state?.workflowKey ?? null,
       taskHash: state?.taskHash ?? null,
       stage: state?.stage ?? null,
       caller: state?.caller ?? null,

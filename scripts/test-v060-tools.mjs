@@ -93,7 +93,8 @@ const { clearBridgeNotices, drainBridgeNotices, emitBridgeNotice, getBridgeNotic
 const { closeMssrObservatoryForTests, getMssrTraceEvidence, recordMssrCheckpoint, recordMssrRoute } = await import('../dist/mssr-observatory.js');
 const { buildToolAudit } = await import('../dist/tool-audit.js');
 const { beginToolMetric, classifyToolAuditError, closeMetricsForTests, finishToolMetric, getToolAuditMetrics } = await import('../dist/metrics.js');
-const { RUNTIME_BOOT_ID } = await import('../dist/runtime-identity.js');
+const { RUNTIME_BOOT_ID, resolveMetricWorkflowKey } = await import('../dist/runtime-identity.js');
+const { createMssrTraceSessionCoordinator } = await import('../dist/mssr-trace-context.js');
 const registry = createDefaultToolRegistry();
 const call = (name, args = {}) => registry.call(name, args);
 const root = path.join(sandbox, 'project');
@@ -173,6 +174,41 @@ try {
   const evidenceTool = registry.tools.find((tool) => tool.name === 'mssr_trace_evidence');
   if (!evidenceTool || !registry.riskSummary.readOnly.includes('mssr_trace_evidence') || evidenceTool.metadata?.lifecycle !== 'protected') throw new Error('mssr_trace_evidence metadata/risk failed');
   if (!/^[0-9a-f-]{36}$/.test(RUNTIME_BOOT_ID)) throw new Error('runtime boot identity must be a UUID');
+  const workflowCoordinatorA = createMssrTraceSessionCoordinator(registry.tools);
+  const unscopedRouteArgs = {task:'Unscoped task A',caller:'chatgpt-web'};
+  workflowCoordinatorA.prepare('skill_route_plan', unscopedRouteArgs, {caller:'chatgpt-web',sessionKey:'session-shared-workflow',project:'bridge-mcp'});
+  workflowCoordinatorA.observe('skill_route_plan', unscopedRouteArgs, {traceId:'__test_workflow_trace_a',stage:'start',workflowKey:null,activeSkills:[]});
+  const unscopedSnapshot = workflowCoordinatorA.snapshot();
+  if (unscopedSnapshot.workflowKey !== 'unscoped') throw new Error('unscoped trace did not retain an explicit unscoped workflow identity');
+
+  const workflowCoordinatorB = createMssrTraceSessionCoordinator(registry.tools);
+  const scopedRouteArgs = {task:'Scoped task B',caller:'chatgpt-web',workflowKey:'workflow-b'};
+  workflowCoordinatorB.prepare('skill_route_plan', scopedRouteArgs, {caller:'chatgpt-web',sessionKey:'session-shared-workflow',project:'bridge-mcp'});
+  workflowCoordinatorB.observe('skill_route_plan', scopedRouteArgs, {traceId:'__test_workflow_trace_b',stage:'start',workflowKey:'workflow-b',activeSkills:[]});
+  const scopedSnapshot = workflowCoordinatorB.snapshot();
+  if (scopedSnapshot.workflowKey !== 'workflow-b') throw new Error('scoped trace workflow was not captured by the coordinator');
+
+  const isolatedUnscoped = resolveMetricWorkflowKey({
+    startsNewRoute:false,
+    traceId:unscopedSnapshot.traceId,
+    traceWorkflowKey:unscopedSnapshot.workflowKey,
+    explicitWorkflowKey:'workflow-b',
+    sessionWorkflowKey:'workflow-b',
+    localWorkflowKey:'workflow-b',
+  });
+  if (isolatedUnscoped !== 'unscoped') throw new Error('an existing unscoped trace inherited another workflow from the shared session');
+  const isolatedScoped = resolveMetricWorkflowKey({
+    startsNewRoute:false,
+    traceId:scopedSnapshot.traceId,
+    traceWorkflowKey:scopedSnapshot.workflowKey,
+    explicitWorkflowKey:'workflow-c',
+    sessionWorkflowKey:'workflow-c',
+  });
+  if (isolatedScoped !== 'workflow-b') throw new Error('an existing scoped trace was reassigned by later session metadata');
+  const newRouteWorkflow = resolveMetricWorkflowKey({startsNewRoute:true,explicitWorkflowKey:'workflow-c',sessionWorkflowKey:'workflow-b'});
+  if (newRouteWorkflow !== 'workflow-c') throw new Error('a new route did not prefer its explicit workflow');
+
+
 
   const identityTraceId = '__test_identity_trace';
   recordMssrRoute({

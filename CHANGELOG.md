@@ -1,3 +1,9 @@
+## 0.6.40 - 2026-07-27
+
+- Make workflow attribution trace-scoped after a trace is resolved, preventing a later workflow in the same Web session from contaminating an existing scoped or `unscoped` trace.
+- Carry `workflowKey` in the in-memory/persisted trace coordinator snapshot and preserve the original workflow across replans.
+- Add regression coverage for two traces sharing one `sessionKey`, including unscoped isolation, scoped immutability and explicit workflow selection for a new route.
+
 ## 0.6.39 - 2026-07-27
 
 - Add a process-unique `runtimeBootId` UUID to HTTP status, metrics and MSSR events so restarts are distinguishable without treating a reusable PID as task identity.

@@ -18,7 +18,7 @@ import { createDefaultToolRegistry } from "./tool-registry.js";
 import type { BridgeToolSchema } from "./tools/types.js";
 import { createMssrTraceSessionCoordinator } from "./mssr-trace-context.js";
 import { recordMssrEvent } from "./mssr-observatory.js";
-import { normalizeWorkflowKey } from "./runtime-identity.js";
+import { normalizeWorkflowKey, resolveMetricWorkflowKey } from "./runtime-identity.js";
 
 export { SERVER_NAME, SERVER_VERSION } from "./config.js";
 export { bridgeRestartStatus } from "./tools/bridge-ops.js";
@@ -548,9 +548,14 @@ export function createBridgeServer() {
       ?? localTaskKey
       ?? (traceSnapshot.taskHash ? `task_${traceSnapshot.taskHash.slice(0, 16)}` : undefined)
       ?? taskKeyFromText(effectivePrepared.args.task);
-    const workflowKey = normalizeWorkflowKey(effectivePrepared.args.workflowKey)
-      ?? (hostProfile.sessionKey ? sessionWorkflowKeys.get(hostProfile.sessionKey) : undefined)
-      ?? localWorkflowKey;
+    const workflowKey = resolveMetricWorkflowKey({
+      startsNewRoute,
+      traceId: traceSnapshot.traceId,
+      traceWorkflowKey: traceSnapshot.workflowKey,
+      explicitWorkflowKey: effectivePrepared.args.workflowKey,
+      sessionWorkflowKey: hostProfile.sessionKey ? sessionWorkflowKeys.get(hostProfile.sessionKey) : undefined,
+      localWorkflowKey,
+    });
     const relatedProject = observedProject && observedProject !== metricProject
       ? observedProject
       : undefined;

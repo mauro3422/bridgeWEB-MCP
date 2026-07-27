@@ -26,3 +26,19 @@ export function requireWorkflowKey(value: unknown): string | undefined {
   }
   return normalized;
 }
+
+export function resolveMetricWorkflowKey(args: {
+  startsNewRoute: boolean;
+  traceId?: string | null;
+  traceWorkflowKey?: string | null;
+  explicitWorkflowKey?: unknown;
+  sessionWorkflowKey?: unknown;
+  localWorkflowKey?: unknown;
+}): string | undefined {
+  if (!args.startsNewRoute && args.traceId) {
+    return normalizeWorkflowKey(args.traceWorkflowKey) ?? "unscoped";
+  }
+  return normalizeWorkflowKey(args.explicitWorkflowKey)
+    ?? normalizeWorkflowKey(args.sessionWorkflowKey)
+    ?? normalizeWorkflowKey(args.localWorkflowKey);
+}
