@@ -40,6 +40,7 @@ export const dashboardMarkup = `
   <nav class="tabs" role="tablist" aria-label="Secciones del dashboard">
     <button class="tab-button" type="button" role="tab" aria-selected="true" aria-controls="panel-summary" id="tab-summary" data-tab="summary">Resumen</button>
     <button class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-activity" id="tab-activity" data-tab="activity">Actividad</button>
+    <button class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-tools" id="tab-tools" data-tab="tools">Tools</button>
     <button class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-mssr" id="tab-mssr" data-tab="mssr">MSSR</button>
     <button class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-errors" id="tab-errors" data-tab="errors">Errores</button>
     <button class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-system" id="tab-system" data-tab="system">Sistema</button>
@@ -140,6 +141,60 @@ export const dashboardMarkup = `
           <table>
             <thead><tr><th>Hora</th><th>Tool</th><th>Duración</th><th>Estado</th><th>Detalle</th></tr></thead>
             <tbody id="activity-recent"><tr><td colspan="5" class="muted">Cargando…</td></tr></tbody>
+          </table>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section id="panel-tools" class="tab-panel" role="tabpanel" aria-labelledby="tab-tools" data-panel="tools" hidden>
+    <div class="grid">
+      <article class="card span-12">
+        <div class="card-header">
+          <div><div class="card-kicker">Registry + evidencia operativa</div><h2 class="card-title">Tool Portfolio</h2><p id="tools-portfolio-window" class="card-description">Cargando catálogo y ventana de evidencia…</p></div>
+          <span id="tools-portfolio-privacy" class="status-pill" data-tone="info"><span class="dot info"></span><span>datos agregados</span></span>
+        </div>
+        <div class="card-body">
+          <div class="metric-grid">
+            <div class="metric-card"><div class="metric-label">Registradas</div><div id="tools-registered" class="metric-value">—</div><div class="metric-note">registry canónico</div></div>
+            <div class="metric-card"><div class="metric-label">Con evidencia</div><div id="tools-observed" class="metric-value">—</div><div class="metric-note">al menos una llamada</div></div>
+            <div class="metric-card"><div class="metric-label">Sin evidencia</div><div id="tools-no-evidence" class="metric-value">—</div><div class="metric-note">requieren smoke test antes de decidir</div></div>
+            <div id="tools-review-card" class="metric-card"><div class="metric-label">Para revisar</div><div id="tools-review" class="metric-value">—</div><div class="metric-note">sin contar mantener, proteger o falta de muestra</div></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="card span-12">
+        <div class="card-header">
+          <div><div class="card-kicker">Triggers y recuperación</div><h2 class="card-title">Recordatorios accionables</h2><p class="card-description">Avisos efímeros de las últimas 24 horas. Sugieren el siguiente preflight; nunca ejecutan cambios automáticamente.</p></div>
+          <span id="tools-notice-count" class="status-pill" data-tone="info"><span class="dot info"></span><span>sin avisos</span></span>
+        </div>
+        <div id="tools-notices" class="notice-list"><div class="muted">Cargando recordatorios…</div></div>
+      </article>
+
+      <article class="card span-12">
+        <div class="card-header">
+          <div><div class="card-kicker">Explorar contratos</div><h2 class="card-title">Filtros del portfolio</h2><p class="card-description">La vista es diagnóstica. No cambia lifecycle, visibilidad ni implementación.</p></div>
+          <button id="tools-reset" class="secondary-button" type="button">Limpiar filtros</button>
+        </div>
+        <div class="portfolio-filters">
+          <label class="portfolio-field"><span>Buscar</span><input id="tools-search" type="search" placeholder="nombre, descripción o recomendación" autocomplete="off" /></label>
+          <label class="portfolio-field"><span>Familia</span><select id="tools-family"><option value="">Todas</option></select></label>
+          <label class="portfolio-field"><span>Rol</span><select id="tools-role"><option value="">Todos</option></select></label>
+          <label class="portfolio-field"><span>Estado</span><select id="tools-status"><option value="">Todos</option></select></label>
+          <label class="portfolio-field"><span>Lifecycle</span><select id="tools-lifecycle"><option value="">Todos</option></select></label>
+        </div>
+      </article>
+
+      <article class="card span-12">
+        <div class="card-header">
+          <div><div class="card-kicker">Contratos y mantenimiento</div><h2 class="card-title">Inventario verificable</h2><p class="card-description">Ordenado primero por necesidad de atención y luego por volumen observado.</p></div>
+          <span id="tools-result-count" class="status-pill" data-tone="info"><span class="dot info"></span><span>cargando</span></span>
+        </div>
+        <div class="table-wrap portfolio-table-wrap">
+          <table class="portfolio-table">
+            <thead><tr><th>Tool</th><th>Contrato</th><th>Evidencia</th><th>Estado</th><th>Recomendación</th></tr></thead>
+            <tbody id="tools-portfolio-body"><tr><td colspan="5" class="muted">Cargando portfolio…</td></tr></tbody>
           </table>
         </div>
       </article>

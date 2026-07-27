@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { BridgeNoticeInput } from "./notices.js";
+import type { BridgeNoticeAction, BridgeNoticeInput } from "./notices.js";
 import { findPersistedMssrTraceCandidates, readPersistedMssrTraceState } from "./mssr-observatory.js";
 
 type JsonRecord = Record<string, unknown>;
@@ -117,8 +117,9 @@ function notice(
   message: string,
   details: JsonRecord,
   dedupeKey: string,
+  actions: BridgeNoticeAction[] = [],
 ): BridgeNoticeInput {
-  return { severity, code, source, message, details, dedupeKey };
+  return { severity, code, source, message, details, actions, dedupeKey };
 }
 
 function clearClosureTimer(traceId: string): void {
@@ -421,6 +422,11 @@ export function createMssrTraceSessionCoordinator(
       `${toolName} encontró ${candidates.length} trazas compatibles; no se propagó ninguna para evitar mezclar agentes o tareas.`,
       { toolName, ...candidateDetails(candidates) },
       `mssr-trace-ambiguous:${toolName}:${candidates.map((state) => state.traceId).sort().join(",")}`,
+      [{
+        label: "Inspeccionar trazas MSSR",
+        toolName: "mssr_observatory_query",
+        instruction: "Identifica una única traza abierta y reintenta con su traceId explícito; no elijas por nombre de skill solamente.",
+      }],
     );
   }
 
@@ -441,6 +447,12 @@ export function createMssrTraceSessionCoordinator(
       `La traza ${state.traceId} llegó a ${stageOrEvent} sin cargar ${missing.length} skill(s) requerida(s).`,
       { traceId: state.traceId, stage: state.stage, boundary: stageOrEvent, missingSkills: missing },
       `mssr-required-skill-not-loaded:${state.traceId}:${stageOrEvent}:${missing.join(",")}`,
+      missing.slice(0, 4).map((name) => ({
+        label: `Cargar ${name}`,
+        toolName: "skill_load",
+        arguments: { name, traceId: state.traceId, stage: state.stage, required: true },
+        instruction: "Carga esta skill sobre la traza activa antes de cruzar el límite de fase.",
+      })),
     )];
   }
 
@@ -569,6 +581,21 @@ export function createMssrTraceSessionCoordinator(
           message,
           { toolName, localTraceId, sharedOpenTraces: openSharedTraces().length },
           `${code}:${toolName}:${localTraceId ?? "none"}`,
+          toolName === "skill_load"
+            ? [{
+                label: "Cargar fase con skill_bootstrap",
+                toolName: "skill_bootstrap",
+                instruction: "Usa la tarea, intent y traceId correctos para cargar automáticamente todas las skills de la fase; si existen varias trazas, inspecciónalas primero.",
+              }, {
+                label: "Inspeccionar trazas MSSR",
+                toolName: "mssr_observatory_query",
+                instruction: "Selecciona una única traza y reintenta skill_load con traceId explícito.",
+              }]
+            : [{
+                label: "Inspeccionar trazas MSSR",
+                toolName: "mssr_observatory_query",
+                instruction: "Recupera una traza abierta inequívoca o abre una ruta nueva antes de reintentar.",
+              }],
         ));
       }
     } else if (state && explicitTrace !== state.traceId && !state.closed) {

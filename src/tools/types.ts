@@ -3,12 +3,25 @@ export type BridgeToolInputSchema = Record<string, unknown>;
 export type BridgeToolRole = "dedicated" | "alias" | "fallback" | "aggregator" | "provider-proxy" | "experimental";
 export type BridgeToolLifecycle = "protected" | "stable" | "experimental" | "deprecated";
 
+export type BridgeToolRecoveryRule = {
+  code: string;
+  instruction: string;
+  toolName?: string;
+};
+
+export type BridgeToolUsageGuidance = {
+  prerequisites?: string[];
+  preflightTools?: string[];
+  recovery?: BridgeToolRecoveryRule[];
+};
+
 export type BridgeToolMetadata = {
   role: BridgeToolRole;
   family: string;
   lifecycle: BridgeToolLifecycle;
   aliasOf?: string;
   preferredTool?: string;
+  usage?: BridgeToolUsageGuidance;
 };
 
 export type BridgeToolSchema = {

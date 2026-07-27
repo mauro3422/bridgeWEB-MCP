@@ -2,6 +2,9 @@ export const dashboardScript = `
 const numberFormat = new Intl.NumberFormat('es-AR');
 const decimalFormat = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 });
 let refreshing = false;
+let toolAuditData = null;
+let toolAuditFetchedAt = 0;
+const TOOL_AUDIT_REFRESH_MS = 30000;
 
 const byId = (id) => document.getElementById(id);
 const num = (value) => numberFormat.format(Number(value || 0));
@@ -356,6 +359,161 @@ function renderMssrAgentProfiles(inputRows) {
   }
 }
 
+function auditStatusLabel(status) {
+  return ({
+    protect: 'proteger',
+    maintain: 'mantener',
+    clarify: 'aclarar alias',
+    'no-evidence': 'sin evidencia',
+    'fix-ux-schema': 'mejorar schema/UX',
+    'prefer-dedicated': 'preferir dedicada',
+    'deprecation-candidate': 'revisar deprecación',
+    repair: 'reparar'
+  })[status] || status || '—';
+}
+
+function auditTone(status) {
+  if (status === 'repair' || status === 'fix-ux-schema') return 'bad';
+  if (status === 'prefer-dedicated' || status === 'deprecation-candidate' || status === 'clarify') return 'warn';
+  if (status === 'no-evidence') return 'info';
+  return 'ok';
+}
+
+function portfolioBadge(text, tone) {
+  return '<span class="portfolio-badge" data-tone="' + esc(tone || 'info') + '">' + esc(text) + '</span>';
+}
+
+function setPortfolioSelectOptions(id, values, formatter) {
+  const select = byId(id);
+  if (!select) return;
+  const current = select.value;
+  const options = [...new Set(values.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b)));
+  select.innerHTML = '<option value="">Todos</option>' + options.map((value) => '<option value="' + esc(value) + '">' + esc(formatter ? formatter(value) : value) + '</option>').join('');
+  if (options.includes(current)) select.value = current;
+}
+
+function renderToolPortfolioRows() {
+  const target = byId('tools-portfolio-body');
+  if (!target) return;
+  const source = toolAuditData && Array.isArray(toolAuditData.items) ? toolAuditData.items : [];
+  const query = String(byId('tools-search')?.value || '').trim().toLowerCase();
+  const family = String(byId('tools-family')?.value || '');
+  const role = String(byId('tools-role')?.value || '');
+  const status = String(byId('tools-status')?.value || '');
+  const lifecycle = String(byId('tools-lifecycle')?.value || '');
+  const rows = source.filter((item) => {
+    const metadata = item.metadata || {};
+    if (family && metadata.family !== family) return false;
+    if (role && metadata.role !== role) return false;
+    if (status && item.status !== status) return false;
+    if (lifecycle && metadata.lifecycle !== lifecycle) return false;
+    if (!query) return true;
+    const haystack = [item.tool, item.description, item.recommendation, item.reason, metadata.family, metadata.role, metadata.aliasOf, metadata.preferredTool].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(query);
+  });
+
+  setPill('tools-result-count', rows.length ? 'info' : 'warn', num(rows.length) + ' de ' + num(source.length));
+  if (!rows.length) {
+    target.innerHTML = '<tr><td colspan="5" class="muted">Ninguna tool coincide con los filtros actuales.</td></tr>';
+    return;
+  }
+
+  target.innerHTML = rows.map((item) => {
+    const metadata = item.metadata || {};
+    const evidence = item.evidence || {};
+    const alias = metadata.aliasOf ? '<div class="portfolio-subline">alias de <code>' + esc(metadata.aliasOf) + '</code></div>' : '';
+    const preferred = metadata.preferredTool && metadata.preferredTool !== metadata.aliasOf ? '<div class="portfolio-subline">preferida: <code>' + esc(metadata.preferredTool) + '</code></div>' : '';
+    const contractBadges = [
+      portfolioBadge(metadata.family || 'sin familia', 'info'),
+      portfolioBadge(metadata.role || 'dedicated', metadata.role === 'fallback' ? 'warn' : metadata.role === 'alias' ? 'info' : 'ok'),
+      portfolioBadge(metadata.lifecycle || 'stable', metadata.lifecycle === 'protected' ? 'ok' : metadata.lifecycle === 'deprecated' ? 'bad' : 'info'),
+      portfolioBadge(item.risk || 'neutral', item.risk === 'destructive' ? 'warn' : item.risk === 'read-only' ? 'ok' : 'info')
+    ].join('');
+    const errorCategories = (evidence.errorCategories || []).map((entry) => entry.name + ' ' + num(entry.count)).join(' · ');
+    const duration = evidence.avgDurationMs === null || evidence.avgDurationMs === undefined ? '—' : ms(evidence.avgDurationMs);
+    const lastEvidence = evidence.lastSuccessAt
+      ? 'último ok ' + dateTime(evidence.lastSuccessAt)
+      : evidence.lastErrorAt
+        ? 'último error ' + dateTime(evidence.lastErrorAt)
+        : 'sin ejecución observada';
+    return '<tr>' +
+      '<td class="portfolio-tool"><code title="' + esc(item.tool) + '">' + esc(item.tool) + '</code><div class="portfolio-description">' + esc(item.description || '') + '</div>' + alias + preferred + '</td>' +
+      '<td><div class="portfolio-badges">' + contractBadges + '</div></td>' +
+      '<td><strong>' + num(evidence.calls) + ' llamadas</strong><div class="portfolio-subline">' + pct(evidence.successRate) + ' éxito · ' + num(evidence.errorCalls) + ' errores · avg ' + esc(duration) + '</div><div class="portfolio-subline">' + esc(lastEvidence) + ' · ' + num(evidence.uniqueSessions) + ' sesiones · ' + num(evidence.uniqueProjects) + ' proyectos</div>' + (errorCategories ? '<div class="portfolio-errors">' + esc(errorCategories) + '</div>' : '') + '</td>' +
+      '<td>' + portfolioBadge(auditStatusLabel(item.status), auditTone(item.status)) + '<div class="portfolio-subline">confianza ' + esc(item.confidence || '—') + '</div></td>' +
+      '<td><div class="portfolio-recommendation">' + esc(item.recommendation || '') + '</div><div class="portfolio-reason">' + esc(item.reason || '') + '</div></td>' +
+    '</tr>';
+  }).join('');
+}
+
+function updateToolNotices(payload) {
+  const target = byId('tools-notices');
+  if (!target) return;
+  const items = payload && Array.isArray(payload.items) ? payload.items : [];
+  setPill('tools-notice-count', items.some((item) => item.severity === 'error') ? 'bad' : items.length ? 'warn' : 'ok', items.length ? num(items.length) + ' recientes' : 'sin avisos');
+  if (!items.length) {
+    target.innerHTML = '<div class="notice-empty">No hay recordatorios recientes. Los avisos entregados al agente aparecerán aquí durante 24 horas.</div>';
+    return;
+  }
+  target.innerHTML = items.slice(0, 12).map((item) => {
+    const actions = Array.isArray(item.actions) ? item.actions : [];
+    const actionMarkup = actions.map((action) => '<div class="notice-action"><strong>' + esc(action.label || action.toolName || 'Siguiente paso') + '</strong>' + (action.toolName ? '<code>' + esc(action.toolName) + '</code>' : '') + (action.instruction ? '<span>' + esc(action.instruction) + '</span>' : '') + '</div>').join('');
+    return '<article class="notice-item" data-tone="' + esc(item.severity || 'info') + '">' +
+      '<div class="notice-item-head"><div><code>' + esc(item.code || 'bridge-notice') + '</code><span>' + esc(item.source || 'bridge') + '</span></div><time>' + esc(dateTime(item.updatedAt)) + '</time></div>' +
+      '<div class="notice-message">' + esc(item.message || '') + '</div>' +
+      (Number(item.occurrences || 0) > 1 ? '<div class="notice-occurrences">' + num(item.occurrences) + ' ocurrencias</div>' : '') +
+      (actionMarkup ? '<div class="notice-actions">' + actionMarkup + '</div>' : '') +
+    '</article>';
+  }).join('');
+}
+
+function updateToolPortfolio(audit) {
+  toolAuditData = audit || { items: [], summary: {} };
+  const summary = toolAuditData.summary || {};
+  const counts = summary.statusCounts || {};
+  const reviewCount = ['repair', 'fix-ux-schema', 'prefer-dedicated', 'deprecation-candidate', 'clarify']
+    .reduce((total, key) => total + Number(counts[key] || 0), 0);
+  setText('tools-registered', num(summary.registeredTools));
+  setText('tools-observed', num(summary.observedTools));
+  setText('tools-no-evidence', num(summary.toolsWithoutEvidence));
+  setText('tools-review', num(reviewCount));
+  const reviewCard = byId('tools-review-card');
+  if (reviewCard) reviewCard.dataset.tone = reviewCount > 0 ? 'warn' : 'ok';
+  setText('tools-portfolio-window', 'Scope ' + (toolAuditData.scope || 'active') + ' · ' + num(toolAuditData.days) + ' días · desde ' + dateTime(toolAuditData.since) + '.');
+  setPill('tools-portfolio-privacy', 'info', toolAuditData.metricsAvailable ? 'agregado y redactado' : 'sin SQLite');
+
+  const items = Array.isArray(toolAuditData.items) ? toolAuditData.items : [];
+  setPortfolioSelectOptions('tools-family', items.map((item) => item.metadata && item.metadata.family));
+  setPortfolioSelectOptions('tools-role', items.map((item) => item.metadata && item.metadata.role));
+  setPortfolioSelectOptions('tools-status', items.map((item) => item.status), auditStatusLabel);
+  setPortfolioSelectOptions('tools-lifecycle', items.map((item) => item.metadata && item.metadata.lifecycle));
+  renderToolPortfolioRows();
+}
+
+function setupToolPortfolioFilters() {
+  const search = byId('tools-search');
+  if (search) search.addEventListener('input', renderToolPortfolioRows);
+  ['tools-family', 'tools-role', 'tools-status', 'tools-lifecycle'].forEach((id) => {
+    const select = byId(id);
+    if (select) select.addEventListener('change', renderToolPortfolioRows);
+  });
+  const reset = byId('tools-reset');
+  if (reset) reset.addEventListener('click', () => {
+    ['tools-search', 'tools-family', 'tools-role', 'tools-status', 'tools-lifecycle'].forEach((id) => {
+      const field = byId(id);
+      if (field) field.value = '';
+    });
+    renderToolPortfolioRows();
+  });
+}
+
+async function getToolAudit() {
+  if (toolAuditData && Date.now() - toolAuditFetchedAt < TOOL_AUDIT_REFRESH_MS) return toolAuditData;
+  const audit = await getJson('/api/tools/audit?view=all&limit=200&days=30&scope=active');
+  toolAuditFetchedAt = Date.now();
+  return audit;
+}
+
 function updateHealth(status, overview, mssr) {
   const bridgeOk = Boolean(status.ready) && !Boolean(status.closing);
   const sqliteOk = Boolean(overview.enabled) && Boolean(overview.sqliteAvailable);
@@ -508,20 +666,24 @@ async function refresh() {
   if (refreshing) return;
   refreshing = true;
   try {
-    const [status, overview, summary, recent, errors, timeline, mssr] = await Promise.all([
+    const [status, overview, summary, recent, errors, timeline, mssr, toolAudit, toolNotices] = await Promise.all([
       getJson('/status'),
       getJson('/api/metrics/overview?scope=active'),
       getJson('/api/metrics/summary?limit=12&scope=active'),
       getJson('/api/metrics/recent?limit=20&scope=active'),
       getJson('/api/metrics/errors?limit=20&scope=active'),
       getJson('/api/metrics/timeline?limit=500&scope=active'),
-      getJson('/api/mssr/summary?days=30&scope=active')
+      getJson('/api/mssr/summary?days=30&scope=active'),
+      getToolAudit(),
+      getJson('/api/notices?limit=20')
     ]);
 
     updateHealth(status, overview, mssr);
     updateSummary(status, overview, summary, recent, timeline, mssr);
     updateActivity(summary, recent, timeline);
     updateMssr(mssr);
+    updateToolPortfolio(toolAudit);
+    updateToolNotices(toolNotices);
     updateSystem(status, overview, mssr);
     renderErrors(errors.errors || []);
     setText('updated-at', 'actualizado ' + new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
@@ -536,6 +698,7 @@ async function refresh() {
   }
 }
 
+setupToolPortfolioFilters();
 setupTabs();
 refresh();
 setInterval(() => { if (!document.hidden) refresh(); }, 5000);

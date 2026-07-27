@@ -8,7 +8,10 @@ import { getBridgeHttpConfig, SERVER_NAME, SERVER_VERSION } from "./config.js";
 import { renderDashboardHtml } from "./dashboard.js";
 import { closeRobloxMcpConnection } from "./integrations/roblox-mcp-client.js";
 import { getMetricsErrors, getMetricsOverview, getMetricsStatus, getMetricsSummary, getMetricsTimeline, getRecentMetrics } from "./metrics.js";
+import { peekBridgeNoticeHistory } from "./notices.js";
 import { queryMssrObservatory } from "./mssr-observatory.js";
+import { TOOL_AUDIT_VIEWS, type ToolAuditView } from "./tool-audit.js";
+import { getDefaultToolAudit } from "./tool-registry.js";
 
 const config = getBridgeHttpConfig();
 const startedAt = new Date();
@@ -427,6 +430,37 @@ async function main() {
         return;
       }
 
+      if (req.method === "GET" && url.pathname === "/api/notices") {
+        const items = peekBridgeNoticeHistory(getLimit(url, 25, 100));
+        sendJson(res, 200, {
+          delivery: "recent-history",
+          count: items.length,
+          items,
+          privacy: {
+            rawArgumentsStored: false,
+            rawPromptsStored: false,
+            evidence: "ephemeral bounded notices with redacted details and suggested recovery actions",
+          },
+        });
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/tools/audit") {
+        const rawView = url.searchParams.get("view") || "all";
+        if (!TOOL_AUDIT_VIEWS.includes(rawView as ToolAuditView)) {
+          throw Object.assign(new Error(`view must be one of: ${TOOL_AUDIT_VIEWS.join(", ")}.`), { statusCode: 400 });
+        }
+        const toolName = url.searchParams.get("toolName")?.trim() || undefined;
+        sendJson(res, 200, getDefaultToolAudit({
+          view: rawView as ToolAuditView,
+          toolName,
+          scope: url.searchParams.get("scope") === "all" ? "all" : "active",
+          days: getDays(url, 30, 365),
+          limit: getLimit(url, 125, 200),
+        }));
+        return;
+      }
+
       if (req.method === "GET" && url.pathname === "/api/metrics/status") {
         sendJson(res, 200, getMetricsStatus());
         return;
@@ -483,19 +517,24 @@ async function main() {
       sendJson(res, 404, {
         error: "not_found",
         requestId,
-        routes: ["GET /healthz", "GET /readyz", "GET /status", "GET /dashboard", "GET /api/metrics/*", `${config.mcpPath} MCP Streamable HTTP`],
+        routes: ["GET /healthz", "GET /readyz", "GET /status", "GET /dashboard", "GET /api/notices", "GET /api/tools/audit", "GET /api/metrics/*", `${config.mcpPath} MCP Streamable HTTP`],
       });
     } catch (error) {
-      log("error", "request failed", {
+      const candidateStatus = error && typeof error === "object" && "statusCode" in error
+        ? Number((error as { statusCode?: unknown }).statusCode)
+        : 500;
+      const statusCode = Number.isInteger(candidateStatus) && candidateStatus >= 400 && candidateStatus <= 599 ? candidateStatus : 500;
+      log(statusCode >= 500 ? "error" : "warn", "request failed", {
         requestId,
         method: req.method,
         url: req.url,
+        statusCode,
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
       });
 
       if (!res.headersSent) {
-        sendJson(res, 500, { requestId, error: error instanceof Error ? error.message : String(error) });
+        sendJson(res, statusCode, { requestId, error: error instanceof Error ? error.message : String(error) });
       } else {
         res.end();
       }

@@ -6,14 +6,16 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { SERVER_NAME, SERVER_VERSION } from "./config.js";
-import { beginToolMetric, finishToolMetric, type BridgeMetricProfile } from "./metrics.js";
+import { beginToolMetric, classifyToolAuditError, finishToolMetric, type BridgeMetricProfile } from "./metrics.js";
 import {
   drainBridgeNotices,
   emitBridgeNotice,
   type BridgeNotice,
+  type BridgeNoticeAction,
   type BridgeNoticeInput,
 } from "./notices.js";
 import { createDefaultToolRegistry } from "./tool-registry.js";
+import type { BridgeToolSchema } from "./tools/types.js";
 import { createMssrTraceSessionCoordinator } from "./mssr-trace-context.js";
 import { recordMssrEvent } from "./mssr-observatory.js";
 
@@ -125,16 +127,57 @@ function toolContent(data: JsonValue | unknown, deliveredNotices: BridgeNotice[]
   return { content };
 }
 
-function emitAutomaticMetricNotices(toolName: string, event: ReturnType<typeof finishToolMetric>, hasImages = false) {
+function toolRecoveryActions(toolName: string, error: string | undefined, toolSchema?: BridgeToolSchema): BridgeNoticeAction[] {
+  const category = classifyToolAuditError(error);
+  const usage = toolSchema?.metadata?.usage;
+  const matching = (usage?.recovery ?? []).filter((rule) => rule.code === category);
+  if (matching.length > 0) {
+    return matching.slice(0, 4).map((rule) => ({
+      label: rule.toolName ? `Usar ${rule.toolName}` : "Aplicar recuperación",
+      ...(rule.toolName ? { toolName: rule.toolName } : {}),
+      instruction: rule.instruction,
+    }));
+  }
+  if (category === "schema-validation") {
+    return [{
+      label: `Inspeccionar schema de ${toolName}`,
+      toolName: "bridge_tool_schema",
+      arguments: { toolName },
+      instruction: "Lee el contrato runtime exacto antes de reconstruir los argumentos; no inventes campos ni enums.",
+    }];
+  }
+  const preflightTool = usage?.preflightTools?.[0];
+  return preflightTool ? [{
+    label: `Usar ${preflightTool}`,
+    toolName: preflightTool,
+    instruction: `Ejecuta el preflight recomendado para ${toolName} y reintenta sólo con un target o estado verificado.`,
+  }] : [];
+}
+
+function emitAutomaticMetricNotices(
+  toolName: string,
+  event: ReturnType<typeof finishToolMetric>,
+  toolSchema?: BridgeToolSchema,
+  hasImages = false,
+) {
   if (noticeInspectionTools.has(toolName)) return;
   if (!event.ok) {
+    const errorCategory = classifyToolAuditError(event.error);
+    const callerContractError = ["schema-validation", "target-not-found", "permission-or-risk-mismatch", "expected-safety-guard"].includes(errorCategory);
     emitBridgeNotice({
-      severity: "error",
+      severity: callerContractError ? "warning" : "error",
       code: "tool-call-failed",
       source: toolName,
       message: event.error || `La herramienta ${toolName} falló.`,
-      details: { durationMs: event.durationMs, inputKeys: event.inputKeys },
-      dedupeKey: `${toolName}:tool-call-failed:${event.error || "unknown"}`,
+      details: {
+        durationMs: event.durationMs,
+        inputKeys: event.inputKeys,
+        errorCategory,
+        prerequisites: toolSchema?.metadata?.usage?.prerequisites ?? [],
+        preflightTools: toolSchema?.metadata?.usage?.preflightTools ?? [],
+      },
+      actions: toolRecoveryActions(toolName, event.error, toolSchema),
+      dedupeKey: `${toolName}:tool-call-failed:${errorCategory}:${event.error || "unknown"}`,
     });
   }
   if (event.durationMs >= slowToolThresholdMs) {
@@ -346,7 +389,7 @@ function emitUnroutedNotice(
     severity: destructive ? "warning" : "info",
     code: "mssr-unrouted-tool-call",
     source: toolName,
-    message: `${toolName} se ejecutó sin una traza MSSR activa. Antes de continuar trabajo sustancial, abre skill_route_plan o skill_bootstrap; la llamada no fue bloqueada.`,
+    message: `${toolName} se ejecutó sin una traza MSSR activa. Antes de continuar trabajo sustancial, abre skill_bootstrap con intent estructurado; la llamada no fue bloqueada.`,
     details: {
       toolName,
       caller: metric.caller,
@@ -355,6 +398,11 @@ function emitUnroutedNotice(
       destructive,
       policy: "observe-and-warn; MSSR does not grant permissions or proxy execution",
     },
+    actions: [{
+      label: "Cargar fase MSSR",
+      toolName: "skill_bootstrap",
+      instruction: "Construye intent estructurado y carga automáticamente todas las skills de la fase antes de continuar la cadena sustancial.",
+    }],
     dedupeKey: `mssr-unrouted-tool-call:${key}`,
   });
 }
@@ -373,8 +421,9 @@ export function createBridgeServer() {
         "When ChatGPT must visually inspect existing local PNG, JPEG, or WebP files, use image_file_attach. It attaches the original image bytes as MCP image content without printing the encoded payload; do not substitute binary_file_read_chunk, temporary HTTP servers, tunnels, or resized previews unless attachment itself is proven unavailable.",
         "When the user asks you to look at, inspect, read, or review the current TabletWhiteboard view, call whiteboard_capture_pc_view so the connected PC creates a fresh viewport PNG at its exact pan and zoom and the image is attached to the result. Use whiteboard_latest_capture only when the user explicitly wants the last saved image without taking a new one.",
         "When the user asks you to write, explain, diagram, annotate, or place an existing image inside TabletWhiteboard, use whiteboard_add_text for structured prose, whiteboard_add_diagram for safe shapes, arrows, polylines and Bezier paths, whiteboard_add_svg only for sanitized SVG markup, and whiteboard_insert_image only for an existing local PNG, JPEG, or WebP. These tools write to ChatGPT's separate locked layer; do not claim an object exists until the tool confirms it.",
-        "Bridge anomaly notices are delivered inside normal tool responses as bridgeNotices and are removed from the pending queue after delivery. Inspect them before continuing a long workflow.",
+        "Bridge anomaly notices are delivered inside normal tool responses as bridgeNotices and are removed from the pending queue after delivery. Their bounded actions are suggested preflights or recovery steps, never authorization. Delivered notices remain visible in the dashboard recent-history view for 24 hours so unresolved triggers are not lost.",
         "Bridge automatically propagates an MSSR trace inside the current MCP session, through a bounded process-shared lease and, after coordinator-memory loss, from persisted SQLite state. Exact anonymized-session or project matches win; when connector metadata rotates across related repositories, Bridge may adopt only the single open trace for the same caller and never uses a skill name to choose between concurrent tasks. Keep explicit traceId for ambiguous, historical or deliberately selected resumes; treat ambiguous trace, mismatch, orphan load, missing required skill, and outcome-without-route notices as control evidence that may require replanning.",
+        "Use skill_route_plan for inspection. When applying a route, follow its nextAction and call skill_bootstrap so all active-phase skills load automatically on the same trace; use individual skill_load only for focused recovery. Before tools that consume runtime ids, follow metadata.usage preflights and never invent sessions, snapshots, uploads, Studios or provider tool names.",
         "Bridge correlates ChatGPT tool calls with the anonymized openai/session metadata when the host provides it. An mssr-unrouted-tool-call notice means an eligible tool ran without a compatible route; continue safely, but bootstrap MSSR before the next substantial chain. Bootstrap and diagnostic tools are excluded from trace-coverage denominators.",
         "For chatgpt-web work, record an MSSR outcome and return a concise user-visible result or concrete blocker when the task ends. Bridge may emit mssr-web-outcome-missing-after-idle after tool activity without an observable outcome; treat it as a lifecycle reminder, not proof that the UI failed to render.",
         "Never claim that a guide, file, image, build, Blender scene, or other side effect exists until a tool result confirms it.",
@@ -508,7 +557,7 @@ export function createBridgeServer() {
         return total + (part.type === "text" ? part.text.length : part.data.length);
       }, 0);
       const event = finishToolMetric(metric, ok, outputChars, error);
-      emitAutomaticMetricNotices(name, event, hasImages);
+      emitAutomaticMetricNotices(name, event, toolSchema, hasImages);
       const delivered = noticeInspectionTools.has(name) ? [] : drainBridgeNotices();
       return toolContent(extracted.payload, delivered);
     };

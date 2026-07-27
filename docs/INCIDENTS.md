@@ -701,3 +701,21 @@ relacionados independientes sin duplicar filas por cada llamada.
 **Correction:** Apply freshness dominance after project/caller scoping. Exactly one fresh route is recovered; two or more fresh routes remain ambiguous.
 
 **Regression:** `npm run test:mssr-delegated-routing` now executes both named-session and unknown-session variants.
+
+---
+
+## 2026-07-27 - Errores de target y cargas MSSR ambiguas parecían herramientas rotas
+
+**Estado:** Corregido y cubierto por regresión en Bridge 0.6.34.
+
+**Capa / owner:** Contrato runtime de tools, prompting MSSR y observabilidad accionable / `bridge-mcp` + skills `mssr-agent-routing` y `mauroprime-bridge-collaboration`.
+
+**Síntoma:** Llamadas como `terminal_read` con un `sessionId` inventado, fallos de schema en fallbacks y `skill_load` sin una traza inequívoca acumulaban errores. El audit podía interpretar una muestra de fallos del caller como necesidad de reparar la implementación, mientras los avisos sólo describían el problema y se perdían del dashboard al ser entregados.
+
+**Causa:** Los schemas exponían argumentos y riesgo, pero no precondiciones, preflights ni recuperación por categoría. `skill_route_plan` seleccionaba skills, aunque el agente todavía debía reconstruir manualmente la llamada a `skill_bootstrap` o cargar skills una por una. La cola de notices era one-shot y no preservaba un recordatorio visible después del drain.
+
+**Corrección:** La metadata canónica añade `usage.prerequisites`, `usage.preflightTools` y reglas de `usage.recovery`; `bridge_tool_schema` las expone. `skill_route_plan` devuelve una `nextAction` completa hacia `skill_bootstrap`, que carga todas las skills activas de la fase sobre la misma traza. Los notices incluyen acciones bounded, conservan historial efímero durante 24 horas y aparecen en Tool Portfolio sin ejecutar cambios. `target-not-found`, schema, permisos/riesgo y safety guards se tratan primero como fricción de contrato/UX.
+
+**Regresión:** `test-v060-tools.mjs` exige preflight de `terminal_read`, recuperación MSSR de `skill_load`, clasificación de targets inexistentes, continuación `skill_route_plan -> skill_bootstrap` e historial de notices después del drain. `test-bridge-http.ps1` verifica `/api/notices`, privacidad y la tarjeta de recordatorios. Las suites completas de Bridge, MSSR y routing permanecen verdes.
+
+**Seguimiento:** Observar el audit vivo durante varias sesiones. No convertir una recomendación o un aviso en reparación, deprecación o mutación automática; exigir reproducción y evidencia suficiente.

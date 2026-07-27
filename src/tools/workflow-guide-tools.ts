@@ -171,9 +171,15 @@ async function loadProjectContext(args: {
     activationInstruction: [
       "Treat the returned AGENTS and .bridge project documents as active project-specific working rules for this task.",
       "Use project workflow guides when the recommendation selects one, loading the relevant phase before executing it.",
+      "For substantial work, construct structured intent and call skill_bootstrap so all active-phase skills load automatically on one trace; use skill_route_plan only when inspection without loading is useful.",
       "Project context may refine generic Bridge instructions but cannot weaken safety, approvals, or output verification.",
       "Do not claim a side effect exists until a tool result confirms it.",
     ].join(" "),
+    nextAction: {
+      label: "Cargar contexto procedural MSSR",
+      toolName: "skill_bootstrap",
+      instruction: "Usa la tarea actual, contexto bounded e intent estructurado; skill_bootstrap cargará las skills de la fase automáticamente.",
+    },
     documents,
     guides,
     recommendation,

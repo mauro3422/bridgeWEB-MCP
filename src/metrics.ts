@@ -407,7 +407,7 @@ export function classifyToolAuditError(value: string | null | undefined): string
   if (/confirmtoolname|classified read-only|not classified read-only|destructive action|risk classification/.test(error)) return "permission-or-risk-mismatch";
   if (/timed? out|timeout|etimedout/.test(error)) return "timeout";
   if (/expected \d+ replacement|expected replacement|patch conflict|context mismatch/.test(error)) return "patch-conflict";
-  if (/unknown modular tool|not found|enoent|target .*missing|does not exist/.test(error)) return "target-not-found";
+  if (/unknown modular tool|unknown (terminal|workspace|upload|snapshot|studio) (session|id|target)|not found|enoent|target .*missing|does not exist/.test(error)) return "target-not-found";
   if (/econnrefused|provider unavailable|connection closed|disconnected|tools\/list returned zero|no last-known tool cache/.test(error)) return "provider-unavailable";
   if (/refusing|not allowed|outside allowed|denied path|escaped|requires exact|truncated snapshot rollback/.test(error)) return "expected-safety-guard";
   if (/internal|sqlite|assertion|unexpected/.test(error)) return "runtime-internal";

@@ -91,6 +91,7 @@ function compactSkillRoute<T extends Record<string, unknown>>(route: T): Record<
     coverage: route.coverage,
     selectionPolicy: route.selectionPolicy,
     executionGuidance: route.executionGuidance,
+    nextAction: route.nextAction,
     warnings: route.warnings,
     activationInstruction: route.activationInstruction,
     sourceHealth: route.sourceHealth,
@@ -754,7 +755,31 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const profile = agentProfile(args);
       const observedRoute = { ...route, agentProfile: profile };
       recordMssrRoute({ traceId, action: "plan", task, route: observedRoute as unknown as Record<string, unknown> });
-      const response = { ...observedRoute, traceId, sourceHealth: discovered.sourceHealth, warnings: [...discovered.warnings, ...route.warnings] };
+      const response = {
+        ...observedRoute,
+        traceId,
+        sourceHealth: discovered.sourceHealth,
+        warnings: [...discovered.warnings, ...route.warnings],
+        nextAction: {
+          label: "Cargar automáticamente las skills de la fase",
+          toolName: "skill_bootstrap",
+          arguments: {
+            task,
+            context: args.context ?? "",
+            intent: args.intent,
+            caller: args.caller ?? "other",
+            model: args.model,
+            reasoningEffort: args.reasoningEffort ?? "unknown",
+            stage: route.stage,
+            completedPhases: args.completedPhases ?? [],
+            sources: args.sources,
+            maxSkills: args.maxSkills ?? 8,
+            traceId,
+            responseMode,
+          },
+          instruction: "Usa esta acción cuando necesites aplicar la ruta: skill_bootstrap carga todas las skills de la fase sobre la misma traza. No hagas skill_load manual uno por uno salvo recuperación focal.",
+        },
+      };
       return responseMode === "debug" ? { ...response, responseMode } : compactSkillRoute(response);
     },
     skill_bootstrap: async (args) => {

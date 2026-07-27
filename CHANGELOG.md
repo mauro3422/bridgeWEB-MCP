@@ -1,3 +1,16 @@
+## 0.6.34 - 2026-07-27
+
+- Add a read-only Tools / Tool Portfolio dashboard tab backed by the canonical registry metadata and privacy-safe aggregate tool audit.
+- Add `/api/tools/audit` with bounded view, scope, days and limit parameters, including HTTP 400 for invalid views.
+- Add searchable family, role, status and lifecycle filters plus evidence, confidence and recommendation details for all 125 tools.
+- Reuse the same registered-tool audit projection across MCP and HTTP surfaces and add dashboard/endpoint regression coverage.
+- Add per-tool usage metadata with prerequisites, preflight tools and recovery rules exposed through `bridge_tool_schema`.
+- Add actionable notice suggestions, a bounded 24-hour recent-history endpoint and dashboard reminders without automatic execution.
+- Make `skill_route_plan` return a complete `skill_bootstrap` next action so current-phase skills can be loaded automatically on one trace.
+- Reclassify missing runtime targets as caller/context UX friction before treating a tool implementation as broken.
+
+
+
 ## 0.6.33 - 2026-07-27
 
 - Add canonical tool metadata for role, family, lifecycle, aliases, and preferred tools across the runtime registry.

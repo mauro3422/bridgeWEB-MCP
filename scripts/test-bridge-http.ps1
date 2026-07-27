@@ -65,6 +65,40 @@ Invoke-Check "MSSR dashboard" {
   if ([int]$all.eventCount -lt [int]$mssr.eventCount) { throw "All-history scope cannot contain fewer events than active scope" }
   Write-Host "  OK epoch=$($mssr.observability.activeEpoch) routes=$($mssr.benchmark.routeEvents) outcomes=$($mssr.benchmark.attributedOutcomeTraces) allEvents=$($all.eventCount)"
 }
+Invoke-Check "Tools portfolio dashboard" {
+  $dashboard = Invoke-WebRequest -UseBasicParsing "$BaseUrl/dashboard"
+  if ($dashboard.Content -notmatch 'id="panel-tools"' -or $dashboard.Content -notmatch 'id="tools-portfolio-body"' -or $dashboard.Content -notmatch '/api/tools/audit' -or $dashboard.Content -notmatch 'Tool Portfolio') {
+    throw "Dashboard does not expose the tools portfolio contract"
+  }
+
+  $audit = Invoke-RestMethod "$BaseUrl/api/tools/audit?view=all&limit=200&days=30&scope=active"
+  if ([int]$audit.summary.registeredTools -ne 125 -or [int]$audit.items.Count -ne 125) {
+    throw "Tools audit endpoint did not return the full 125-tool registry"
+  }
+  if ($null -eq $audit.items[0].metadata.family -or $null -eq $audit.items[0].status -or $null -eq $audit.items[0].evidence.calls) {
+    throw "Tools audit endpoint is missing metadata, recommendation status, or evidence"
+  }
+  if ($audit.privacy.rawArgumentsStored -ne $false -or $audit.privacy.rawPromptsStored -ne $false) {
+    throw "Tools audit endpoint violated the privacy contract"
+  }
+
+  $invalidStatus = 0
+  try {
+    Invoke-WebRequest -UseBasicParsing "$BaseUrl/api/tools/audit?view=invalid" -ErrorAction Stop | Out-Null
+  } catch {
+    $invalidStatus = [int]$_.Exception.Response.StatusCode
+  }
+  if ($invalidStatus -ne 400) { throw "Invalid tools audit view must return HTTP 400, got $invalidStatus" }
+  if ($dashboard.Content -notmatch 'id="tools-notices"' -or $dashboard.Content -notmatch '/api/notices') {
+    throw "Dashboard does not expose actionable notice reminders"
+  }
+  $notices = Invoke-RestMethod "$BaseUrl/api/notices?limit=20"
+  if ($notices.delivery -ne "recent-history" -or $notices.privacy.rawArgumentsStored -ne $false -or $notices.privacy.rawPromptsStored -ne $false) {
+    throw "Notice history endpoint violated its delivery or privacy contract"
+  }
+
+  Write-Host "  OK registered=$($audit.summary.registeredTools) observed=$($audit.summary.observedTools) noEvidence=$($audit.summary.toolsWithoutEvidence)"
+}
 
 Invoke-Check "active Bridge metrics" {
   $activeMetrics = Invoke-RestMethod "$BaseUrl/api/metrics/overview?scope=active"

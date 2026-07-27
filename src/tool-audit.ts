@@ -105,11 +105,14 @@ function recommendationFor(tool: BridgeToolSchema, metric: ToolAuditMetricRow | 
     };
   }
 
-  if (errorRate >= 20 && topError?.name === "schema-validation") {
+  if (errorRate >= 20 && ["schema-validation", "target-not-found", "permission-or-risk-mismatch", "expected-safety-guard"].includes(topError?.name ?? "")) {
+    const category = topError?.name ?? "caller-contract";
     return {
       status: "fix-ux-schema",
-      recommendation: "Improve the tool description, schema ergonomics, or schema-first guidance before changing implementation.",
-      reason: `${errorRate}% of calls failed and schema validation is the dominant error category.`,
+      recommendation: category === "target-not-found"
+        ? "Improve target discovery, lifecycle visibility, or preflight validation before changing implementation."
+        : "Improve the tool description, schema ergonomics, or schema-first guidance before changing implementation.",
+      reason: `${errorRate}% of calls failed and ${category} is the dominant caller-contract error category.`,
       confidence,
     };
   }

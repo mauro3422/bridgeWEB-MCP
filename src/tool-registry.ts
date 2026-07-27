@@ -22,9 +22,9 @@ import { skillCatalogToolModule } from "./tools/skill-catalog-tools.js";
 import { workspaceToolModule } from "./tools/workspace-tools.js";
 import { workflowGuideToolModule } from "./tools/workflow-guide-tools.js";
 import { whiteboardToolModule } from "./tools/whiteboard-tools.js";
-import { buildToolAudit, TOOL_AUDIT_VIEWS, type ToolAuditView } from "./tool-audit.js";
+import { buildToolAudit, TOOL_AUDIT_VIEWS, type ToolAuditArgs, type ToolAuditView } from "./tool-audit.js";
 import { getToolAuditMetrics, type BridgeMetricsScope } from "./metrics.js";
-import type { BridgeToolMetadata, BridgeToolModule, BridgeToolRegistry, BridgeToolSchema } from "./tools/types.js";
+import type { BridgeToolMetadata, BridgeToolModule, BridgeToolRegistry, BridgeToolSchema, BridgeToolUsageGuidance } from "./tools/types.js";
 
 const readOnlyToolNames = new Set([
   "system_info", "list_dir", "read_text_file", "list_files_smart", "read_file_lines", "read_many_files", "search_files",
@@ -70,6 +70,100 @@ const protectedToolNames = new Set([
   "skill_route_plan", "skill_bootstrap", "skill_load", "mssr_trace_record", "bridge_verify_all", "roblox_place_save",
 ]);
 
+const toolUsageGuidance = new Map<string, BridgeToolUsageGuidance>([
+  ["project_context_load", {
+    prerequisites: ["Use once at the start of substantial work in a known repository."],
+    preflightTools: ["skill_bootstrap"],
+    recovery: [{ code: "mssr-unrouted-tool-call", toolName: "skill_bootstrap", instruction: "Bootstrap the current MSSR phase with structured intent so required skills are loaded automatically." }],
+  }],
+  ["skill_route_plan", {
+    prerequisites: ["Provide structured intent with at least one non-nominal signal when friction or uncertainty exists."],
+    preflightTools: ["skill_bootstrap"],
+    recovery: [{ code: "mssr-required-skill-not-loaded", toolName: "skill_bootstrap", instruction: "Call skill_bootstrap with the returned traceId to load the full current phase automatically." }],
+  }],
+  ["skill_load", {
+    prerequisites: ["Pass the traceId returned by skill_route_plan or skill_bootstrap whenever one exists."],
+    preflightTools: ["skill_bootstrap"],
+    recovery: [
+      { code: "mssr-orphan-skill-load", toolName: "skill_bootstrap", instruction: "Bootstrap the active phase instead of loading an unscoped skill, or retry skill_load with an explicit traceId." },
+      { code: "mssr-trace-ambiguous", toolName: "mssr_observatory_query", instruction: "Inspect open traces and retry with one explicit traceId; never guess between concurrent tasks." },
+    ],
+  }],
+  ["terminal_read", {
+    prerequisites: ["Use a sessionId returned by terminal_start or terminal_list."],
+    preflightTools: ["terminal_list"],
+    recovery: [{ code: "target-not-found", toolName: "terminal_list", instruction: "List active terminal sessions and retry with a returned sessionId." }],
+  }],
+  ["terminal_write", {
+    prerequisites: ["Use a live sessionId returned by terminal_start or terminal_list."],
+    preflightTools: ["terminal_list"],
+    recovery: [{ code: "target-not-found", toolName: "terminal_list", instruction: "List active terminal sessions before sending input." }],
+  }],
+  ["terminal_stop", {
+    prerequisites: ["Use a live sessionId returned by terminal_start or terminal_list."],
+    preflightTools: ["terminal_list"],
+    recovery: [{ code: "target-not-found", toolName: "terminal_list", instruction: "List active terminal sessions; an expired session does not mean terminal_stop is broken." }],
+  }],
+  ["workspace_diff", {
+    prerequisites: ["Use a snapshotId returned by workspace_snapshot or workspace_snapshot_list."],
+    preflightTools: ["workspace_snapshot_list"],
+    recovery: [{ code: "target-not-found", toolName: "workspace_snapshot_list", instruction: "List snapshots and retry with an existing snapshotId." }],
+  }],
+  ["workspace_rollback", {
+    prerequisites: ["Use an exact snapshotId returned by workspace_snapshot or workspace_snapshot_list and repeat it in confirmSnapshotId."],
+    preflightTools: ["workspace_snapshot_list", "workspace_diff"],
+    recovery: [{ code: "target-not-found", toolName: "workspace_snapshot_list", instruction: "Resolve an existing snapshot before rollback; do not invent IDs." }],
+  }],
+  ["binary_upload_append", {
+    prerequisites: ["Use an uploadId returned by binary_upload_begin."],
+    preflightTools: ["binary_upload_status"],
+    recovery: [{ code: "target-not-found", toolName: "binary_upload_status", instruction: "Inspect the resumable upload state and retry with its uploadId." }],
+  }],
+  ["binary_upload_finish", {
+    prerequisites: ["Use an uploadId returned by binary_upload_begin and verify all expected chunks are present."],
+    preflightTools: ["binary_upload_status"],
+    recovery: [{ code: "target-not-found", toolName: "binary_upload_status", instruction: "Inspect the upload state before finishing it." }],
+  }],
+  ["bridge_tool_query", {
+    prerequisites: ["Use only when the dedicated connector schema is absent."],
+    preflightTools: ["bridge_tool_schema"],
+    recovery: [{ code: "schema-validation", toolName: "bridge_tool_schema", instruction: "Read the exact runtime schema and rebuild arguments without inventing fields or enums." }],
+  }],
+  ["bridge_tool_action", {
+    prerequisites: ["Use only when the dedicated connector schema is absent and confirmToolName exactly matches toolName."],
+    preflightTools: ["bridge_tool_schema"],
+    recovery: [
+      { code: "schema-validation", toolName: "bridge_tool_schema", instruction: "Read the exact runtime schema before retrying the delegated action." },
+      { code: "permission-or-risk-mismatch", toolName: "bridge_tool_schema", instruction: "Inspect the target annotations and choose bridge_tool_query for read-only tools or bridge_tool_action for mutable tools." },
+    ],
+  }],
+  ["roblox_mcp_query", {
+    prerequisites: ["Inspect the live Roblox tool schema and active Studio before invoking a remote query."],
+    preflightTools: ["roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list"],
+    recovery: [{ code: "provider-unavailable", toolName: "roblox_mcp_status", instruction: "Refresh Roblox MCP health and live Studio state before retrying." }],
+  }],
+  ["roblox_mcp_action", {
+    prerequisites: ["Inspect the live schema, verify the active Studio and repeat the exact remote tool name in confirmToolName."],
+    preflightTools: ["roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list"],
+    recovery: [{ code: "provider-unavailable", toolName: "roblox_mcp_status", instruction: "Recover the live Roblox MCP connection and re-inspect the schema before mutating." }],
+  }],
+  ["blender_execute_code", {
+    prerequisites: ["Verify the interactive Blender bridge is connected before executing code."],
+    preflightTools: ["blender_status", "blender_scene_info"],
+    recovery: [{ code: "provider-unavailable", toolName: "blender_status", instruction: "Check or restore the Blender bridge before retrying." }],
+  }],
+  ["git_push_current_branch", {
+    prerequisites: ["Verify the working tree, commit content, tracking branch and remote before push."],
+    preflightTools: ["git_status", "git_show_commit", "git_compare_branches"],
+    recovery: [{ code: "target-not-found", toolName: "git_status", instruction: "Verify repository root, branch and remote configuration before retrying push." }],
+  }],
+]);
+
+for (const [alias, canonical] of aliasTargets) {
+  const canonicalUsage = toolUsageGuidance.get(canonical);
+  if (canonicalUsage && !toolUsageGuidance.has(alias)) toolUsageGuidance.set(alias, canonicalUsage);
+}
+
 function toolMetadata(tool: BridgeToolSchema, moduleName: string): BridgeToolMetadata {
   const aliasOf = aliasTargets.get(tool.name);
   const role = aliasOf
@@ -86,6 +180,7 @@ function toolMetadata(tool: BridgeToolSchema, moduleName: string): BridgeToolMet
     family: moduleName,
     lifecycle: protectedToolNames.has(tool.name) ? "protected" : "stable",
     ...(aliasOf ? { aliasOf, preferredTool: aliasOf } : {}),
+    ...(toolUsageGuidance.has(tool.name) ? { usage: toolUsageGuidance.get(tool.name) } : {}),
     ...(tool.metadata ?? {}),
   };
 }
@@ -233,11 +328,13 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
       : typeof args.toolName === "string" && args.toolName.trim()
         ? args.toolName.trim()
         : (() => { throw new Error("toolName must be a non-empty string when provided."); })();
-    return buildToolAudit(
-      tools,
-      getToolAuditMetrics(days, rawScope as BridgeMetricsScope),
-      { view: rawView as ToolAuditView, toolName, limit },
-    );
+    return buildRegisteredToolAudit(tools, {
+      view: rawView as ToolAuditView,
+      toolName,
+      limit,
+      days,
+      scope: rawScope as BridgeMetricsScope,
+    });
   });
   handlers.set("bridge_tool_query", async (args) => {
     const name = delegatedToolName(args.toolName);
@@ -291,31 +388,57 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
   };
 }
 
+const defaultToolModules: readonly BridgeToolModule[] = [
+  coreToolModule,
+  fileNavigationToolModule,
+  fileWritingToolModule,
+  workflowGuideToolModule,
+  skillCatalogToolModule,
+  robloxStudioToolModule,
+  robloxPhotoCaptureToolModule,
+  binaryFileToolModule,
+  imageToolModule,
+  processToolModule,
+  gitToolModule,
+  projectToolModule,
+  workspaceToolModule,
+  cacheToolModule,
+  bridgeOpsToolModule,
+  metricsToolModule,
+  mssrObservatoryToolModule,
+  noticeToolModule,
+  codeIntelligenceToolModule,
+  codeGraphToolModule,
+  pythonToolModule,
+  blenderToolModule,
+  whiteboardToolModule,
+  bridgeWorkflowToolModule,
+];
+
+let defaultToolCatalog: readonly BridgeToolSchema[] | undefined;
+
+export type RegisteredToolAuditArgs = ToolAuditArgs & {
+  days: number;
+  scope: BridgeMetricsScope;
+};
+
+export function buildRegisteredToolAudit(tools: readonly BridgeToolSchema[], args: RegisteredToolAuditArgs) {
+  return buildToolAudit(tools, getToolAuditMetrics(args.days, args.scope), {
+    view: args.view,
+    toolName: args.toolName,
+    limit: args.limit,
+  });
+}
+
+export function getDefaultToolCatalog(): readonly BridgeToolSchema[] {
+  defaultToolCatalog ??= createToolRegistry(defaultToolModules).tools;
+  return defaultToolCatalog;
+}
+
+export function getDefaultToolAudit(args: RegisteredToolAuditArgs) {
+  return buildRegisteredToolAudit(getDefaultToolCatalog(), args);
+}
+
 export function createDefaultToolRegistry(): BridgeToolRegistry {
-  return createToolRegistry([
-    coreToolModule,
-    fileNavigationToolModule,
-    fileWritingToolModule,
-    workflowGuideToolModule,
-    skillCatalogToolModule,
-    robloxStudioToolModule,
-    robloxPhotoCaptureToolModule,
-    binaryFileToolModule,
-    imageToolModule,
-    processToolModule,
-    gitToolModule,
-    projectToolModule,
-    workspaceToolModule,
-    cacheToolModule,
-    bridgeOpsToolModule,
-    metricsToolModule,
-    mssrObservatoryToolModule,
-    noticeToolModule,
-    codeIntelligenceToolModule,
-    codeGraphToolModule,
-    pythonToolModule,
-    blenderToolModule,
-    whiteboardToolModule,
-    bridgeWorkflowToolModule,
-  ]);
+  return createToolRegistry(defaultToolModules);
 }
