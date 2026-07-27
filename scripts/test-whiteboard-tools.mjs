@@ -188,6 +188,11 @@ try {
   const delegated = await registry.call("bridge_tool_query", { toolName: "whiteboard_latest_capture", arguments: { boardId: "default" } });
   if (!Array.isArray(delegated.__bridgeImages) || delegated.__bridgeImages.length !== 1) throw new Error("bridge_tool_query did not hoist latest image");
   if (delegated.result?.__bridgeImages !== undefined || delegated.result?.capture?.id !== capture.id) throw new Error("bridge_tool_query exposed internal image data");
+  const schemaInfo = await registry.call("bridge_tool_schema", { toolName: "whiteboard_latest_capture" });
+  if (schemaInfo.tool?.name !== "whiteboard_latest_capture") throw new Error("bridge_tool_schema returned the wrong tool");
+  if (!schemaInfo.tool?.inputSchema?.properties?.boardId) throw new Error("bridge_tool_schema omitted the delegated input schema");
+  if (schemaInfo.tool?.annotations?.readOnlyHint !== true) throw new Error("bridge_tool_schema omitted safety annotations");
+
 
   let freshProxyRejected = false;
   try {

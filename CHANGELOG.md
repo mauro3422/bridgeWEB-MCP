@@ -1,3 +1,9 @@
+## 0.6.31 - 2026-07-26
+
+- Add `bridge_tool_schema`, a read-only runtime contract inspector for tools whose dedicated connector schema is missing.
+- Return the exact tool description, input schema, and safety annotations before delegated query/action calls.
+- Extend registry and whiteboard regressions and regenerate `TOOLS.md` for 124 runtime tools.
+
 ## 0.6.30 - 2026-07-26
 
 - Recover the uniquely fresh delegated MSSR route when ChatGPT Web provides no stable session metadata, while preserving ambiguity when multiple fresh routes remain compatible.
@@ -8,13 +14,13 @@
 ## Unreleased
 
 - Extend persisted MSSR recovery to generic eligible tools and metric attribution after a Bridge restart; `resolveMetricContext` now uses the same exact-session/project then unique-caller fallback as trace-aware tools.
-- Added a live-equivalent regression for `route → coordinator reset → generic search_files from a rotated session/project`, requiring the original trace in metrics and no `mssr-unrouted-tool-call`.
+- Added a live-equivalent regression for `route â†’ coordinator reset â†’ generic search_files from a rotated session/project`, requiring the original trace in metrics and no `mssr-unrouted-tool-call`.
 - Preserve MSSR continuity when the OpenAI connector rotates its anonymized session id or the same task moves across related repositories: exact session/project matches still win, otherwise Bridge adopts only the single open trace for that caller and refuses to use a skill name to disambiguate concurrent tasks.
 - Added regressions for rotated-session metric attribution, persisted `stage=close` recovery with a different session id, and two-open-trace ambiguity.
 - Recover a unique open MSSR trace from persisted SQLite state when a stateless or restarted Web call loses the in-memory coordinator, scoped by anonymized session or project/caller and selected skill; ambiguous candidates remain unpropagated.
 - Preserve nested `traceId` and agent profile metadata emitted by tools delegated through `bridge_tool_query` / `bridge_tool_action`, allowing later dedicated calls to resume the same trace.
 - Make `mssr-web-outcome-missing-after-idle` execution-aware: routing, context loading, catalog/audit queries and `skill_load` no longer start the closure timer, while substantive traced work and non-outcome checkpoints still do.
-- Added regressions for `dispatch route(close) → coordinator-memory loss → dedicated skill_load/checkpoint` and for route/load-only reminder suppression.
+- Added regressions for `dispatch route(close) â†’ coordinator-memory loss â†’ dedicated skill_load/checkpoint` and for route/load-only reminder suppression.
 - Added privacy-safe `task_key` attribution and explicit primary/related project roles to general Bridge metrics, so concurrent ChatGPT Web tasks no longer collapse into session-only rows or let auxiliary repositories replace the primary project.
 - Updated the dashboard to group one row per observable task/session/primary project and aggregate auxiliary repositories, with concurrent Web regression coverage.
 - Clarified `skill_load` as guide delivery rather than proof of application, exposed each recent operation subject in the compact dashboard, and documented bounded MSSR resume after Codex context compaction.
@@ -22,8 +28,8 @@
 - Store an allow-listed privacy-safe operation subject for recent metrics, so `skill_load` rows identify the loaded skill and context/routing/checkpoint rows expose their bounded target without retaining prompts.
 - Added `trace-contract-v1` propagation across direct tools and generic dispatch wrappers. Bridge keeps local session continuity and a bounded process-shared lease for stateless calls, selects only a unique compatible trace, and emits `mssr-trace-ambiguous` instead of mixing concurrent agents or tasks.
 - Added logical MSSR observability epochs: the dashboard and `scope=active` begin from a clean persisted baseline, while `scope=all` preserves legacy telemetry for comparison.
-- Added an end-to-end in-memory MCP regression proving route → required loads → replan → verification → persistence → outcome continuity, plus negative notice cases.
-- Expanded the MSSR dashboard with route→load continuity, orphan loads, active epoch, and baseline visibility.
+- Added an end-to-end in-memory MCP regression proving route â†’ required loads â†’ replan â†’ verification â†’ persistence â†’ outcome continuity, plus negative notice cases.
+- Expanded the MSSR dashboard with routeâ†’load continuity, orphan loads, active epoch, and baseline visibility.
 - Isolated the Bridge skill-routing integration suite in temporary telemetry storage so verification cannot pollute the production observability epoch.
 
 ## 0.6.14 - 2026-07-25
@@ -50,10 +56,10 @@
 ## 0.6.12 - 2026-07-25
 
 - Added `whiteboard_add_text`, `whiteboard_add_svg`, `whiteboard_add_diagram`, and `whiteboard_insert_image` for writing into ChatGPT's separate TabletWhiteboard layer.
-- Structured diagrams support rectangles, ellipses, lines, arrows, polylines, polygons, labels, and quadratic/cubic Bézier SVG paths.
+- Structured diagrams support rectangles, ellipses, lines, arrows, polylines, polygons, labels, and quadratic/cubic BÃ©zier SVG paths.
 - Existing local PNG, JPEG, and WebP files can be inserted after Bridge path-policy, size, MIME, and signature validation.
 - SVG writes are sanitized by TabletWhiteboard and reject scripts, event handlers, links, embedded resources, CSS, and unsafe SVG elements.
-- Expanded the whiteboard regression suite to verify seven tools, request payloads, Bézier preservation, image bytes, MIME, placement, and SHA-256.
+- Expanded the whiteboard regression suite to verify seven tools, request payloads, BÃ©zier preservation, image bytes, MIME, placement, and SHA-256.
 ## 0.6.11 - 2026-07-24
 
 - Added read-only `skill_route_vocabulary`, exposing the canonical closed MSSR enums before routing metadata or fixtures are authored.
