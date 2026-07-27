@@ -11,6 +11,7 @@
 - Add protected read-only `mssr_trace_evidence`, correlating route/load/checkpoint events, tool calls, workflow/task/session keys, runtime generations and explicit evidence refs for one trace.
 - Keep trace closure explicit: idle periods remain reminders and never synthesize a successful outcome.
 - Add dashboard runtime-boot visibility, additive SQLite columns and regression coverage for open/closed evidence, workflow propagation, privacy and runtime UUIDs.
+- Strengthen ChatGPT Web server instructions with bounded user-visible progress checkpoints and explicitly document that Bridge notices are in-band reminders: they cannot interrupt an opaque tool call or push directly to the user outside a later tool response.
 
 
 ## 0.6.38 - 2026-07-27
