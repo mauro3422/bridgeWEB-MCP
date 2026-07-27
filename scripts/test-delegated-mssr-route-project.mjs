@@ -23,6 +23,7 @@ for (const [name, description] of [
   ["mssr-agent-routing", "Route substantial work through MSSR and preserve trace continuity."],
   ["shared-skill-governance", "Govern reusable skill changes and verification."],
   ["skill-routing-maintainer", "Maintain MSSR routing metadata and fixtures."],
+  ["git-change-publication", "Verify and publish repository changes with explicit persistence evidence."],
   ["mauroprime-bridge-tool-authoring", "Author and verify Bridge MCP tools."],
 ]) {
   const directory = path.join(skillRoot, name);
@@ -172,6 +173,33 @@ try {
   for (const skill of required) {
     assert.equal(loadedNames.has(skill.name), true, `Delegated bootstrap must report required skill ${skill.name} as loaded.`);
   }
+
+  const verifyIntent = {
+    ...intent,
+    domains: [...intent.domains, "git"],
+    actions: [...intent.actions, "publish"],
+    needs: [...intent.needs, "version-control"],
+  };
+  const verifyEnvelope = await call("bridge_tool_query", {
+    toolName: "skill_bootstrap",
+    arguments: {
+      task: freshTask,
+      context: "Advance the same delegated trace to verification and load every newly required skill before evaluating the boundary.",
+      intent: verifyIntent,
+      caller: "chatgpt-web",
+      stage: "verify",
+      completedPhases: ["discovery", "safety", "implementation"],
+      sources: ["codex-local"],
+      maxSkills: 12,
+      traceId: route.traceId,
+    },
+  });
+  assert.equal(verifyEnvelope.result.traceId, route.traceId);
+  assert.equal(
+    verifyEnvelope.bridgeNotices?.items?.some((notice) => notice.code === "mssr-required-skill-not-loaded") ?? false,
+    false,
+    "A verification-stage bootstrap must attribute its own loads before evaluating the required-skill boundary.",
+  );
 
   const outcome = await call("mssr_trace_record", {
     traceId: route.traceId,

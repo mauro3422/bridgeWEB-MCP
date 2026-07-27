@@ -734,3 +734,17 @@ relacionados independientes sin duplicar filas por cada llamada.
 **Corrección:** La proyección del audit conserva la fila física del fallback y agrega una segunda atribución virtual al `operation_subject` cuando la tool exterior es `bridge_tool_query` o `bridge_tool_action`. No se duplica almacenamiento ni se guardan argumentos crudos.
 
 **Regresión:** `test-v060-tools.mjs` registra una llamada delegada y exige evidencia simultánea para `bridge_tool_query` y `bridge_tool_audit`, incluyendo éxito del target.
+
+---
+
+## 2026-07-27 - Bootstrap de verificación avisaba que faltaba la skill que acababa de cargar
+
+**Estado:** Corregido en Bridge 0.6.37.
+
+**Síntoma:** `skill_bootstrap` avanzaba una traza a `verify`, devolvía `git-change-publication` con `loaded: true`, pero la misma llamada emitía `mssr-required-skill-not-loaded` para esa skill.
+
+**Causa:** El coordinador evaluaba el gate de frontera en `prepare()` antes de ejecutar el bootstrap. La atribución de `record.loaded` ocurría después, en `observe()`, por lo que el aviso usaba el estado anterior a las cargas producidas por la propia llamada.
+
+**Corrección:** Los route plans continúan verificando la frontera antes de ejecutar, pero `skill_bootstrap` difiere el gate hasta `observe()`, inmediatamente después de incorporar sus cargas al `loadedSkills` de la traza.
+
+**Regresión:** `test-delegated-mssr-route-project.mjs` ahora avanza la misma ruta delegada desde `start` hasta `verify`, introduce una skill requerida nueva y exige que no se emita `mssr-required-skill-not-loaded`, tanto con sesión identificada como con `sessionKey=unknown`.

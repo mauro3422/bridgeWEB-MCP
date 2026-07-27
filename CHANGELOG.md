@@ -1,3 +1,10 @@
+## 0.6.37 - 2026-07-27
+
+- Defer required-skill boundary checks for `skill_bootstrap` until its returned phase loads have been attributed to the active trace.
+- Prevent false `mssr-required-skill-not-loaded` notices when a verify/persist/close bootstrap itself loads a newly required skill.
+- Extend the delegated MSSR regression through a verification-stage bootstrap for both named and anonymous sessions.
+
+
 ## 0.6.36 - 2026-07-27
 
 - Attribute delegated fallback executions to both the fallback wrapper and the actual runtime target in Tool Portfolio evidence.

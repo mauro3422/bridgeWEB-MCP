@@ -555,7 +555,9 @@ export function createMssrTraceSessionCoordinator(
       }
 
       state = localState();
-      if (state && TRACE_BOUNDARY_STAGES.has(stage)) notices.push(...boundaryNotice(toolName, stage, state));
+      if (toolName !== "skill_bootstrap" && state && TRACE_BOUNDARY_STAGES.has(stage)) {
+        notices.push(...boundaryNotice(toolName, stage, state));
+      }
       return { args, notices };
     }
 
@@ -701,6 +703,9 @@ export function createMssrTraceSessionCoordinator(
       };
       if (toolName === "skill_bootstrap") {
         for (const name of loadedSkillNames(record.loaded)) state.loadedSkills.add(name);
+        if (TRACE_BOUNDARY_STAGES.has(state.stage)) {
+          notices.push(...boundaryNotice(toolName, state.stage, state));
+        }
       }
       sharedTraces.set(traceId, state);
       adopt(state);
