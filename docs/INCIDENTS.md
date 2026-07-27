@@ -706,7 +706,7 @@ relacionados independientes sin duplicar filas por cada llamada.
 
 ## 2026-07-27 - Errores de target y cargas MSSR ambiguas parecían herramientas rotas
 
-**Estado:** Corregido y cubierto por regresión en Bridge 0.6.34.
+**Estado:** Corregido en Bridge 0.6.34; continuidad automática del bootstrap delegado corregida adicionalmente en 0.6.35.
 
 **Capa / owner:** Contrato runtime de tools, prompting MSSR y observabilidad accionable / `bridge-mcp` + skills `mssr-agent-routing` y `mauroprime-bridge-collaboration`.
 
@@ -717,5 +717,7 @@ relacionados independientes sin duplicar filas por cada llamada.
 **Corrección:** La metadata canónica añade `usage.prerequisites`, `usage.preflightTools` y reglas de `usage.recovery`; `bridge_tool_schema` las expone. `skill_route_plan` devuelve una `nextAction` completa hacia `skill_bootstrap`, que carga todas las skills activas de la fase sobre la misma traza. Los notices incluyen acciones bounded, conservan historial efímero durante 24 horas y aparecen en Tool Portfolio sin ejecutar cambios. `target-not-found`, schema, permisos/riesgo y safety guards se tratan primero como fricción de contrato/UX.
 
 **Regresión:** `test-v060-tools.mjs` exige preflight de `terminal_read`, recuperación MSSR de `skill_load`, clasificación de targets inexistentes, continuación `skill_route_plan -> skill_bootstrap` e historial de notices después del drain. `test-bridge-http.ps1` verifica `/api/notices`, privacidad y la tarjeta de recordatorios. Las suites completas de Bridge, MSSR y routing permanecen verdes.
+
+**Seguimiento 0.6.35:** El smoke test vivo posterior a 0.6.34 detectó que `skill_bootstrap` registraba cargas Codex exitosas en observabilidad, pero omitía `loaded: true` en su respuesta; el coordinador no podía incorporarlas a `loadedSkills` y bloqueaba correctamente el outcome. Se unificó el contrato Codex/Roblox y la regresión delegada ahora exige `bridge_tool_query -> skill_bootstrap -> outcome` sin `skill_load` manual, tanto con sesión identificada como anónima.
 
 **Seguimiento:** Observar el audit vivo durante varias sesiones. No convertir una recomendación o un aviso en reparación, deprecación o mutación automática; exigir reproducción y evidencia suficiente.

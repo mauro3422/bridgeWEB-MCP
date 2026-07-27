@@ -1,3 +1,9 @@
+## 0.6.35 - 2026-07-27
+
+- Mark successful Codex skill loads explicitly with `loaded: true`, matching the existing Roblox skill-load contract.
+- Ensure delegated `skill_bootstrap` results are attributed as loaded skills by the MSSR trace coordinator so required-load gates accept the automatic phase load.
+- Replace the delegated-route regression's manual `skill_load` fallback with a full `bridge_tool_query -> skill_bootstrap -> outcome` assertion for named and anonymous sessions.
+
 ## 0.6.34 - 2026-07-27
 
 - Add a read-only Tools / Tool Portfolio dashboard tab backed by the canonical registry metadata and privacy-safe aggregate tool audit.

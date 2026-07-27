@@ -118,7 +118,8 @@ try {
     projectRoot,
     task: "Load the project again before the fresh delegated MSSR route.",
   });
-  const route = await planDelegatedRoute("Verify delegated MSSR route project scope is preserved.");
+  const freshTask = "Verify delegated MSSR route project scope is preserved.";
+  const route = await planDelegatedRoute(freshTask);
 
   traceContext.resetSharedMssrTraceRegistryForTests();
 
@@ -147,15 +148,29 @@ try {
   assert.equal(searchMetric?.routing_status, "traced");
 
   const required = route.activeSkills.filter((skill) => skill.required);
-  for (const skill of required) {
-    const loaded = await call("skill_load", {
-      name: skill.name,
-      source: "codex",
+  const bootstrapEnvelope = await call("bridge_tool_query", {
+    toolName: "skill_bootstrap",
+    arguments: {
+      task: freshTask,
+      context: "Apply the delegated route and load every active-phase skill on the same trace.",
+      intent,
+      caller: "chatgpt-web",
+      stage: "start",
+      sources: ["codex-local"],
+      maxSkills: 12,
       traceId: route.traceId,
-      required: true,
-      stage: "close",
-    });
-    assert.equal(loaded.traceId, route.traceId);
+    },
+  });
+  const bootstrap = bootstrapEnvelope.result;
+  assert.equal(bootstrap.traceId, route.traceId, "Delegated bootstrap must preserve the delegated route trace.");
+  const loadedNames = new Set(
+    bootstrap.loaded
+      .filter((item) => item.loaded === true)
+      .map((item) => item.skill?.name)
+      .filter(Boolean),
+  );
+  for (const skill of required) {
+    assert.equal(loadedNames.has(skill.name), true, `Delegated bootstrap must report required skill ${skill.name} as loaded.`);
   }
 
   const outcome = await call("mssr_trace_record", {

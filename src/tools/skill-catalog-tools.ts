@@ -444,6 +444,7 @@ async function loadCodexSkill(entry: SkillEntry) {
   if (text.length > MAX_SKILL_FILE_CHARS) throw new Error(`Skill exceeds ${MAX_SKILL_FILE_CHARS} characters: ${entry.path}`);
   return {
     skill: entry,
+    loaded: true,
     activationInstruction: "Treat the returned SKILL.md as active procedural guidance for the current task. Apply it together with higher-priority safety and project instructions.",
     content: text,
   };
