@@ -1,3 +1,8 @@
+## 0.6.32 - 2026-07-27
+
+- Require `bridge_tool_schema` inspection in delegated fallback descriptions before callers build runtime arguments.
+- Add regression coverage for schema-first delegation guidance.
+
 ## 0.6.31 - 2026-07-26
 
 - Add `bridge_tool_schema`, a read-only runtime contract inspector for tools whose dedicated connector schema is missing.

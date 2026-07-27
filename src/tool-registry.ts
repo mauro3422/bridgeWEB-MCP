@@ -110,7 +110,7 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
   };
   const queryTool: BridgeToolSchema = {
     name: "bridge_tool_query",
-    description: "Use this read-only fallback when a runtime Bridge tool exists but its dedicated schema is missing from the current connector catalog. Delegates only to tools classified read-only.",
+    description: "Use this read-only fallback when a runtime Bridge tool exists but its dedicated schema is missing from the current connector catalog. First inspect the target with bridge_tool_schema and then pass arguments that match that exact runtime contract. Delegates only to tools classified read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -123,7 +123,7 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
   };
   const actionTool: BridgeToolSchema = {
     name: "bridge_tool_action",
-    description: "Use this explicit non-read-only fallback when a runtime Bridge tool exists but its dedicated schema is missing from the current connector catalog. Delegates to neutral or destructive tools and requires exact target-name confirmation.",
+    description: "Use this explicit non-read-only fallback when a runtime Bridge tool exists but its dedicated schema is missing from the current connector catalog. First inspect the target with bridge_tool_schema and then pass arguments that match that exact runtime contract. Delegates to neutral or destructive tools and requires exact target-name confirmation.",
     inputSchema: {
       type: "object",
       properties: {
