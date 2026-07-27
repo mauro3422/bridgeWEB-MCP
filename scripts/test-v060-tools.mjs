@@ -153,6 +153,7 @@ try {
   const delegatedActionTool = registry.tools.find((tool) => tool.name === 'bridge_tool_action');
   if (!delegatedQueryTool?.description?.includes('First inspect the target with bridge_tool_schema')) throw new Error('bridge_tool_query must require schema-first delegation');
   if (!delegatedActionTool?.description?.includes('First inspect the target with bridge_tool_schema')) throw new Error('bridge_tool_action must require schema-first delegation');
+  if (!delegatedQueryTool?.inputSchema?.properties?.traceId || !delegatedActionTool?.inputSchema?.properties?.traceId) throw new Error('delegated wrappers must expose optional MSSR trace control');
   const expectedNeutral = ['whiteboard_capture_pc_view', 'whiteboard_add_text', 'whiteboard_add_svg', 'whiteboard_add_diagram', 'whiteboard_insert_image', 'mssr_trace_record', 'mssr_observatory_epoch_start'];
   if (registry.riskSummary.neutral.length !== expectedNeutral.length || expectedNeutral.some((name) => !registry.riskSummary.neutral.includes(name))) throw new Error(`unexpected neutral tools: ${registry.riskSummary.neutral.join(', ')}`);
   for (const moduleName of ['project','workspace','cache','workflow-guides','skill-catalog-and-roblox-proxy','roblox-studio-ops','roblox-photo-capture','notices','mssr-observatory','binary-files','images','blender','tablet-whiteboard']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);

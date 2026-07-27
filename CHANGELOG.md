@@ -1,3 +1,10 @@
+## 0.6.38 - 2026-07-27
+
+- Add optional wrapper-level `traceId` control to `bridge_tool_query` and `bridge_tool_action` for stateless or concurrent callers that cannot expose a stable session/task key.
+- Preserve target schemas by forwarding the control trace only when the delegated runtime tool declares `traceId`; generic targets receive their original arguments unchanged.
+- Add a regression with two concurrent open traces proving explicit dispatch attribution avoids ambiguous/unrouted notices and records the selected trace on the wrapper metric.
+
+
 ## 0.6.37 - 2026-07-27
 
 - Defer required-skill boundary checks for `skill_bootstrap` until its returned phase loads have been attributed to the active trace.

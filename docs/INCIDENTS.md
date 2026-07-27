@@ -748,3 +748,18 @@ relacionados independientes sin duplicar filas por cada llamada.
 **Corrección:** Los route plans continúan verificando la frontera antes de ejecutar, pero `skill_bootstrap` difiere el gate hasta `observe()`, inmediatamente después de incorporar sus cargas al `loadedSkills` de la traza.
 
 **Regresión:** `test-delegated-mssr-route-project.mjs` ahora avanza la misma ruta delegada desde `start` hasta `verify`, introduce una skill requerida nueva y exige que no se emita `mssr-required-skill-not-loaded`, tanto con sesión identificada como con `sessionKey=unknown`.
+
+
+---
+
+## 2026-07-27 - Caller stateless con varias trazas no podía atribuir tools genéricas
+
+**Estado:** Corregido en Bridge 0.6.38.
+
+**Síntoma:** Una automatización Web abría correctamente una ruta mediante `bridge_tool_query -> skill_bootstrap`, pero las llamadas directas posteriores llegaban con `sessionKey=unknown` y sin task key. Cuando coexistían varias trazas Web frescas, herramientas como `git_status` o `read_file_lines` quedaban `unrouted`; elegir una automáticamente habría mezclado tareas concurrentes.
+
+**Causa:** La recuperación segura sólo podía usar sesión, proyecto, caller y frescura. Los wrappers forward-compatible no ofrecían un campo de control para conservar un `traceId` explícito al delegar una tool cuyo schema no declara `traceId`.
+
+**Corrección:** `bridge_tool_query` y `bridge_tool_action` aceptan un `traceId` opcional a nivel del wrapper. El coordinador adopta esa traza para observabilidad; sólo reenvía el campo al target cuando éste declara `traceId`, preservando schemas genéricos y la protección contra ambigüedad.
+
+**Regresión:** `test-delegated-mssr-route-project.mjs` mantiene dos trazas frescas abiertas, reinicia la memoria del coordinador y delega `search_files` con el `traceId` elegido. Exige ausencia de avisos ambiguos/unrouted y atribución exacta de la métrica del wrapper.

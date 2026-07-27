@@ -218,6 +218,29 @@ try {
     summary: "Delegated route preserved project, session and trace through the next project tool.",
   });
   assert.equal(outcome.traceId, route.traceId);
+  const concurrentTraceA = await planDelegatedRoute("Concurrent stateless dispatch trace A.");
+  const concurrentTraceB = await planDelegatedRoute("Concurrent stateless dispatch trace B.");
+  assert.notEqual(concurrentTraceA.traceId, concurrentTraceB.traceId);
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const explicitlyScopedDispatch = await call("bridge_tool_query", {
+    toolName: "search_files",
+    traceId: concurrentTraceA.traceId,
+    arguments: {
+      path: projectRoot,
+      pattern: "delegated-route-fixture",
+      maxResults: 5,
+    },
+  });
+  assert.equal(
+    explicitlyScopedDispatch.bridgeNotices?.items?.some((notice) => notice.code === "mssr-unrouted-tool-call" || notice.code === "mssr-trace-ambiguous") ?? false,
+    false,
+    "An explicit wrapper traceId must disambiguate a generic delegated target without forwarding traceId into its schema.",
+  );
+  const explicitDispatchMetric = metrics.getRecentMetrics(20, "active").recent.find((row) =>
+    row.tool === "bridge_tool_query" && row.operation_subject === "search_files");
+  assert.equal(explicitDispatchMetric?.trace_id, concurrentTraceA.traceId);
+
+
 
   console.log(JSON.stringify({
     ok: true,
