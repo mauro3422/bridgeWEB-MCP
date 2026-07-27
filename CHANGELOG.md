@@ -3,6 +3,7 @@
 - Make workflow attribution trace-scoped after a trace is resolved, preventing a later workflow in the same Web session from contaminating an existing scoped or `unscoped` trace.
 - Carry `workflowKey` in the in-memory/persisted trace coordinator snapshot and preserve the original workflow across replans.
 - Add regression coverage for two traces sharing one `sessionKey`, including unscoped isolation, scoped immutability and explicit workflow selection for a new route.
+- Strengthen ChatGPT Web server instructions with bounded user-visible progress checkpoints and explicitly document that Bridge notices are in-band reminders: they cannot interrupt an opaque tool call or push directly to the user outside a later tool response.
 
 ## 0.6.39 - 2026-07-27
 
@@ -11,8 +12,6 @@
 - Add protected read-only `mssr_trace_evidence`, correlating route/load/checkpoint events, tool calls, workflow/task/session keys, runtime generations and explicit evidence refs for one trace.
 - Keep trace closure explicit: idle periods remain reminders and never synthesize a successful outcome.
 - Add dashboard runtime-boot visibility, additive SQLite columns and regression coverage for open/closed evidence, workflow propagation, privacy and runtime UUIDs.
-- Strengthen ChatGPT Web server instructions with bounded user-visible progress checkpoints and explicitly document that Bridge notices are in-band reminders: they cannot interrupt an opaque tool call or push directly to the user outside a later tool response.
-
 
 ## 0.6.38 - 2026-07-27
 
