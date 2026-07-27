@@ -763,3 +763,21 @@ relacionados independientes sin duplicar filas por cada llamada.
 **Corrección:** `bridge_tool_query` y `bridge_tool_action` aceptan un `traceId` opcional a nivel del wrapper. El coordinador adopta esa traza para observabilidad; sólo reenvía el campo al target cuando éste declara `traceId`, preservando schemas genéricos y la protección contra ambigüedad.
 
 **Regresión:** `test-delegated-mssr-route-project.mjs` mantiene dos trazas frescas abiertas, reinicia la memoria del coordinador y delega `search_files` con el `traceId` elegido. Exige ausencia de avisos ambiguos/unrouted y atribución exacta de la métrica del wrapper.
+
+---
+
+## 2026-07-27 - Una sesión Web no distinguía workflows, tareas, trazas y generaciones runtime
+
+**Estado:** Corregido en Bridge 0.6.39.
+
+**Capa / owner:** Identidad y correlación de observabilidad / `bridge-mcp` + skill `mssr-observability-maintenance`.
+
+**Síntoma:** Un mismo chat o scope MCP podía contener varias tareas y trazas relacionadas. `sessionKey`, `taskKey`, `traceId` y PID existían, pero no había una identidad estable para agrupar ciclos recurrentes ni una generación UUID por arranque. Reconstruir qué tools, skills, runtime, verificación, persistencia y evidencia pertenecían a una traza exigía consultar varias superficies manualmente. Un aviso de inactividad tampoco demostraba que ChatGPT hubiera entregado el cierre al usuario.
+
+**Causa:** `sessionKey` identifica únicamente el scope opaco que expone el host; `taskKey` deriva del texto de tarea; `traceId` pertenece a una ejecución lógica; y PID identifica el proceso actual, pero puede atender muchas tareas y ser reutilizado por el sistema operativo. Faltaban un `workflowKey` local estable, un `runtimeBootId` por arranque y una proyección unificada por traza.
+
+**Corrección:** Se añadió `workflowKey` opcional a `project_context_load`, routing y bootstrap; `runtimeBootId` UUID a status, métricas y eventos MSSR; y la tool protegida read-only `mssr_trace_evidence`, que correlaciona eventos, llamadas, skills, task/session/workflow keys, generaciones runtime y `evidenceRef` explícitos. Los períodos idle continúan generando recordatorios y nunca sintetizan outcomes exitosos.
+
+**Regresión:** `scripts/test-v060-tools.mjs` exige 126 tools, propagación del workflow al `nextAction`, UUID de runtime, evidencia open/closed, cardinalidad de tools y privacidad sin prompts, transcripts ni argumentos crudos.
+
+**Seguimiento:** Los ciclos programados de mantenimiento deben usar `workflowKey=mauroprime-system-loop`, abrir una traza nueva por ejecución, conservarla entre fases y cerrarla con un único outcome verificable. No inferir `conversation_id`, `message_id` ni `automation_run_id` si el host no los expone.

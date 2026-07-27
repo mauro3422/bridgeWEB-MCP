@@ -4,6 +4,7 @@ import {
   MSSR_CHECKPOINT_TYPES,
   MSSR_CONTEXT_SOURCES,
   MSSR_OUTCOME_EVIDENCE_KINDS,
+  getMssrTraceEvidence,
   queryMssrObservatory,
   recordMssrCheckpoint,
 } from "../mssr-observatory.js";
@@ -30,6 +31,19 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
           days: { type: "number", minimum: 1, maximum: 365, default: 30 },
           limit: { type: "number", minimum: 1, maximum: 200, default: 50 },
         },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "mssr_trace_evidence",
+      description: "Reconstruct one privacy-safe evidence bundle for an MSSR trace by correlating route/load/checkpoint events with Bridge tool calls, workflow/task/session identifiers, runtime boot generations, verification, persistence, outcome and explicitly recorded evidence refs. This is read-only and does not infer a ChatGPT conversation id or final UI rendering.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          traceId: { type: "string", pattern: "^[A-Za-z0-9._:-]{6,128}$" },
+          limit: { type: "number", minimum: 1, maximum: 2000, default: 500 },
+        },
+        required: ["traceId"],
         additionalProperties: false,
       },
     },
@@ -90,6 +104,13 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
         limit: z.number().int().min(1).max(200).default(50),
       }).parse(args);
       return queryMssrObservatory(parsed);
+    },
+    mssr_trace_evidence: (args) => {
+      const parsed = z.object({
+        traceId: z.string().regex(/^[A-Za-z0-9._:-]{6,128}$/),
+        limit: z.number().int().min(1).max(2000).default(500),
+      }).parse(args);
+      return getMssrTraceEvidence(parsed.traceId, parsed.limit);
     },
     mssr_trace_record: (args) => {
       const parsed = z.object({

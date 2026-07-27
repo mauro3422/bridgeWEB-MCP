@@ -18,6 +18,7 @@ import { createDefaultToolRegistry } from "./tool-registry.js";
 import type { BridgeToolSchema } from "./tools/types.js";
 import { createMssrTraceSessionCoordinator } from "./mssr-trace-context.js";
 import { recordMssrEvent } from "./mssr-observatory.js";
+import { normalizeWorkflowKey } from "./runtime-identity.js";
 
 export { SERVER_NAME, SERVER_VERSION } from "./config.js";
 export { bridgeRestartStatus } from "./tools/bridge-ops.js";
@@ -59,11 +60,13 @@ const mssrExemptTools = new Set([
   "bridge_visualization_catalog",
   "bridge_visualize_metrics",
   "mssr_observatory_query",
+  "mssr_trace_evidence",
   "bridge_notice_status",
   "bridge_notice_drain",
 ]);
 const sessionProjects = new Map<string, string>();
 const sessionTaskKeys = new Map<string, string>();
+const sessionWorkflowKeys = new Map<string, string>();
 const unroutedWarnings = new Map<string, number>();
 const maxScopedMetricEntries = 2048;
 const unroutedWarningIntervalMs = Math.max(
@@ -341,6 +344,7 @@ function metricProfile(
   traceSnapshot: ReturnType<ReturnType<typeof createMssrTraceSessionCoordinator>["snapshot"]>,
   project: string | undefined,
   taskKey: string | undefined,
+  workflowKey: string | undefined,
   relatedProject: string | undefined,
 ): BridgeMetricProfile {
   const delegated = delegatedArgs(toolName, args);
@@ -365,6 +369,7 @@ function metricProfile(
     sessionKey: host.sessionKey,
     project,
     taskKey,
+    workflowKey,
     relatedProject,
     routingStatus: routingStatus(toolName, traceId ?? null, args),
   };
@@ -433,6 +438,7 @@ export function createBridgeServer() {
   const modularToolRegistry = createDefaultToolRegistry();
   const pendingContextProjects = new Set<string>();
   let localTaskKey: string | undefined;
+  let localWorkflowKey: string | undefined;
   const mssrTraceSession = createMssrTraceSessionCoordinator(modularToolRegistry.tools, {
     onClosureReminder: (reminder) => {
       emitBridgeNotice(reminder.notice);
@@ -470,6 +476,7 @@ export function createBridgeServer() {
     if (name === "project_context_load" && observedProject) pendingContextProjects.add(observedProject);
     if (name === "project_context_load") {
       const nextTaskKey = taskKeyFromText(profiledArgs.task);
+      const nextWorkflowKey = normalizeWorkflowKey(profiledArgs.workflowKey);
       if (nextTaskKey) {
         localTaskKey = nextTaskKey;
         if (hostProfile.sessionKey) {
@@ -481,6 +488,26 @@ export function createBridgeServer() {
             sessionTaskKeys.delete(oldest);
           }
         }
+      }
+      if (nextWorkflowKey) {
+        localWorkflowKey = nextWorkflowKey;
+        if (hostProfile.sessionKey) {
+          sessionWorkflowKeys.delete(hostProfile.sessionKey);
+          sessionWorkflowKeys.set(hostProfile.sessionKey, nextWorkflowKey);
+          while (sessionWorkflowKeys.size > maxScopedMetricEntries) {
+            const oldest = sessionWorkflowKeys.keys().next().value;
+            if (typeof oldest !== "string") break;
+            sessionWorkflowKeys.delete(oldest);
+          }
+        }
+      }
+    }
+    const explicitWorkflowKey = normalizeWorkflowKey(effectiveCall.args.workflowKey);
+    if (explicitWorkflowKey) {
+      localWorkflowKey = explicitWorkflowKey;
+      if (hostProfile.sessionKey) {
+        sessionWorkflowKeys.delete(hostProfile.sessionKey);
+        sessionWorkflowKeys.set(hostProfile.sessionKey, explicitWorkflowKey);
       }
     }
     const startsNewRoute = (effectiveCall.toolName === "skill_recommend"
@@ -521,13 +548,16 @@ export function createBridgeServer() {
       ?? localTaskKey
       ?? (traceSnapshot.taskHash ? `task_${traceSnapshot.taskHash.slice(0, 16)}` : undefined)
       ?? taskKeyFromText(effectivePrepared.args.task);
+    const workflowKey = normalizeWorkflowKey(effectivePrepared.args.workflowKey)
+      ?? (hostProfile.sessionKey ? sessionWorkflowKeys.get(hostProfile.sessionKey) : undefined)
+      ?? localWorkflowKey;
     const relatedProject = observedProject && observedProject !== metricProject
       ? observedProject
       : undefined;
     const metric = beginToolMetric(
       name,
       args,
-      metricProfile(name, args, hostProfile, traceSnapshot, metricProject, taskKey, relatedProject),
+      metricProfile(name, args, hostProfile, traceSnapshot, metricProject, taskKey, workflowKey, relatedProject),
     );
     const toolSchema = modularToolRegistry.tools.find((tool) => tool.name === name);
     emitUnroutedNotice(name, metric, toolSchema?.annotations?.destructiveHint === true);

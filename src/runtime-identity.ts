@@ -1,0 +1,28 @@
+import { randomUUID } from "node:crypto";
+
+export const RUNTIME_BOOT_ID = randomUUID();
+export const RUNTIME_STARTED_AT = new Date().toISOString();
+
+const WORKFLOW_KEY_PATTERN = /^[a-z0-9][a-z0-9._-]{1,79}$/;
+
+export function normalizeWorkflowKey(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value
+    .normalize("NFKC")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/[-_.]{2,}/g, "-")
+    .replace(/^[-_.]+|[-_.]+$/g, "")
+    .slice(0, 80);
+  return WORKFLOW_KEY_PATTERN.test(normalized) ? normalized : undefined;
+}
+
+export function requireWorkflowKey(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const normalized = normalizeWorkflowKey(value);
+  if (!normalized) {
+    throw new Error("workflowKey must normalize to 2-80 lowercase letters, numbers, dots, underscores, or hyphens.");
+  }
+  return normalized;
+}

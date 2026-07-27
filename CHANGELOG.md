@@ -1,3 +1,12 @@
+## 0.6.39 - 2026-07-27
+
+- Add a process-unique `runtimeBootId` UUID to HTTP status, metrics and MSSR events so restarts are distinguishable without treating a reusable PID as task identity.
+- Add optional stable `workflowKey` control metadata to project context and MSSR route/bootstrap calls, allowing repeated cycles such as `mauroprime-system-loop` to group separate traces without claiming a ChatGPT conversation id.
+- Add protected read-only `mssr_trace_evidence`, correlating route/load/checkpoint events, tool calls, workflow/task/session keys, runtime generations and explicit evidence refs for one trace.
+- Keep trace closure explicit: idle periods remain reminders and never synthesize a successful outcome.
+- Add dashboard runtime-boot visibility, additive SQLite columns and regression coverage for open/closed evidence, workflow propagation, privacy and runtime UUIDs.
+
+
 ## 0.6.38 - 2026-07-27
 
 - Add optional wrapper-level `traceId` control to `bridge_tool_query` and `bridge_tool_action` for stateless or concurrent callers that cannot expose a stable session/task key.

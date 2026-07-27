@@ -36,6 +36,7 @@ import {
   recordMssrSkillLoad,
   resolveMssrTraceId,
 } from "../mssr-observatory.js";
+import { requireWorkflowKey } from "../runtime-identity.js";
 
 const MAX_SKILL_FILE_CHARS = 160_000;
 const MAX_DISCOVERED_SKILLS = 600;
@@ -72,6 +73,7 @@ function compactSkillRoute<T extends Record<string, unknown>>(route: T): Record<
   return {
     responseMode: "compact",
     traceId: route.traceId,
+    workflowKey: route.workflowKey,
     stage: route.stage,
     caller: route.caller,
     agentProfile: route.agentProfile,
@@ -500,6 +502,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
           sources: { type: "array", items: { type: "string", enum: ["codex-local", "codex-system", "codex-plugin", "roblox"] } },
           maxResults: { type: "number", default: 8, minimum: 1, maximum: 16 },
           responseMode: { type: "string", enum: routeResponseModes, default: "compact", description: "compact returns the actionable phase route; debug includes full scores, metadata and phase diagnostics." },
+          workflowKey: { type: "string", pattern: "^[a-z0-9][a-z0-9._-]{1,79}$", description: "Optional stable workflow id shared by related traces, for example mauroprime-system-loop. It is local observability metadata, not a ChatGPT conversation id." },
           traceId: { type: "string", description: "Optional existing MSSR trace id for a replan. A new id is generated when omitted." },
         },
         required: ["task"],
@@ -543,6 +546,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
           sources: { type: "array", items: { type: "string", enum: ["codex-local", "codex-system", "codex-plugin", "roblox"] } },
           maxSkills: { type: "number", default: 8, minimum: 1, maximum: 16 },
           responseMode: { type: "string", enum: routeResponseModes, default: "compact", description: "compact returns the actionable phase route; debug includes full scores, metadata and phase diagnostics." },
+          workflowKey: { type: "string", pattern: "^[a-z0-9][a-z0-9._-]{1,79}$", description: "Optional stable workflow id shared by related traces, for example mauroprime-system-loop. It is local observability metadata, not a ChatGPT conversation id." },
           traceId: { type: "string", description: "Optional existing MSSR trace id for a replan. A new id is generated when omitted." },
         },
         required: ["task"],
@@ -565,6 +569,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
           completedPhases: { type: "array", items: { type: "string", enum: [...SKILL_PHASES] }, default: [] },
           sources: { type: "array", items: { type: "string", enum: ["codex-local", "codex-system", "codex-plugin", "roblox"] } },
           maxSkills: { type: "number", default: 8, minimum: 1, maximum: 16 },
+          workflowKey: { type: "string", pattern: "^[a-z0-9][a-z0-9._-]{1,79}$", description: "Optional stable workflow id shared by related traces, for example mauroprime-system-loop. It is local observability metadata, not a ChatGPT conversation id." },
           traceId: { type: "string", description: "Optional existing MSSR trace id for a replan. A new id is generated when omitted." },
         },
         required: ["task"],
@@ -684,7 +689,8 @@ export const skillCatalogToolModule: BridgeToolModule = {
       });
       const traceId = resolveMssrTraceId(args.traceId);
       const profile = agentProfile(args);
-      const observedRoute = { ...route, agentProfile: profile };
+      const workflowKey = requireWorkflowKey(args.workflowKey);
+      const observedRoute = { ...route, agentProfile: profile, workflowKey: workflowKey ?? null };
       recordMssrRoute({ traceId, action: "recommend", task, route: observedRoute as unknown as Record<string, unknown> });
       const matches = [...route.activeSkills, ...route.deferredSkills]
         .filter((skill, index, all) => all.findIndex((candidate) => candidate.name === skill.name) === index)
@@ -754,7 +760,8 @@ export const skillCatalogToolModule: BridgeToolModule = {
       });
       const traceId = resolveMssrTraceId(args.traceId);
       const profile = agentProfile(args);
-      const observedRoute = { ...route, agentProfile: profile };
+      const workflowKey = requireWorkflowKey(args.workflowKey);
+      const observedRoute = { ...route, agentProfile: profile, workflowKey: workflowKey ?? null };
       recordMssrRoute({ traceId, action: "plan", task, route: observedRoute as unknown as Record<string, unknown> });
       const response = {
         ...observedRoute,
@@ -776,6 +783,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
             sources: args.sources,
             maxSkills: args.maxSkills ?? 8,
             traceId,
+            workflowKey,
             responseMode,
           },
           instruction: "Usa esta acción cuando necesites aplicar la ruta: skill_bootstrap carga todas las skills de la fase sobre la misma traza. No hagas skill_load manual uno por uno salvo recuperación focal.",
@@ -800,7 +808,8 @@ export const skillCatalogToolModule: BridgeToolModule = {
       });
       const traceId = resolveMssrTraceId(args.traceId);
       const profile = agentProfile(args);
-      const observedRoute = { ...route, agentProfile: profile };
+      const workflowKey = requireWorkflowKey(args.workflowKey);
+      const observedRoute = { ...route, agentProfile: profile, workflowKey: workflowKey ?? null };
       recordMssrRoute({ traceId, action: "bootstrap", task, route: observedRoute as unknown as Record<string, unknown> });
       const activeByName = new Map(route.activeSkills.map((skill) => [skill.name, skill]));
       const loaded: Array<Record<string, unknown>> = [];

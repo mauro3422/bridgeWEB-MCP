@@ -550,6 +550,7 @@ function updateSummary(status, overview, summary, recent, timeline, mssr) {
   setText('current-active-sessions', num(status.activeSessions));
   setText('current-anonymous', num(status.anonymousTransports));
   setText('current-pid', status.pid || '—');
+  setText('current-runtime-boot', status.runtimeBootId || '—');
   setText('current-uptime', humanDuration(status.uptimeSeconds));
 
   setText('total-calls', num(totalCalls));

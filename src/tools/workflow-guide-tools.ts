@@ -490,6 +490,7 @@ export const workflowGuideToolModule: BridgeToolModule = {
         properties: {
           projectRoot: { type: "string", description: "Repository or project root." },
           task: { type: "string", description: "Optional current user request used to recommend a workflow guide." },
+          workflowKey: { type: "string", pattern: "^[a-z0-9][a-z0-9._-]{1,79}$", description: "Optional stable workflow id shared by related executions, for example mauroprime-system-loop. This is local control metadata, not a ChatGPT conversation id." },
           includeAgents: { type: "boolean", default: true },
           includeProjectContext: { type: "boolean", default: true },
           includeGuides: { type: "boolean", default: true },
@@ -571,11 +572,13 @@ export const workflowGuideToolModule: BridgeToolModule = {
       const parsed = z.object({
         projectRoot: z.string().min(1),
         task: z.string().min(1).max(10_000).optional(),
+        workflowKey: z.string().regex(/^[a-z0-9][a-z0-9._-]{1,79}$/).optional(),
         includeAgents: z.boolean().default(true),
         includeProjectContext: z.boolean().default(true),
         includeGuides: z.boolean().default(true),
       }).parse(raw);
-      return await loadProjectContext(parsed);
+      const context = await loadProjectContext(parsed);
+      return { ...context, workflowKey: parsed.workflowKey ?? null };
     },
     workflow_guide_recommend: async (raw) => {
       const parsed = z.object({

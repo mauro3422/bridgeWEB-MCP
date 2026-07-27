@@ -12,6 +12,7 @@ import { peekBridgeNoticeHistory } from "./notices.js";
 import { queryMssrObservatory } from "./mssr-observatory.js";
 import { TOOL_AUDIT_VIEWS, type ToolAuditView } from "./tool-audit.js";
 import { getDefaultToolAudit } from "./tool-registry.js";
+import { RUNTIME_BOOT_ID } from "./runtime-identity.js";
 
 const config = getBridgeHttpConfig();
 const startedAt = new Date();
@@ -155,6 +156,7 @@ function getStatus() {
     startedAt: startedAt.toISOString(),
     uptimeSeconds: Math.round(process.uptime()),
     pid: process.pid,
+    runtimeBootId: RUNTIME_BOOT_ID,
     node: process.version,
   };
 }
@@ -456,7 +458,7 @@ async function main() {
           toolName,
           scope: url.searchParams.get("scope") === "all" ? "all" : "active",
           days: getDays(url, 30, 365),
-          limit: getLimit(url, 125, 200),
+          limit: getLimit(url, 126, 200),
         }));
         return;
       }

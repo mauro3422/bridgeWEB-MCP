@@ -4,6 +4,8 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { SERVER_NAME, SERVER_VERSION } from "./config.js";
+import { getTraceToolEvidence } from "./metrics.js";
+import { RUNTIME_BOOT_ID } from "./runtime-identity.js";
 import {
   getMssrObservabilityEpoch,
   mssrObservabilityStatePath,
@@ -91,6 +93,7 @@ type MssrStoredEvent = {
 
 export type PersistedMssrTraceState = {
   traceId: string;
+  workflowKey: string;
   stage: string;
   taskHash: string;
   caller: string;
@@ -241,6 +244,7 @@ export function recordMssrEvent(input: MssrEventInput): MssrStoredEvent {
     details: safeDetails({
       ...(input.details ?? {}),
       observabilityEpoch: epoch.activeEpoch,
+      runtimeBootId: RUNTIME_BOOT_ID,
       contractVersion: epoch.contractVersion,
     }),
   };
@@ -304,6 +308,7 @@ export function recordMssrRoute(args: {
     ok: true,
     details: {
       action: args.action,
+      workflowKey: typeof args.route.workflowKey === "string" ? args.route.workflowKey : null,
       agentProfile: {
         model: typeof agentProfile.model === "string" ? agentProfile.model : "unknown",
         reasoningEffort: typeof agentProfile.reasoningEffort === "string" ? agentProfile.reasoningEffort : "unknown",
@@ -470,7 +475,7 @@ export function readPersistedMssrTraceState(traceId: string): PersistedMssrTrace
   let metricContext: JsonRecord = {};
   try {
     metricContext = database.prepare(`
-      SELECT session_key, project
+      SELECT session_key, project, workflow_key
       FROM tool_calls
       WHERE trace_id = ?
       ORDER BY started_at DESC
@@ -481,6 +486,9 @@ export function readPersistedMssrTraceState(traceId: string): PersistedMssrTrace
   }
   return {
     traceId,
+    workflowKey: typeof latestRoute.details.workflowKey === "string"
+      ? latestRoute.details.workflowKey
+      : typeof metricContext.workflow_key === "string" ? metricContext.workflow_key : "unscoped",
     stage: latestRoute.stage ?? "start",
     taskHash: latestRoute.taskHash ?? "",
     caller: latestRoute.caller ?? "other",
@@ -919,6 +927,109 @@ export function queryMssrObservatory(args: {
     : decoded).slice(0, limit);
   return { ...observatoryStatus(), scope, recent };
 }
+export function getMssrTraceEvidence(traceId: string, limit = 500) {
+  if (!validTraceId(traceId)) {
+    throw new Error("traceId must contain only letters, numbers, dot, underscore, colon, or hyphen.");
+  }
+  const boundedLimit = Math.max(1, Math.min(2_000, Math.trunc(limit)));
+  const database = getDb();
+  const events = database
+    ? database.prepare(`
+        SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
+               skill_name, required, ok, task_hash, details_json
+        FROM mssr_events
+        WHERE trace_id = ?
+        ORDER BY occurred_at ASC
+        LIMIT ?
+      `).all(traceId, boundedLimit).map(decodeRow)
+    : [];
+  const state = readPersistedMssrTraceState(traceId);
+  const toolEvidence = getTraceToolEvidence(traceId, boundedLimit);
+  const latest = (type: string) => [...events].reverse().find((event) => event.eventType === type) ?? null;
+  const latestRoute = latest("route_planned");
+  const latestOutcome = latest("outcome");
+  const latestVerification = latest("verification");
+  const latestPersistence = latest("persistence");
+  const latestReminder = [...events].reverse().find((event) => event.eventType.includes("reminder") || event.eventType.includes("idle")) ?? null;
+  const missingRequiredSkills = state
+    ? state.requiredSkills.filter((skill) => !state.loadedSkills.includes(skill))
+    : [];
+  const outcomeStatus = latestOutcome && typeof latestOutcome.details.status === "string"
+    ? latestOutcome.details.status
+    : null;
+  const closureStatus = !latestRoute
+    ? "trace-not-found"
+    : latestOutcome && Date.parse(latestOutcome.occurredAt) >= Date.parse(latestRoute.occurredAt)
+      ? `closed-${outcomeStatus ?? (latestOutcome.ok === false ? "failed" : "recorded")}`
+      : missingRequiredSkills.length > 0
+        ? "open-missing-required-skills"
+        : latestReminder
+          ? "open-idle-reminder"
+          : "open-active";
+  const evidenceRefs = [...new Set(events.flatMap((event) => {
+    const value = event.details.evidenceRef;
+    return typeof value === "string" && value.trim() ? [value.trim()] : [];
+  }))];
+  const eventRuntimeBootIds = [...new Set(events.flatMap((event) => {
+    const value = event.details.runtimeBootId;
+    return typeof value === "string" && value ? [value] : [];
+  }))];
+  const workflowKeys = [...new Set([
+    ...(state?.workflowKey && state.workflowKey !== "unscoped" ? [state.workflowKey] : []),
+    ...toolEvidence.workflowKeys,
+  ])];
+  return {
+    traceId,
+    workflowKeys,
+    identity: {
+      taskHash: state?.taskHash ?? null,
+      taskKeys: toolEvidence.taskKeys,
+      sessionKeys: toolEvidence.sessionKeys,
+      caller: state?.caller ?? null,
+      project: state?.project ?? toolEvidence.projects[0] ?? null,
+      projects: toolEvidence.projects,
+    },
+    lifecycle: {
+      status: closureStatus,
+      stage: state?.stage ?? latestRoute?.stage ?? null,
+      routeCount: state?.routeCount ?? 0,
+      firstEventAt: events[0]?.occurredAt ?? toolEvidence.summary.firstStartedAt,
+      lastEventAt: events.at(-1)?.occurredAt ?? toolEvidence.summary.lastStartedAt,
+      requiredSkills: state?.requiredSkills ?? [],
+      selectedSkills: state?.selectedSkills ?? [],
+      loadedSkills: state?.loadedSkills ?? [],
+      missingRequiredSkills,
+      verification: latestVerification,
+      persistence: latestPersistence,
+      outcome: latestOutcome,
+      idleReminder: latestReminder,
+    },
+    runtime: {
+      currentBootId: RUNTIME_BOOT_ID,
+      eventRuntimeBootIds,
+      toolRuntimeGenerations: toolEvidence.runtimeGenerations,
+    },
+    tools: {
+      summary: toolEvidence.summary,
+      counts: toolEvidence.toolCounts,
+      calls: toolEvidence.calls,
+      truncated: toolEvidence.truncated,
+    },
+    evidenceRefs,
+    events,
+    truncated: events.length >= boundedLimit || toolEvidence.truncated,
+    privacy: {
+      rawArgumentsStored: false,
+      rawPromptsStored: false,
+      transcriptsStored: false,
+      privateReasoningStored: false,
+      gitOutputsStored: false,
+      note: "Commit hashes, snapshot ids, restart ids and remote-ref checks are retained only when explicitly written as bounded evidenceRef values.",
+    },
+  };
+}
+
+
 export function closeMssrObservatoryForTests(): void {
   if (db) db.close();
   db = undefined;

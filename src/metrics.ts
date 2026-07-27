@@ -4,6 +4,7 @@ import os from "node:os";
 import { createRequire } from "node:module";
 import { SERVER_NAME, SERVER_VERSION } from "./config.js";
 import { getMssrObservabilityEpoch } from "./mssr-observability-epoch.js";
+import { RUNTIME_BOOT_ID, RUNTIME_STARTED_AT } from "./runtime-identity.js";
 
 type JsonRecord = Record<string, unknown>;
 export type BridgeMetricsScope = "active" | "all";
@@ -33,6 +34,7 @@ export type ToolAuditMetricSnapshot = {
 };
 export type BridgeMetricProfile = {
   traceId?: string;
+  workflowKey?: string;
   taskKey?: string;
   caller?: string;
   model?: string;
@@ -65,7 +67,9 @@ export type BridgeMetricStart = {
   inputKeys: string;
   operationSubject?: string;
   observabilityEpoch: string;
+  runtimeBootId: string;
   traceId?: string;
+  workflowKey: string;
   taskKey: string;
   caller: string;
   model: string;
@@ -105,7 +109,9 @@ function ensureToolCallProfileColumns(database: DatabaseSync): void {
   const columns = tableColumns(database, "tool_calls");
   const additions = [
     ["observability_epoch", "TEXT"],
+    ["runtime_boot_id", "TEXT"],
     ["trace_id", "TEXT"],
+    ["workflow_key", "TEXT"],
     ["task_key", "TEXT"],
     ["caller", "TEXT"],
     ["model", "TEXT"],
@@ -168,7 +174,9 @@ function getDb(): DatabaseSync | null {
       platform TEXT NOT NULL,
       cwd TEXT NOT NULL,
       observability_epoch TEXT,
+      runtime_boot_id TEXT,
       trace_id TEXT,
+      workflow_key TEXT,
       task_key TEXT,
       caller TEXT,
       model TEXT,
@@ -201,6 +209,8 @@ function getDb(): DatabaseSync | null {
     CREATE INDEX IF NOT EXISTS idx_tool_calls_epoch_started_at ON tool_calls(observability_epoch, started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_profile ON tool_calls(caller, model, reasoning_effort, started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_trace_id ON tool_calls(trace_id);
+    CREATE INDEX IF NOT EXISTS idx_tool_calls_workflow_key ON tool_calls(workflow_key, started_at);
+    CREATE INDEX IF NOT EXISTS idx_tool_calls_runtime_boot_id ON tool_calls(runtime_boot_id, started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_task_key ON tool_calls(task_key, started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_client_name ON tool_calls(client_name, started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_session_key ON tool_calls(session_key, started_at);
@@ -212,10 +222,10 @@ function getDb(): DatabaseSync | null {
     INSERT INTO tool_calls (
       id, started_at, ended_at, duration_ms, tool, ok, error, input_keys,
       output_chars, server_name, server_version, pid, hostname, platform, cwd,
-      observability_epoch, trace_id, caller, model, reasoning_effort, client_name,
+      observability_epoch, runtime_boot_id, trace_id, workflow_key, caller, model, reasoning_effort, client_name,
       session_key, project, routing_status, mssr_eligible, operation_subject,
       task_key, related_project
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   return db;
 }
@@ -273,7 +283,9 @@ export function beginToolMetric(tool: string, args: unknown, profile: BridgeMetr
     inputKeys,
     operationSubject: operationSubject(tool, args),
     observabilityEpoch: epoch.activeEpoch,
+    runtimeBootId: RUNTIME_BOOT_ID,
     traceId: typeof profile.traceId === "string" ? profile.traceId.slice(0, 128) : undefined,
+    workflowKey: boundedProfileText(profile.workflowKey, "unscoped", 80),
     taskKey: boundedProfileText(profile.taskKey, "unknown", 80),
     caller: boundedProfileText(profile.caller, "other", 80),
     model: boundedProfileText(profile.model, "unknown", 80),
@@ -310,11 +322,12 @@ export function finishToolMetric(metric: BridgeMetricStart, ok: boolean, outputC
     type: "tool_call",
     ...event,
     endedAtIso: endedAt.toISOString(),
-    server: { name: SERVER_NAME, version: SERVER_VERSION, pid: process.pid },
+    server: { name: SERVER_NAME, version: SERVER_VERSION, pid: process.pid, runtimeBootId: metric.runtimeBootId },
     host: { hostname: os.hostname(), platform: os.platform(), cwd: process.cwd() },
     observability: {
       epoch: metric.observabilityEpoch,
       traceId: metric.traceId,
+      workflowKey: metric.workflowKey,
       taskKey: metric.taskKey,
       caller: metric.caller,
       model: metric.model,
@@ -349,7 +362,9 @@ export function finishToolMetric(metric: BridgeMetricStart, ok: boolean, outputC
       os.platform(),
       process.cwd(),
       metric.observabilityEpoch,
+      metric.runtimeBootId,
       metric.traceId ?? null,
+      metric.workflowKey,
       metric.caller,
       metric.model,
       metric.reasoningEffort,
@@ -382,6 +397,11 @@ export function getMetricsStatus() {
     jsonlPath,
     metricsDir,
     logsDir,
+    runtime: {
+      bootId: RUNTIME_BOOT_ID,
+      startedAt: RUNTIME_STARTED_AT,
+      pid: process.pid,
+    },
     observability: {
       defaultScope: "active",
       activeEpoch: epoch.activeEpoch,
@@ -576,7 +596,7 @@ export function getRecentMetrics(limit = 25, scope: BridgeMetricsScope = "active
   const filter = metricsFilter(scope);
   const rows = sqlite.prepare(`
     SELECT started_at, duration_ms, tool, ok, error, input_keys, operation_subject, output_chars, pid,
-      trace_id, task_key, caller, model, reasoning_effort, client_name, session_key, project, related_project,
+      runtime_boot_id, trace_id, workflow_key, task_key, caller, model, reasoning_effort, client_name, session_key, project, related_project,
       routing_status, mssr_eligible
     FROM tool_calls
     WHERE ${filter.where}
@@ -592,7 +612,7 @@ export function getMetricsErrors(limit = 25, scope: BridgeMetricsScope = "active
   const filter = metricsFilter(scope);
   const rows = sqlite.prepare(`
     SELECT started_at, duration_ms, tool, error, input_keys, operation_subject, output_chars, pid,
-      trace_id, task_key, caller, model, reasoning_effort, client_name, session_key, project, related_project,
+      runtime_boot_id, trace_id, workflow_key, task_key, caller, model, reasoning_effort, client_name, session_key, project, related_project,
       routing_status, mssr_eligible
     FROM tool_calls
     WHERE ok = 0 AND ${filter.where}
@@ -675,6 +695,105 @@ export function getMetricsTimeline(limit = 500, scope: BridgeMetricsScope = "act
 
   return { ...getMetricsStatus(), scope, timeline };
 }
+
+export function getTraceToolEvidence(traceId: string, limit = 500) {
+  const normalizedTraceId = traceId.trim();
+  if (!/^[A-Za-z0-9._:-]{1,128}$/.test(normalizedTraceId)) {
+    throw new Error("traceId must contain only letters, numbers, dot, underscore, colon, or hyphen.");
+  }
+  const boundedLimit = Math.max(1, Math.min(2_000, Math.trunc(limit)));
+  const sqlite = getDb();
+  if (!sqlite) {
+    return {
+      ...getMetricsStatus(),
+      traceId: normalizedTraceId,
+      truncated: false,
+      calls: [],
+      summary: { calls: 0, okCalls: 0, errorCalls: 0, firstStartedAt: null, lastStartedAt: null },
+      toolCounts: [],
+      runtimeGenerations: [],
+      workflowKeys: [],
+      taskKeys: [],
+      sessionKeys: [],
+      projects: [],
+    };
+  }
+  const calls = sqlite.prepare(`
+    SELECT started_at, ended_at, duration_ms, tool, ok, error, operation_subject,
+      server_version, pid, runtime_boot_id, trace_id, workflow_key, task_key,
+      caller, client_name, session_key, project, related_project, routing_status
+    FROM tool_calls
+    WHERE trace_id = ?
+    ORDER BY started_at ASC
+    LIMIT ?
+  `).all(normalizedTraceId, boundedLimit);
+  const distinct = (field: string) => [...new Set(calls.flatMap((row) => {
+    const value = row[field];
+    return typeof value === "string" && value && value !== "unknown" && value !== "none" && value !== "unscoped" ? [value] : [];
+  }))].sort();
+  const toolCountMap = new Map<string, { calls: number; okCalls: number; errorCalls: number }>();
+  const runtimeMap = new Map<string, { runtimeBootId: string; pid: number | null; serverVersion: string; firstSeenAt: string; lastSeenAt: string; calls: number }>();
+  let okCalls = 0;
+  let errorCalls = 0;
+  for (const row of calls) {
+    const tool = typeof row.tool === "string" ? row.tool : "unknown";
+    const current = toolCountMap.get(tool) ?? { calls: 0, okCalls: 0, errorCalls: 0 };
+    current.calls += 1;
+    if (Number(row.ok) === 1) {
+      current.okCalls += 1;
+      okCalls += 1;
+    } else {
+      current.errorCalls += 1;
+      errorCalls += 1;
+    }
+    toolCountMap.set(tool, current);
+
+    const runtimeBootId = typeof row.runtime_boot_id === "string" && row.runtime_boot_id
+      ? row.runtime_boot_id
+      : `legacy-pid-${String(row.pid ?? "unknown")}`;
+    const startedAt = typeof row.started_at === "string" ? row.started_at : "";
+    const runtime = runtimeMap.get(runtimeBootId) ?? {
+      runtimeBootId,
+      pid: typeof row.pid === "number" ? row.pid : row.pid === null || row.pid === undefined ? null : Number(row.pid),
+      serverVersion: typeof row.server_version === "string" ? row.server_version : "unknown",
+      firstSeenAt: startedAt,
+      lastSeenAt: startedAt,
+      calls: 0,
+    };
+    runtime.calls += 1;
+    if (startedAt && (!runtime.firstSeenAt || startedAt < runtime.firstSeenAt)) runtime.firstSeenAt = startedAt;
+    if (startedAt && startedAt > runtime.lastSeenAt) runtime.lastSeenAt = startedAt;
+    runtimeMap.set(runtimeBootId, runtime);
+  }
+  return {
+    ...getMetricsStatus(),
+    traceId: normalizedTraceId,
+    truncated: calls.length >= boundedLimit,
+    summary: {
+      calls: calls.length,
+      okCalls,
+      errorCalls,
+      firstStartedAt: typeof calls[0]?.started_at === "string" ? calls[0].started_at : null,
+      lastStartedAt: typeof calls.at(-1)?.started_at === "string" ? calls.at(-1)?.started_at : null,
+    },
+    toolCounts: [...toolCountMap.entries()]
+      .map(([tool, value]) => ({ tool, ...value }))
+      .sort((a, b) => b.calls - a.calls || a.tool.localeCompare(b.tool)),
+    runtimeGenerations: [...runtimeMap.values()].sort((a, b) => a.firstSeenAt.localeCompare(b.firstSeenAt)),
+    workflowKeys: distinct("workflow_key"),
+    taskKeys: distinct("task_key"),
+    sessionKeys: distinct("session_key"),
+    projects: distinct("project"),
+    calls,
+    privacy: {
+      rawArgumentsStored: false,
+      rawPromptsStored: false,
+      transcriptsStored: false,
+      gitOutputsStored: false,
+    },
+  };
+}
+
 
 export function closeMetricsForTests(): void {
   if (db) db.close();

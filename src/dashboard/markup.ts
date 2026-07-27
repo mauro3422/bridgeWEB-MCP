@@ -77,6 +77,7 @@ export const dashboardMarkup = `
           <div class="status-row"><span class="status-key">Con solicitud activa</span><span id="current-active-sessions" class="status-value">—</span></div>
           <div class="status-row"><span class="status-key">Transportes anónimos</span><span id="current-anonymous" class="status-value">—</span></div>
           <div class="status-row"><span class="status-key">PID</span><span id="current-pid" class="status-value">—</span></div>
+          <div class="status-row"><span class="status-key">Runtime boot</span><code id="current-runtime-boot" class="status-value">—</code></div>
           <div class="status-row"><span class="status-key">Uptime</span><span id="current-uptime" class="status-value">—</span></div>
         </div>
       </article>

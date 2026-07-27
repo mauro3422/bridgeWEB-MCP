@@ -90,9 +90,10 @@ const { writePersistentCache } = await import('../dist/tools/shared/persistent-c
 const { classifyRobloxMcpToolCatalog, getRobloxMcpToolRequestOptions, parseRobloxStudios } = await import('../dist/integrations/roblox-mcp-client.js');
 const { extractRobloxMcpImage } = await import('../dist/tools/roblox-studio-tools.js');
 const { clearBridgeNotices, drainBridgeNotices, emitBridgeNotice, getBridgeNoticeStatus, peekBridgeNoticeHistory } = await import('../dist/notices.js');
-const { closeMssrObservatoryForTests } = await import('../dist/mssr-observatory.js');
+const { closeMssrObservatoryForTests, getMssrTraceEvidence, recordMssrCheckpoint, recordMssrRoute } = await import('../dist/mssr-observatory.js');
 const { buildToolAudit } = await import('../dist/tool-audit.js');
 const { beginToolMetric, classifyToolAuditError, closeMetricsForTests, finishToolMetric, getToolAuditMetrics } = await import('../dist/metrics.js');
+const { RUNTIME_BOOT_ID } = await import('../dist/runtime-identity.js');
 const registry = createDefaultToolRegistry();
 const call = (name, args = {}) => registry.call(name, args);
 const root = path.join(sandbox, 'project');
@@ -148,7 +149,7 @@ try {
   if (drainedNotices.length !== 1 || getBridgeNoticeStatus().pendingCount !== 0) throw new Error('Bridge notice one-shot drain failed');
   if (!noticeHistory.some((item) => item.code === 'fixture-warning' && item.actions?.[0]?.toolName === 'terminal_list')) throw new Error('Bridge notice history did not retain actionable reminder after drain');
 
-  if (registry.tools.length !== 125) throw new Error(`expected 125 tools, got ${registry.tools.length}`);
+  if (registry.tools.length !== 126) throw new Error(`expected 126 tools, got ${registry.tools.length}`);
   const delegatedQueryTool = registry.tools.find((tool) => tool.name === 'bridge_tool_query');
   const delegatedActionTool = registry.tools.find((tool) => tool.name === 'bridge_tool_action');
   if (!delegatedQueryTool?.description?.includes('First inspect the target with bridge_tool_schema')) throw new Error('bridge_tool_query must require schema-first delegation');
@@ -157,7 +158,7 @@ try {
   const expectedNeutral = ['whiteboard_capture_pc_view', 'whiteboard_add_text', 'whiteboard_add_svg', 'whiteboard_add_diagram', 'whiteboard_insert_image', 'mssr_trace_record', 'mssr_observatory_epoch_start'];
   if (registry.riskSummary.neutral.length !== expectedNeutral.length || expectedNeutral.some((name) => !registry.riskSummary.neutral.includes(name))) throw new Error(`unexpected neutral tools: ${registry.riskSummary.neutral.join(', ')}`);
   for (const moduleName of ['project','workspace','cache','workflow-guides','skill-catalog-and-roblox-proxy','roblox-studio-ops','roblox-photo-capture','notices','mssr-observatory','binary-files','images','blender','tablet-whiteboard']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
-  for (const toolName of ['project_context_load','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','bridge_tool_schema','bridge_tool_audit','skill_catalog','skill_recommend','skill_route_audit','skill_route_vocabulary','skill_route_plan','skill_bootstrap','skill_load','mssr_observatory_query','mssr_trace_record','mssr_observatory_epoch_start','bridge_notice_status','bridge_notice_drain','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_studio_list','roblox_mcp_query','roblox_mcp_action','roblox_studio_window_capture_save','roblox_screen_capture_save','roblox_photo_capture_job','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_file_attach','image_asset_save','image_character_views_prepare','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_review_bundle','blender_execute_code','blender_batch_script','blender_setup_character_references','blender_character_loop_status','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list','whiteboard_add_text','whiteboard_add_svg','whiteboard_add_diagram','whiteboard_insert_image']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/Blender/whiteboard tool ${toolName}`);
+  for (const toolName of ['project_context_load','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','bridge_tool_schema','bridge_tool_audit','skill_catalog','skill_recommend','skill_route_audit','skill_route_vocabulary','skill_route_plan','skill_bootstrap','skill_load','mssr_observatory_query','mssr_trace_evidence','mssr_trace_record','mssr_observatory_epoch_start','bridge_notice_status','bridge_notice_drain','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_studio_list','roblox_mcp_query','roblox_mcp_action','roblox_studio_window_capture_save','roblox_screen_capture_save','roblox_photo_capture_job','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_file_attach','image_asset_save','image_character_views_prepare','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_review_bundle','blender_execute_code','blender_batch_script','blender_setup_character_references','blender_character_loop_status','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list','whiteboard_add_text','whiteboard_add_svg','whiteboard_add_diagram','whiteboard_insert_image']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/Blender/whiteboard tool ${toolName}`);
   if (!registry.riskSummary.destructive.includes('roblox_mcp_action') || !registry.riskSummary.destructive.includes('roblox_studio_window_capture_save') || !registry.riskSummary.destructive.includes('roblox_screen_capture_save') || !registry.riskSummary.destructive.includes('roblox_photo_capture_job') || !registry.riskSummary.destructive.includes('roblox_place_save')) throw new Error('Roblox action/capture/save risk classification failed');
   if (!registry.riskSummary.readOnly.includes('bridge_notice_status') || !registry.riskSummary.readOnly.includes('bridge_notice_drain')) throw new Error('Bridge notice risk classification failed');
   const reviewTool = registry.tools.find((tool) => tool.name === 'blender_review_bundle');
@@ -169,6 +170,50 @@ try {
   const workOnceTool = registry.tools.find((tool) => tool.name === 'work_once');
   const auditTool = registry.tools.find((tool) => tool.name === 'bridge_tool_audit');
   if (workOnceTool?.metadata?.role !== 'alias' || workOnceTool.metadata.aliasOf !== 'run_command' || workOnceTool.metadata.family !== 'process') throw new Error('tool alias metadata failed');
+  const evidenceTool = registry.tools.find((tool) => tool.name === 'mssr_trace_evidence');
+  if (!evidenceTool || !registry.riskSummary.readOnly.includes('mssr_trace_evidence') || evidenceTool.metadata?.lifecycle !== 'protected') throw new Error('mssr_trace_evidence metadata/risk failed');
+  if (!/^[0-9a-f-]{36}$/.test(RUNTIME_BOOT_ID)) throw new Error('runtime boot identity must be a UUID');
+
+  const identityTraceId = '__test_identity_trace';
+  recordMssrRoute({
+    traceId: identityTraceId,
+    action: 'plan',
+    task: 'Maintain the MauroPrime system loop',
+    route: {
+      caller: 'chatgpt-web',
+      stage: 'start',
+      classificationMode: 'structured-semantic',
+      workflowKey: 'mauroprime-system-loop',
+      agentProfile: {model:'gpt-test',reasoningEffort:'unknown'},
+      contextUsed: true,
+      contextCharacters: 32,
+      workflows: [],
+      activeSkills: [],
+      deferredSkills: [],
+      loadOrder: [],
+      deferredLoadOrder: [],
+      intent: {signals:['reusable-pattern'],ambiguity:'low'},
+      coverage: {requiredPhases:[],completedPhases:[],missingRequiredPhases:[]},
+    },
+  });
+  const identityMetric = beginToolMetric('__test_identity_tool', {}, {
+    traceId: identityTraceId,
+    workflowKey: 'mauroprime-system-loop',
+    taskKey: 'task_fixture',
+    caller: 'chatgpt-web',
+    clientName: 'openai-mcp',
+    sessionKey: 'session-fixture',
+    project: 'bridge-mcp',
+  });
+  finishToolMetric(identityMetric, true, 12);
+  const openEvidence = getMssrTraceEvidence(identityTraceId, 50);
+  if (!openEvidence.workflowKeys.includes('mauroprime-system-loop') || openEvidence.runtime.currentBootId !== RUNTIME_BOOT_ID || openEvidence.runtime.toolRuntimeGenerations[0]?.runtimeBootId !== RUNTIME_BOOT_ID) throw new Error('trace identity correlation failed');
+  if (openEvidence.lifecycle.status !== 'open-active' || openEvidence.tools.summary.calls !== 1 || openEvidence.identity.taskKeys[0] !== 'task_fixture') throw new Error('open trace evidence projection failed');
+  recordMssrCheckpoint({traceId:identityTraceId,eventType:'outcome',primarySkill:'mssr-observability-maintenance',status:'success',accepted:true,verificationPassed:true,persisted:true,summary:'Fixture outcome'});
+  const closedEvidence = await call('mssr_trace_evidence', {traceId:identityTraceId,limit:50});
+  if (closedEvidence.lifecycle?.status !== 'closed-success' || closedEvidence.privacy?.rawPromptsStored !== false || closedEvidence.privacy?.transcriptsStored !== false) throw new Error('closed trace evidence/privacy failed');
+
+
   if (auditTool?.metadata?.lifecycle !== 'protected' || auditTool.metadata.family !== 'tool-dispatch' || !registry.riskSummary.readOnly.includes('bridge_tool_audit')) throw new Error('bridge_tool_audit metadata/risk failed');
   const auditSchema = await call('bridge_tool_schema', {toolName:'bridge_tool_audit'});
   if (auditSchema.tool?.metadata?.lifecycle !== 'protected' || !auditSchema.tool?.inputSchema?.properties?.view) throw new Error('bridge_tool_schema did not expose audit metadata');
@@ -177,7 +222,7 @@ try {
   const skillLoadSchema = await call('bridge_tool_schema', {toolName:'skill_load'});
   if (!skillLoadSchema.tool?.metadata?.usage?.recovery?.some((rule) => rule.code === 'mssr-orphan-skill-load' && rule.toolName === 'skill_bootstrap')) throw new Error('skill_load MSSR recovery metadata failed');
   const aliasAudit = await call('bridge_tool_audit', {view:'aliases',scope:'active',days:30,limit:20});
-  if (aliasAudit.summary?.registeredTools !== 125 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
+  if (aliasAudit.summary?.registeredTools !== 126 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
   const delegatedMetric = beginToolMetric('bridge_tool_query', {toolName:'bridge_tool_audit',arguments:{view:'all'}}, {caller:'chatgpt-web',sessionKey:'fixture-session',project:'fixture-project'});
   finishToolMetric(delegatedMetric, true, 128);
   const delegatedSnapshot = getToolAuditMetrics(30, 'active');
@@ -226,6 +271,7 @@ try {
     stage:'start',
     maxSkills:8,
     traceId:'__test_route_trace',
+    workflowKey:'roblox-network-authoring',
     intent:{
       summary:'Sistema Roblox de conexiones y recursos con cambios persistentes',
       domains:['roblox'],
@@ -236,8 +282,8 @@ try {
       ambiguity:'low',
     },
   });
-  if (structuredRoute.classificationMode !== 'structured-semantic' || structuredRoute.traceId !== '__test_route_trace') throw new Error('structured skill routing mode/trace failed');
-  if (structuredRoute.nextAction?.toolName !== 'skill_bootstrap' || structuredRoute.nextAction?.arguments?.traceId !== structuredRoute.traceId) throw new Error('skill_route_plan did not expose an actionable bootstrap continuation');
+  if (structuredRoute.classificationMode !== 'structured-semantic' || structuredRoute.traceId !== '__test_route_trace' || structuredRoute.workflowKey !== 'roblox-network-authoring') throw new Error('structured skill routing mode/trace/workflow failed');
+  if (structuredRoute.nextAction?.toolName !== 'skill_bootstrap' || structuredRoute.nextAction?.arguments?.traceId !== structuredRoute.traceId || structuredRoute.nextAction?.arguments?.workflowKey !== structuredRoute.workflowKey) throw new Error('skill_route_plan did not expose an actionable bootstrap continuation');
   for (const name of ['roblox-mcp-skill-router','roblox-safe-editing','roblox-connection-network-authoring']) {
     if (!structuredRoute.loadOrder.includes(name)) throw new Error(`structured route missing active skill ${name}`);
   }
