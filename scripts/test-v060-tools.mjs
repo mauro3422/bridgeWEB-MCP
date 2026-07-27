@@ -93,7 +93,7 @@ const { clearBridgeNotices, drainBridgeNotices, emitBridgeNotice, getBridgeNotic
 const { closeMssrObservatoryForTests, getMssrTraceEvidence, recordMssrCheckpoint, recordMssrRoute } = await import('../dist/mssr-observatory.js');
 const { buildToolAudit } = await import('../dist/tool-audit.js');
 const { beginToolMetric, classifyToolAuditError, closeMetricsForTests, finishToolMetric, getToolAuditMetrics } = await import('../dist/metrics.js');
-const { RUNTIME_BOOT_ID, resolveMetricWorkflowKey } = await import('../dist/runtime-identity.js');
+const { RUNTIME_BOOT_ID, resolveMetricTaskKey, resolveMetricWorkflowKey } = await import('../dist/runtime-identity.js');
 const { createMssrTraceSessionCoordinator } = await import('../dist/mssr-trace-context.js');
 const registry = createDefaultToolRegistry();
 const call = (name, args = {}) => registry.call(name, args);
@@ -207,8 +207,26 @@ try {
   if (isolatedScoped !== 'workflow-b') throw new Error('an existing scoped trace was reassigned by later session metadata');
   const newRouteWorkflow = resolveMetricWorkflowKey({startsNewRoute:true,explicitWorkflowKey:'workflow-c',sessionWorkflowKey:'workflow-b'});
   if (newRouteWorkflow !== 'workflow-c') throw new Error('a new route did not prefer its explicit workflow');
+  const stalePendingWorkflow = resolveMetricWorkflowKey({startsNewRoute:true,sessionWorkflowKey:'workflow-b',localWorkflowKey:'workflow-b'});
+  if (stalePendingWorkflow !== undefined) throw new Error('a new route inherited a stale pending workflow without an explicit workflowKey');
 
-
+  const traceTaskHash = 'a'.repeat(64);
+  const isolatedTraceTask = resolveMetricTaskKey({
+    startsNewRoute:false,
+    traceId:'__test_workflow_trace_a',
+    traceTaskHash,
+    explicitTaskKey:'task_bbbbbbbbbbbbbbbb',
+    sessionTaskKey:'task_cccccccccccccccc',
+  });
+  if (isolatedTraceTask !== 'task_aaaaaaaaaaaaaaaa') throw new Error('an existing trace inherited another task key from the shared session');
+  const explicitNewTask = resolveMetricTaskKey({
+    startsNewRoute:true,
+    explicitTaskKey:'task_bbbbbbbbbbbbbbbb',
+    sessionTaskKey:'task_cccccccccccccccc',
+  });
+  if (explicitNewTask !== 'task_bbbbbbbbbbbbbbbb') throw new Error('a new route did not prefer its explicit task key');
+  const stalePendingTask = resolveMetricTaskKey({startsNewRoute:true,sessionTaskKey:'task_cccccccccccccccc',localTaskKey:'task_cccccccccccccccc'});
+  if (stalePendingTask !== undefined) throw new Error('a new route inherited a stale pending task key without explicit task text');
 
   const identityTraceId = '__test_identity_trace';
   recordMssrRoute({

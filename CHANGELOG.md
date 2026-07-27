@@ -1,3 +1,10 @@
+## 0.6.41 - 2026-07-27
+
+- Require an explicit `workflowKey` on every new MSSR route instead of inheriting a stale pending workflow from an earlier task in the same Web session.
+- Make `taskKey` trace-scoped for existing executions and derive it from the new route's explicit task text, preventing later context changes from contaminating an active trace.
+- Clear pending workflow/task context when a new project context omits those values and consume both pending keys after one route start.
+- Add regression coverage for stale pending workflow/task rejection, explicit new-route identity and existing-trace immutability.
+
 ## 0.6.40 - 2026-07-27
 
 - Make workflow attribution trace-scoped after a trace is resolved, preventing a later workflow in the same Web session from contaminating an existing scoped or `unscoped` trace.

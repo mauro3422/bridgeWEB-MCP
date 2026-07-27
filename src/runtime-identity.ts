@@ -38,7 +38,31 @@ export function resolveMetricWorkflowKey(args: {
   if (!args.startsNewRoute && args.traceId) {
     return normalizeWorkflowKey(args.traceWorkflowKey) ?? "unscoped";
   }
+  if (args.startsNewRoute) return normalizeWorkflowKey(args.explicitWorkflowKey);
   return normalizeWorkflowKey(args.explicitWorkflowKey)
     ?? normalizeWorkflowKey(args.sessionWorkflowKey)
     ?? normalizeWorkflowKey(args.localWorkflowKey);
+}
+
+const TASK_KEY_PATTERN = /^task_[0-9a-f]{16}$/;
+
+function normalizeTaskKey(value: unknown): string | undefined {
+  return typeof value === "string" && TASK_KEY_PATTERN.test(value) ? value : undefined;
+}
+
+export function resolveMetricTaskKey(args: {
+  startsNewRoute: boolean;
+  traceId?: string | null;
+  traceTaskHash?: string | null;
+  explicitTaskKey?: unknown;
+  sessionTaskKey?: unknown;
+  localTaskKey?: unknown;
+}): string | undefined {
+  if (!args.startsNewRoute && args.traceId && typeof args.traceTaskHash === "string" && /^[0-9a-f]{64}$/.test(args.traceTaskHash)) {
+    return `task_${args.traceTaskHash.slice(0, 16)}`;
+  }
+  if (args.startsNewRoute) return normalizeTaskKey(args.explicitTaskKey);
+  return normalizeTaskKey(args.explicitTaskKey)
+    ?? normalizeTaskKey(args.sessionTaskKey)
+    ?? normalizeTaskKey(args.localTaskKey);
 }

@@ -768,7 +768,7 @@ relacionados independientes sin duplicar filas por cada llamada.
 
 ## 2026-07-27 - Una sesión Web no distinguía workflows, tareas, trazas y generaciones runtime
 
-**Estado:** Corregido en Bridge 0.6.39; aislamiento trace-scoped completado en 0.6.40.
+**Estado:** Corregido en Bridge 0.6.39; aislamiento trace-scoped completado en 0.6.40; consumo explícito de identidad pendiente completado en 0.6.41.
 
 **Capa / owner:** Identidad y correlación de observabilidad / `bridge-mcp` + skill `mssr-observability-maintenance`.
 
@@ -776,7 +776,7 @@ relacionados independientes sin duplicar filas por cada llamada.
 
 **Causa:** `sessionKey` identifica únicamente el scope opaco que expone el host; `taskKey` deriva del texto de tarea; `traceId` pertenece a una ejecución lógica; y PID identifica el proceso actual, pero puede atender muchas tareas y ser reutilizado por el sistema operativo. Faltaban un `workflowKey` local estable, un `runtimeBootId` por arranque y una proyección unificada por traza.
 
-**Corrección:** Se añadió `workflowKey` opcional a `project_context_load`, routing y bootstrap; `runtimeBootId` UUID a status, métricas y eventos MSSR; y la tool protegida read-only `mssr_trace_evidence`, que correlaciona eventos, llamadas, skills, task/session/workflow keys, generaciones runtime y `evidenceRef` explícitos. Los períodos idle continúan generando recordatorios y nunca sintetizan outcomes exitosos.
+**Corrección:** Se añadió `workflowKey` opcional a `project_context_load`, routing y bootstrap; `runtimeBootId` UUID a status, métricas y eventos MSSR; y la tool protegida read-only `mssr_trace_evidence`, que correlaciona eventos, llamadas, skills, task/session/workflow keys, generaciones runtime y `evidenceRef` explícitos. Una traza existente conserva sus propias identidades; una ruta nueva exige workflow y tarea explícitos y consume el contexto pendiente una sola vez. Los períodos idle continúan generando recordatorios y nunca sintetizan outcomes exitosos.
 
 **Regresión:** `scripts/test-v060-tools.mjs` exige 126 tools, propagación del workflow al `nextAction`, UUID de runtime, evidencia open/closed, cardinalidad de tools y privacidad sin prompts, transcripts ni argumentos crudos. Después del primer readback vivo se añadió un caso con dos trazas bajo el mismo `sessionKey`: la traza `unscoped` debe seguir `unscoped`, una traza scoped no puede ser reasignada por metadata posterior y una ruta nueva sí debe aceptar su workflow explícito.
 

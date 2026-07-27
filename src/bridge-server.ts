@@ -18,7 +18,7 @@ import { createDefaultToolRegistry } from "./tool-registry.js";
 import type { BridgeToolSchema } from "./tools/types.js";
 import { createMssrTraceSessionCoordinator } from "./mssr-trace-context.js";
 import { recordMssrEvent } from "./mssr-observatory.js";
-import { normalizeWorkflowKey, resolveMetricWorkflowKey } from "./runtime-identity.js";
+import { normalizeWorkflowKey, resolveMetricTaskKey, resolveMetricWorkflowKey } from "./runtime-identity.js";
 
 export { SERVER_NAME, SERVER_VERSION } from "./config.js";
 export { bridgeRestartStatus } from "./tools/bridge-ops.js";
@@ -488,6 +488,9 @@ export function createBridgeServer() {
             sessionTaskKeys.delete(oldest);
           }
         }
+      } else {
+        localTaskKey = undefined;
+        if (hostProfile.sessionKey) sessionTaskKeys.delete(hostProfile.sessionKey);
       }
       if (nextWorkflowKey) {
         localWorkflowKey = nextWorkflowKey;
@@ -500,6 +503,9 @@ export function createBridgeServer() {
             sessionWorkflowKeys.delete(oldest);
           }
         }
+      } else {
+        localWorkflowKey = undefined;
+        if (hostProfile.sessionKey) sessionWorkflowKeys.delete(hostProfile.sessionKey);
       }
     }
     const explicitWorkflowKey = normalizeWorkflowKey(effectiveCall.args.workflowKey);
@@ -544,10 +550,14 @@ export function createBridgeServer() {
     const metricProject = (traceSnapshot.project && traceSnapshot.project !== "unknown"
       ? traceSnapshot.project
       : undefined) ?? project;
-    const taskKey = (hostProfile.sessionKey ? sessionTaskKeys.get(hostProfile.sessionKey) : undefined)
-      ?? localTaskKey
-      ?? (traceSnapshot.taskHash ? `task_${traceSnapshot.taskHash.slice(0, 16)}` : undefined)
-      ?? taskKeyFromText(effectivePrepared.args.task);
+    const taskKey = resolveMetricTaskKey({
+      startsNewRoute,
+      traceId: traceSnapshot.traceId,
+      traceTaskHash: traceSnapshot.taskHash,
+      explicitTaskKey: taskKeyFromText(effectivePrepared.args.task),
+      sessionTaskKey: hostProfile.sessionKey ? sessionTaskKeys.get(hostProfile.sessionKey) : undefined,
+      localTaskKey,
+    });
     const workflowKey = resolveMetricWorkflowKey({
       startsNewRoute,
       traceId: traceSnapshot.traceId,
@@ -564,6 +574,14 @@ export function createBridgeServer() {
       args,
       metricProfile(name, args, hostProfile, traceSnapshot, metricProject, taskKey, workflowKey, relatedProject),
     );
+    if (startsNewRoute) {
+      localTaskKey = undefined;
+      localWorkflowKey = undefined;
+      if (hostProfile.sessionKey) {
+        sessionTaskKeys.delete(hostProfile.sessionKey);
+        sessionWorkflowKeys.delete(hostProfile.sessionKey);
+      }
+    }
     const toolSchema = modularToolRegistry.tools.find((tool) => tool.name === name);
     emitUnroutedNotice(name, metric, toolSchema?.annotations?.destructiveHint === true);
 

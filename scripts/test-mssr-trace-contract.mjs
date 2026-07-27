@@ -305,13 +305,15 @@ try {
     'A unique open Web trace must survive connector session/project rotation without an unrouted warning.',
   );
   const expectedSessionKey = `session-${createHash('sha256').update('web-session-fixture-001').digest('hex').slice(0, 16)}`;
-  const expectedTaskKey = `task_${createHash('sha256').update('load bounded fixture project context.').digest('hex').slice(0, 16)}`;
+  const expectedContextTaskKey = `task_${createHash('sha256').update('load bounded fixture project context.').digest('hex').slice(0, 16)}`;
+  const expectedActiveTraceTaskKey = `task_${createHash('sha256').update('start a separate mssr task after the previous outcome closed.').digest('hex').slice(0, 16)}`;
   const scopedProfiles = metrics.getMetricsOverview('active').agentProfiles;
   const fixtureProfile = scopedProfiles.find((profile) =>
     profile.caller === 'chatgpt-web'
     && profile.project === 'fixture-project'
     && profile.session_key === expectedSessionKey);
-  assert.equal(fixtureProfile?.task_key, expectedTaskKey);
+  assert.equal(fixtureProfile?.task_key, expectedActiveTraceTaskKey, 'Rotated project/session context must not replace the active trace task identity.');
+  assert.notEqual(fixtureProfile?.task_key, expectedContextTaskKey, 'Project context task metadata must remain pending evidence, not overwrite an active trace.');
   assert.equal(fixtureProfile?.related_project, 'none');
   assert.equal(fixtureProfile?.eligible_calls, 1);
   assert.equal(fixtureProfile?.traced_calls, 1);
@@ -343,7 +345,8 @@ try {
   const concurrentProfiles = metrics.getMetricsOverview('active').agentProfiles
     .filter((profile) => String(profile.project).startsWith('web-concurrent-primary-'));
   assert.equal(new Set(concurrentProfiles.map((profile) => profile.session_key)).size, 2);
-  assert.equal(new Set(concurrentProfiles.map((profile) => profile.task_key)).size, 2);
+  assert.equal(new Set(concurrentProfiles.map((profile) => profile.task_key)).size, 1, 'Concurrent project contexts attached to one active trace must preserve that trace task identity.');
+  assert.ok(concurrentProfiles.every((profile) => profile.task_key === expectedActiveTraceTaskKey));
   assert.deepEqual(
     new Set(concurrentProfiles.map((profile) => profile.related_project)),
     new Set(['web-concurrent-support-a', 'web-concurrent-support-b']),
