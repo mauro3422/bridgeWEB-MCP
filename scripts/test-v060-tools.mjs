@@ -432,18 +432,55 @@ try {
   execFileSync('git', ['add', 'package.json', 'app.txt', '.env.development'], {cwd:root,stdio:'ignore'});
   execFileSync('git', ['commit', '-m', 'initial'], {cwd:root,stdio:'ignore'});
 
+  const invalidGuideRoot = path.join(root, '.bridge', 'workflow-guides');
+  const oversizedPhrasesDir = path.join(invalidGuideRoot, 'oversized-phrases');
+  const oversizedPhasesDir = path.join(invalidGuideRoot, 'oversized-phases');
+  fs.mkdirSync(oversizedPhrasesDir, {recursive:true});
+  fs.mkdirSync(oversizedPhasesDir, {recursive:true});
+  const invalidGuideBase = {
+    schemaVersion:1,
+    title:'Invalid fixture guide',
+    description:'This fixture must be isolated without blocking project context.',
+    activation:{keywords:[],negativeKeywords:[],examples:[]},
+    entrypoint:'GUIDE.md',
+    recommendedTools:[],
+  };
+  fs.writeFileSync(path.join(oversizedPhrasesDir, 'guide.json'), JSON.stringify({
+    ...invalidGuideBase,
+    name:'oversized-phrases',
+    activation:{...invalidGuideBase.activation,phrases:Array.from({length:41},(_,index)=>`phrase ${index}`)},
+    phases:{},
+  }, null, 2));
+  fs.writeFileSync(path.join(oversizedPhasesDir, 'guide.json'), JSON.stringify({
+    ...invalidGuideBase,
+    name:'oversized-phases',
+    activation:{...invalidGuideBase.activation,phrases:[]},
+    phases:Object.fromEntries(Array.from({length:25},(_,index)=>[`phase-${String(index).padStart(2,'0')}`,`phases/phase-${index}.md`])),
+  }, null, 2));
+
   const projectContext = await call('project_context_load', {
     projectRoot:root,
     task:'Crear un personaje low poly y preparar las vistas para Blender',
   });
   if (projectContext.documents.length !== 3 || !projectContext.documents.some((item) => item.kind === 'agents') || !projectContext.documents.some((item) => item.kind === 'project-context') || !projectContext.documents.some((item) => item.kind === 'project-state')) throw new Error('project context documents failed');
   if (!projectContext.guides.some((item) => item.name === 'character-concept-blender') || projectContext.recommendation?.recommendation?.action !== 'load_existing') throw new Error('project context guide recommendation failed');
+  if (projectContext.guideWarnings?.length !== 2 || !projectContext.guideWarnings.some((item) => item.guideName === 'oversized-phrases' && item.message.includes('at most 40 element')) || !projectContext.guideWarnings.some((item) => item.guideName === 'oversized-phases' && item.message.includes('at most 24 entries'))) throw new Error(`invalid guide isolation failed: ${JSON.stringify(projectContext.guideWarnings)}`);
+  if (projectContext.recommendation?.guideWarnings?.length !== 2) throw new Error('project context recommendation did not preserve guide warnings');
 
   const characterRecommendation = await call('workflow_guide_recommend', {
     task:'Cada vez que creemos un personaje furry low poly quiero generar frente costado espalda y pasarlo a Blender',
     projectRoot:root,
   });
   if (characterRecommendation.recommendation.action !== 'load_existing' || characterRecommendation.recommendation.guide !== 'character-concept-blender') throw new Error('character guide recommendation failed');
+  if (characterRecommendation.guideWarnings?.length !== 2) throw new Error('workflow guide recommendation did not isolate invalid guides');
+  let invalidGuideLoadRejected = false;
+  try {
+    await call('workflow_guide_load', {name:'oversized-phrases',projectRoot:root});
+  } catch (error) {
+    invalidGuideLoadRejected = String(error).includes("Workflow guide 'oversized-phrases' is invalid") && String(error).includes('at most 40 element');
+  }
+  if (!invalidGuideLoadRejected) throw new Error('explicit invalid workflow guide load was not rejected clearly');
+
   const genericRecommendation = await call('workflow_guide_recommend', {
     task:'A futuro, cada vez que hagamos una migracion quiero un pipeline reutilizable con pruebas y rollback',
     projectRoot:root,

@@ -819,3 +819,23 @@ relacionados independientes sin duplicar filas por cada llamada.
 **Migración:** `conversation-history-review` recibió manifest al aparecer como fallback completo repetido. Los cores grandes existentes no se redujeron sin más evidencia: contienen invariantes transversales y ahora quedan señalados por el dashboard para revisión posterior. No se añadió un `exclusiveGroup` real porque no apareció una pareja de procedimientos mutuamente excluyentes; mantener la fixture negativa evita inventar exclusividad.
 
 **Regresión:** `test-selective-skill-context.mjs` prueba starvation global y deduplicación; `test-delegated-mssr-route-project.mjs` exige reserva de todos los cores requeridos y resumen observable; `bridge_verify_all` valida dashboard, schema, routing y runtime vivo.
+
+---
+
+## 2026-07-28 — Una guía inválida bloqueó toda la carga de contexto
+
+**Estado:** Corregido en `0.6.44`; pendiente verificación del servicio vivo después del restart.
+
+**Capa / owner:** `src/tools/workflow-guide-tools.ts`, `project_context_load`, `workflow_guide_recommend` y `workflow_guide_load`.
+
+**Síntoma:** una guía concurrente que superaba el límite de `activation.phrases` hacía fallar el descubrimiento completo. `project_context_load` no devolvía contexto durable ni recomendaciones, aunque el resto de las guías era válido.
+
+**Reproducción mínima:** colocar bajo `.bridge/workflow-guides` una `guide.json` con 41 frases, o 25 fases, y ejecutar `project_context_load` con `includeGuides=true`.
+
+**Causa:** `discoverInRoot()` validaba cada manifest, pero no aislaba excepciones por directorio. El error de una sola guía salía del loop y abortaba todo el catálogo.
+
+**Corrección:** la validación permanece estricta; no se elevan límites ni se truncan arrays. Cada directorio inválido produce `guideWarnings`, se excluye del catálogo y permite continuar con las demás guías. Un proyecto inválido no cae silenciosamente a una guía global homónima. La carga explícita del nombre inválido falla con su razón exacta.
+
+**Regresión:** `scripts/test-v060-tools.mjs` crea fixtures con 41 frases y 25 fases; exige que contexto y recomendación sobrevivan con dos warnings, y que `workflow_guide_load` rechace claramente la guía inválida.
+
+**Seguimiento:** ejecutar `bridge_verify_all` para `0.6.44`, publicar, reiniciar mediante watchdog y repetir `project_context_load` vivo con una guía inválida aislada.

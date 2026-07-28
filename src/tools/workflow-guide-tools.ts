@@ -26,7 +26,11 @@ const guideManifestSchema = z.object({
     examples: z.array(z.string().min(1).max(500)).max(30).default([]),
   }),
   entrypoint: z.string().min(1).max(240).default("GUIDE.md"),
-  phases: z.record(z.string(), z.string()).default({}),
+  phases: z.record(phaseNameSchema, z.string().min(1).max(240))
+    .refine((phases) => Object.keys(phases).length <= MAX_PHASES, {
+      message: `phases must contain at most ${MAX_PHASES} entries`,
+    })
+    .default({}),
   recommendedTools: z.array(z.string().min(1).max(120)).max(80).default([]),
   scopeNotes: z.string().max(1200).optional(),
 });
@@ -39,6 +43,20 @@ type DiscoveredGuide = {
   directory: string;
   manifestPath: string;
   manifest: GuideManifest;
+};
+
+type GuideDiscoveryWarning = {
+  code: "invalid-guide-manifest";
+  scope: GuideScope;
+  guideName: string;
+  directory: string;
+  manifestPath: string;
+  message: string;
+};
+
+type GuideDiscoveryResult = {
+  guides: DiscoveredGuide[];
+  warnings: GuideDiscoveryWarning[];
 };
 
 function globalGuideRoot(): string {
@@ -102,25 +120,49 @@ async function readGuide(directory: string, scope: GuideScope): Promise<Discover
   return { scope, directory, manifestPath, manifest };
 }
 
-async function discoverInRoot(root: string, scope: GuideScope): Promise<DiscoveredGuide[]> {
-  if (!(await pathExists(root))) return [];
-  const entries = await fs.readdir(root, { withFileTypes: true });
-  const guides: DiscoveredGuide[] = [];
-  for (const entry of entries.slice(0, MAX_GUIDES)) {
-    if (!entry.isDirectory()) continue;
-    const guide = await readGuide(path.join(root, entry.name), scope);
-    if (guide) guides.push(guide);
-  }
-  return guides;
+function guideErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.length <= 2_000 ? message : `${message.slice(0, 1_997)}...`;
 }
 
-async function discoverGuides(projectRoot?: string): Promise<DiscoveredGuide[]> {
-  const projectGuides = projectRoot ? await discoverInRoot(projectGuideRoot(projectRoot), "project") : [];
-  const globalGuides = await discoverInRoot(globalGuideRoot(), "global");
+async function discoverInRoot(root: string, scope: GuideScope): Promise<GuideDiscoveryResult> {
+  if (!(await pathExists(root))) return { guides: [], warnings: [] };
+  const entries = await fs.readdir(root, { withFileTypes: true });
+  const guides: DiscoveredGuide[] = [];
+  const warnings: GuideDiscoveryWarning[] = [];
+  for (const entry of entries.slice(0, MAX_GUIDES)) {
+    if (!entry.isDirectory()) continue;
+    const directory = path.join(root, entry.name);
+    try {
+      const guide = await readGuide(directory, scope);
+      if (guide) guides.push(guide);
+    } catch (error) {
+      warnings.push({
+        code: "invalid-guide-manifest",
+        scope,
+        guideName: entry.name,
+        directory,
+        manifestPath: path.join(directory, "guide.json"),
+        message: guideErrorMessage(error),
+      });
+    }
+  }
+  return { guides, warnings };
+}
+
+async function discoverGuides(projectRoot?: string): Promise<GuideDiscoveryResult> {
+  const projectDiscovery = projectRoot
+    ? await discoverInRoot(projectGuideRoot(projectRoot), "project")
+    : { guides: [], warnings: [] } satisfies GuideDiscoveryResult;
+  const globalDiscovery = await discoverInRoot(globalGuideRoot(), "global");
   const merged = new Map<string, DiscoveredGuide>();
-  for (const guide of globalGuides) merged.set(guide.manifest.name, guide);
-  for (const guide of projectGuides) merged.set(guide.manifest.name, guide);
-  return [...merged.values()].sort((a, b) => a.manifest.name.localeCompare(b.manifest.name));
+  for (const guide of globalDiscovery.guides) merged.set(guide.manifest.name, guide);
+  for (const warning of projectDiscovery.warnings) merged.delete(warning.guideName);
+  for (const guide of projectDiscovery.guides) merged.set(guide.manifest.name, guide);
+  return {
+    guides: [...merged.values()].sort((a, b) => a.manifest.name.localeCompare(b.manifest.name)),
+    warnings: [...globalDiscovery.warnings, ...projectDiscovery.warnings],
+  };
 }
 
 async function loadProjectContext(args: {
@@ -152,8 +194,10 @@ async function loadProjectContext(args: {
     await addDocument("project-state", path.join(projectRoot, ".bridge", "PROJECT_STATE.md"));
   }
 
-  const discovered = args.includeGuides ? await discoverGuides(projectRoot) : [];
-  const guides = discovered.map((guide) => ({
+  const discovery = args.includeGuides
+    ? await discoverGuides(projectRoot)
+    : { guides: [], warnings: [] } satisfies GuideDiscoveryResult;
+  const guides = discovery.guides.map((guide) => ({
     name: guide.manifest.name,
     title: guide.manifest.title,
     description: guide.manifest.description,
@@ -163,7 +207,10 @@ async function loadProjectContext(args: {
     manifestPath: guide.manifestPath,
   }));
   const recommendation = args.task
-    ? await recommendGuide({ task: args.task, projectRoot, maxResults: 5 })
+    ? await recommendGuide(
+        { task: args.task, projectRoot, maxResults: 5 },
+        args.includeGuides ? discovery : undefined,
+      )
     : null;
 
   return {
@@ -182,6 +229,7 @@ async function loadProjectContext(args: {
     },
     documents,
     guides,
+    guideWarnings: discovery.warnings,
     recommendation,
   };
 }
@@ -262,8 +310,12 @@ function reusablePattern(task: string) {
   };
 }
 
-async function recommendGuide(args: { task: string; projectRoot?: string; maxResults: number }) {
-  const guides = await discoverGuides(args.projectRoot);
+async function recommendGuide(
+  args: { task: string; projectRoot?: string; maxResults: number },
+  existingDiscovery?: GuideDiscoveryResult,
+) {
+  const discovery = existingDiscovery ?? await discoverGuides(args.projectRoot);
+  const guides = discovery.guides;
   const ranked = guides
     .map((guide) => {
       const scored = scoreGuide(args.task, guide);
@@ -294,6 +346,7 @@ async function recommendGuide(args: { task: string; projectRoot?: string; maxRes
     task: args.task,
     searchedScopes: args.projectRoot ? ["project", "global"] : ["global"],
     guideCount: guides.length,
+    guideWarnings: discovery.warnings,
     reusablePattern: pattern,
     existingSkillCoverage: skillCoverage,
     matches: ranked,
@@ -308,10 +361,14 @@ async function recommendGuide(args: { task: string; projectRoot?: string; maxRes
 }
 
 async function findGuide(name: string, projectRoot?: string): Promise<DiscoveredGuide> {
-  const guides = await discoverGuides(projectRoot);
-  const guide = guides.find((item) => item.manifest.name === name);
-  if (!guide) throw new Error(`Workflow guide not found: ${name}`);
-  return guide;
+  const discovery = await discoverGuides(projectRoot);
+  const guide = discovery.guides.find((item) => item.manifest.name === name);
+  if (guide) return guide;
+  const invalidGuide = discovery.warnings.find((warning) => warning.guideName === name);
+  if (invalidGuide) {
+    throw new Error(`Workflow guide '${name}' is invalid: ${invalidGuide.message}`);
+  }
+  throw new Error(`Workflow guide not found: ${name}`);
 }
 
 async function loadGuide(args: {

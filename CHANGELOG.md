@@ -1,3 +1,10 @@
+## 0.6.44 - 2026-07-28
+
+- Isolate invalid workflow-guide manifests during discovery so one oversized or malformed guide no longer blocks `project_context_load` or `workflow_guide_recommend`.
+- Preserve strict guide validation without silent truncation: invalid guides are excluded with bounded `guideWarnings`, while explicit loads fail with the exact validation reason.
+- Prevent an invalid project guide from silently falling back to a same-named global guide.
+- Add regressions for 41 activation phrases, 25 phases, surviving context/recommendation and explicit invalid-guide load rejection.
+
 ## 0.6.43 - 2026-07-28
 
 - Replace sequential per-skill budgeting with the `global-required-core-first` planner: reserve every required core, then required modules, then globally rank optional modules.
