@@ -824,7 +824,7 @@ relacionados independientes sin duplicar filas por cada llamada.
 
 ## 2026-07-28 — Una guía inválida bloqueó toda la carga de contexto
 
-**Estado:** Corregido en `0.6.44`; pendiente verificación del servicio vivo después del restart.
+**Estado:** Corregido, publicado y verificado en el servicio vivo `0.6.44`.
 
 **Capa / owner:** `src/tools/workflow-guide-tools.ts`, `project_context_load`, `workflow_guide_recommend` y `workflow_guide_load`.
 
@@ -838,4 +838,4 @@ relacionados independientes sin duplicar filas por cada llamada.
 
 **Regresión:** `scripts/test-v060-tools.mjs` crea fixtures con 41 frases y 25 fases; exige que contexto y recomendación sobrevivan con dos warnings, y que `workflow_guide_load` rechace claramente la guía inválida.
 
-**Seguimiento:** ejecutar `bridge_verify_all` para `0.6.44`, publicar, reiniciar mediante watchdog y repetir `project_context_load` vivo con una guía inválida aislada.
+**Verificación final:** el watchdog reinició HTTP desde `0.6.43` a `0.6.44`; `bridge_verify_all` pasó todos los gates obligatorios, incluido doctor, typecheck, build, smoke HTTP, regresiones, 162 casos efectivos de routing y documentación de 126 herramientas. Un `project_context_load` vivo posterior devolvió contexto, catálogo y recomendación sin abortar.
