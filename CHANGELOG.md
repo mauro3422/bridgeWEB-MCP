@@ -1,3 +1,12 @@
+## 0.6.47 - 2026-07-28
+
+- Add `systemAwareness` to `skill_route_plan` and `skill_bootstrap` for Roblox-routed work, reporting Bridge reachability/version, live Roblox MCP catalog health, connected Studios, active target, and Edit/Play mode.
+- Classify `single-studio-inactive` separately from disconnection and expose a no-restart recovery action through `get_studio_state`.
+- Cache the snapshot for five seconds so route planning and immediate bootstrap do not duplicate Studio probes, and treat the first ten seconds without a registered Studio as quiet `studio-warming-up` instead of a false disconnection warning.
+- Emit in-band, deduplicated notices only when the Roblox target or provider requires attention, plus one recovery notice when a prior unhealthy state becomes active again.
+- Add a focused regression matrix for route relevance, mode parsing, and target-state classification.
+
+
 ## 0.6.46 - 2026-07-28
 
 - Accept a legacy nested `arguments.traceId` control in `bridge_tool_query` and `bridge_tool_action` when a stale static connector catalog cannot expose the canonical wrapper-level field.

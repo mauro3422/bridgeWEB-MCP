@@ -43,6 +43,7 @@ import {
   resolveMssrTraceId,
 } from "../mssr-observatory.js";
 import { requireWorkflowKey } from "../runtime-identity.js";
+import { buildMssrSystemAwareness } from "../mssr-system-awareness.js";
 
 const MAX_SKILL_FILE_CHARS = 160_000;
 const MAX_DISCOVERED_SKILLS = 600;
@@ -103,6 +104,8 @@ function compactSkillRoute<T extends Record<string, unknown>>(route: T): Record<
     warnings: route.warnings,
     activationInstruction: route.activationInstruction,
     sourceHealth: route.sourceHealth,
+    systemAwareness: route.systemAwareness,
+    __bridgeNotices: route.__bridgeNotices,
   };
 }
 
@@ -537,7 +540,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
     },
     {
       name: "skill_route_plan",
-      description: "Plan skill activation before substantial specialized work. The agent should first infer a compact structured intent from the user's request, including explicit semantic signals, even when the wording is incomplete, then call this tool. Use signal nominal only when no error, warning, uncertainty, friction, recovery need, capability gap, or reusable pattern is present. It deterministically applies routing metadata, dependencies, exclusions, workflow phases, source precedence, and completed-phase coverage. It does not expose or require chain-of-thought.",
+      description: "Plan skill activation before substantial specialized work. The agent should first infer a compact structured intent from the user's request, including explicit semantic signals, even when the wording is incomplete, then call this tool. Use signal nominal only when no error, warning, uncertainty, friction, recovery need, capability gap, or reusable pattern is present. It deterministically applies routing metadata, dependencies, exclusions, workflow phases, source precedence, and completed-phase coverage. For Roblox routes, the response also includes a short-lived systemAwareness snapshot of Bridge, Roblox MCP catalog, connected Studios, active target and Edit/Play mode, with deduplicated notices only for actionable states. It does not expose or require chain-of-thought.",
       inputSchema: {
         type: "object",
         properties: {
@@ -561,7 +564,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
     },
     {
       name: "skill_bootstrap",
-      description: "Load the current phase of a structured skill route. By default it globally plans selective Codex context from context-modules.json manifests: reserve every required skill core first, then required modules, globally rank optional modules, and admit optional skill packages only when they fit. Skills without manifests fall back to the full SKILL.md for compatibility; contentMode=full preserves the explicit legacy/debug path. The response reports savings, skips, overflow, duplicate avoidance, and allocation tiers. Deferred skills remain metadata-only.",
+      description: "Load the current phase of a structured skill route. By default it globally plans selective Codex context from context-modules.json manifests: reserve every required skill core first, then required modules, globally rank optional modules, and admit optional skill packages only when they fit. Skills without manifests fall back to the full SKILL.md for compatibility; contentMode=full preserves the explicit legacy/debug path. The response reports savings, skips, overflow, duplicate avoidance, and allocation tiers. For Roblox routes it also returns a cached-at-most-five-seconds systemAwareness snapshot and delivers deduplicated recovery notices when the target, catalog, or Studio state needs attention. Deferred skills remain metadata-only.",
       inputSchema: {
         type: "object",
         properties: {
@@ -771,11 +774,18 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const profile = agentProfile(args);
       const workflowKey = requireWorkflowKey(args.workflowKey);
       const observedRoute = { ...route, agentProfile: profile, workflowKey: workflowKey ?? null };
+      const systemAwareness = await buildMssrSystemAwareness({
+        intent: route.intent,
+        workflows: route.workflows,
+        robloxHealth: discovered.sourceHealth.roblox,
+      });
       recordMssrRoute({ traceId, action: "plan", task, route: observedRoute as unknown as Record<string, unknown> });
       const response = {
         ...observedRoute,
         traceId,
         sourceHealth: discovered.sourceHealth,
+        systemAwareness: systemAwareness.status,
+        __bridgeNotices: systemAwareness.notices,
         warnings: [...discovered.warnings, ...route.warnings],
         nextAction: {
           label: "Cargar automáticamente las skills de la fase",
@@ -818,6 +828,11 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const traceId = resolveMssrTraceId(args.traceId);
       const profile = agentProfile(args);
       const workflowKey = requireWorkflowKey(args.workflowKey);
+      const systemAwareness = await buildMssrSystemAwareness({
+        intent: route.intent,
+        workflows: route.workflows,
+        robloxHealth: discovered.sourceHealth.roblox,
+      });
       const contentMode = z.enum(["selective", "full"]).catch("selective").parse(args.contentMode ?? "selective") as SkillContextMode;
       const referenceMode = z.enum(["auto", "none"]).catch("auto").parse(args.includeReferences ?? "auto") as SkillReferenceMode;
       const maxContextChars = z.number().int().min(4_000).max(100_000).catch(24_000).parse(args.maxContextChars ?? 24_000);
@@ -911,6 +926,8 @@ export const skillCatalogToolModule: BridgeToolModule = {
           skills: contextAssemblySkills,
         },
         sourceHealth: discovered.sourceHealth,
+        systemAwareness: systemAwareness.status,
+        __bridgeNotices: systemAwareness.notices,
         warnings: [...discovered.warnings, ...route.warnings],
         activationInstruction: loaded.length > 0
           ? "The loaded skills govern only the current phase. Bridge carries the active trace in-session and uniquely recovers it across stateless calls when safe. Call skill_bootstrap again only at verify, persist, close, a material failure, or a newly discovered capability need; pass traceId explicitly after restart or when multiple candidates exist."
