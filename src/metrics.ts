@@ -82,7 +82,13 @@ export type BridgeMetricStart = {
   mssrEligible: boolean;
 };
 
-export type BridgeMetricEnd = BridgeMetricStart & {
+export type BridgeMetricResult = {
+  resultOk?: boolean;
+  resultCode?: number | null;
+  resultStatus?: "success" | "failed" | "timeout";
+};
+
+export type BridgeMetricEnd = BridgeMetricStart & BridgeMetricResult & {
   ok: boolean;
   durationMs: number;
   outputChars: number;
@@ -123,6 +129,9 @@ function ensureToolCallProfileColumns(database: DatabaseSync): void {
     ["routing_status", "TEXT"],
     ["mssr_eligible", "INTEGER"],
     ["operation_subject", "TEXT"],
+    ["result_ok", "INTEGER"],
+    ["result_code", "INTEGER"],
+    ["result_status", "TEXT"],
   ] as const;
   for (const [name, type] of additions) {
     if (!columns.has(name)) database.exec(`ALTER TABLE tool_calls ADD COLUMN ${name} ${type};`);
@@ -187,7 +196,10 @@ function getDb(): DatabaseSync | null {
       related_project TEXT,
       routing_status TEXT,
       mssr_eligible INTEGER,
-      operation_subject TEXT
+      operation_subject TEXT,
+      result_ok INTEGER,
+      result_code INTEGER,
+      result_status TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_tool_calls_started_at ON tool_calls(started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_tool_started_at ON tool_calls(tool, started_at);
@@ -224,8 +236,8 @@ function getDb(): DatabaseSync | null {
       output_chars, server_name, server_version, pid, hostname, platform, cwd,
       observability_epoch, runtime_boot_id, trace_id, workflow_key, caller, model, reasoning_effort, client_name,
       session_key, project, routing_status, mssr_eligible, operation_subject,
-      task_key, related_project
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      task_key, related_project, result_ok, result_code, result_status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   return db;
 }
@@ -303,7 +315,39 @@ function cryptoRandomId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export function finishToolMetric(metric: BridgeMetricStart, ok: boolean, outputChars: number, error?: string): BridgeMetricEnd {
+export function extractToolResultMetric(toolName: string, rawData: unknown): BridgeMetricResult {
+  const effectiveTool = toolName === "bridge_tool_query" || toolName === "bridge_tool_action"
+    ? undefined
+    : toolName;
+  const outer = rawData && typeof rawData === "object" && !Array.isArray(rawData)
+    ? rawData as Record<string, unknown>
+    : undefined;
+  const delegatedTool = typeof outer?.delegatedTool === "string" ? outer.delegatedTool : undefined;
+  const payload = outer?.result && typeof outer.result === "object" && !Array.isArray(outer.result)
+    ? outer.result as Record<string, unknown>
+    : outer;
+  const observedTool = delegatedTool ?? effectiveTool;
+  if (!payload || (observedTool !== "run_command" && observedTool !== "work_once")) return {};
+
+  const timedOut = payload.timedOut === true;
+  const rawCode = payload.code;
+  const resultCode = typeof rawCode === "number" && Number.isInteger(rawCode) ? rawCode : null;
+  if (timedOut) return { resultOk: false, resultCode, resultStatus: "timeout" };
+  if (resultCode === null) return {};
+  return {
+    resultOk: resultCode === 0,
+    resultCode,
+    resultStatus: resultCode === 0 ? "success" : "failed",
+  };
+}
+
+export function finishToolMetric(
+  metric: BridgeMetricStart,
+  ok: boolean,
+  outputChars: number,
+  error?: string,
+  result: BridgeMetricResult = {},
+): BridgeMetricEnd {
   const endedAt = new Date();
   const durationMs = Math.max(0, endedAt.getTime() - metric.startedAtMs);
   const safeError = error ? redactText(error) : null;
@@ -314,6 +358,7 @@ export function finishToolMetric(metric: BridgeMetricStart, ok: boolean, outputC
     durationMs,
     outputChars,
     error: safeError || undefined,
+    ...result,
   };
 
   if (!metricsEnabled) return event;
@@ -376,6 +421,9 @@ export function finishToolMetric(metric: BridgeMetricStart, ok: boolean, outputC
       metric.operationSubject ?? null,
       metric.taskKey,
       metric.relatedProject,
+      result.resultOk === undefined ? null : result.resultOk ? 1 : 0,
+      result.resultCode ?? null,
+      result.resultStatus ?? null,
     );
   } catch (sqliteError) {
     writeJsonl({
@@ -425,7 +473,8 @@ export function classifyToolAuditError(value: string | null | undefined): string
   if (!error) return "unknown";
   if (/invalid_type|unrecognized_keys|zod|required|expected .* received|must be a (json object|non-empty string)|invalid .* expected/.test(error)) return "schema-validation";
   if (/confirmtoolname|classified read-only|not classified read-only|destructive action|risk classification/.test(error)) return "permission-or-risk-mismatch";
-  if (/timed? out|timeout|etimedout/.test(error)) return "timeout";
+  if (/process-result:timeout|timed? out|timeout|etimedout/.test(error)) return "timeout";
+  if (/process-result:failed:code=/.test(error)) return "process-exit";
   if (/expected \d+ replacement|expected replacement|patch conflict|context mismatch/.test(error)) return "patch-conflict";
   if (/unknown modular tool|unknown (terminal|workspace|upload|snapshot|studio) (session|id|target)|not found|enoent|target .*missing|does not exist/.test(error)) return "target-not-found";
   if (/econnrefused|provider unavailable|connection closed|disconnected|tools\/list returned zero|no last-known tool cache/.test(error)) return "provider-unavailable";
@@ -447,11 +496,11 @@ export function getToolAuditMetrics(days = 30, scope: BridgeMetricsScope = "acti
   const filter = metricsFilter(scope);
   const rows = database.prepare(`
     WITH projected_calls AS (
-      SELECT tool AS audited_tool, started_at, duration_ms, ok, session_key, project
+      SELECT tool AS audited_tool, started_at, duration_ms, COALESCE(result_ok, ok) AS effective_ok, session_key, project
       FROM tool_calls
       WHERE ${filter.where} AND started_at >= ?
       UNION ALL
-      SELECT operation_subject AS audited_tool, started_at, duration_ms, ok, session_key, project
+      SELECT operation_subject AS audited_tool, started_at, duration_ms, COALESCE(result_ok, ok) AS effective_ok, session_key, project
       FROM tool_calls
       WHERE ${filter.where} AND started_at >= ?
         AND tool IN ('bridge_tool_query', 'bridge_tool_action')
@@ -459,13 +508,13 @@ export function getToolAuditMetrics(days = 30, scope: BridgeMetricsScope = "acti
     )
     SELECT audited_tool AS tool,
       COUNT(*) AS calls,
-      SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END) AS ok_calls,
-      SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS error_calls,
+      SUM(CASE WHEN effective_ok = 1 THEN 1 ELSE 0 END) AS ok_calls,
+      SUM(CASE WHEN effective_ok = 0 THEN 1 ELSE 0 END) AS error_calls,
       ROUND(AVG(duration_ms), 2) AS avg_duration_ms,
       MAX(duration_ms) AS max_duration_ms,
       MAX(started_at) AS last_started_at,
-      MAX(CASE WHEN ok = 1 THEN started_at END) AS last_success_at,
-      MAX(CASE WHEN ok = 0 THEN started_at END) AS last_error_at,
+      MAX(CASE WHEN effective_ok = 1 THEN started_at END) AS last_success_at,
+      MAX(CASE WHEN effective_ok = 0 THEN started_at END) AS last_error_at,
       COUNT(DISTINCT CASE WHEN session_key IS NOT NULL AND session_key <> 'unknown' THEN session_key END) AS unique_sessions,
       COUNT(DISTINCT CASE WHEN project IS NOT NULL AND project <> 'unknown' THEN project END) AS unique_projects
     FROM projected_calls
@@ -474,13 +523,13 @@ export function getToolAuditMetrics(days = 30, scope: BridgeMetricsScope = "acti
   `).all(...filter.params, since, ...filter.params, since);
 
   const errors = database.prepare(`
-    SELECT tool, error
+    SELECT tool, COALESCE(error, 'process-result:' || COALESCE(result_status, 'failed') || ':code=' || COALESCE(CAST(result_code AS TEXT), 'null')) AS error
     FROM tool_calls
-    WHERE ok = 0 AND ${filter.where} AND started_at >= ?
+    WHERE COALESCE(result_ok, ok) = 0 AND ${filter.where} AND started_at >= ?
     UNION ALL
-    SELECT operation_subject AS tool, error
+    SELECT operation_subject AS tool, COALESCE(error, 'process-result:' || COALESCE(result_status, 'failed') || ':code=' || COALESCE(CAST(result_code AS TEXT), 'null')) AS error
     FROM tool_calls
-    WHERE ok = 0 AND ${filter.where} AND started_at >= ?
+    WHERE COALESCE(result_ok, ok) = 0 AND ${filter.where} AND started_at >= ?
       AND tool IN ('bridge_tool_query', 'bridge_tool_action')
       AND operation_subject IS NOT NULL AND operation_subject <> ''
   `).all(...filter.params, since, ...filter.params, since);
@@ -596,6 +645,7 @@ export function getRecentMetrics(limit = 25, scope: BridgeMetricsScope = "active
   const filter = metricsFilter(scope);
   const rows = sqlite.prepare(`
     SELECT started_at, duration_ms, tool, ok, error, input_keys, operation_subject, output_chars, pid,
+      result_ok, result_code, result_status,
       runtime_boot_id, trace_id, workflow_key, task_key, caller, model, reasoning_effort, client_name, session_key, project, related_project,
       routing_status, mssr_eligible
     FROM tool_calls

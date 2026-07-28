@@ -6,7 +6,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { SERVER_NAME, SERVER_VERSION } from "./config.js";
-import { beginToolMetric, classifyToolAuditError, finishToolMetric, type BridgeMetricProfile } from "./metrics.js";
+import { beginToolMetric, classifyToolAuditError, extractToolResultMetric, finishToolMetric, type BridgeMetricProfile } from "./metrics.js";
 import {
   drainBridgeNotices,
   emitBridgeNotice,
@@ -609,7 +609,7 @@ export function createBridgeServer() {
       const outputChars = preview.content.reduce((total, part) => {
         return total + (part.type === "text" ? part.text.length : part.data.length);
       }, 0);
-      const event = finishToolMetric(metric, ok, outputChars, error);
+      const event = finishToolMetric(metric, ok, outputChars, error, extractToolResultMetric(name, rawData));
       emitAutomaticMetricNotices(name, event, toolSchema, hasImages);
       const delivered = noticeInspectionTools.has(name) ? [] : drainBridgeNotices();
       return toolContent(extracted.payload, delivered);

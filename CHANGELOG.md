@@ -1,3 +1,11 @@
+## 0.6.45 - 2026-07-28
+
+- Preserve `tool_calls.ok` as MCP handler/transport success while recording nullable `result_ok`, `result_code`, and `result_status` for `run_command` and `work_once` child-process outcomes.
+- Project delegated process results through `bridge_tool_query` / `bridge_tool_action`, classify non-zero exits separately, and use the semantic result in Tool Portfolio evidence when available.
+- Show `handler error`, `handler ok`, `command ok`, `command failed`, or `command timeout` explicitly in recent dashboard activity instead of presenting every completed handler as a successful command.
+- Keep historical rows intact with unknown semantic result fields; no SQLite reset or retroactive relabeling is performed.
+
+
 ## 0.6.44 - 2026-07-28
 
 - Isolate invalid workflow-guide manifests during discovery so one oversized or malformed guide no longer blocks `project_context_load` or `workflow_guide_recommend`.

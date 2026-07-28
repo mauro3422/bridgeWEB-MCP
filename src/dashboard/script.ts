@@ -134,10 +134,17 @@ function renderSkillCounts(targetId, inputRows, emptyText) {
   }).join('');
 }
 
-function recentStatus(ok) {
-  const tone = Number(ok) === 1 ? 'ok' : 'bad';
-  const label = Number(ok) === 1 ? 'ok' : 'error';
-  return '<span class="status-pill" data-tone="' + tone + '"><span class="dot ' + tone + '"></span><span>' + label + '</span></span>';
+function recentStatus(row) {
+  if (Number(row.ok) !== 1) {
+    return '<span class="status-pill" data-tone="bad"><span class="dot bad"></span><span>handler error</span></span>';
+  }
+  if (row.result_ok !== null && row.result_ok !== undefined) {
+    const passed = Number(row.result_ok) === 1;
+    const tone = passed ? 'ok' : 'bad';
+    const label = passed ? 'command ok' : row.result_status === 'timeout' ? 'command timeout' : 'command failed';
+    return '<span class="status-pill" data-tone="' + tone + '"><span class="dot ' + tone + '"></span><span>' + label + '</span></span>';
+  }
+  return '<span class="status-pill" data-tone="ok"><span class="dot ok"></span><span>handler ok</span></span>';
 }
 
 function operationSubjectLabel(row) {
@@ -175,7 +182,7 @@ function renderRecent(targetId, inputRows, limit, includeDetail) {
     return '<tr>' +
       '<td>' + esc(clock(row.started_at)) + '</td>' +
       '<td><code title="' + esc(toolHint(row.tool)) + '">' + esc(row.tool) + '</code>' + summarySubject + '</td>' +
-      (includeDetail ? '<td>' + esc(ms(row.duration_ms)) + '</td><td>' + recentStatus(row.ok) + '</td><td class="recent-detail">' + esc(detail) + '</td>' : '<td>' + recentStatus(row.ok) + '</td><td>' + esc(ms(row.duration_ms)) + '</td>') +
+      (includeDetail ? '<td>' + esc(ms(row.duration_ms)) + '</td><td>' + recentStatus(row) + '</td><td class="recent-detail">' + esc(detail) + '</td>' : '<td>' + recentStatus(row) + '</td><td>' + esc(ms(row.duration_ms)) + '</td>') +
     '</tr>';
   }).join('');
 }

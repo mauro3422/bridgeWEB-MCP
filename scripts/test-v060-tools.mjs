@@ -92,7 +92,7 @@ const { extractRobloxMcpImage } = await import('../dist/tools/roblox-studio-tool
 const { clearBridgeNotices, drainBridgeNotices, emitBridgeNotice, getBridgeNoticeStatus, peekBridgeNoticeHistory } = await import('../dist/notices.js');
 const { closeMssrObservatoryForTests, getMssrTraceEvidence, recordMssrCheckpoint, recordMssrRoute } = await import('../dist/mssr-observatory.js');
 const { buildToolAudit } = await import('../dist/tool-audit.js');
-const { beginToolMetric, classifyToolAuditError, closeMetricsForTests, finishToolMetric, getToolAuditMetrics } = await import('../dist/metrics.js');
+const { beginToolMetric, classifyToolAuditError, closeMetricsForTests, extractToolResultMetric, finishToolMetric, getRecentMetrics, getToolAuditMetrics } = await import('../dist/metrics.js');
 const { RUNTIME_BOOT_ID, resolveMetricTaskKey, resolveMetricWorkflowKey } = await import('../dist/runtime-identity.js');
 const { createMssrTraceSessionCoordinator } = await import('../dist/mssr-trace-context.js');
 const registry = createDefaultToolRegistry();
@@ -284,6 +284,18 @@ try {
   const targetEvidence = delegatedSnapshot.rows.find((row) => row.tool === 'bridge_tool_audit');
   if (!wrapperEvidence || wrapperEvidence.calls < 1) throw new Error('delegated wrapper audit evidence missing');
   if (!targetEvidence || targetEvidence.calls < 1 || targetEvidence.okCalls < 1) throw new Error('delegated target audit evidence missing');
+  const processOkMetric = beginToolMetric('work_once', {}, {caller:'chatgpt-web',sessionKey:'fixture-session',project:'fixture-project'});
+  finishToolMetric(processOkMetric, true, 16, undefined, extractToolResultMetric('work_once', {code:0,timedOut:false}));
+  const processFailMetric = beginToolMetric('work_once', {}, {caller:'chatgpt-web',sessionKey:'fixture-session',project:'fixture-project'});
+  finishToolMetric(processFailMetric, true, 16, undefined, extractToolResultMetric('work_once', {code:7,timedOut:false}));
+  const delegatedProcess = extractToolResultMetric('bridge_tool_query', {delegatedTool:'work_once',result:{code:9,timedOut:false}});
+  if (delegatedProcess.resultOk !== false || delegatedProcess.resultCode !== 9 || delegatedProcess.resultStatus !== 'failed') throw new Error('delegated process result extraction failed');
+  const recentProcess = getRecentMetrics(10, 'active').recent.filter((row) => row.tool === 'work_once').slice(0, 2);
+  if (!recentProcess.some((row) => row.ok === 1 && row.result_ok === 0 && row.result_code === 7 && row.result_status === 'failed')) throw new Error('failed child process metric projection missing');
+  if (!recentProcess.some((row) => row.ok === 1 && row.result_ok === 1 && row.result_code === 0 && row.result_status === 'success')) throw new Error('successful child process metric projection missing');
+  const processAudit = getToolAuditMetrics(30, 'active').rows.find((row) => row.tool === 'work_once');
+  if (!processAudit || processAudit.errorCalls < 1 || !processAudit.errorCategories.some((entry) => entry.name === 'process-exit')) throw new Error('process result audit classification failed');
+
   if (classifyToolAuditError('Expected 1 replacement(s), found 0.') !== 'patch-conflict') throw new Error('patch conflict classification failed');
   if (classifyToolAuditError('confirmToolName must exactly match target') !== 'permission-or-risk-mismatch') throw new Error('risk mismatch classification failed');
   if (classifyToolAuditError('Unknown terminal session: missing-session') !== 'target-not-found') throw new Error('missing target classification failed');
