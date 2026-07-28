@@ -799,3 +799,23 @@ relacionados independientes sin duplicar filas por cada llamada.
 **Regresión:** `test-selective-skill-context.mjs` cubre selección real, core-only, full exacto, manifest missing, ambigüedad exclusiva y traversal. `test-delegated-mssr-route-project.mjs` exige modo selectivo, continuidad de trace y descarte controlado de contexto opcional por presupuesto. La primera muestra cargó 6.525 de 9.955 caracteres para `mssr-agent-routing`, ahorrando 3.430.
 
 **Fricción durante la corrección:** Un patch textual amplio encontró tres bloques equivalentes y se negó a aplicar; el cambio se reejecutó por rango exacto. Una escritura de incidente fue invocada inicialmente sin `append=true`, se detectó por caída de tamaño/hash, se restauró desde Git y se repitió como append verificado. Ambas protecciones evitaron conservar una mutación ambigua o destructiva.
+
+---
+
+## 2026-07-28 - El presupuesto secuencial podía privar módulos relevantes a skills requeridas posteriores
+
+**Estado:** Corregido en Bridge 0.6.43.
+
+**Capa / owner:** Planner global de contexto procedural / `bridge-mcp`.
+
+**Síntoma:** `skill_bootstrap` ya ensamblaba cada skill selectivamente, pero consumía `maxContextChars` siguiendo `route.loadOrder`. Una skill requerida temprana podía cargar módulos opcionales grandes y dejar a una skill requerida posterior sólo con su core, aunque el módulo posterior tuviera mayor score y correspondiera mejor al intent.
+
+**Evidencia:** Una ejecución real con 18.000 caracteres cargó módulos opcionales de `mssr-agent-routing` y `shared-skill-governance`, mientras `skill-routing-maintainer` perdió `routing-maintenance-loop` por presupuesto pese a ser requerida en implementación. La misma traza se convirtió en fixture controlada con dos skills requeridas: la posterior posee el módulo globalmente más relevante.
+
+**Corrección:** El planner `global-required-core-first` materializa todos los candidatos antes de asignar presupuesto. Reserva todos los cores requeridos, luego módulos requeridos, ordena globalmente módulos opcionales de skills requeridas, admite skills opcionales como paquetes mínimos indivisibles y finalmente ordena sus módulos opcionales. También detecta secciones ya contenidas en contexto cargado y evita reinjectarlas, reportando `duplicateCharsAvoided`.
+
+**Observabilidad:** El resumen MSSR agrega cargado/full/ahorrado, fallbacks, skips, overflow, duplicación evitada, trazas recientes, modos de planner y presión por skill. El dashboard expone estas métricas y recomendaciones de migración basadas en ejecuciones observadas.
+
+**Migración:** `conversation-history-review` recibió manifest al aparecer como fallback completo repetido. Los cores grandes existentes no se redujeron sin más evidencia: contienen invariantes transversales y ahora quedan señalados por el dashboard para revisión posterior. No se añadió un `exclusiveGroup` real porque no apareció una pareja de procedimientos mutuamente excluyentes; mantener la fixture negativa evita inventar exclusividad.
+
+**Regresión:** `test-selective-skill-context.mjs` prueba starvation global y deduplicación; `test-delegated-mssr-route-project.mjs` exige reserva de todos los cores requeridos y resumen observable; `bridge_verify_all` valida dashboard, schema, routing y runtime vivo.

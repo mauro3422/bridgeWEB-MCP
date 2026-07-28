@@ -576,6 +576,65 @@ function updateActivity(summary, recent, timeline) {
   renderRecent('activity-recent', recent.recent || [], 20, true);
 }
 
+function renderMssrContextAssembly(context) {
+  const data = context || {};
+  setText('mssr-context-loaded', num(data.loadedChars));
+  setText('mssr-context-full', num(data.fullChars));
+  setText('mssr-context-saved', num(data.savedChars));
+  setText('mssr-context-savings', pct(data.savingsRate));
+  setText('mssr-context-loads', num(data.loadEvents));
+  setText('mssr-context-fallbacks', num(data.fallbackLoads));
+  setText('mssr-context-skips', num(data.skippedLoads));
+  setText('mssr-context-duplicates', num(data.duplicateCharsAvoided));
+
+  const planner = Array.isArray(data.planningModes) && data.planningModes.length ? data.planningModes[0] : null;
+  const plannerName = planner && planner.name ? planner.name : 'sin planner observado';
+  const plannerTone = plannerName === 'global-required-core-first' ? 'ok' : plannerName === 'legacy-sequential' ? 'warn' : 'info';
+  setPill('mssr-context-planner', plannerTone, plannerName + (planner && planner.count ? ' · ' + num(planner.count) : ''));
+
+  const tracesTarget = byId('mssr-context-traces');
+  const traces = Array.isArray(data.recentTraces) ? data.recentTraces : [];
+  if (tracesTarget) {
+    tracesTarget.innerHTML = traces.length ? traces.map((row) => {
+      const trace = String(row.traceId || '—');
+      const shortTrace = trace.length > 28 ? trace.slice(0, 18) + '…' + trace.slice(-7) : trace;
+      const incidents = [];
+      if (Number(row.skippedLoads || 0) > 0) incidents.push(num(row.skippedLoads) + ' skip');
+      if (Number(row.overflowLoads || 0) > 0) incidents.push(num(row.overflowLoads) + ' overflow');
+      if (Number(row.duplicateCharsAvoided || 0) > 0) incidents.push(num(row.duplicateCharsAvoided) + ' dup. evitados');
+      return '<tr>' +
+        '<td><code title="' + esc(trace) + '">' + esc(shortTrace) + '</code><div class="recent-detail">' + esc(dateTime(row.latestAt)) + '</div></td>' +
+        '<td>' + num(row.skills) + '</td>' +
+        '<td>' + num(row.loadedChars) + ' / ' + num(row.fullChars) + '</td>' +
+        '<td>' + pct(row.savingsRate) + '<div class="recent-detail">' + num(row.savedChars) + ' chars</div></td>' +
+        '<td>' + (incidents.length ? esc(incidents.join(' · ')) : '<span class="muted">sin incidentes</span>') + '</td>' +
+      '</tr>';
+    }).join('') : '<tr><td colspan="5" class="muted">Todavía no hay cargas con telemetría de contexto.</td></tr>';
+  }
+
+  const pressureTarget = byId('mssr-context-pressure');
+  const pressure = Array.isArray(data.skillPressure) ? data.skillPressure : [];
+  const labels = {
+    'add-context-manifest': 'agregar manifest',
+    'review-core': 'revisar core',
+    'review-budget': 'revisar presupuesto',
+    'healthy-selective': 'selectivo sano'
+  };
+  if (pressureTarget) {
+    pressureTarget.innerHTML = pressure.length ? pressure.slice(0, 12).map((row) => {
+      const recommendation = labels[row.recommendation] || row.recommendation || '—';
+      const tone = row.recommendation === 'healthy-selective' ? 'ok' : row.recommendation === 'review-budget' ? 'warn' : 'info';
+      return '<tr>' +
+        '<td><strong>' + esc(row.name) + '</strong><div class="recent-detail">full avg ' + num(row.averageFullChars) + ' · ahorro ' + pct(row.savingsRate) + '</div></td>' +
+        '<td>' + num(row.loads) + '<div class="recent-detail">fallback ' + num(row.fallbackLoads) + ' · skip ' + num(row.skippedLoads) + '</div></td>' +
+        '<td>' + num(row.averageCoreChars) + '</td>' +
+        '<td><span class="status-pill" data-tone="' + tone + '"><span class="dot ' + tone + '"></span><span>' + esc(recommendation) + '</span></span></td>' +
+      '</tr>';
+    }).join('') : '<tr><td colspan="4" class="muted">No hay presión de contexto medible todavía.</td></tr>';
+  }
+}
+
+
 function updateMssr(mssr) {
   const benchmark = mssr.benchmark || {};
   const observability = mssr.observability || {};
@@ -597,6 +656,7 @@ function updateMssr(mssr) {
   setPill('mssr-scope', 'info', 'scope ' + (mssr.scope || observability.defaultScope || 'active'));
 
   renderMssrProgress(benchmark);
+  renderMssrContextAssembly(mssr.contextAssembly || {});
   renderMssrAgentProfiles(mssr.agentProfiles || []);
   renderSkillCounts('mssr-selected-skills', mssr.top && mssr.top.selectedSkills ? mssr.top.selectedSkills : [], 'Sin skills seleccionadas en la época activa.');
   renderSkillCounts('mssr-loaded-skills', mssr.top && mssr.top.loadedSkills ? mssr.top.loadedSkills : [], 'Sin skills cargadas en la época activa.');

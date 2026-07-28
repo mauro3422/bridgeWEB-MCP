@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { assembleCodexSkillContext } from "../dist/skill-context-assembler.js";
+import { assembleCodexSkillContext, planCodexSkillContexts } from "../dist/skill-context-assembler.js";
 import { structuredSkillIntentSchema } from "@mauroprime/mssr";
 
 const skillsRoot = "C:\\Dev\\mauroprime-skills\\skills";
@@ -103,6 +103,118 @@ try {
   ]);
   assert.equal(ambiguous.content.includes("Repair owner"), false);
   assert.equal(ambiguous.content.includes("Create adapter"), false);
+
+  const plannerDirs = ["first-required", "second-required"];
+  const plannerSpecs = [
+    {
+      name: plannerDirs[0],
+      markdown: `# First required\n\n## Core\n\nFirst required core.\n\n## Low priority\n\n${"low ".repeat(260)}\n`,
+      module: { id: "low-priority", heading: "## Low priority", priority: 1 },
+      routeScore: 500,
+    },
+    {
+      name: plannerDirs[1],
+      markdown: `# Second required\n\n## Core\n\nSecond required core.\n\n## High priority\n\n${"high ".repeat(150)}\n`,
+      module: { id: "high-priority", heading: "## High priority", priority: 90 },
+      routeScore: 10,
+    },
+  ];
+  const plannerSkills = [];
+  for (const [routeIndex, spec] of plannerSpecs.entries()) {
+    const directory = path.join(tempRoot, spec.name);
+    await fs.mkdir(directory, { recursive: true });
+    const skillPath = path.join(directory, "SKILL.md");
+    await fs.writeFile(skillPath, spec.markdown, "utf8");
+    await fs.writeFile(path.join(directory, "context-modules.json"), JSON.stringify({
+      schemaVersion: 1,
+      core: { sections: ["## Core"] },
+      modules: [{
+        id: spec.module.id,
+        description: `${spec.module.id} fixture.`,
+        source: { sections: [spec.module.heading] },
+        actions: ["edit"],
+        signals: ["skill-gap"],
+        priority: spec.module.priority,
+      }],
+    }), "utf8");
+    plannerSkills.push({
+      skill: { name: spec.name, description: spec.name, source: "codex-local", path: skillPath },
+      required: true,
+      routeIndex,
+      routeScore: spec.routeScore,
+    });
+  }
+  const unconstrainedPlan = await planCodexSkillContexts({
+    skills: plannerSkills,
+    intent,
+    stage: "implement",
+    mode: "selective",
+    references: "auto",
+    maxContextChars: 50_000,
+  });
+  const unconstrainedByName = new Map(unconstrainedPlan.skills.map((item) => [item.skill.name, item]));
+  const requiredCoreChars = [...unconstrainedByName.values()].reduce((sum, item) => sum + item.contextAssembly.coreCharsLoaded, 0);
+  const highChars = unconstrainedByName.get("second-required").contextAssembly.moduleDecisions.find((item) => item.id === "high-priority").chars;
+  const constrainedPlan = await planCodexSkillContexts({
+    skills: plannerSkills,
+    intent,
+    stage: "implement",
+    mode: "selective",
+    references: "auto",
+    maxContextChars: requiredCoreChars + highChars + 4,
+  });
+  const constrainedByName = new Map(constrainedPlan.skills.map((item) => [item.skill.name, item]));
+  assert.equal(constrainedPlan.planningMode, "global-required-core-first");
+  assert.equal(constrainedByName.get("first-required").loaded, true);
+  assert.equal(constrainedByName.get("second-required").loaded, true);
+  assert.deepEqual(constrainedByName.get("second-required").contextAssembly.selectedModules, ["high-priority"]);
+  assert.deepEqual(constrainedByName.get("first-required").contextAssembly.selectedModules, []);
+  assert.equal(
+    constrainedByName.get("first-required").contextAssembly.moduleDecisions.find((item) => item.id === "low-priority").reason,
+    "budget-exceeded",
+  );
+  assert.equal(constrainedPlan.requiredCoreReservedChars, requiredCoreChars);
+  assert.equal(constrainedPlan.globallySelectedModules[0].module, "high-priority");
+
+  const overlapDir = path.join(tempRoot, "overlap");
+  await fs.mkdir(overlapDir, { recursive: true });
+  const overlapPath = path.join(overlapDir, "SKILL.md");
+  await fs.writeFile(overlapPath, "# Overlap\n\n## Core\n\nAlways required.\n\n### Repeated procedure\n\nDo this exactly once.\n\n## Other\n\nOther text.\n", "utf8");
+  await fs.writeFile(path.join(overlapDir, "context-modules.json"), JSON.stringify({
+    schemaVersion: 1,
+    core: { sections: ["## Core"] },
+    modules: [{
+      id: "repeated-procedure",
+      description: "Must not duplicate content already inside the core.",
+      source: { sections: ["### Repeated procedure"] },
+      actions: ["edit"],
+      signals: ["skill-gap"],
+      priority: 50,
+    }],
+  }), "utf8");
+  const overlapPlan = await planCodexSkillContexts({
+    skills: [{
+      skill: { name: "overlap", description: "overlap", source: "codex-local", path: overlapPath },
+      required: true,
+      routeIndex: 0,
+      routeScore: 1,
+    }],
+    intent,
+    stage: "implement",
+    mode: "selective",
+    references: "auto",
+    maxContextChars: 12_000,
+  });
+  const overlap = overlapPlan.skills[0];
+  assert.equal(overlap.loaded, true);
+  assert.deepEqual(overlap.contextAssembly.selectedModules, []);
+  assert.equal(
+    overlap.contextAssembly.moduleDecisions.find((item) => item.id === "repeated-procedure").reason,
+    "already-covered-by-loaded-context",
+  );
+  assert.equal(overlap.contextAssembly.duplicateCharsAvoided > 0, true);
+  assert.equal(overlap.content.match(/Do this exactly once\./g)?.length, 1);
+
 
   const skillDir = path.join(tempRoot, "unsafe");
   await fs.mkdir(skillDir, { recursive: true });

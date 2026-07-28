@@ -224,6 +224,28 @@ export const dashboardMarkup = `
         <div id="mssr-progress" class="mssr-list"><div class="empty-state">Cargando métricas MSSR…</div></div>
       </article>
 
+      <article class="card span-12">
+        <div class="card-header"><div><div class="card-kicker">Presión de contexto</div><h2 class="card-title">Ensamblado selectivo</h2><p class="card-description">Compara el texto que habría entrado completo con el contexto realmente ensamblado. El ahorro no mide calidad; muestra presión evitada.</p></div><span id="mssr-context-planner" class="status-pill" data-tone="info"><span class="dot info"></span><span>sin planner observado</span></span></div>
+        <div class="card-body">
+          <div class="metric-grid">
+            <div class="metric-card"><div class="metric-label">Cargado</div><div id="mssr-context-loaded" class="metric-value">—</div><div class="metric-note"><span id="mssr-context-loads">—</span> cargas medibles</div></div>
+            <div class="metric-card"><div class="metric-label">Completo estimado</div><div id="mssr-context-full" class="metric-value">—</div><div class="metric-note"><span id="mssr-context-fallbacks">—</span> fallbacks full</div></div>
+            <div class="metric-card"><div class="metric-label">Ahorrado</div><div id="mssr-context-saved" class="metric-value">—</div><div class="metric-note"><span id="mssr-context-skips">—</span> contextos omitidos</div></div>
+            <div class="metric-card"><div class="metric-label">Tasa de ahorro</div><div id="mssr-context-savings" class="metric-value">—</div><div class="metric-note"><span id="mssr-context-duplicates">—</span> caracteres duplicados evitados</div></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="card span-7">
+        <div class="card-header"><div><div class="card-kicker">Últimas ejecuciones</div><h2 class="card-title">Contexto por traza</h2><p class="card-description">Resume presión, ahorro, skips y overflow por ejecución sin almacenar el texto procedural.</p></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Traza</th><th>Skills</th><th>Cargado / full</th><th>Ahorro</th><th>Incidentes</th></tr></thead><tbody id="mssr-context-traces"><tr><td colspan="5" class="muted">Cargando trazas…</td></tr></tbody></table></div>
+      </article>
+
+      <article class="card span-5">
+        <div class="card-header"><div><div class="card-kicker">Migración guiada</div><h2 class="card-title">Presión por skill</h2><p class="card-description">Prioriza manifests, revisión de cores o presupuesto usando cargas observadas, no sólo tamaño en disco.</p></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Skill</th><th>Cargas</th><th>Core</th><th>Señal</th></tr></thead><tbody id="mssr-context-pressure"><tr><td colspan="4" class="muted">Cargando presión…</td></tr></tbody></table></div>
+      </article>
+
       <article class="card span-6">
         <div class="card-header"><div><div class="card-kicker">Decisión del router</div><h2 class="card-title">Skills seleccionadas</h2><p class="card-description">Candidatas activas de cada fase. Seleccionar no prueba que el agente haya cargado o aplicado la guía.</p></div></div>
         <div id="mssr-selected-skills" class="tool-list"><div class="empty-state">Cargando selección…</div></div>

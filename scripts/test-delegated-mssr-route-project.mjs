@@ -172,25 +172,25 @@ try {
   const bootstrap = bootstrapEnvelope.result;
   assert.equal(bootstrap.traceId, route.traceId, "Delegated bootstrap must preserve the delegated route trace.");
   assert.equal(bootstrap.contextAssembly?.mode, "selective", "Delegated bootstrap must use selective context by default.");
+  assert.equal(bootstrap.contextAssembly?.planningMode, "global-required-core-first");
   assert.equal(typeof bootstrap.contextAssembly?.totalContextCharsLoaded, "number");
   assert.equal(typeof bootstrap.contextAssembly?.estimatedCharsSaved, "number");
+  assert.equal(typeof bootstrap.contextAssembly?.requiredCoreReservedChars, "number");
+  assert.equal(Array.isArray(bootstrap.contextAssembly?.globallySelectedModules), true);
   assert.equal(Array.isArray(bootstrap.contextAssembly?.skills), true);
-  let replayRemaining = bootstrap.contextAssembly.maxContextChars;
-  for (const item of bootstrap.contextAssembly.skills) {
-    if (item.skipped === true) {
-      assert.equal(item.required, false, "Only optional skill context may be skipped for budget.");
-      assert.equal(item.skippedReason, "optional-context-exceeds-budget");
-      assert.equal(item.totalCharsLoaded, 0);
-      assert.equal(item.candidateChars > replayRemaining, true);
-      continue;
-    }
-    if (item.totalCharsLoaded > replayRemaining) {
-      assert.equal(item.required, true, "Only required skill context may exceed the remaining global budget.");
-    }
-    replayRemaining = Math.max(0, replayRemaining - item.totalCharsLoaded);
-  }
+  const requiredAssembly = bootstrap.contextAssembly.skills.filter((item) => item.required === true);
+  assert.equal(requiredAssembly.every((item) => item.skipped !== true && item.coreCharsLoaded > 0), true, "Every required skill core must be reserved before optional context.");
+  assert.equal(
+    bootstrap.contextAssembly.requiredCoreReservedChars,
+    requiredAssembly.reduce((sum, item) => sum + item.coreCharsLoaded, 0),
+  );
+  assert.equal(
+    bootstrap.contextAssembly.totalContextCharsLoaded,
+    bootstrap.contextAssembly.skills.reduce((sum, item) => sum + item.totalCharsLoaded, 0),
+  );
   const skippedForBudget = bootstrap.contextAssembly.skills.filter((item) => item.skippedReason === "optional-context-exceeds-budget");
   assert.equal(skippedForBudget.length > 0, true, "A constrained bootstrap must exercise the optional context skip path.");
+  assert.equal(skippedForBudget.every((item) => item.required === false && item.totalCharsLoaded === 0), true);
   const loadedNames = new Set(
     bootstrap.loaded
       .filter((item) => item.loaded === true)
@@ -200,6 +200,16 @@ try {
   for (const skill of required) {
     assert.equal(loadedNames.has(skill.name), true, `Delegated bootstrap must report required skill ${skill.name} as loaded.`);
   }
+
+  const observatorySummary = await call("mssr_observatory_query", { kind: "summary", days: 1, scope: "active" });
+  assert.equal(observatorySummary.contextAssembly?.loadEvents > 0, true, "Context assembly summary must include bootstrap load telemetry.");
+  assert.equal(Array.isArray(observatorySummary.contextAssembly?.skillPressure), true);
+  assert.equal(
+    observatorySummary.contextAssembly.planningModes.some((item) => item.name === "global-required-core-first"),
+    true,
+    "Context assembly summary must expose the global planner mode.",
+  );
+  assert.equal(Array.isArray(observatorySummary.contextAssembly?.recentTraces), true);
 
   const verifyIntent = {
     ...intent,

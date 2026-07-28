@@ -1,3 +1,13 @@
+## 0.6.43 - 2026-07-28
+
+- Replace sequential per-skill budgeting with the `global-required-core-first` planner: reserve every required core, then required modules, then globally rank optional modules.
+- Admit optional skills only as complete minimum packages and preserve explicit required-context overflow evidence.
+- Avoid reinjecting module text already contained in loaded context and report `duplicateCharsAvoided` plus allocation tiers.
+- Add MSSR context-assembly aggregates and dashboard views for loaded/full/saved characters, traces, fallbacks, skips, overflow, planner mode, and per-skill migration pressure.
+- Add starvation, duplicate-section, handler aggregation, and observatory regressions.
+- Migrate `conversation-history-review` after repeated full-file fallback evidence; retain evidence-driven migration and avoid inventing real exclusive groups without contradictory procedures.
+
+
 ## 0.6.42 - 2026-07-27
 
 - Make `skill_bootstrap` assemble selective Codex skill context by default from `context-modules.json` manifests.

@@ -33,7 +33,7 @@ import {
   type SkillSource,
 } from "./skill-routing.js";
 import {
-  assembleCodexSkillContext,
+  planCodexSkillContexts,
   type SkillContextMode,
   type SkillReferenceMode,
 } from "../skill-context-assembler.js";
@@ -561,7 +561,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
     },
     {
       name: "skill_bootstrap",
-      description: "Load the current phase of a structured skill route. By default it assembles selective Codex skill context from context-modules.json manifests, loading a compact core plus only modules whose stage and structured-intent selectors match within the context budget. Skills without manifests fall back to the full SKILL.md for compatibility; contentMode=full preserves the explicit legacy/debug path. Deferred skills remain metadata-only.",
+      description: "Load the current phase of a structured skill route. By default it globally plans selective Codex context from context-modules.json manifests: reserve every required skill core first, then required modules, globally rank optional modules, and admit optional skill packages only when they fit. Skills without manifests fall back to the full SKILL.md for compatibility; contentMode=full preserves the explicit legacy/debug path. The response reports savings, skips, overflow, duplicate avoidance, and allocation tiers. Deferred skills remain metadata-only.",
       inputSchema: {
         type: "object",
         properties: {
@@ -826,11 +826,26 @@ export const skillCatalogToolModule: BridgeToolModule = {
       recordMssrRoute({ traceId, action: "bootstrap", task, route: observedRoute as unknown as Record<string, unknown> });
       const activeByName = new Map(route.activeSkills.map((skill) => [skill.name, skill]));
       const loaded: Array<Record<string, unknown>> = [];
-      let remainingContextChars = maxContextChars;
+      const codexMatches = route.loadOrder.flatMap((name, routeIndex) => {
+        const match = activeByName.get(name);
+        return match && match.source !== "roblox" ? [{ match, routeIndex }] : [];
+      });
+      const codexPlan = await planCodexSkillContexts({
+        skills: codexMatches.map(({ match, routeIndex }) => ({
+          skill: match,
+          required: match.required === true,
+          routeIndex,
+          routeScore: Number((match as { score?: number }).score ?? 0),
+        })),
+        intent: routedIntent,
+        stage: route.stage,
+        mode: contentMode,
+        references: referenceMode,
+        maxContextChars,
+      });
+      const codexByName = new Map(codexPlan.skills.map((item) => [item.skill.name, item]));
       const contextAssemblySkills: Array<Record<string, unknown>> = [];
-      let totalContextCharsLoaded = 0;
-      let totalFullSkillChars = 0;
-      let totalEstimatedCharsSaved = 0;
+
       for (const name of route.loadOrder) {
         const match = activeByName.get(name);
         if (!match) continue;
@@ -849,92 +864,40 @@ export const skillCatalogToolModule: BridgeToolModule = {
             recordMssrSkillLoad({ traceId, skillName: match.name, source: match.source, stage: route.stage, required: match.required, loaded: false, via: "skill_bootstrap", warning: error instanceof Error ? error.message : String(error) });
             throw error;
           }
-        } else {
-          try {
-            const assembled = await assembleCodexSkillContext({
-              skill: match,
-              intent: routedIntent,
-              stage: route.stage,
-              mode: contentMode,
-              references: referenceMode,
-              remainingChars: remainingContextChars,
-            });
-            const contextInfo = assembled.contextAssembly;
-            totalFullSkillChars += contextInfo.fullSkillChars;
-            if (match.required !== true && contextInfo.totalCharsLoaded > remainingContextChars) {
-              const warning = `Optional skill '${match.name}' context was skipped because ${contextInfo.totalCharsLoaded} characters exceed the remaining global budget of ${remainingContextChars}.`;
-              const skippedInfo = {
-                ...contextInfo,
-                coreCharsLoaded: 0,
-                moduleCharsLoaded: 0,
-                totalCharsLoaded: 0,
-                estimatedCharsSaved: contextInfo.fullSkillChars,
-                selectedModules: [],
-                budgetExceeded: true,
-                skipped: true,
-                skippedReason: "optional-context-exceeds-budget",
-                candidateChars: contextInfo.totalCharsLoaded,
-                warning,
-              };
-              loaded.push({ skill: match, loaded: false, warning, contextAssembly: skippedInfo });
-              totalEstimatedCharsSaved += contextInfo.fullSkillChars;
-              contextAssemblySkills.push({ name: match.name, required: false, ...skippedInfo });
-              recordMssrSkillLoad({
-                traceId,
-                skillName: match.name,
-                source: match.source,
-                stage: route.stage,
-                required: false,
-                loaded: false,
-                via: "skill_bootstrap",
-                warning,
-                contentMode: contextInfo.mode,
-                coreCharsLoaded: 0,
-                moduleCharsLoaded: 0,
-                totalCharsLoaded: 0,
-                fullSkillChars: contextInfo.fullSkillChars,
-                estimatedCharsSaved: contextInfo.fullSkillChars,
-                selectedModules: [],
-                manifestStatus: contextInfo.manifestStatus,
-                ambiguousGroups: contextInfo.ambiguousGroups,
-                budgetExceeded: true,
-                skipped: true,
-                skippedReason: "optional-context-exceeds-budget",
-                candidateChars: contextInfo.totalCharsLoaded,
-              });
-              continue;
-            }
-
-            loaded.push(assembled as unknown as Record<string, unknown>);
-            remainingContextChars = Math.max(0, remainingContextChars - contextInfo.totalCharsLoaded);
-            totalContextCharsLoaded += contextInfo.totalCharsLoaded;
-            totalEstimatedCharsSaved += contextInfo.estimatedCharsSaved;
-            contextAssemblySkills.push({ name: match.name, required: match.required === true, ...contextInfo });
-            recordMssrSkillLoad({
-              traceId,
-              skillName: match.name,
-              source: match.source,
-              stage: route.stage,
-              required: match.required,
-              loaded: true,
-              via: "skill_bootstrap",
-              warning: contextInfo.warning,
-              contentMode: contextInfo.mode,
-              coreCharsLoaded: contextInfo.coreCharsLoaded,
-              moduleCharsLoaded: contextInfo.moduleCharsLoaded,
-              totalCharsLoaded: contextInfo.totalCharsLoaded,
-              fullSkillChars: contextInfo.fullSkillChars,
-              estimatedCharsSaved: contextInfo.estimatedCharsSaved,
-              selectedModules: contextInfo.selectedModules,
-              manifestStatus: contextInfo.manifestStatus,
-              ambiguousGroups: contextInfo.ambiguousGroups,
-              budgetExceeded: contextInfo.budgetExceeded,
-            });
-          } catch (error) {
-            recordMssrSkillLoad({ traceId, skillName: match.name, source: match.source, stage: route.stage, required: match.required, loaded: false, via: "skill_bootstrap", warning: error instanceof Error ? error.message : String(error), contentMode });
-            throw error;
-          }
+          continue;
         }
+
+        const planned = codexByName.get(match.name);
+        if (!planned) throw new Error(`Global context planner did not return routed skill: ${match.name}`);
+        loaded.push(planned as unknown as Record<string, unknown>);
+        const contextInfo = planned.contextAssembly;
+        contextAssemblySkills.push({ name: match.name, required: match.required === true, ...contextInfo });
+        recordMssrSkillLoad({
+          traceId,
+          skillName: match.name,
+          source: match.source,
+          stage: route.stage,
+          required: match.required,
+          loaded: planned.loaded,
+          via: "skill_bootstrap",
+          warning: planned.loaded ? contextInfo.warning : planned.warning,
+          contentMode: contextInfo.mode,
+          coreCharsLoaded: contextInfo.coreCharsLoaded,
+          moduleCharsLoaded: contextInfo.moduleCharsLoaded,
+          totalCharsLoaded: contextInfo.totalCharsLoaded,
+          fullSkillChars: contextInfo.fullSkillChars,
+          estimatedCharsSaved: contextInfo.estimatedCharsSaved,
+          selectedModules: contextInfo.selectedModules,
+          manifestStatus: contextInfo.manifestStatus,
+          ambiguousGroups: contextInfo.ambiguousGroups,
+          budgetExceeded: contextInfo.budgetExceeded,
+          skipped: contextInfo.skipped,
+          skippedReason: contextInfo.skippedReason,
+          candidateChars: contextInfo.candidateChars,
+          planningMode: contextInfo.planningMode,
+          allocationTiers: contextInfo.allocationTiers,
+          duplicateCharsAvoided: contextInfo.duplicateCharsAvoided,
+        });
       }
       return {
         ...observedRoute,
@@ -944,12 +907,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         contextAssembly: {
           mode: contentMode,
           includeReferences: referenceMode,
-          maxContextChars,
-          totalContextCharsLoaded,
-          totalFullSkillChars,
-          estimatedCharsSaved: totalEstimatedCharsSaved,
-          remainingContextChars,
-          budgetExceeded: totalContextCharsLoaded > maxContextChars || contextAssemblySkills.some((item) => item.budgetExceeded === true),
+          ...codexPlan,
           skills: contextAssemblySkills,
         },
         sourceHealth: discovered.sourceHealth,

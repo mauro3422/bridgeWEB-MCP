@@ -351,6 +351,9 @@ export function recordMssrSkillLoad(args: {
   skippedReason?: string;
   candidateChars?: number;
   ambiguousGroups?: Array<{ group: string; candidates: string[]; score: number }>;
+  planningMode?: string;
+  allocationTiers?: string[];
+  duplicateCharsAvoided?: number;
 }): MssrStoredEvent {
   return recordMssrEvent({
     traceId: args.traceId,
@@ -380,6 +383,9 @@ export function recordMssrSkillLoad(args: {
         candidates: item.candidates.slice(0, 8),
         score: item.score,
       })),
+      planningMode: args.planningMode,
+      allocationTiers: args.allocationTiers?.slice(0, 8),
+      duplicateCharsAvoided: args.duplicateCharsAvoided,
     },
   });
 }
@@ -588,6 +594,184 @@ function topCounts(values: string[], limit = 12): Array<{ name: string; count: n
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
     .slice(0, limit);
 }
+function numericDetail(event: MssrStoredEvent, key: string): number {
+  const value = event.details[key];
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+function summarizeContextAssembly(events: MssrStoredEvent[]) {
+  const loads = events.filter((event) => event.eventType === "skill_loaded"
+    && (typeof event.details.totalCharsLoaded === "number" || typeof event.details.fullSkillChars === "number"));
+  const byTrace = new Map<string, {
+    traceId: string;
+    latestAt: string;
+    loadedChars: number;
+    fullChars: number;
+    savedChars: number;
+    skippedLoads: number;
+    overflowLoads: number;
+    duplicateCharsAvoided: number;
+    skillNames: Set<string>;
+    planningModes: Set<string>;
+  }>();
+  const bySkill = new Map<string, {
+    name: string;
+    loads: number;
+    selectiveLoads: number;
+    fullLoads: number;
+    fallbackLoads: number;
+    skippedLoads: number;
+    overflowLoads: number;
+    coreChars: number;
+    loadedChars: number;
+    fullChars: number;
+    savedChars: number;
+    duplicateCharsAvoided: number;
+  }>();
+  let loadedChars = 0;
+  let fullChars = 0;
+  let savedChars = 0;
+  let fallbackLoads = 0;
+  let skippedLoads = 0;
+  let overflowLoads = 0;
+  let duplicateCharsAvoided = 0;
+  let ambiguousGroups = 0;
+  const planningModes: string[] = [];
+
+  for (const event of loads) {
+    const loaded = numericDetail(event, "totalCharsLoaded");
+    const full = numericDetail(event, "fullSkillChars");
+    const saved = numericDetail(event, "estimatedCharsSaved");
+    const duplicate = numericDetail(event, "duplicateCharsAvoided");
+    const skipped = event.details.skipped === true;
+    const overflow = event.details.budgetExceeded === true;
+    const fallback = event.details.manifestStatus === "missing" || event.details.manifestStatus === "invalid" || event.details.fallbackFull === true;
+    const mode = typeof event.details.contentMode === "string" ? event.details.contentMode : "unknown";
+    const planner = typeof event.details.planningMode === "string" ? event.details.planningMode : "legacy-sequential";
+    const ambiguous = Array.isArray(event.details.ambiguousGroups) ? event.details.ambiguousGroups.length : 0;
+    loadedChars += loaded;
+    fullChars += full;
+    savedChars += saved;
+    duplicateCharsAvoided += duplicate;
+    if (fallback) fallbackLoads += 1;
+    if (skipped) skippedLoads += 1;
+    if (overflow) overflowLoads += 1;
+    ambiguousGroups += ambiguous;
+    planningModes.push(planner);
+
+    const trace = byTrace.get(event.traceId) ?? {
+      traceId: event.traceId,
+      latestAt: event.occurredAt,
+      loadedChars: 0,
+      fullChars: 0,
+      savedChars: 0,
+      skippedLoads: 0,
+      overflowLoads: 0,
+      duplicateCharsAvoided: 0,
+      skillNames: new Set<string>(),
+      planningModes: new Set<string>(),
+    };
+    trace.latestAt = event.occurredAt > trace.latestAt ? event.occurredAt : trace.latestAt;
+    trace.loadedChars += loaded;
+    trace.fullChars += full;
+    trace.savedChars += saved;
+    trace.skippedLoads += skipped ? 1 : 0;
+    trace.overflowLoads += overflow ? 1 : 0;
+    trace.duplicateCharsAvoided += duplicate;
+    if (event.skillName) trace.skillNames.add(event.skillName);
+    trace.planningModes.add(planner);
+    byTrace.set(event.traceId, trace);
+
+    const name = event.skillName || "unknown";
+    const skill = bySkill.get(name) ?? {
+      name,
+      loads: 0,
+      selectiveLoads: 0,
+      fullLoads: 0,
+      fallbackLoads: 0,
+      skippedLoads: 0,
+      overflowLoads: 0,
+      coreChars: 0,
+      loadedChars: 0,
+      fullChars: 0,
+      savedChars: 0,
+      duplicateCharsAvoided: 0,
+    };
+    skill.loads += 1;
+    skill.selectiveLoads += mode === "selective" ? 1 : 0;
+    skill.fullLoads += mode === "full" ? 1 : 0;
+    skill.fallbackLoads += fallback ? 1 : 0;
+    skill.skippedLoads += skipped ? 1 : 0;
+    skill.overflowLoads += overflow ? 1 : 0;
+    skill.coreChars += numericDetail(event, "coreCharsLoaded");
+    skill.loadedChars += loaded;
+    skill.fullChars += full;
+    skill.savedChars += saved;
+    skill.duplicateCharsAvoided += duplicate;
+    bySkill.set(name, skill);
+  }
+
+  const skillPressure = [...bySkill.values()].map((skill) => {
+    const averageCoreChars = skill.loads > 0 ? Math.round(skill.coreChars / skill.loads) : 0;
+    const averageLoadedChars = skill.loads > 0 ? Math.round(skill.loadedChars / skill.loads) : 0;
+    const averageFullChars = skill.loads > 0 ? Math.round(skill.fullChars / skill.loads) : 0;
+    const savingsRate = rate(skill.savedChars, skill.fullChars);
+    const fallbackRate = skill.loads > 0 ? skill.fallbackLoads / skill.loads : 0;
+    const retainedRatio = skill.fullChars > 0 ? skill.loadedChars / skill.fullChars : 1;
+    const pressureScore = Math.round(skill.loads * Math.max(1, averageFullChars) * Math.max(0.1, fallbackRate + retainedRatio));
+    const recommendation = skill.fallbackLoads > 0
+      ? "add-context-manifest"
+      : averageCoreChars >= 4500 && skill.loads >= 2
+        ? "review-core"
+        : skill.skippedLoads > 0 || skill.overflowLoads > 0
+          ? "review-budget"
+          : "healthy-selective";
+    return {
+      ...skill,
+      averageCoreChars,
+      averageLoadedChars,
+      averageFullChars,
+      savingsRate,
+      pressureScore,
+      recommendation,
+    };
+  }).sort((a, b) => b.pressureScore - a.pressureScore || b.loads - a.loads || a.name.localeCompare(b.name));
+
+  return {
+    loadEvents: loads.length,
+    selectiveLoads: loads.filter((event) => event.details.contentMode === "selective").length,
+    fullLoads: loads.filter((event) => event.details.contentMode === "full").length,
+    fallbackLoads,
+    skippedLoads,
+    overflowLoads,
+    ambiguousGroups,
+    loadedChars,
+    fullChars,
+    savedChars,
+    savingsRate: rate(savedChars, fullChars),
+    duplicateCharsAvoided,
+    planningModes: topCounts(planningModes, 8),
+    recentTraces: [...byTrace.values()]
+      .map((trace) => ({
+        traceId: trace.traceId,
+        latestAt: trace.latestAt,
+        loadedChars: trace.loadedChars,
+        fullChars: trace.fullChars,
+        savedChars: trace.savedChars,
+        savingsRate: rate(trace.savedChars, trace.fullChars),
+        skippedLoads: trace.skippedLoads,
+        overflowLoads: trace.overflowLoads,
+        duplicateCharsAvoided: trace.duplicateCharsAvoided,
+        skills: trace.skillNames.size,
+        planningModes: [...trace.planningModes],
+      }))
+      .sort((a, b) => b.latestAt.localeCompare(a.latestAt))
+      .slice(0, 12),
+    skillPressure: skillPressure.slice(0, 20),
+  };
+}
+
+
 
 function observatoryStatus() {
   const database = getDb();
@@ -661,6 +845,7 @@ function summary(days: number, scope: MssrObservatoryScope) {
   const routes = events.filter((event) => event.eventType === "route_planned");
   const loads = events.filter((event) => event.eventType === "skill_loaded");
   const successfulLoads = loads.filter((event) => event.ok === true);
+  const contextAssembly = summarizeContextAssembly(events);
   const traceIdsWithRoutes = new Set(routes.map((event) => event.traceId));
   const traceIdsWithLoads = new Set(successfulLoads.map((event) => event.traceId));
   const routeTracesWithLoads = [...traceIdsWithRoutes].filter((traceId) => traceIdsWithLoads.has(traceId)).length;
@@ -903,6 +1088,7 @@ function summary(days: number, scope: MssrObservatoryScope) {
       closureReminderTraces: new Set(closureReminderEvents.map((event) => event.traceId)).size,
       userCorrections,
     },
+    contextAssembly,
     surfaces: surfaceBenchmarks,
     agentProfiles,
     top: {

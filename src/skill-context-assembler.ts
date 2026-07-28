@@ -12,30 +12,132 @@ import {
 const MANIFEST_NAME = "context-modules.json";
 const MAX_SKILL_FILE_CHARS = 160_000;
 const MAX_MODULE_FILE_CHARS = 80_000;
+const UNBOUNDED_MODULE_BUDGET = Number.MAX_SAFE_INTEGER;
 
 export type SkillContextMode = "selective" | "full";
 export type SkillReferenceMode = "auto" | "none";
+export type SkillContextPlanningMode = "global-required-core-first";
+
+type ManifestStatus = "loaded" | "missing" | "invalid" | "disabled";
+type AllocationTier =
+  | "required-core"
+  | "required-module"
+  | "required-skill-module"
+  | "optional-skill-core"
+  | "optional-skill-module";
+
+type ModuleDecision = {
+  id: string;
+  selected: boolean;
+  score: number;
+  chars: number;
+  reason: string;
+  matched?: string[];
+  allocationTier?: AllocationTier;
+};
+
+type AmbiguousGroup = { group: string; candidates: string[]; score: number };
+
+export type SkillContextAssemblyInfo = {
+  mode: SkillContextMode;
+  manifestStatus: ManifestStatus;
+  fallbackFull: boolean;
+  coreCharsLoaded: number;
+  moduleCharsLoaded: number;
+  totalCharsLoaded: number;
+  fullSkillChars: number;
+  estimatedCharsSaved: number;
+  selectedModules: string[];
+  moduleDecisions: Array<Record<string, unknown>>;
+  ambiguousGroups: AmbiguousGroup[];
+  budgetExceeded: boolean;
+  planningMode: SkillContextPlanningMode;
+  allocationTiers: AllocationTier[];
+  duplicateCharsAvoided: number;
+  skipped?: boolean;
+  skippedReason?: string;
+  candidateChars?: number;
+  warning?: string;
+};
 
 export type SkillContextAssembly = {
   skill: SkillEntry;
   loaded: true;
   activationInstruction: string;
   content: string;
-  contextAssembly: {
-    mode: SkillContextMode;
-    manifestStatus: "loaded" | "missing" | "invalid" | "disabled";
-    fallbackFull: boolean;
-    coreCharsLoaded: number;
-    moduleCharsLoaded: number;
-    totalCharsLoaded: number;
-    fullSkillChars: number;
-    estimatedCharsSaved: number;
-    selectedModules: string[];
-    moduleDecisions: Array<Record<string, unknown>>;
-    ambiguousGroups: Array<{ group: string; candidates: string[]; score: number }>;
-    budgetExceeded: boolean;
-    warning?: string;
-  };
+  contextAssembly: SkillContextAssemblyInfo;
+};
+
+export type SkippedSkillContextAssembly = {
+  skill: SkillEntry;
+  loaded: false;
+  warning: string;
+  contextAssembly: SkillContextAssemblyInfo;
+};
+
+export type PlannedSkillContext = SkillContextAssembly | SkippedSkillContextAssembly;
+
+type PreparedModule = {
+  id: string;
+  content: string;
+  assembledContent: string;
+  chars: number;
+  score: number;
+  priority: number;
+  required: boolean;
+  matched: string[];
+};
+
+type PreparedSkillContext = {
+  skill: SkillEntry;
+  required: boolean;
+  routeIndex: number;
+  routeScore: number;
+  mode: SkillContextMode;
+  manifestStatus: ManifestStatus;
+  fallbackFull: boolean;
+  fullSkillText: string;
+  baseContent: string;
+  modules: PreparedModule[];
+  moduleDecisions: ModuleDecision[];
+  ambiguousGroups: AmbiguousGroup[];
+  warning?: string;
+};
+
+type PlanningState = {
+  prepared: PreparedSkillContext;
+  loaded: boolean;
+  selected: PreparedModule[];
+  selectedIds: Set<string>;
+  coveredText: string;
+  duplicateCharsAvoided: number;
+  allocationTiers: Set<AllocationTier>;
+  skippedReason?: string;
+  warning?: string;
+};
+
+export type GlobalSkillContextPlan = {
+  planningMode: SkillContextPlanningMode;
+  maxContextChars: number;
+  requiredCoreReservedChars: number;
+  requiredModuleReservedChars: number;
+  optionalModuleCharsLoaded: number;
+  optionalSkillCoreCharsLoaded: number;
+  requiredOverflowChars: number;
+  duplicateCharsAvoided: number;
+  totalContextCharsLoaded: number;
+  totalFullSkillChars: number;
+  estimatedCharsSaved: number;
+  remainingContextChars: number;
+  budgetExceeded: boolean;
+  globallySelectedModules: Array<{
+    skill: string;
+    module: string;
+    tier: AllocationTier;
+    score: number;
+    chars: number;
+  }>;
+  skills: PlannedSkillContext[];
 };
 
 function resolveInsideSkill(skillDir: string, relativePath: string): string {
@@ -98,33 +200,490 @@ async function materializeSource(args: {
   return text.trim();
 }
 
-function fullAssembly(
-  skill: SkillEntry,
-  fullSkillText: string,
-  status: SkillContextAssembly["contextAssembly"]["manifestStatus"],
-  remainingChars: number,
-  warning?: string,
-): SkillContextAssembly {
-  return {
-    skill,
-    loaded: true,
-    activationInstruction: "Treat the returned SKILL.md as active procedural guidance for the current task. Apply it together with higher-priority safety and project instructions.",
-    content: fullSkillText,
-    contextAssembly: {
+function compareModules(
+  a: { module: PreparedModule; state: PlanningState },
+  b: { module: PreparedModule; state: PlanningState },
+): number {
+  return b.module.score - a.module.score
+    || b.module.priority - a.module.priority
+    || b.state.prepared.routeScore - a.state.prepared.routeScore
+    || a.state.prepared.routeIndex - b.state.prepared.routeIndex
+    || a.state.prepared.skill.name.localeCompare(b.state.prepared.skill.name)
+    || a.module.id.localeCompare(b.module.id);
+}
+
+function moduleAlreadyCovered(state: PlanningState, module: PreparedModule): boolean {
+  const content = module.content.trim();
+  return content.length > 0 && state.coveredText.includes(content);
+}
+
+function updateDecision(
+  state: PlanningState,
+  module: PreparedModule,
+  patch: Partial<ModuleDecision>,
+): void {
+  const index = state.prepared.moduleDecisions.findIndex((item) => item.id === module.id);
+  if (index < 0) return;
+  state.prepared.moduleDecisions[index] = {
+    ...state.prepared.moduleDecisions[index],
+    ...patch,
+  };
+}
+
+function selectModule(state: PlanningState, module: PreparedModule, tier: AllocationTier): number {
+  if (state.selectedIds.has(module.id)) return 0;
+  if (moduleAlreadyCovered(state, module)) {
+    state.duplicateCharsAvoided += module.chars;
+    updateDecision(state, module, {
+      selected: false,
+      chars: 0,
+      reason: "already-covered-by-loaded-context",
+      allocationTier: tier,
+    });
+    return 0;
+  }
+  state.selected.push(module);
+  state.selectedIds.add(module.id);
+  state.coveredText = `${state.coveredText}\n\n${module.content}`;
+  state.allocationTiers.add(tier);
+  updateDecision(state, module, {
+    selected: true,
+    reason: "selected",
+    allocationTier: tier,
+  });
+  return module.chars;
+}
+
+function omitModule(state: PlanningState, module: PreparedModule, reason: string, tier: AllocationTier): void {
+  updateDecision(state, module, {
+    selected: false,
+    reason,
+    allocationTier: tier,
+  });
+}
+
+function finalContent(state: PlanningState): string {
+  return [state.prepared.baseContent, ...state.selected.map((module) => module.assembledContent)]
+    .filter(Boolean)
+    .join("\n\n")
+    .trim();
+}
+
+function prepareDecisionRecords(selection: ReturnType<typeof selectSkillContextModules>): ModuleDecision[] {
+  return selection.decisions.map((item) => ({
+    id: item.id,
+    selected: item.selected,
+    score: item.score,
+    chars: item.chars,
+    reason: item.reason,
+    matched: item.matched,
+  }));
+}
+
+async function prepareCodexSkillContext(args: {
+  skill: SkillEntry;
+  required: boolean;
+  routeIndex: number;
+  routeScore: number;
+  intent: StructuredSkillIntent;
+  stage: SkillStage;
+  mode: SkillContextMode;
+  references: SkillReferenceMode;
+}): Promise<PreparedSkillContext> {
+  if (!args.skill.path) throw new Error(`Codex skill has no readable path: ${args.skill.name}`);
+  const fullSkillText = await readBoundedText(args.skill.path, MAX_SKILL_FILE_CHARS);
+  if (args.mode === "full") {
+    return {
+      skill: args.skill,
+      required: args.required,
+      routeIndex: args.routeIndex,
+      routeScore: args.routeScore,
       mode: "full",
-      manifestStatus: status,
-      fallbackFull: status !== "disabled",
-      coreCharsLoaded: fullSkillText.length,
-      moduleCharsLoaded: 0,
-      totalCharsLoaded: fullSkillText.length,
-      fullSkillChars: fullSkillText.length,
-      estimatedCharsSaved: 0,
-      selectedModules: [],
+      manifestStatus: "disabled",
+      fallbackFull: false,
+      fullSkillText,
+      baseContent: fullSkillText,
+      modules: [],
       moduleDecisions: [],
       ambiguousGroups: [],
-      budgetExceeded: fullSkillText.length > Math.max(0, remainingChars),
+    };
+  }
+
+  const skillDir = path.dirname(args.skill.path);
+  const manifestPath = path.join(skillDir, MANIFEST_NAME);
+  let manifestRaw: string;
+  try {
+    manifestRaw = await fs.readFile(manifestPath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return {
+        skill: args.skill,
+        required: args.required,
+        routeIndex: args.routeIndex,
+        routeScore: args.routeScore,
+        mode: "full",
+        manifestStatus: "missing",
+        fallbackFull: true,
+        fullSkillText,
+        baseContent: fullSkillText,
+        modules: [],
+        moduleDecisions: [],
+        ambiguousGroups: [],
+        warning: "No context-modules.json manifest; loaded full SKILL.md for compatibility.",
+      };
+    }
+    throw error;
+  }
+
+  let manifest;
+  try {
+    manifest = skillContextManifestSchema.parse(JSON.parse(manifestRaw));
+  } catch (error) {
+    return {
+      skill: args.skill,
+      required: args.required,
+      routeIndex: args.routeIndex,
+      routeScore: args.routeScore,
+      mode: "full",
+      manifestStatus: "invalid",
+      fallbackFull: true,
+      fullSkillText,
+      baseContent: fullSkillText,
+      modules: [],
+      moduleDecisions: [],
+      ambiguousGroups: [],
+      warning: `Invalid context-modules.json; loaded full SKILL.md: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+
+  const core = await materializeSource({ source: manifest.core, skillDir, fullSkillText, maxChars: MAX_SKILL_FILE_CHARS });
+  const skillHeader = `# Active skill context: ${args.skill.name}`;
+  const baseContent = [skillHeader, core].join("\n\n").trim();
+  if (args.references === "none") {
+    return {
+      skill: args.skill,
+      required: args.required,
+      routeIndex: args.routeIndex,
+      routeScore: args.routeScore,
+      mode: "selective",
+      manifestStatus: "loaded",
+      fallbackFull: false,
+      fullSkillText,
+      baseContent,
+      modules: [],
+      moduleDecisions: manifest.modules.map((module) => ({
+        id: module.id,
+        selected: false,
+        score: 0,
+        chars: 0,
+        reason: "references-disabled",
+        matched: [],
+      })),
+      ambiguousGroups: [],
+    };
+  }
+
+  const materialized = await Promise.all(manifest.modules.map(async (module) => {
+    const content = await materializeSource({ source: module.source, skillDir, fullSkillText, maxChars: module.maxChars });
+    const assembledContent = `## Selected context module: ${module.id}\n\n${content}`;
+    return {
+      ...module,
+      content,
+      assembledContent,
+      chars: assembledContent.length + 2,
+    };
+  }));
+  const selection = selectSkillContextModules({
+    modules: materialized.map(({ content: _content, assembledContent: _assembledContent, ...module }) => module),
+    intent: args.intent,
+    stage: args.stage,
+    maxModuleChars: UNBOUNDED_MODULE_BUDGET,
+  });
+  const selectedById = new Map(selection.selected.map((module) => [module.id, module]));
+  const modules: PreparedModule[] = materialized
+    .filter((module) => selectedById.has(module.id))
+    .map((module) => {
+      const selected = selectedById.get(module.id)!;
+      const decision = selection.decisions.find((item) => item.id === module.id)!;
+      return {
+        id: module.id,
+        content: module.content,
+        assembledContent: module.assembledContent,
+        chars: module.chars,
+        score: decision.score,
+        priority: module.priority ?? 0,
+        required: module.required === true,
+        matched: decision.matched,
+      };
+    });
+
+  return {
+    skill: args.skill,
+    required: args.required,
+    routeIndex: args.routeIndex,
+    routeScore: args.routeScore,
+    mode: "selective",
+    manifestStatus: "loaded",
+    fallbackFull: false,
+    fullSkillText,
+    baseContent,
+    modules,
+    moduleDecisions: prepareDecisionRecords(selection),
+    ambiguousGroups: selection.ambiguousGroups,
+  };
+}
+
+function toResult(state: PlanningState, maxContextChars: number): PlannedSkillContext {
+  const prepared = state.prepared;
+  if (!state.loaded) {
+    const candidateChars = prepared.baseContent.length
+      + prepared.modules.filter((module) => module.required).reduce((sum, module) => sum + module.chars, 0);
+    const warning = state.warning
+      ?? `Optional skill '${prepared.skill.name}' context was skipped because its minimum package of ${candidateChars} characters did not fit the global budget.`;
+    return {
+      skill: prepared.skill,
+      loaded: false,
       warning,
+      contextAssembly: {
+        mode: prepared.mode,
+        manifestStatus: prepared.manifestStatus,
+        fallbackFull: prepared.fallbackFull,
+        coreCharsLoaded: 0,
+        moduleCharsLoaded: 0,
+        totalCharsLoaded: 0,
+        fullSkillChars: prepared.fullSkillText.length,
+        estimatedCharsSaved: prepared.fullSkillText.length,
+        selectedModules: [],
+        moduleDecisions: prepared.moduleDecisions,
+        ambiguousGroups: prepared.ambiguousGroups,
+        budgetExceeded: true,
+        planningMode: "global-required-core-first",
+        allocationTiers: [],
+        duplicateCharsAvoided: state.duplicateCharsAvoided,
+        skipped: true,
+        skippedReason: state.skippedReason ?? "optional-context-exceeds-budget",
+        candidateChars,
+        warning,
+      },
+    };
+  }
+
+  const content = prepared.mode === "full" ? prepared.baseContent : finalContent(state);
+  const moduleCharsLoaded = Math.max(0, content.length - prepared.baseContent.length);
+  return {
+    skill: prepared.skill,
+    loaded: true,
+    activationInstruction: prepared.mode === "full"
+      ? "Treat the returned SKILL.md as active procedural guidance for the current task. Apply it together with higher-priority safety and project instructions."
+      : "Treat the assembled core and selected modules as active guidance for this task phase. Omitted modules are not active unless loaded explicitly.",
+    content,
+    contextAssembly: {
+      mode: prepared.mode,
+      manifestStatus: prepared.manifestStatus,
+      fallbackFull: prepared.fallbackFull,
+      coreCharsLoaded: prepared.baseContent.length,
+      moduleCharsLoaded,
+      totalCharsLoaded: content.length,
+      fullSkillChars: prepared.fullSkillText.length,
+      estimatedCharsSaved: Math.max(0, prepared.fullSkillText.length - content.length),
+      selectedModules: state.selected.map((module) => module.id),
+      moduleDecisions: prepared.moduleDecisions,
+      ambiguousGroups: prepared.ambiguousGroups,
+      budgetExceeded: content.length > maxContextChars
+        || prepared.moduleDecisions.some((item) => item.reason === "budget-exceeded"),
+      planningMode: "global-required-core-first",
+      allocationTiers: [...state.allocationTiers],
+      duplicateCharsAvoided: state.duplicateCharsAvoided,
+      warning: prepared.warning,
     },
+  };
+}
+
+export async function planCodexSkillContexts(args: {
+  skills: Array<{
+    skill: SkillEntry;
+    required: boolean;
+    routeIndex: number;
+    routeScore: number;
+  }>;
+  intent: StructuredSkillIntent;
+  stage: SkillStage;
+  mode: SkillContextMode;
+  references: SkillReferenceMode;
+  maxContextChars: number;
+}): Promise<GlobalSkillContextPlan> {
+  const prepared = await Promise.all(args.skills.map((item) => prepareCodexSkillContext({
+    ...item,
+    intent: args.intent,
+    stage: args.stage,
+    mode: args.mode,
+    references: args.references,
+  })));
+  const states = prepared.map<PlanningState>((item) => ({
+    prepared: item,
+    loaded: false,
+    selected: [],
+    selectedIds: new Set(),
+    coveredText: "",
+    duplicateCharsAvoided: 0,
+    allocationTiers: new Set(),
+  }));
+  const requiredStates = states.filter((state) => state.prepared.required);
+  const optionalStates = states.filter((state) => !state.prepared.required);
+  let used = 0;
+  let requiredCoreReservedChars = 0;
+  let requiredModuleReservedChars = 0;
+  let optionalModuleCharsLoaded = 0;
+  let optionalSkillCoreCharsLoaded = 0;
+  const globallySelectedModules: GlobalSkillContextPlan["globallySelectedModules"] = [];
+
+  for (const state of requiredStates) {
+    state.loaded = true;
+    state.coveredText = state.prepared.baseContent;
+    state.allocationTiers.add("required-core");
+    used += state.prepared.baseContent.length;
+    requiredCoreReservedChars += state.prepared.baseContent.length;
+  }
+
+  const requiredModules = requiredStates
+    .flatMap((state) => state.prepared.modules.filter((module) => module.required).map((module) => ({ state, module })))
+    .sort(compareModules);
+  for (const candidate of requiredModules) {
+    const chars = selectModule(candidate.state, candidate.module, "required-module");
+    used += chars;
+    requiredModuleReservedChars += chars;
+    if (chars > 0) globallySelectedModules.push({
+      skill: candidate.state.prepared.skill.name,
+      module: candidate.module.id,
+      tier: "required-module",
+      score: candidate.module.score,
+      chars,
+    });
+  }
+
+  let remaining = Math.max(0, args.maxContextChars - used);
+  const requiredOptionalModules = requiredStates
+    .flatMap((state) => state.prepared.modules.filter((module) => !module.required).map((module) => ({ state, module })))
+    .sort(compareModules);
+  for (const candidate of requiredOptionalModules) {
+    if (moduleAlreadyCovered(candidate.state, candidate.module)) {
+      selectModule(candidate.state, candidate.module, "required-skill-module");
+      continue;
+    }
+    if (candidate.module.chars <= remaining) {
+      const chars = selectModule(candidate.state, candidate.module, "required-skill-module");
+      used += chars;
+      remaining = Math.max(0, remaining - chars);
+      optionalModuleCharsLoaded += chars;
+      if (chars > 0) globallySelectedModules.push({
+        skill: candidate.state.prepared.skill.name,
+        module: candidate.module.id,
+        tier: "required-skill-module",
+        score: candidate.module.score,
+        chars,
+      });
+    } else {
+      omitModule(candidate.state, candidate.module, "budget-exceeded", "required-skill-module");
+    }
+  }
+
+  optionalStates.sort((a, b) => b.prepared.routeScore - a.prepared.routeScore
+    || a.prepared.routeIndex - b.prepared.routeIndex
+    || a.prepared.skill.name.localeCompare(b.prepared.skill.name));
+  for (const state of optionalStates) {
+    const requiredForSkill = state.prepared.modules.filter((module) => module.required).sort((a, b) => compareModules(
+      { state, module: a },
+      { state, module: b },
+    ));
+    let minimumChars = state.prepared.baseContent.length;
+    let simulatedCovered = state.prepared.baseContent;
+    for (const module of requiredForSkill) {
+      if (!simulatedCovered.includes(module.content.trim())) {
+        minimumChars += module.chars;
+        simulatedCovered += `\n\n${module.content}`;
+      }
+    }
+    if (minimumChars > remaining) {
+      state.skippedReason = "optional-context-exceeds-budget";
+      state.warning = `Optional skill '${state.prepared.skill.name}' context was skipped because its minimum package of ${minimumChars} characters exceeds the remaining global budget of ${remaining}.`;
+      for (const module of state.prepared.modules) {
+        omitModule(state, module, "optional-skill-not-loaded", module.required ? "required-module" : "optional-skill-module");
+      }
+      continue;
+    }
+    state.loaded = true;
+    state.coveredText = state.prepared.baseContent;
+    state.allocationTiers.add("optional-skill-core");
+    used += state.prepared.baseContent.length;
+    remaining = Math.max(0, remaining - state.prepared.baseContent.length);
+    optionalSkillCoreCharsLoaded += state.prepared.baseContent.length;
+    for (const module of requiredForSkill) {
+      const chars = selectModule(state, module, "required-module");
+      used += chars;
+      remaining = Math.max(0, remaining - chars);
+      requiredModuleReservedChars += chars;
+      if (chars > 0) globallySelectedModules.push({
+        skill: state.prepared.skill.name,
+        module: module.id,
+        tier: "required-module",
+        score: module.score,
+        chars,
+      });
+    }
+  }
+
+  const optionalSkillModules = optionalStates
+    .filter((state) => state.loaded)
+    .flatMap((state) => state.prepared.modules.filter((module) => !module.required).map((module) => ({ state, module })))
+    .sort(compareModules);
+  for (const candidate of optionalSkillModules) {
+    if (moduleAlreadyCovered(candidate.state, candidate.module)) {
+      selectModule(candidate.state, candidate.module, "optional-skill-module");
+      continue;
+    }
+    if (candidate.module.chars <= remaining) {
+      const chars = selectModule(candidate.state, candidate.module, "optional-skill-module");
+      used += chars;
+      remaining = Math.max(0, remaining - chars);
+      optionalModuleCharsLoaded += chars;
+      if (chars > 0) globallySelectedModules.push({
+        skill: candidate.state.prepared.skill.name,
+        module: candidate.module.id,
+        tier: "optional-skill-module",
+        score: candidate.module.score,
+        chars,
+      });
+    } else {
+      omitModule(candidate.state, candidate.module, "budget-exceeded", "optional-skill-module");
+    }
+  }
+
+  const skills = states
+    .sort((a, b) => a.prepared.routeIndex - b.prepared.routeIndex)
+    .map((state) => toResult(state, args.maxContextChars));
+  const totalContextCharsLoaded = skills.reduce((sum, item) => sum + item.contextAssembly.totalCharsLoaded, 0);
+  const totalFullSkillChars = skills.reduce((sum, item) => sum + item.contextAssembly.fullSkillChars, 0);
+  const estimatedCharsSaved = skills.reduce((sum, item) => sum + item.contextAssembly.estimatedCharsSaved, 0);
+  const duplicateCharsAvoided = skills.reduce((sum, item) => sum + item.contextAssembly.duplicateCharsAvoided, 0);
+  const requiredOverflowChars = Math.max(0, requiredCoreReservedChars + requiredModuleReservedChars - args.maxContextChars);
+
+  return {
+    planningMode: "global-required-core-first",
+    maxContextChars: args.maxContextChars,
+    requiredCoreReservedChars,
+    requiredModuleReservedChars,
+    optionalModuleCharsLoaded,
+    optionalSkillCoreCharsLoaded,
+    requiredOverflowChars,
+    duplicateCharsAvoided,
+    totalContextCharsLoaded,
+    totalFullSkillChars,
+    estimatedCharsSaved,
+    remainingContextChars: Math.max(0, args.maxContextChars - totalContextCharsLoaded),
+    budgetExceeded: totalContextCharsLoaded > args.maxContextChars
+      || skills.some((item) => item.contextAssembly.budgetExceeded),
+    globallySelectedModules,
+    skills,
   };
 }
 
@@ -136,73 +695,15 @@ export async function assembleCodexSkillContext(args: {
   references: SkillReferenceMode;
   remainingChars: number;
 }): Promise<SkillContextAssembly> {
-  if (!args.skill.path) throw new Error(`Codex skill has no readable path: ${args.skill.name}`);
-  const fullSkillText = await readBoundedText(args.skill.path, MAX_SKILL_FILE_CHARS);
-  if (args.mode === "full") return fullAssembly(args.skill, fullSkillText, "disabled", args.remainingChars);
-
-  const skillDir = path.dirname(args.skill.path);
-  const manifestPath = path.join(skillDir, MANIFEST_NAME);
-  let manifestRaw: string;
-  try {
-    manifestRaw = await fs.readFile(manifestPath, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return fullAssembly(args.skill, fullSkillText, "missing", args.remainingChars, "No context-modules.json manifest; loaded full SKILL.md for compatibility.");
-    }
-    throw error;
-  }
-
-  let manifest;
-  try {
-    manifest = skillContextManifestSchema.parse(JSON.parse(manifestRaw));
-  } catch (error) {
-    const warning = `Invalid context-modules.json; loaded full SKILL.md: ${error instanceof Error ? error.message : String(error)}`;
-    return fullAssembly(args.skill, fullSkillText, "invalid", args.remainingChars, warning);
-  }
-
-  const core = await materializeSource({ source: manifest.core, skillDir, fullSkillText, maxChars: MAX_SKILL_FILE_CHARS });
-  const skillHeader = `# Active skill context: ${args.skill.name}`;
-  const baseContent = [skillHeader, core].join("\n\n").trim();
-  const materialized = args.references === "none"
-    ? []
-    : await Promise.all(manifest.modules.map(async (module) => {
-        const content = await materializeSource({ source: module.source, skillDir, fullSkillText, maxChars: module.maxChars });
-        const assembledContent = `## Selected context module: ${module.id}\n\n${content}`;
-        return { ...module, chars: assembledContent.length + 2, content, assembledContent };
-      }));
-  const availableForModules = Math.max(0, Math.floor(args.remainingChars) - baseContent.length);
-  const selection = selectSkillContextModules({
-    modules: materialized.map(({ content: _content, assembledContent: _assembledContent, ...module }) => module),
+  const plan = await planCodexSkillContexts({
+    skills: [{ skill: args.skill, required: true, routeIndex: 0, routeScore: 0 }],
     intent: args.intent,
     stage: args.stage,
-    maxModuleChars: availableForModules,
+    mode: args.mode,
+    references: args.references,
+    maxContextChars: Math.max(0, Math.floor(args.remainingChars)),
   });
-  const selectedIds = new Set(selection.selected.map((module) => module.id));
-  const selected = materialized.filter((module) => selectedIds.has(module.id));
-  const content = [
-    baseContent,
-    ...selected.map((module) => module.assembledContent),
-  ].join("\n\n").trim();
-  const moduleCharsLoaded = Math.max(0, content.length - baseContent.length);
-
-  return {
-    skill: args.skill,
-    loaded: true,
-    activationInstruction: "Treat the assembled core and selected modules as active guidance for this task phase. Omitted modules are not active unless loaded explicitly.",
-    content,
-    contextAssembly: {
-      mode: "selective",
-      manifestStatus: "loaded",
-      fallbackFull: false,
-      coreCharsLoaded: core.length,
-      moduleCharsLoaded,
-      totalCharsLoaded: content.length,
-      fullSkillChars: fullSkillText.length,
-      estimatedCharsSaved: Math.max(0, fullSkillText.length - content.length),
-      selectedModules: selected.map((module) => module.id),
-      moduleDecisions: selection.decisions,
-      ambiguousGroups: selection.ambiguousGroups,
-      budgetExceeded: content.length > args.remainingChars || selection.decisions.some((item) => item.reason === "budget-exceeded"),
-    },
-  };
+  const result = plan.skills[0];
+  if (!result || !result.loaded) throw new Error(`Required skill context was unexpectedly skipped: ${args.skill.name}`);
+  return result;
 }
