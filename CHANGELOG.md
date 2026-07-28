@@ -1,3 +1,11 @@
+## 0.6.46 - 2026-07-28
+
+- Accept a legacy nested `arguments.traceId` control in `bridge_tool_query` and `bridge_tool_action` when a stale static connector catalog cannot expose the canonical wrapper-level field.
+- Use the nested value only for MSSR trace attribution and remove it before invoking targets that do not declare `traceId`, preserving strict target schemas.
+- Add concurrent named-session and anonymous-session regressions proving that both canonical and legacy wrapper trace controls disambiguate the intended trace without contaminating `search_files` arguments.
+- Preserve the canonical top-level `traceId` contract for refreshed connectors; this release is a backward-compatible transport bridge, not a schema replacement.
+
+
 ## 0.6.45 - 2026-07-28
 
 - Preserve `tool_calls.ok` as MCP handler/transport success while recording nullable `result_ok`, `result_code`, and `result_status` for `run_command` and `work_once` child-process outcomes.

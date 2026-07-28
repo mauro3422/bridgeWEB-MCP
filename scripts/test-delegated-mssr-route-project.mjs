@@ -277,7 +277,24 @@ try {
     row.tool === "bridge_tool_query" && row.operation_subject === "search_files");
   assert.equal(explicitDispatchMetric?.trace_id, concurrentTraceA.traceId);
 
-
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const legacyScopedDispatch = await call("bridge_tool_query", {
+    toolName: "search_files",
+    arguments: {
+      path: projectRoot,
+      pattern: "delegated-route-fixture",
+      maxResults: 5,
+      traceId: concurrentTraceB.traceId,
+    },
+  });
+  assert.equal(
+    legacyScopedDispatch.bridgeNotices?.items?.some((notice) => notice.code === "mssr-unrouted-tool-call" || notice.code === "mssr-trace-ambiguous") ?? false,
+    false,
+    "A legacy nested traceId must disambiguate a delegated target and must be removed before validating a trace-unaware target schema.",
+  );
+  const legacyDispatchMetric = metrics.getRecentMetrics(20, "active").recent.find((row) =>
+    row.tool === "bridge_tool_query" && row.operation_subject === "search_files" && row.trace_id === concurrentTraceB.traceId);
+  assert.equal(legacyDispatchMetric?.trace_id, concurrentTraceB.traceId);
 
   console.log(JSON.stringify({
     ok: true,

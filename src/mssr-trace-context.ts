@@ -512,7 +512,8 @@ export function createMssrTraceSessionCoordinator(
       const delegatedTool = typeof args.toolName === "string" ? args.toolName.trim() : "";
       if (!delegatedTool || TRACE_DISPATCH_TOOLS.has(delegatedTool)) return { args, notices };
       const delegatedInput = { ...(asRecord(args.arguments) ?? {}) };
-      const controlTraceId = validTraceId(args.traceId) ? String(args.traceId).trim() : null;
+      const legacyNestedTraceId = validTraceId(delegatedInput.traceId) ? String(delegatedInput.traceId).trim() : null;
+      const controlTraceId = validTraceId(args.traceId) ? String(args.traceId).trim() : legacyNestedTraceId;
       const targetAcceptsTraceId = traceAwareTools.has(delegatedTool) || ROUTE_TOOLS.has(delegatedTool);
       if (controlTraceId && delegatedInput.traceId === undefined) delegatedInput.traceId = controlTraceId;
       const delegated = prepare(delegatedTool, delegatedInput, hostContext);
