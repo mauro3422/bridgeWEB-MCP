@@ -9,6 +9,7 @@ import {
   callRobloxMcpTool,
   callRobloxMcpToolForStudio,
   inspectRobloxMcpTools,
+  inspectRobloxMcpToolsForDiscovery,
   inspectRobloxStudioState,
   parseRobloxStudios,
   robloxMcpConnectionStatus,
@@ -285,7 +286,7 @@ function robloxHealthSummary(health: RobloxMcpToolCatalogHealth, skillCount: num
 }
 
 async function discoverRobloxSkills(): Promise<{ skills: SkillEntry[]; health: RobloxMcpToolCatalogHealth }> {
-  const health = await inspectRobloxMcpTools();
+  const health = await inspectRobloxMcpToolsForDiscovery();
   const skills = parseRobloxSkills(health.tools.find((tool) => tool.name === "skill"));
   return { skills, health };
 }

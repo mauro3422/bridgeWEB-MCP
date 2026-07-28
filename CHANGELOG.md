@@ -1,3 +1,9 @@
+## 0.6.48 - 2026-07-28
+
+- Make MSSR Roblox skill discovery reuse the last-known catalog without waiting for the exclusive Studio operation queue, so long Roblox actions no longer freeze unrelated routing.
+- Preserve live catalog refresh for explicit Roblox status, tool listing, and dispatch paths.
+
+
 ## 0.6.47 - 2026-07-28
 
 - Add `systemAwareness` to `skill_route_plan` and `skill_bootstrap` for Roblox-routed work, reporting Bridge reachability/version, live Roblox MCP catalog health, connected Studios, active target, and Edit/Play mode.
