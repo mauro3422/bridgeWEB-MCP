@@ -338,6 +338,19 @@ export function recordMssrSkillLoad(args: {
   loaded: boolean;
   via: "skill_load" | "skill_bootstrap";
   warning?: string;
+  contentMode?: "selective" | "full";
+  coreCharsLoaded?: number;
+  moduleCharsLoaded?: number;
+  totalCharsLoaded?: number;
+  fullSkillChars?: number;
+  estimatedCharsSaved?: number;
+  selectedModules?: string[];
+  manifestStatus?: string;
+  budgetExceeded?: boolean;
+  skipped?: boolean;
+  skippedReason?: string;
+  candidateChars?: number;
+  ambiguousGroups?: Array<{ group: string; candidates: string[]; score: number }>;
 }): MssrStoredEvent {
   return recordMssrEvent({
     traceId: args.traceId,
@@ -350,6 +363,23 @@ export function recordMssrSkillLoad(args: {
       source: args.source,
       via: args.via,
       warning: args.warning,
+      contentMode: args.contentMode,
+      coreCharsLoaded: args.coreCharsLoaded,
+      moduleCharsLoaded: args.moduleCharsLoaded,
+      totalCharsLoaded: args.totalCharsLoaded,
+      fullSkillChars: args.fullSkillChars,
+      estimatedCharsSaved: args.estimatedCharsSaved,
+      selectedModules: args.selectedModules?.slice(0, 24),
+      manifestStatus: args.manifestStatus,
+      budgetExceeded: args.budgetExceeded,
+      skipped: args.skipped,
+      skippedReason: args.skippedReason,
+      candidateChars: args.candidateChars,
+      ambiguousGroups: args.ambiguousGroups?.slice(0, 8).map((item) => ({
+        group: item.group,
+        candidates: item.candidates.slice(0, 8),
+        score: item.score,
+      })),
     },
   });
 }

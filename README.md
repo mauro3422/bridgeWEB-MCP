@@ -508,16 +508,9 @@ antes de evaluar los gates de fase.
 `skill_route_plan` y `skill_recommend` usan `responseMode=compact` por defecto:
 devuelven la ruta accionable, nombres, razón corta, obligatoriedad, orden y
 warnings. `responseMode=debug` conserva scores, planes de fase y metadata completa.
-El contenido de `SKILL.md` sólo se entrega mediante `skill_load`; permanece sujeto
-al contexto y compactación del host, no a una inyección oculta del Bridge.
+El contenido procedural entra mediante `skill_bootstrap` o `skill_load`. Bootstrap usa `contentMode=selective` por defecto: para skills con `context-modules.json` devuelve un núcleo más módulos coincidentes con intent/fase dentro de `maxContextChars`. `includeReferences=none` entrega sólo el núcleo; `contentMode=full` y `skill_load` preservan la lectura completa explícita. Skills sin manifiesto caen a full con fallback observable. El presupuesto es estricto para contexto opcional: una skill opcional que no entra se omite completa; sólo una requerida puede desbordar y debe marcarlo. Los módulos alternativos pueden compartir `exclusiveGroup`: un ganador único entra y un empate devuelve candidatos sin inyectar ambas reglas.
 
-En el dashboard, `skill_route_plan` significa **seleccionada/recomendada** y
-`skill_load` significa **guía entregada al contexto y carga registrada**. No
-significa por sí solo que la guía se haya seguido ni que la tarea haya salido
-bien: la aplicación se demuestra con checkpoints de verificación/persistencia y
-un outcome final atribuido a una `primarySkill`. Varias filas `skill_load` a la
-misma hora son cargas distintas; el objetivo visible identifica cuál skill fue
-entregada.
+En el dashboard, `skill_route_plan` significa **seleccionada/recomendada** y cada evento de carga significa **contexto procedural entregado y carga registrada**. La telemetría puede indicar `selective` o `full`, caracteres de core/módulos/full, ahorro estimado, módulos seleccionados, grupos ambiguos, estado del manifiesto, fallback, skip y overflow; nunca guarda el contenido. La carga no prueba por sí sola que la guía se siguió ni que la tarea salió bien: la aplicación se demuestra con checkpoints de verificación/persistencia y un outcome final atribuido a una `primarySkill`.
 
 Codex puede compactar una conversación larga. Bridge no recibe un evento privado
 de compactación y no debe adivinarlo. La recuperación durable es conservar en el

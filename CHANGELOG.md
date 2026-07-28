@@ -1,3 +1,14 @@
+## 0.6.42 - 2026-07-27
+
+- Make `skill_bootstrap` assemble selective Codex skill context by default from `context-modules.json` manifests.
+- Add `contentMode`, `includeReferences`, and `maxContextChars` controls while preserving exact full-file `skill_load` behavior and explicit `contentMode=full` rollback.
+- Resolve exact Markdown sections and bounded reference files only inside the owning skill directory; reject traversal and ambiguous headings.
+- Record privacy-safe context metrics per skill: core/module/full/loaded/saved characters, selected modules, ambiguous candidate groups, manifest status, fallback, skip reason, and budget overflow.
+- Enforce the global budget for optional skill context by skipping a whole optional context that cannot fit; only required context may overflow with explicit evidence.
+- Support `exclusiveGroup` alternatives: one unique winner loads, while a top-score tie returns candidates without injecting multiple contradictory procedures.
+- Add real-skill, handler-level, core-only, full, fallback, optional-budget-skip, ambiguity, and traversal regressions.
+
+
 ## 0.6.41 - 2026-07-27
 
 - Require an explicit `workflowKey` on every new MSSR route instead of inheriting a stale pending workflow from an earlier task in the same Web session.

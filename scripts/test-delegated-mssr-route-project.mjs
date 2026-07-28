@@ -25,6 +25,7 @@ for (const [name, description] of [
   ["skill-routing-maintainer", "Maintain MSSR routing metadata and fixtures."],
   ["git-change-publication", "Verify and publish repository changes with explicit persistence evidence."],
   ["mauroprime-bridge-tool-authoring", "Author and verify Bridge MCP tools."],
+  ["systematic-debugging", "Diagnose repeated failures and verify the smallest reversible fix."],
 ]) {
   const directory = path.join(skillRoot, name);
   fs.mkdirSync(directory, { recursive: true });
@@ -34,6 +35,11 @@ for (const [name, description] of [
     "utf8",
   );
 }
+fs.appendFileSync(
+  path.join(skillRoot, "systematic-debugging", "SKILL.md"),
+  `\n## Large optional fixture\n\n${"Optional diagnostic context. ".repeat(320)}\n`,
+  "utf8",
+);
 fs.mkdirSync(projectRoot, { recursive: true });
 fs.writeFileSync(path.join(projectRoot, "fixture.txt"), "delegated-route-fixture\n", "utf8");
 
@@ -159,11 +165,32 @@ try {
       stage: "start",
       sources: ["codex-local"],
       maxSkills: 12,
+      maxContextChars: 6_000,
       traceId: route.traceId,
     },
   });
   const bootstrap = bootstrapEnvelope.result;
   assert.equal(bootstrap.traceId, route.traceId, "Delegated bootstrap must preserve the delegated route trace.");
+  assert.equal(bootstrap.contextAssembly?.mode, "selective", "Delegated bootstrap must use selective context by default.");
+  assert.equal(typeof bootstrap.contextAssembly?.totalContextCharsLoaded, "number");
+  assert.equal(typeof bootstrap.contextAssembly?.estimatedCharsSaved, "number");
+  assert.equal(Array.isArray(bootstrap.contextAssembly?.skills), true);
+  let replayRemaining = bootstrap.contextAssembly.maxContextChars;
+  for (const item of bootstrap.contextAssembly.skills) {
+    if (item.skipped === true) {
+      assert.equal(item.required, false, "Only optional skill context may be skipped for budget.");
+      assert.equal(item.skippedReason, "optional-context-exceeds-budget");
+      assert.equal(item.totalCharsLoaded, 0);
+      assert.equal(item.candidateChars > replayRemaining, true);
+      continue;
+    }
+    if (item.totalCharsLoaded > replayRemaining) {
+      assert.equal(item.required, true, "Only required skill context may exceed the remaining global budget.");
+    }
+    replayRemaining = Math.max(0, replayRemaining - item.totalCharsLoaded);
+  }
+  const skippedForBudget = bootstrap.contextAssembly.skills.filter((item) => item.skippedReason === "optional-context-exceeds-budget");
+  assert.equal(skippedForBudget.length > 0, true, "A constrained bootstrap must exercise the optional context skip path.");
   const loadedNames = new Set(
     bootstrap.loaded
       .filter((item) => item.loaded === true)

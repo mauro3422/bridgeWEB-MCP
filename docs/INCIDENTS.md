@@ -781,3 +781,21 @@ relacionados independientes sin duplicar filas por cada llamada.
 **Regresión:** `scripts/test-v060-tools.mjs` exige 126 tools, propagación del workflow al `nextAction`, UUID de runtime, evidencia open/closed, cardinalidad de tools y privacidad sin prompts, transcripts ni argumentos crudos. Después del primer readback vivo se añadió un caso con dos trazas bajo el mismo `sessionKey`: la traza `unscoped` debe seguir `unscoped`, una traza scoped no puede ser reasignada por metadata posterior y una ruta nueva sí debe aceptar su workflow explícito.
 
 **Seguimiento:** Los ciclos programados de mantenimiento deben usar `workflowKey=mauroprime-system-loop`, abrir una traza nueva por ejecución, conservarla entre fases y cerrarla con un único outcome verificable. No inferir `conversation_id`, `message_id` ni `automation_run_id` si el host no los expone.
+
+---
+
+## 2026-07-27 - `skill_bootstrap` era un cargador agregado de `SKILL.md` completos
+
+**Estado:** Corregido en Bridge 0.6.42.
+
+**Capa / owner:** Ensamblado de contexto procedural / `bridge-mcp` adapter + contrato portable MSSR.
+
+**Síntoma:** MSSR seleccionaba correctamente las skills activas de una fase, pero el Bridge recorría el `loadOrder` y devolvía cada archivo `SKILL.md` completo. Las references modulares sólo reducían el archivo principal o servían como navegación manual; no existían selección automática, presupuesto global ni métricas de presión de contexto.
+
+**Causa:** `loadCodexSkill` era una lectura UTF-8 completa y `skill_bootstrap` lo reutilizaba para todas las skills activas. El adapter no distinguía núcleo obligatorio, módulos condicionados por intent/fase, compatibilidad heredada ni límite de caracteres.
+
+**Corrección:** Se añadió `src/skill-context-assembler.ts` y `skill_bootstrap` usa `contentMode=selective` por defecto. El assembler lee `context-modules.json`, materializa headings exactos o references internas, bloquea escapes de carpeta, selecciona módulos mediante `@mauroprime/mssr`, aplica `maxContextChars`, conserva `full`/`skill_load` y devuelve `contextAssembly` con ahorro, fallback, grupos ambiguos, skip y overflow. El presupuesto omite completa una skill opcional que no cabe; sólo una requerida puede desbordar. Los módulos en un mismo `exclusiveGroup` cargan un ganador único o, ante empate, devuelven candidatos sin inyectar reglas contradictorias. El observatorio registra sólo metadata acotada, nunca el texto procedural.
+
+**Regresión:** `test-selective-skill-context.mjs` cubre selección real, core-only, full exacto, manifest missing, ambigüedad exclusiva y traversal. `test-delegated-mssr-route-project.mjs` exige modo selectivo, continuidad de trace y descarte controlado de contexto opcional por presupuesto. La primera muestra cargó 6.525 de 9.955 caracteres para `mssr-agent-routing`, ahorrando 3.430.
+
+**Fricción durante la corrección:** Un patch textual amplio encontró tres bloques equivalentes y se negó a aplicar; el cambio se reejecutó por rango exacto. Una escritura de incidente fue invocada inicialmente sin `append=true`, se detectó por caída de tamaño/hash, se restauró desde Git y se repitió como append verificado. Ambas protecciones evitaron conservar una mutación ambigua o destructiva.

@@ -28,9 +28,15 @@ import {
   auditSkillRouting,
   canonicalizeSkillEntries,
   planSkillRoute,
+  structuredSkillIntentSchema,
   type SkillEntry,
   type SkillSource,
 } from "./skill-routing.js";
+import {
+  assembleCodexSkillContext,
+  type SkillContextMode,
+  type SkillReferenceMode,
+} from "../skill-context-assembler.js";
 import {
   recordMssrRoute,
   recordMssrSkillLoad,
@@ -555,7 +561,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
     },
     {
       name: "skill_bootstrap",
-      description: "Load the current phase of a structured skill route. Use at start, implementation, verification, persistence, close, or resume. It rescans the canonical Codex skills and live Roblox catalog, plans activation deterministically, and loads only active-phase skills; deferred skills remain in the returned plan to avoid context bloat. Provide structured intent with explicit semantic signals whenever possible; use nominal only for a clean request. Lexical matching is a marked fallback only.",
+      description: "Load the current phase of a structured skill route. By default it assembles selective Codex skill context from context-modules.json manifests, loading a compact core plus only modules whose stage and structured-intent selectors match within the context budget. Skills without manifests fall back to the full SKILL.md for compatibility; contentMode=full preserves the explicit legacy/debug path. Deferred skills remain metadata-only.",
       inputSchema: {
         type: "object",
         properties: {
@@ -569,6 +575,9 @@ export const skillCatalogToolModule: BridgeToolModule = {
           completedPhases: { type: "array", items: { type: "string", enum: [...SKILL_PHASES] }, default: [] },
           sources: { type: "array", items: { type: "string", enum: ["codex-local", "codex-system", "codex-plugin", "roblox"] } },
           maxSkills: { type: "number", default: 8, minimum: 1, maximum: 16 },
+          contentMode: { type: "string", enum: ["selective", "full"], default: "selective", description: "Use selective to assemble manifest-guided core/modules. Use full only for explicit diagnosis, compatibility comparison, or recovery." },
+          includeReferences: { type: "string", enum: ["auto", "none"], default: "auto", description: "Auto selects matching manifest modules. None loads only the declared core while preserving routing." },
+          maxContextChars: { type: "number", default: 24000, minimum: 4000, maximum: 100000, description: "Global character budget for assembled Codex skill context. Required cores are never silently truncated; budget overflow is reported." },
           workflowKey: { type: "string", pattern: "^[a-z0-9][a-z0-9._-]{1,79}$", description: "Optional stable workflow id shared by related traces, for example mauroprime-system-loop. It is local observability metadata, not a ChatGPT conversation id." },
           traceId: { type: "string", description: "Optional existing MSSR trace id for a replan. A new id is generated when omitted." },
         },
@@ -809,10 +818,19 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const traceId = resolveMssrTraceId(args.traceId);
       const profile = agentProfile(args);
       const workflowKey = requireWorkflowKey(args.workflowKey);
+      const contentMode = z.enum(["selective", "full"]).catch("selective").parse(args.contentMode ?? "selective") as SkillContextMode;
+      const referenceMode = z.enum(["auto", "none"]).catch("auto").parse(args.includeReferences ?? "auto") as SkillReferenceMode;
+      const maxContextChars = z.number().int().min(4_000).max(100_000).catch(24_000).parse(args.maxContextChars ?? 24_000);
+      const routedIntent = structuredSkillIntentSchema.parse(route.intent);
       const observedRoute = { ...route, agentProfile: profile, workflowKey: workflowKey ?? null };
       recordMssrRoute({ traceId, action: "bootstrap", task, route: observedRoute as unknown as Record<string, unknown> });
       const activeByName = new Map(route.activeSkills.map((skill) => [skill.name, skill]));
       const loaded: Array<Record<string, unknown>> = [];
+      let remainingContextChars = maxContextChars;
+      const contextAssemblySkills: Array<Record<string, unknown>> = [];
+      let totalContextCharsLoaded = 0;
+      let totalFullSkillChars = 0;
+      let totalEstimatedCharsSaved = 0;
       for (const name of route.loadOrder) {
         const match = activeByName.get(name);
         if (!match) continue;
@@ -833,10 +851,87 @@ export const skillCatalogToolModule: BridgeToolModule = {
           }
         } else {
           try {
-            loaded.push(await loadCodexSkill(match));
-            recordMssrSkillLoad({ traceId, skillName: match.name, source: match.source, stage: route.stage, required: match.required, loaded: true, via: "skill_bootstrap" });
+            const assembled = await assembleCodexSkillContext({
+              skill: match,
+              intent: routedIntent,
+              stage: route.stage,
+              mode: contentMode,
+              references: referenceMode,
+              remainingChars: remainingContextChars,
+            });
+            const contextInfo = assembled.contextAssembly;
+            totalFullSkillChars += contextInfo.fullSkillChars;
+            if (match.required !== true && contextInfo.totalCharsLoaded > remainingContextChars) {
+              const warning = `Optional skill '${match.name}' context was skipped because ${contextInfo.totalCharsLoaded} characters exceed the remaining global budget of ${remainingContextChars}.`;
+              const skippedInfo = {
+                ...contextInfo,
+                coreCharsLoaded: 0,
+                moduleCharsLoaded: 0,
+                totalCharsLoaded: 0,
+                estimatedCharsSaved: contextInfo.fullSkillChars,
+                selectedModules: [],
+                budgetExceeded: true,
+                skipped: true,
+                skippedReason: "optional-context-exceeds-budget",
+                candidateChars: contextInfo.totalCharsLoaded,
+                warning,
+              };
+              loaded.push({ skill: match, loaded: false, warning, contextAssembly: skippedInfo });
+              totalEstimatedCharsSaved += contextInfo.fullSkillChars;
+              contextAssemblySkills.push({ name: match.name, required: false, ...skippedInfo });
+              recordMssrSkillLoad({
+                traceId,
+                skillName: match.name,
+                source: match.source,
+                stage: route.stage,
+                required: false,
+                loaded: false,
+                via: "skill_bootstrap",
+                warning,
+                contentMode: contextInfo.mode,
+                coreCharsLoaded: 0,
+                moduleCharsLoaded: 0,
+                totalCharsLoaded: 0,
+                fullSkillChars: contextInfo.fullSkillChars,
+                estimatedCharsSaved: contextInfo.fullSkillChars,
+                selectedModules: [],
+                manifestStatus: contextInfo.manifestStatus,
+                ambiguousGroups: contextInfo.ambiguousGroups,
+                budgetExceeded: true,
+                skipped: true,
+                skippedReason: "optional-context-exceeds-budget",
+                candidateChars: contextInfo.totalCharsLoaded,
+              });
+              continue;
+            }
+
+            loaded.push(assembled as unknown as Record<string, unknown>);
+            remainingContextChars = Math.max(0, remainingContextChars - contextInfo.totalCharsLoaded);
+            totalContextCharsLoaded += contextInfo.totalCharsLoaded;
+            totalEstimatedCharsSaved += contextInfo.estimatedCharsSaved;
+            contextAssemblySkills.push({ name: match.name, required: match.required === true, ...contextInfo });
+            recordMssrSkillLoad({
+              traceId,
+              skillName: match.name,
+              source: match.source,
+              stage: route.stage,
+              required: match.required,
+              loaded: true,
+              via: "skill_bootstrap",
+              warning: contextInfo.warning,
+              contentMode: contextInfo.mode,
+              coreCharsLoaded: contextInfo.coreCharsLoaded,
+              moduleCharsLoaded: contextInfo.moduleCharsLoaded,
+              totalCharsLoaded: contextInfo.totalCharsLoaded,
+              fullSkillChars: contextInfo.fullSkillChars,
+              estimatedCharsSaved: contextInfo.estimatedCharsSaved,
+              selectedModules: contextInfo.selectedModules,
+              manifestStatus: contextInfo.manifestStatus,
+              ambiguousGroups: contextInfo.ambiguousGroups,
+              budgetExceeded: contextInfo.budgetExceeded,
+            });
           } catch (error) {
-            recordMssrSkillLoad({ traceId, skillName: match.name, source: match.source, stage: route.stage, required: match.required, loaded: false, via: "skill_bootstrap", warning: error instanceof Error ? error.message : String(error) });
+            recordMssrSkillLoad({ traceId, skillName: match.name, source: match.source, stage: route.stage, required: match.required, loaded: false, via: "skill_bootstrap", warning: error instanceof Error ? error.message : String(error), contentMode });
             throw error;
           }
         }
@@ -846,6 +941,17 @@ export const skillCatalogToolModule: BridgeToolModule = {
         traceId,
         canonicalCodexSkillRoot: path.join(codexHome(), "skills"),
         loaded,
+        contextAssembly: {
+          mode: contentMode,
+          includeReferences: referenceMode,
+          maxContextChars,
+          totalContextCharsLoaded,
+          totalFullSkillChars,
+          estimatedCharsSaved: totalEstimatedCharsSaved,
+          remainingContextChars,
+          budgetExceeded: totalContextCharsLoaded > maxContextChars || contextAssemblySkills.some((item) => item.budgetExceeded === true),
+          skills: contextAssemblySkills,
+        },
         sourceHealth: discovered.sourceHealth,
         warnings: [...discovered.warnings, ...route.warnings],
         activationInstruction: loaded.length > 0
