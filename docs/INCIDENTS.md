@@ -839,3 +839,43 @@ relacionados independientes sin duplicar filas por cada llamada.
 **Regresión:** `scripts/test-v060-tools.mjs` crea fixtures con 41 frases y 25 fases; exige que contexto y recomendación sobrevivan con dos warnings, y que `workflow_guide_load` rechace claramente la guía inválida.
 
 **Verificación final:** el watchdog reinició HTTP desde `0.6.43` a `0.6.44`; `bridge_verify_all` pasó todos los gates obligatorios, incluido doctor, typecheck, build, smoke HTTP, regresiones, 162 casos efectivos de routing y documentación de 126 herramientas. Un `project_context_load` vivo posterior devolvió contexto, catálogo y recomendación sin abortar.
+---
+
+## 2026-07-28 — `roblox_place_save` no pudo confirmar foreground de una ventana exacta
+
+**Estado:** Mitigado en la operación; causa de plataforma no resuelta y sin cambio de código.
+
+**Capa / owner:** `roblox_place_save` y `scripts/roblox-studio-save.ps1` / `bridge-mcp`.
+
+**Síntoma:** La herramienta identificó una única ventana `D:\Dev\MyceliumFront\1.rbxl - Roblox Studio` (PID `19488`), pero `SetForegroundWindow` y `AppActivate` no lograron que `GetForegroundWindow()` devolviera su handle. El script abortó correctamente antes de enviar `Ctrl+S`.
+
+**Reproducción mínima / evidencia:** El fallo ocurrió con `roblox_place_save` y se repitió al invocar el mismo script inmediatamente después de restaurar y enfocar Studio desde el capturador local. En ambos intentos el mensaje fue `Roblox Studio window could not be confirmed as foreground; Ctrl+S was not sent`.
+
+**Causa:** `No resuelta`. La evidencia apunta a la política de foreground de Windows para procesos no interactivos; la selección de proceso, título y handle fue correcta.
+
+**Mitigación aplicada:** Un helper temporal exigió una coincidencia exacta única, realizó un solo clic acotado sobre la barra de título, verificó el handle foreground y delegó al mismo `roblox-studio-save.ps1`. El script oficial devolvió `foregroundConfirmed=true`, envió sólo `Ctrl+S` y el helper fue eliminado.
+
+**Prueba observable:** El SHA-256 de `1.rbxl` cambió de `0834d7875f90e7d463762e3d34a701b865988faff775844f9b20ce8b723410dc` a `52bf6084ceaff69744b0db1a2f3b94049ef00c2f7b49fdbc7e57d789aa9a43ed`; Studio permaneció en Edit y la escena guardada conservó la reparación esperada.
+
+**Seguimiento:** Evaluar un fallback interno igualmente acotado para activación por clic de barra de título, con coincidencia exacta, restauración del cursor, aborto seguro y regresión aislada. No generalizar ni modificar la tool hasta reproducirlo otra vez o disponer de una prueba automatizable de alto impacto.
+**Actualización 2026-07-28 — segunda aparición confirmada:** En otra sesión sobre el mismo place, `roblox_place_save` volvió a identificar correctamente PID `19488` y el título exacto `D:\Dev\MyceliumFront\1.rbxl - PlantViewport - Roblox Studio`, pero abortó antes de `Ctrl+S` porque no pudo confirmar foreground. `roblox_studio_window_capture_save`, acotado al mismo `placePath`, sí obtuvo `foregroundConfirmed=true`; el segundo `roblox_place_save` oficial guardó y verificó el cambio de SHA-256 `72393c3f5f5340687d69cb59bafe0493e183ec41a6a8cf3d1b6d43f0b5406201` → `5c1adf6f24a05604ffa8862d9c9e22a88c5941c43c8cff09f2079d46293e1f9d`. La recurrencia justifica investigar un fallback interno acotado reutilizando la activación segura ya demostrada por la captura; todavía no demuestra la causa de plataforma ni autoriza relajar la comprobación de foreground.
+
+---
+
+## 2026-07-28 — `execute_luau` en Client devolvió 502 y perdió temporalmente el target activo
+
+**Estado:** No resuelta; mitigada con payload acotado, selección explícita de Studio y prueba de replicación desde un `Script` de arranque normal.
+
+**Capa / owner:** proxy Roblox Studio, transporte HTTP y lifecycle de selección de Studio / `bridge-mcp`.
+
+**Síntoma:** Durante la verificación de 13 plantas en Play, una llamada `execute_luau` sobre el DataModel `Client` con recorrido y JSON detallado devolvió `502: Upstream or external service errors`. El readback inmediato de `roblox_mcp_status` terminó sin respuesta; al recuperarse, la conexión veía `1.rbxl` pero había perdido el target activo. Un segundo intento grande, ya fijado al `studioId` exacto, repitió el 502.
+
+**Reproducción mínima / evidencia:** Studio permaneció abierto y respondía en PID `19488`; `get_studio_state` confirmó que Play seguía activo con Client y Server. Entre los readbacks se observó Bridge `0.6.48` donde antes operaba `0.6.47`, pero no está demostrado que el payload causara el cambio de runtime. `roblox_mcp_studio_list(refresh=true)` recuperó el Studio `d25941ab-7d41-4e81-8631-427ec6e9c9fe` y permitió volver a fijarlo atómicamente.
+
+**Causa:** `No resuelta`. La evidencia no separa con certeza límite o duración del payload Client, fallo upstream del proveedor, transición concurrente del Bridge ni pérdida de selección durante la reconexión.
+
+**Mitigación aplicada:** Se dejó de reintentar el payload grande. La prueba real se movió a un `Script` temporal preexistente en Edit, ejecutado por el servidor durante el arranque normal de Play; el Client sólo realizó un sondeo Luau corto y acotado. Las llamadas posteriores fijaron el `studioId` exacto.
+
+**Prueba de regresión operativa:** El Client devolvió `CLIENT_STARTUP_OK models=13 ports=52 parts=505 uniqueSilhouettes=13 revision=9 contract=CanonicalPlantVisualV2 serverVerified=true`. Play se detuvo y el arnés temporal fue eliminado con `leftovers=0`.
+
+**Seguimiento:** Crear una reproducción aislada que compare payload Client corto y grande, mida tamaño/duración, preserve `studioId` y `runtimeBootId`, y diferencie explícitamente timeout upstream, restart del Bridge y pérdida de target. No atribuir el 502 al juego ni aumentar reintentos ciegos hasta demostrar la capa causal.
