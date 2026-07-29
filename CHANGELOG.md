@@ -1,3 +1,10 @@
+## 0.6.49 - 2026-07-29
+
+- Isolate the primary project of a newly started MSSR route from any unrelated trace that remains open in the same Bridge process.
+- Prefer freshly loaded project context when projecting route metrics, while preserving the prior trace project for continuation calls.
+- Add a regression that keeps one trace open, loads a different project, starts an independent route, and proves the new route is attributed to the fresh project.
+
+
 ## 0.6.48 - 2026-07-28
 
 - Make MSSR Roblox skill discovery reuse the last-known catalog without waiting for the exclusive Studio operation queue, so long Roblox actions no longer freeze unrelated routing.

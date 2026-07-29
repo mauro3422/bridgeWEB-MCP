@@ -724,6 +724,53 @@ try {
     assert.equal(laterContextMetric?.trace_id, null, 'A closed trace must not leak into later context-load metrics.');
   });
 
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  await withClientSession('Codex', async (call) => {
+    const previousProject = path.join(sandbox, 'previous-open-trace-project');
+    const freshProject = path.join(sandbox, 'fresh-route-project');
+    fs.mkdirSync(previousProject, { recursive: true });
+    fs.mkdirSync(freshProject, { recursive: true });
+
+    await call('project_context_load', {
+      projectRoot: previousProject,
+      task: 'Load the project for the trace that will remain open.',
+    });
+    const previousRoute = await call('skill_route_plan', {
+      task: 'Open a routed task that remains active while another project is loaded.',
+      context: 'This route intentionally remains open to reproduce cross-task project contamination.',
+      intent,
+      caller: 'codex-local',
+      stage: 'start',
+      sources: ['codex-local'],
+      maxSkills: 12,
+    });
+
+    await call('project_context_load', {
+      projectRoot: freshProject,
+      task: 'Load the project that must own the next independent route.',
+    });
+    const freshRoute = await call('skill_route_plan', {
+      task: 'Open an independent route after loading a different project.',
+      context: 'The previous trace remains open, but this new route must use the freshly loaded project.',
+      workflowKey: 'fresh-route-project-isolation',
+      intent,
+      caller: 'codex-local',
+      stage: 'start',
+      sources: ['codex-local'],
+      maxSkills: 12,
+    });
+
+    assert.notEqual(freshRoute.traceId, previousRoute.traceId);
+    const recentProjectMetrics = metrics.getRecentMetrics(30, 'active').recent;
+    const freshRouteMetric = recentProjectMetrics.find((row) =>
+      row.tool === 'skill_route_plan' && row.trace_id === freshRoute.traceId);
+    assert.equal(
+      freshRouteMetric?.project,
+      'fresh-route-project',
+      'A new route must prefer freshly loaded project context over the project of another open trace.',
+    );
+  });
+
   console.log(JSON.stringify({
     ok: true,
     traceId,

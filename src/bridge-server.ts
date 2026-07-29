@@ -533,7 +533,10 @@ export function createBridgeServer() {
       && activeTraceBeforeCall.project !== "unknown"
       ? activeTraceBeforeCall.project
       : undefined;
-    const project = activeTraceProject ?? resolveProject(name, profiledArgs, hostProfile) ?? pendingProject;
+    const resolvedCallProject = resolveProject(name, profiledArgs, hostProfile);
+    const project = startsNewRoute
+      ? observedProject ?? pendingProject ?? resolvedCallProject
+      : activeTraceProject ?? resolvedCallProject ?? pendingProject;
     const prepared = mssrTraceSession.prepare(name, profiledArgs, {
       caller: hostProfile.caller,
       sessionKey: hostProfile.sessionKey,
@@ -547,9 +550,12 @@ export function createBridgeServer() {
       sessionKey: hostProfile.sessionKey,
       project,
     });
-    const metricProject = (traceSnapshot.project && traceSnapshot.project !== "unknown"
+    const traceMetricProject = traceSnapshot.project && traceSnapshot.project !== "unknown"
       ? traceSnapshot.project
-      : undefined) ?? project;
+      : undefined;
+    const metricProject = startsNewRoute
+      ? project ?? traceMetricProject
+      : traceMetricProject ?? project;
     const taskKey = resolveMetricTaskKey({
       startsNewRoute,
       traceId: traceSnapshot.traceId,
