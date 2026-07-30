@@ -879,3 +879,25 @@ relacionados independientes sin duplicar filas por cada llamada.
 **Prueba de regresión operativa:** El Client devolvió `CLIENT_STARTUP_OK models=13 ports=52 parts=505 uniqueSilhouettes=13 revision=9 contract=CanonicalPlantVisualV2 serverVerified=true`. Play se detuvo y el arnés temporal fue eliminado con `leftovers=0`.
 
 **Seguimiento:** Crear una reproducción aislada que compare payload Client corto y grande, mida tamaño/duración, preserve `studioId` y `runtimeBootId`, y diferencie explícitamente timeout upstream, restart del Bridge y pérdida de target. No atribuir el 502 al juego ni aumentar reintentos ciegos hasta demostrar la capa causal.
+
+---
+
+## 2026-07-30 — El schema estricto de intent MSSR bloqueaba la recuperación de vocabulario de ChatGPT Web
+
+**Estado:** Corregido, publicado y verificado en Bridge 0.6.50.
+
+**Capa / owner:** herramientas `skill_recommend`, `skill_route_plan` y `skill_bootstrap`, más observabilidad MSSR / `bridge-mcp`.
+
+**Síntoma:** un caller que enviaba una categoría cercana pero no canónica podía ser rechazado por el schema MCP antes de llegar al router. El error no ofrecía una continuación reutilizable y hacía más probable que ChatGPT Web abandonara MSSR o improvisara otra llamada.
+
+**Reproducción mínima:** llamar routing con aliases inequívocos como `local_app_development`, `inspect` y `bounded-write`, o con valores desconocidos como `bridge-mcp`, `animate` y `verification-needed`.
+
+**Causa:** el borde de transporte y el parser canónico compartían el mismo vocabulario cerrado. Esa combinación era correcta para el motor determinista, pero no dejaba una capa de recuperación entre un error de vocabulario del modelo y la ejecución del router.
+
+**Corrección:** el transporte acepta strings acotados; una capa nueva normaliza sólo aliases explícitos o valores canónicos ubicados de forma inequívoca en otro campo. Los valores desconocidos nunca se adivinan: devuelven candidatos, `routed=false` y un `recoveryAction` que reutiliza la misma traza. La telemetría guarda IDs allow-listed, campos y códigos, no los valores arbitrarios recibidos.
+
+**Regresión:** `test-mssr-intent-normalization.mjs` cubre intent canónico, aliases, reubicación, ambigüedad, campos requeridos vacíos tras normalizar, recuperación same-trace y redacción. La suite completa pasó; el runtime vivo 0.6.50 normalizó los tres aliases y bloqueó el caso desconocido sin ejecutar routing.
+
+**Fricción adicional:** durante la actualización se confundió inicialmente documentación indexada antigua con el estado actual del SDK. La verificación contra npm y documentación oficial confirmó que los paquetes v2 son estables, pero que el protocolo `2026-07-28` requiere opt-in y cambia el lifecycle sessionful. Se actualizó únicamente la rama v1 mantenida a 1.30 y se documentó una migración dual-era en `docs/MCP_V2_MIGRATION.md`.
+
+**Seguimiento:** implementar la ruta moderna v2 en una iteración separada, manteniendo el handler sessionful legado delante de un handler moderno estricto y exigiendo pruebas vivas del túnel antes de retirar cualquier rollback.
