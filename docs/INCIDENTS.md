@@ -1017,3 +1017,5 @@ relacionados independientes sin duplicar filas por cada llamada.
 **Regresión:** nunca aceptar éxito de mutación Studio sin `script_read`/`script_grep`; nunca sustituir el guardador acotado por un `Ctrl+S` no verificado. El segundo guardado confirmó Edit, ruta exacta, foreground y cambio de mtime.
 
 **Seguimiento:** auditar por qué `multi_edit` contabilizó como aplicada una sustitución ausente y mejorar la recuperación de foco de `roblox_place_save` sin ampliar su alcance.
+
+**Recurrencia observada:** en la corrección inmediatamente posterior, `roblox_place_save` volvió a rechazar dos veces el mismo PID/título aunque `WScript.Shell.AppActivate()` devolvió `true`. El fallback acotado activó ese título exacto, envió sólo `Ctrl+S` y verificó que el SHA-256 de `1.rbxl` cambió de `5077B3F43DDE1476C006E5D3FB4E0E39AE9AC5F1B28BEDCCFA95BE53F99ED9E7` a `A942A9D434BCDAAE31E8D93C3BD5808864AED1FF3C0A17EB9757CF58763E50E2`. Esto confirma que la recuperación de foco necesita un gate alternativo verificable.
