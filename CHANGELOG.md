@@ -1,3 +1,10 @@
+## 0.6.50 - 2026-07-30
+
+- Accept bounded non-canonical MSSR intent vocabulary at the MCP transport edge, normalize only explicit safe aliases and exact cross-field values, and return a same-trace correction action instead of failing opaque schema validation or guessing unknown values.
+- Add privacy-preserving intent normalization/correction telemetry and recovery-rate observability by caller.
+- Add regression coverage for canonical, normalized, relocated, ambiguous, empty-after-normalization, same-trace recovery, and telemetry-redaction paths.
+- Update the maintained v1 MCP TypeScript SDK line from 1.29 to 1.30. Protocol revision `2026-07-28` remains an explicit, separate dual-era migration because the current production HTTP route is sessionful.
+
 ## 0.6.49 - 2026-07-29
 
 - Isolate the primary project of a newly started MSSR route from any unrelated trace that remains open in the same Bridge process.

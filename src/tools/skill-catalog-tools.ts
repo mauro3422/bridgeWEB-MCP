@@ -39,12 +39,18 @@ import {
   type SkillReferenceMode,
 } from "../skill-context-assembler.js";
 import {
+  hashMssrTask,
+  recordMssrEvent,
   recordMssrRoute,
   recordMssrSkillLoad,
   resolveMssrTraceId,
 } from "../mssr-observatory.js";
 import { requireWorkflowKey } from "../runtime-identity.js";
 import { buildMssrSystemAwareness } from "../mssr-system-awareness.js";
+import {
+  normalizeMssrIntent,
+  type IntentNormalizationResult,
+} from "../mssr-intent-normalizer.js";
 
 const MAX_SKILL_FILE_CHARS = 160_000;
 const MAX_DISCOVERED_SKILLS = 600;
@@ -91,6 +97,7 @@ function compactSkillRoute<T extends Record<string, unknown>>(route: T): Record<
     classifier: route.classifier,
     semanticSignals: route.semanticSignals,
     intent: route.intent,
+    intentResolution: route.intentResolution,
     workflows: route.workflows,
     activeSkills: compactSkills(route.activeSkills),
     deferredSkills: compactSkills(route.deferredSkills),
@@ -464,20 +471,100 @@ async function loadCodexSkill(entry: SkillEntry) {
 
 const structuredIntentInputSchema = {
   type: "object",
-  description: "Compact semantic classification inferred by the agent from the user's request. This is not chain-of-thought; provide only the structured outcome. Always declare at least one signal; use nominal only when no anomaly, doubt, friction, gap, or reusable pattern is present.",
+  description: "Compact semantic classification inferred by the agent from the user's request. Canonical values are preferred. Bridge safely normalizes a bounded set of unambiguous aliases and returns a correction-ready retry for ambiguous or unknown values; it never guesses an ambiguous intent.",
   properties: {
     summary: { type: "string", maxLength: 600 },
-    domains: { type: "array", minItems: 1, maxItems: 8, items: { type: "string", enum: [...SKILL_DOMAINS] } },
-    actions: { type: "array", minItems: 1, maxItems: 12, items: { type: "string", enum: [...SKILL_ACTIONS] } },
-    artifacts: { type: "array", maxItems: 12, items: { type: "string", enum: [...SKILL_ARTIFACTS] }, default: [] },
-    needs: { type: "array", maxItems: 12, items: { type: "string", enum: [...SKILL_NEEDS] }, default: [] },
-    signals: { type: "array", minItems: 1, maxItems: 12, items: { type: "string", enum: [...SKILL_SIGNALS] }, default: ["nominal"], description: "Observable semantic conditions used to route verification, recovery, maintenance, and skill creation. Do not combine nominal with non-nominal signals." },
-    risk: { type: "string", enum: [...SKILL_RISKS], default: "read-only" },
-    ambiguity: { type: "string", enum: ["low", "medium", "high"], default: "low" },
+    domains: { type: "array", maxItems: 24, items: { type: "string", minLength: 1, maxLength: 80 }, description: `Prefer canonical values: ${SKILL_DOMAINS.join(", ")}.` },
+    actions: { type: "array", maxItems: 24, items: { type: "string", minLength: 1, maxLength: 80 }, description: `Prefer canonical values: ${SKILL_ACTIONS.join(", ")}.` },
+    artifacts: { type: "array", maxItems: 24, items: { type: "string", minLength: 1, maxLength: 80 }, default: [], description: `Prefer canonical values: ${SKILL_ARTIFACTS.join(", ")}.` },
+    needs: { type: "array", maxItems: 24, items: { type: "string", minLength: 1, maxLength: 80 }, default: [], description: `Prefer canonical values: ${SKILL_NEEDS.join(", ")}.` },
+    signals: { type: "array", maxItems: 24, items: { type: "string", minLength: 1, maxLength: 80 }, default: ["nominal"], description: `Prefer canonical values: ${SKILL_SIGNALS.join(", ")}. Do not combine nominal with non-nominal signals.` },
+    risk: { type: "string", minLength: 1, maxLength: 80, default: "read-only", description: `Prefer canonical values: ${SKILL_RISKS.join(", ")}.` },
+    ambiguity: { type: "string", minLength: 1, maxLength: 80, default: "low", description: "Prefer canonical values: low, medium, high." },
   },
-  required: ["domains", "actions", "signals"],
   additionalProperties: false,
 } as const;
+
+function recordIntentResolution(args: {
+  traceId: string;
+  task: string;
+  caller: unknown;
+  stage: unknown;
+  model: unknown;
+  reasoningEffort: unknown;
+  result: IntentNormalizationResult;
+}): void {
+  if (args.result.status !== "normalized" && args.result.status !== "correction-required") return;
+  recordMssrEvent({
+    traceId: args.traceId,
+    eventType: args.result.status === "normalized" ? "intent_normalized" : "intent_correction_required",
+    caller: typeof args.caller === "string" ? args.caller : undefined,
+    stage: typeof args.stage === "string" ? args.stage : undefined,
+    classificationMode: "structured-semantic",
+    taskHash: hashMssrTask(args.task),
+    ok: args.result.status === "normalized",
+    details: {
+      status: args.result.status,
+      aliasIds: args.result.changes.map((change) => change.id).slice(0, 24),
+      changedFields: [...new Set(args.result.changes.map((change) => change.field))],
+      unresolvedFields: [...new Set(args.result.issues.map((issue) => issue.field))],
+      issueCodes: args.result.issues.map((issue) => issue.code).slice(0, 24),
+      issueCount: args.result.issues.length,
+      agentProfile: {
+        model: typeof args.model === "string" ? args.model.slice(0, 80) : "unknown",
+        reasoningEffort: typeof args.reasoningEffort === "string" ? args.reasoningEffort.slice(0, 20) : "unknown",
+      },
+      privacy: "Arbitrary invalid values are returned to the caller but are not stored in telemetry.",
+    },
+  });
+}
+
+function resolveIntentOrRecovery(args: Record<string, unknown>, toolName: "skill_recommend" | "skill_route_plan" | "skill_bootstrap", task: string) {
+  const traceId = resolveMssrTraceId(args.traceId);
+  const result = normalizeMssrIntent(args.intent);
+  recordIntentResolution({
+    traceId,
+    task,
+    caller: args.caller,
+    stage: args.stage,
+    model: args.model,
+    reasoningEffort: args.reasoningEffort,
+    result,
+  });
+  if (result.status !== "correction-required") {
+    return { traceId, intent: result.intent, resolution: result, recovery: null };
+  }
+  const retryArguments = {
+    ...args,
+    traceId,
+    intent: result.retryIntent,
+  };
+  return {
+    traceId,
+    intent: undefined,
+    resolution: result,
+    recovery: {
+      routed: false,
+      traceId,
+      intentResolution: {
+        status: result.status,
+        normalizedAliases: result.changes,
+        unresolved: result.issues,
+      },
+      recoveryAction: {
+        label: "Corregir intent y reintentar",
+        toolName,
+        arguments: retryArguments,
+        instruction: "Elige valores canónicos para los campos unresolved y reintenta esta llamada. Bridge no ejecutó routing ni cargó skills.",
+      },
+      vocabularyAction: {
+        toolName: "skill_route_vocabulary",
+        arguments: {},
+        instruction: "Consulta el vocabulario completo sólo si los candidatos devueltos no bastan.",
+      },
+    },
+  };
+}
 
 export const skillCatalogToolModule: BridgeToolModule = {
   name: "skill-catalog-and-roblox-proxy",
@@ -685,6 +772,8 @@ export const skillCatalogToolModule: BridgeToolModule = {
     },
     skill_recommend: async (args) => {
       const task = z.string().min(1).parse(args.task);
+      const intentResult = resolveIntentOrRecovery(args, "skill_recommend", task);
+      if (intentResult.recovery) return intentResult.recovery;
       const selectedSources = sourceFilter(args.sources);
       const maxResults = z.number().int().min(1).max(16).catch(8).parse(args.maxResults ?? 8);
       const responseMode = z.enum(routeResponseModes).catch("compact").parse(args.responseMode ?? "compact");
@@ -694,13 +783,13 @@ export const skillCatalogToolModule: BridgeToolModule = {
         task,
         context: z.string().max(4_000).catch("").parse(args.context ?? ""),
         skills,
-        intent: args.intent,
+        intent: intentResult.intent,
         caller: z.enum(SKILL_CALLERS).catch("other").parse(args.caller ?? "other"),
         stage: z.enum(SKILL_STAGES).catch("start").parse(args.stage ?? "start"),
         completedPhases: z.array(z.enum(SKILL_PHASES)).catch([]).parse(args.completedPhases ?? []),
         maxSkills: maxResults,
       });
-      const traceId = resolveMssrTraceId(args.traceId);
+      const traceId = intentResult.traceId;
       const profile = agentProfile(args);
       const workflowKey = requireWorkflowKey(args.workflowKey);
       const observedRoute = { ...route, agentProfile: profile, workflowKey: workflowKey ?? null };
@@ -711,6 +800,10 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const response = {
         ...observedRoute,
         traceId,
+        intentResolution: intentResult.resolution.status === "normalized" ? {
+          status: "normalized",
+          normalizedAliases: intentResult.resolution.changes,
+        } : { status: intentResult.resolution.status },
         matches,
         sourceHealth: discovered.sourceHealth,
         warnings: [...discovered.warnings, ...route.warnings],
@@ -757,6 +850,8 @@ export const skillCatalogToolModule: BridgeToolModule = {
     }),
     skill_route_plan: async (args) => {
       const task = z.string().min(1).parse(args.task);
+      const intentResult = resolveIntentOrRecovery(args, "skill_route_plan", task);
+      if (intentResult.recovery) return intentResult.recovery;
       const selectedSources = sourceFilter(args.sources);
       const responseMode = z.enum(routeResponseModes).catch("compact").parse(args.responseMode ?? "compact");
       const discovered = await discoverAllSkills(!selectedSources || selectedSources.includes("roblox"));
@@ -765,13 +860,13 @@ export const skillCatalogToolModule: BridgeToolModule = {
         task,
         context: z.string().max(4_000).catch("").parse(args.context ?? ""),
         skills,
-        intent: args.intent,
+        intent: intentResult.intent,
         caller: z.enum(SKILL_CALLERS).catch("other").parse(args.caller ?? "other"),
         stage: z.enum(SKILL_STAGES).catch("start").parse(args.stage ?? "start"),
         completedPhases: z.array(z.enum(SKILL_PHASES)).catch([]).parse(args.completedPhases ?? []),
         maxSkills: z.number().int().min(1).max(16).catch(8).parse(args.maxSkills ?? 8),
       });
-      const traceId = resolveMssrTraceId(args.traceId);
+      const traceId = intentResult.traceId;
       const profile = agentProfile(args);
       const workflowKey = requireWorkflowKey(args.workflowKey);
       const observedRoute = { ...route, agentProfile: profile, workflowKey: workflowKey ?? null };
@@ -784,6 +879,10 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const response = {
         ...observedRoute,
         traceId,
+        intentResolution: intentResult.resolution.status === "normalized" ? {
+          status: "normalized",
+          normalizedAliases: intentResult.resolution.changes,
+        } : { status: intentResult.resolution.status },
         sourceHealth: discovered.sourceHealth,
         systemAwareness: systemAwareness.status,
         __bridgeNotices: systemAwareness.notices,
@@ -794,7 +893,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
           arguments: {
             task,
             context: args.context ?? "",
-            intent: args.intent,
+            intent: intentResult.intent,
             caller: args.caller ?? "other",
             model: args.model,
             reasoningEffort: args.reasoningEffort ?? "unknown",
@@ -813,6 +912,8 @@ export const skillCatalogToolModule: BridgeToolModule = {
     },
     skill_bootstrap: async (args) => {
       const task = z.string().min(1).parse(args.task);
+      const intentResult = resolveIntentOrRecovery(args, "skill_bootstrap", task);
+      if (intentResult.recovery) return intentResult.recovery;
       const selectedSources = sourceFilter(args.sources);
       const discovered = await discoverAllSkills(!selectedSources || selectedSources.includes("roblox"));
       const skills = discovered.skills.filter((skill) => !selectedSources || selectedSources.includes(skill.source));
@@ -820,13 +921,13 @@ export const skillCatalogToolModule: BridgeToolModule = {
         task,
         context: z.string().max(4_000).catch("").parse(args.context ?? ""),
         skills,
-        intent: args.intent,
+        intent: intentResult.intent,
         caller: z.enum(SKILL_CALLERS).catch("other").parse(args.caller ?? "other"),
         stage: z.enum(SKILL_STAGES).catch("start").parse(args.stage ?? "start"),
         completedPhases: z.array(z.enum(SKILL_PHASES)).catch([]).parse(args.completedPhases ?? []),
         maxSkills: z.number().int().min(1).max(16).catch(8).parse(args.maxSkills ?? 8),
       });
-      const traceId = resolveMssrTraceId(args.traceId);
+      const traceId = intentResult.traceId;
       const profile = agentProfile(args);
       const workflowKey = requireWorkflowKey(args.workflowKey);
       const systemAwareness = await buildMssrSystemAwareness({
@@ -918,6 +1019,10 @@ export const skillCatalogToolModule: BridgeToolModule = {
       return {
         ...observedRoute,
         traceId,
+        intentResolution: intentResult.resolution.status === "normalized" ? {
+          status: "normalized",
+          normalizedAliases: intentResult.resolution.changes,
+        } : { status: intentResult.resolution.status },
         canonicalCodexSkillRoot: path.join(codexHome(), "skills"),
         loaded,
         contextAssembly: {

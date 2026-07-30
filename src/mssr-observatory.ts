@@ -869,6 +869,19 @@ function summary(days: number, scope: MssrObservatoryScope) {
   const persistenceTraces = new Set(events.filter((event) => event.eventType === "persistence" && (event.ok === true || event.details.persisted === true)).map((event) => event.traceId));
   const outcomeEvents = events.filter((event) => event.eventType === "outcome");
   const closureReminderEvents = events.filter((event) => event.eventType === "closure_reminder");
+  const intentNormalizedEvents = events.filter((event) => event.eventType === "intent_normalized");
+  const intentCorrectionEvents = events.filter((event) => event.eventType === "intent_correction_required");
+  const intentCorrectionTraceIds = new Set(intentCorrectionEvents.map((event) => event.traceId));
+  const intentCorrectionRecoveredTraceIds = new Set(intentCorrectionEvents.flatMap((correction) => (
+    routes.some((route) => route.traceId === correction.traceId && route.occurredAt > correction.occurredAt)
+      ? [correction.traceId]
+      : []
+  )));
+  const normalizedAliasIds = intentNormalizedEvents.flatMap((event) => (
+    Array.isArray(event.details.aliasIds)
+      ? event.details.aliasIds.filter((item): item is string => typeof item === "string")
+      : []
+  ));
   const latestOutcomeByTrace = new Map<string, MssrStoredEvent>();
   for (const event of outcomeEvents) latestOutcomeByTrace.set(event.traceId, event);
   const latestOutcomes = [...latestOutcomeByTrace.values()];
@@ -938,7 +951,7 @@ function summary(days: number, scope: MssrObservatoryScope) {
   const structuredRoutes = routes.filter((event) => event.classificationMode === "structured-semantic").length;
   const orphanLoads = loads.filter((event) => !traceIdsWithRoutes.has(event.traceId)).length;
   const surfaceNames = new Set(
-    [...routes, ...outcomeEvents, ...closureReminderEvents]
+    [...routes, ...outcomeEvents, ...closureReminderEvents, ...intentNormalizedEvents, ...intentCorrectionEvents]
       .map((event) => event.caller || "other"),
   );
   const surfaceBenchmarks = [...surfaceNames]
@@ -946,6 +959,9 @@ function summary(days: number, scope: MssrObservatoryScope) {
       const surfaceRouteTraces = new Set(routes.filter((event) => (event.caller || "other") === caller).map((event) => event.traceId));
       const surfaceOutcomeTraces = new Set(latestOutcomes.filter((event) => (event.caller || "other") === caller).map((event) => event.traceId));
       const surfaceReminderTraces = new Set(closureReminderEvents.filter((event) => (event.caller || "other") === caller).map((event) => event.traceId));
+      const surfaceIntentNormalized = intentNormalizedEvents.filter((event) => (event.caller || "other") === caller);
+      const surfaceIntentCorrections = intentCorrectionEvents.filter((event) => (event.caller || "other") === caller);
+      const surfaceCorrectionTraceIds = new Set(surfaceIntentCorrections.map((event) => event.traceId));
       return {
         caller,
         routedTraces: surfaceRouteTraces.size,
@@ -954,6 +970,13 @@ function summary(days: number, scope: MssrObservatoryScope) {
         closureReminderEvents: closureReminderEvents.filter((event) => (event.caller || "other") === caller).length,
         closureReminderTraces: surfaceReminderTraces.size,
         closureReminderRate: rate(surfaceReminderTraces.size, surfaceRouteTraces.size),
+        intentNormalizedEvents: surfaceIntentNormalized.length,
+        intentCorrectionRequiredEvents: surfaceIntentCorrections.length,
+        intentCorrectionRecoveredTraces: [...surfaceCorrectionTraceIds].filter((traceId) => intentCorrectionRecoveredTraceIds.has(traceId)).length,
+        intentCorrectionRecoveryRate: rate(
+          [...surfaceCorrectionTraceIds].filter((traceId) => intentCorrectionRecoveredTraceIds.has(traceId)).length,
+          surfaceCorrectionTraceIds.size,
+        ),
       };
     })
     .sort((a, b) => b.routedTraces - a.routedTraces || a.caller.localeCompare(b.caller));
@@ -1086,6 +1109,11 @@ function summary(days: number, scope: MssrObservatoryScope) {
         : null,
       closureReminderEvents: closureReminderEvents.length,
       closureReminderTraces: new Set(closureReminderEvents.map((event) => event.traceId)).size,
+      intentNormalizedEvents: intentNormalizedEvents.length,
+      intentCorrectionRequiredEvents: intentCorrectionEvents.length,
+      intentCorrectionTraces: intentCorrectionTraceIds.size,
+      intentCorrectionRecoveredTraces: intentCorrectionRecoveredTraceIds.size,
+      intentCorrectionRecoveryRate: rate(intentCorrectionRecoveredTraceIds.size, intentCorrectionTraceIds.size),
       userCorrections,
     },
     contextAssembly,
@@ -1099,6 +1127,7 @@ function summary(days: number, scope: MssrObservatoryScope) {
       callers: topCounts(routes.flatMap((event) => event.caller ? [event.caller] : [])),
       stages: topCounts(routes.flatMap((event) => event.stage ? [event.stage] : [])),
       contextSources: topCounts(contextSources),
+      normalizedIntentAliases: topCounts(normalizedAliasIds),
     },
   };
 }
