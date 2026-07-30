@@ -901,3 +901,23 @@ relacionados independientes sin duplicar filas por cada llamada.
 **Fricción adicional:** durante la actualización se confundió inicialmente documentación indexada antigua con el estado actual del SDK. La verificación contra npm y documentación oficial confirmó que los paquetes v2 son estables, pero que el protocolo `2026-07-28` requiere opt-in y cambia el lifecycle sessionful. Se actualizó únicamente la rama v1 mantenida a 1.30 y se documentó una migración dual-era en `docs/MCP_V2_MIGRATION.md`.
 
 **Seguimiento:** implementar la ruta moderna v2 en una iteración separada, manteniendo el handler sessionful legado delante de un handler moderno estricto y exigiendo pruebas vivas del túnel antes de retirar cualquier rollback.
+
+---
+
+## 2026-07-30 — El smoke HTTP rechazó el identificador correcto del transporte dual-era
+
+**Estado:** Corregido y verificado contra el runtime vivo 0.6.51.
+
+**Capa / owner:** verificación HTTP y release / `bridge-mcp`.
+
+**Síntoma:** después de publicar y activar Bridge 0.6.51, `verify:all` aprobó doctor, build, dual-era, regresiones, routing y documentación, pero `smoke:http` falló con `Unexpected transport: streamable-http-dual-era`.
+
+**Reproducción mínima / evidencia:** el runtime vivo respondió versión `0.6.51`, `transport=streamable-http-dual-era`, ruta legacy sessionful y ruta moderna `2026-07-28` sin sesiones. El script `test-bridge-http.ps1` todavía exigía igualdad literal con el valor anterior `streamable-http`.
+
+**Causa:** el release cambió deliberadamente el identificador observable del transporte, pero el gate legado no se actualizó en el mismo lote.
+
+**Corrección:** actualizar el smoke para aceptar exclusivamente el nuevo identificador y validar además los invariantes de ambas eras: legado sessionful, moderno `2026-07-28` y moderno sin sesión MCP.
+
+**Regresión:** `smoke:http`, `test:mcp-dual-era` y `verify:all` deben pasar juntos contra el runtime vivo.
+
+**Seguimiento:** cuando un campo de `/status` cambie como parte de un release, actualizar su consumer de verificación en el mismo commit y ejecutar el smoke contra un runtime efímero antes de publicar.

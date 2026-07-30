@@ -45,7 +45,10 @@ Invoke-Check "readyz" {
 Invoke-Check "status" {
   $status = Invoke-RestMethod "$BaseUrl/status"
   if ($status.server.name -ne "bridge-mcp") { throw "Unexpected server name: $($status.server.name)" }
-  if ($status.transport -ne "streamable-http") { throw "Unexpected transport: $($status.transport)" }
+  if ($status.transport -ne "streamable-http-dual-era") { throw "Unexpected transport: $($status.transport)" }
+  if ($status.protocols.legacy.sessionful -ne $true) { throw "Legacy MCP route must remain sessionful" }
+  if ($status.protocols.modern.revision -ne "2026-07-28") { throw "Unexpected modern MCP revision: $($status.protocols.modern.revision)" }
+  if ($status.protocols.modern.sessionful -ne $false) { throw "Modern MCP route must remain stateless at the session layer" }
   if ([string]$status.runtimeBootId -notmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') { throw "Status runtimeBootId is not a UUID: $($status.runtimeBootId)" }
   Write-Host "  OK $($status.server.name) $($status.server.version) pid=$($status.pid) boot=$($status.runtimeBootId) uptime=$($status.uptimeSeconds)s sessions=$($status.sessions) active=$($status.activeSessions)"
 }
