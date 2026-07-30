@@ -1019,3 +1019,14 @@ relacionados independientes sin duplicar filas por cada llamada.
 **Seguimiento:** auditar por qué `multi_edit` contabilizó como aplicada una sustitución ausente y mejorar la recuperación de foco de `roblox_place_save` sin ampliar su alcance.
 
 **Recurrencia observada:** en la corrección inmediatamente posterior, `roblox_place_save` volvió a rechazar dos veces el mismo PID/título aunque `WScript.Shell.AppActivate()` devolvió `true`. El fallback acotado activó ese título exacto, envió sólo `Ctrl+S` y verificó que el SHA-256 de `1.rbxl` cambió de `5077B3F43DDE1476C006E5D3FB4E0E39AE9AC5F1B28BEDCCFA95BE53F99ED9E7` a `A942A9D434BCDAAE31E8D93C3BD5808864AED1FF3C0A17EB9757CF58763E50E2`. Esto confirma que la recuperación de foco necesita un gate alternativo verificable.
+
+## 2026-07-30 — Studio QA cannot synthesize GUI button/key input through ExecuteLuau
+
+- **Estado:** Mitigado; no defecto del juego.
+- **Capa / owner:** Roblox Studio MCP sandbox / Bridge integration evidence.
+- **Síntoma:** `TextButton:Activate()` no existe y `VirtualInputManager:SendKeyEvent` falla con `lacking capability RobloxScript` desde `execute_luau` Client.
+- **Reproducción / evidencia:** intento acotado sobre `PlacementGui.OpenBuildButton` durante Play de MyceliumFront; ambas llamadas fueron rechazadas por el sandbox y quedaron en Output.
+- **Causa:** el contexto de comandos del Assistant no posee autoridad para sintetizar input de usuario ni una API pública `Activate` en `TextButton`.
+- **Corrección aplicada:** se validó el contrato autoritativo mediante atributos replicados y el remoto real `BuildActionRequest`; `RemovePlant` aceptó una planta inicial del jugador y limpió dos conexiones sin dangling.
+- **Regresión:** en futuras QA, no usar estas dos APIs como prueba automatizada de UI; separar interacción visual humana de validación de remotos/estado. Clasificar estos mensajes como artefactos de QA, no errores runtime del juego.
+- **Seguimiento:** considerar una herramienta MCP dedicada y limitada para input de Play sólo si este bloqueo se repite y la prueba visual humana resulta insuficiente.
