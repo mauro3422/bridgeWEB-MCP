@@ -1,3 +1,10 @@
+## 0.6.51 - 2026-07-30
+
+- Serve MCP protocol revision `2026-07-28` beside the existing sessionful 2025-era route from the same `/mcp` endpoint.
+- Use the SDK's authoritative `isLegacyRequest` classifier, a strict modern `createMcpHandler` leg, and the unchanged v1 `StreamableHTTPServerTransport` leg instead of replacing ChatGPT Web's validated session lifecycle.
+- Share one Bridge tool registry, execution pipeline, MSSR handling, notices, and tool metrics across both eras while keeping v1 and v2 SDK objects isolated.
+- Expose per-era request/error counters in `/status` and add a regression covering modern discovery, modern tool listing, header/body disagreement, and legacy session initialization.
+
 ## 0.6.50 - 2026-07-30
 
 - Accept bounded non-canonical MSSR intent vocabulary at the MCP transport edge, normalize only explicit safe aliases and exact cross-field values, and return a same-trace correction action instead of failing opaque schema validation or guessing unknown values.

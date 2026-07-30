@@ -2,8 +2,10 @@
 
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createMcpHandler, isLegacyRequest } from "@modelcontextprotocol/server";
+import { toNodeHandler, toWebRequest } from "@modelcontextprotocol/node";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { createBridgeServer } from "./bridge-server.js";
+import { createBridgeServer, createModernBridgeServer } from "./bridge-server.js";
 import { getBridgeHttpConfig, SERVER_NAME, SERVER_VERSION } from "./config.js";
 import { renderDashboardHtml } from "./dashboard.js";
 import { closeRobloxMcpConnection } from "./integrations/roblox-mcp-client.js";
@@ -27,6 +29,25 @@ const MAX_REQUEST_BODY_BYTES = getPositiveIntEnv("BRIDGE_MCP_HTTP_MAX_BODY_BYTES
 let ready = false;
 let closing = false;
 let transportsCreating = 0;
+let legacyProtocolRequests = 0;
+let modernProtocolRequests = 0;
+let modernProtocolErrors = 0;
+
+const modernMcpHandler = createMcpHandler(
+  () => createModernBridgeServer(),
+  {
+    legacy: "reject",
+    responseMode: "auto",
+    onerror: (error) => {
+      modernProtocolErrors += 1;
+      log("error", "Modern MCP handler error", {
+        protocolVersion: "2026-07-28",
+        error: error.message,
+      });
+    },
+  },
+);
+const modernNodeHandler = toNodeHandler(modernMcpHandler);
 
 type BridgeHttpTransport = StreamableHTTPServerTransport & {
   sessionId?: string;
@@ -133,7 +154,20 @@ function getStatus() {
   const activeSessions = Array.from(sessions.values()).filter((record) => record.activeRequests > 0).length;
   return {
     server: { name: SERVER_NAME, version: SERVER_VERSION },
-    transport: "streamable-http",
+    transport: "streamable-http-dual-era",
+    protocols: {
+      legacy: {
+        revisions: "2025-era negotiated by initialize",
+        sessionful: true,
+        requests: legacyProtocolRequests,
+      },
+      modern: {
+        revision: "2026-07-28",
+        sessionful: false,
+        requests: modernProtocolRequests,
+        errors: modernProtocolErrors,
+      },
+    },
     mcpPath: config.mcpPath,
     host: config.host,
     port: config.port,
@@ -279,13 +313,18 @@ async function createTransport(requestId: string): Promise<BridgeHttpTransport> 
   }
 }
 
-async function handleMcpRequest(req: IncomingMessage, res: ServerResponse, requestId: string) {
+async function handleMcpRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  requestId: string,
+  suppliedBody?: { parsed: unknown },
+) {
   const sessionId = getMcpSessionId(req);
   let transport: BridgeHttpTransport | undefined;
   let createdForThisRequest = false;
   let parsedBody: unknown;
 
-  if (req.method === "POST") {
+  if (req.method === "POST" && !suppliedBody) {
     try {
       parsedBody = await readJsonBody(req);
     } catch (error) {
@@ -299,7 +338,7 @@ async function handleMcpRequest(req: IncomingMessage, res: ServerResponse, reque
       });
       return;
     }
-  }
+  } else if (suppliedBody) parsedBody = suppliedBody.parsed;
 
   if (sessionId) {
     const record = sessions.get(sessionId);
@@ -384,6 +423,36 @@ async function handleMcpRequest(req: IncomingMessage, res: ServerResponse, reque
       await closeTransport(transport, "uninitialized-request");
     }
   }
+}
+
+async function handleDualEraMcpRequest(req: IncomingMessage, res: ServerResponse, requestId: string) {
+  let parsedBody: unknown;
+  if (req.method === "POST") {
+    try {
+      parsedBody = await readJsonBody(req);
+    } catch (error) {
+      const statusCode = typeof error === "object" && error && "statusCode" in error
+        ? Number((error as { statusCode?: unknown }).statusCode)
+        : 400;
+      sendJson(res, Number.isInteger(statusCode) ? statusCode : 400, {
+        error: statusCode === 413 ? "request_body_too_large" : "invalid_request_body",
+        requestId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+  }
+
+  const webRequest = await toWebRequest(req, parsedBody);
+  const legacy = await isLegacyRequest(webRequest, parsedBody);
+  if (legacy) {
+    legacyProtocolRequests += 1;
+    await handleMcpRequest(req, res, requestId, { parsed: parsedBody });
+    return;
+  }
+
+  modernProtocolRequests += 1;
+  await modernNodeHandler(req, res, parsedBody);
 }
 
 async function main() {
@@ -512,7 +581,7 @@ async function main() {
           return;
         }
 
-        await handleMcpRequest(req, res, requestId);
+        await handleDualEraMcpRequest(req, res, requestId);
         return;
       }
 
@@ -554,6 +623,7 @@ async function main() {
       await Promise.allSettled([
         ...Array.from(sessions.entries()).map(([sessionId, record]) => closeTransport(record.transport, "shutdown", sessionId)),
         ...Array.from(anonymousTransports.keys()).map((transport) => closeTransport(transport, "shutdown")),
+        modernMcpHandler.close(),
         closeRobloxMcpConnection(),
       ]);
       log("info", "shutdown complete", { signal });

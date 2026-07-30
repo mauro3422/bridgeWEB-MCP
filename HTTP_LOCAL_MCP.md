@@ -39,7 +39,7 @@ Default local endpoints:
 GET  http://127.0.0.1:3001/healthz -> live
 GET  http://127.0.0.1:3001/readyz  -> ready
 GET  http://127.0.0.1:3001/status  -> JSON status
-POST http://127.0.0.1:3001/mcp     -> MCP Streamable HTTP JSON-RPC
+POST http://127.0.0.1:3001/mcp     -> dual-era MCP HTTP JSON-RPC
 GET  http://127.0.0.1:3001/mcp     -> MCP SSE stream when requested with Accept: text/event-stream
 ```
 
@@ -60,6 +60,14 @@ The test checks:
 /status
 POST /mcp initialize
 ```
+
+Run the isolated dual-era regression after building:
+
+```powershell
+npm run test:mcp-dual-era
+```
+
+The same `/mcp` endpoint preserves the sessionful initialize flow for 2025-era clients and accepts explicit `2026-07-28` per-request envelopes without `Mcp-Session-Id`. `/status` exposes `protocols.legacy` and `protocols.modern` counters so adoption and failures can be measured separately.
 
 The startup script also refuses to start if the configured port is already in use, and prints the owning process so stale Node instances are easier to find.
 

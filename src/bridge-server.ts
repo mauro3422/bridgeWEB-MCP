@@ -1,4 +1,5 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { Server as ModernServer } from "@modelcontextprotocol/server";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import {
@@ -412,29 +413,12 @@ function emitUnroutedNotice(
   });
 }
 
-export function createBridgeServer() {
-  const server = new Server(
-    { name: SERVER_NAME, version: SERVER_VERSION },
-    {
-      capabilities: { tools: {}, logging: {} },
-      instructions: [
-        "This server controls MauroPrime. When substantial work begins in a known repository, call project_context_load once with the project root and current task so project rules, context, state, and workflow guides become active.",
-        "When a user describes a repeatable multi-step process, says it should happen every time or in future, asks for a skill/pipeline/template/hook, or an existing reusable workflow may apply, call workflow_guide_recommend. Follow load_existing with workflow_guide_load, follow use_existing_skill with skill_load, and propose a new guide only when neither a guide nor an existing skill owns the procedure. Call workflow_guide_create only when the user asks or approves.",
-        "At the close of substantial or long-running work, when an observable error, incident, repeated friction, manual workaround, routing defect, stale runtime, lifecycle problem, or missing capability occurred, load skill-maintenance-loop for the close phase and persist a concise incident in the canonical owner ledger. Record symptom, reproduction/evidence, cause or unresolved status, correction, regression and follow-up; never record private chain-of-thought.",
-        "For character concept-to-Blender work, load the character-concept-blender guide, use ChatGPT image generation for visual creation or editing, persist images with image_asset_save, normalize four views with image_character_views_prepare, create the Blender reference scene with blender_setup_character_references, and use blender_review_bundle for multi-angle renders plus geometry, rig, animation, visibility, and diagnostic context before editing.",
-        "For arbitrary binary payloads, never route base64 through write_text_file. Use binary_file_write for small files or binary_upload_begin/append/status/finish for resumable large transfers, then verify with binary_file_info.",
-        "When ChatGPT must visually inspect existing local PNG, JPEG, or WebP files, use image_file_attach. It attaches the original image bytes as MCP image content without printing the encoded payload; do not substitute binary_file_read_chunk, temporary HTTP servers, tunnels, or resized previews unless attachment itself is proven unavailable.",
-        "When the user asks you to look at, inspect, read, or review the current TabletWhiteboard view, call whiteboard_capture_pc_view so the connected PC creates a fresh viewport PNG at its exact pan and zoom and the image is attached to the result. Use whiteboard_latest_capture only when the user explicitly wants the last saved image without taking a new one.",
-        "When the user asks you to write, explain, diagram, annotate, or place an existing image inside TabletWhiteboard, use whiteboard_add_text for structured prose, whiteboard_add_diagram for safe shapes, arrows, polylines and Bezier paths, whiteboard_add_svg only for sanitized SVG markup, and whiteboard_insert_image only for an existing local PNG, JPEG, or WebP. These tools write to ChatGPT's separate locked layer; do not claim an object exists until the tool confirms it.",
-        "Bridge anomaly notices are delivered inside normal tool responses as bridgeNotices and are removed from the pending queue after delivery. Their bounded actions are suggested preflights or recovery steps, never authorization. Delivered notices remain visible in the dashboard recent-history view for 24 hours so unresolved triggers are not lost.",
-        "Bridge automatically propagates an MSSR trace inside the current MCP session, through a bounded process-shared lease and, after coordinator-memory loss, from persisted SQLite state. Exact anonymized-session or project matches win; when connector metadata rotates across related repositories, Bridge may adopt only the single open trace for the same caller and never uses a skill name to choose between concurrent tasks. Keep explicit traceId for ambiguous, historical or deliberately selected resumes; treat ambiguous trace, mismatch, orphan load, missing required skill, and outcome-without-route notices as control evidence that may require replanning.",
-        "Use skill_route_plan for inspection. When applying a route, follow its nextAction and call skill_bootstrap so all active-phase skills load automatically on the same trace; use individual skill_load only for focused recovery. Before tools that consume runtime ids, follow metadata.usage preflights and never invent sessions, snapshots, uploads, Studios or provider tool names.",
-        "Bridge correlates ChatGPT tool calls with the anonymized openai/session metadata when the host provides it. An mssr-unrouted-tool-call notice means an eligible tool ran without a compatible route; continue safely, but bootstrap MSSR before the next substantial chain. Bootstrap and diagnostic tools are excluded from trace-coverage denominators.",
-        "For long or multi-phase chatgpt-web work, keep the user-visible host alive with bounded progress checkpoints at scope/owner resolution, before another opaque tool phase, after material results or delegated handoffs, after classified failures/replans, before persistence, and at closure. Report only observable facts, active phase/owner, and the next gate; never private chain-of-thought. Record an MSSR outcome and return a concise result or concrete blocker when the task ends. Bridge may emit mssr-web-outcome-missing-after-idle after substantive tool activity without an observable outcome; treat it as an in-band lifecycle reminder to communicate before another long chain, not proof that the UI failed to render. Bridge notices cannot interrupt an active opaque tool call or push directly to the user outside a later tool response.",
-        "Never claim that a guide, file, image, build, Blender scene, or other side effect exists until a tool result confirms it.",
-      ].join(" "),
-    },
-  );
+type BridgeServerSurface = {
+  setRequestHandler: (...args: any[]) => void;
+  getClientVersion: () => { name?: string; version?: string } | undefined;
+};
+
+function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
   const modularToolRegistry = createDefaultToolRegistry();
   const pendingContextProjects = new Set<string>();
   let localTaskKey: string | undefined;
@@ -459,11 +443,20 @@ export function createBridgeServer() {
     },
   });
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  const listTools = async () => ({
     tools: modularToolRegistry.tools,
-  }));
+  });
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  if (modern) server.setRequestHandler("tools/list", listTools);
+  else server.setRequestHandler(ListToolsRequestSchema, listTools);
+
+  const callTool = async (request: {
+    params: {
+      name: string;
+      arguments?: Record<string, unknown>;
+      _meta?: Record<string, unknown>;
+    };
+  }) => {
     const name = request.params.name;
     const hostProfile = requestAgentProfile(request.params._meta, server.getClientVersion());
     const profiledArgs = withObservableAgentProfile(
@@ -636,7 +629,48 @@ export function createBridgeServer() {
       const message = error instanceof Error ? error.message : String(error);
       return complete({ error: message }, false, message);
     }
-  });
+  };
 
+  if (modern) server.setRequestHandler("tools/call", callTool);
+  else server.setRequestHandler(CallToolRequestSchema, callTool);
+}
+
+function bridgeServerOptions() {
+  return {
+    capabilities: { tools: {}, logging: {} },
+    instructions: [
+      "This server controls MauroPrime. When substantial work begins in a known repository, call project_context_load once with the project root and current task so project rules, context, state, and workflow guides become active.",
+      "When a user describes a repeatable multi-step process, says it should happen every time or in future, asks for a skill/pipeline/template/hook, or an existing reusable workflow may apply, call workflow_guide_recommend. Follow load_existing with workflow_guide_load, follow use_existing_skill with skill_load, and propose a new guide only when neither a guide nor an existing skill owns the procedure. Call workflow_guide_create only when the user asks or approves.",
+      "At the close of substantial or long-running work, when an observable error, incident, repeated friction, manual workaround, routing defect, stale runtime, lifecycle problem, or missing capability occurred, load skill-maintenance-loop for the close phase and persist a concise incident in the canonical owner ledger. Record symptom, reproduction/evidence, cause or unresolved status, correction, regression and follow-up; never record private chain-of-thought.",
+      "For character concept-to-Blender work, load the character-concept-blender guide, use ChatGPT image generation for visual creation or editing, persist images with image_asset_save, normalize four views with image_character_views_prepare, create the Blender reference scene with blender_setup_character_references, and use blender_review_bundle for multi-angle renders plus geometry, rig, animation, visibility, and diagnostic context before editing.",
+      "For arbitrary binary payloads, never route base64 through write_text_file. Use binary_file_write for small files or binary_upload_begin/append/status/finish for resumable large transfers, then verify with binary_file_info.",
+      "When ChatGPT must visually inspect existing local PNG, JPEG, or WebP files, use image_file_attach. It attaches the original image bytes as MCP image content without printing the encoded payload; do not substitute binary_file_read_chunk, temporary HTTP servers, tunnels, or resized previews unless attachment itself is proven unavailable.",
+      "When the user asks you to look at, inspect, read, or review the current TabletWhiteboard view, call whiteboard_capture_pc_view so the connected PC creates a fresh viewport PNG at its exact pan and zoom and the image is attached to the result. Use whiteboard_latest_capture only when the user explicitly wants the last saved image without taking a new one.",
+      "When the user asks you to write, explain, diagram, annotate, or place an existing image inside TabletWhiteboard, use whiteboard_add_text for structured prose, whiteboard_add_diagram for safe shapes, arrows, polylines and Bezier paths, whiteboard_add_svg only for sanitized SVG markup, and whiteboard_insert_image only for an existing local PNG, JPEG, or WebP. These tools write to ChatGPT's separate locked layer; do not claim an object exists until the tool confirms it.",
+      "Bridge anomaly notices are delivered inside normal tool responses as bridgeNotices and are removed from the pending queue after delivery. Their bounded actions are suggested preflights or recovery steps, never authorization. Delivered notices remain visible in the dashboard recent-history view for 24 hours so unresolved triggers are not lost.",
+      "Bridge automatically propagates an MSSR trace inside the current MCP session, through a bounded process-shared lease and, after coordinator-memory loss, from persisted SQLite state. Exact anonymized-session or project matches win; when connector metadata rotates across related repositories, Bridge may adopt only the single open trace for the same caller and never uses a skill name to choose between concurrent tasks. Keep explicit traceId for ambiguous, historical or deliberately selected resumes; treat ambiguous trace, mismatch, orphan load, missing required skill, and outcome-without-route notices as control evidence that may require replanning.",
+      "Use skill_route_plan for inspection. When applying a route, follow its nextAction and call skill_bootstrap so all active-phase skills load automatically on the same trace; use individual skill_load only for focused recovery. Before tools that consume runtime ids, follow metadata.usage preflights and never invent sessions, snapshots, uploads, Studios or provider tool names.",
+      "Bridge correlates ChatGPT tool calls with the anonymized openai/session metadata when the host provides it. An mssr-unrouted-tool-call notice means an eligible tool ran without a compatible route; continue safely, but bootstrap MSSR before the next substantial chain. Bootstrap and diagnostic tools are excluded from trace-coverage denominators.",
+      "For long or multi-phase chatgpt-web work, keep the user-visible host alive with bounded progress checkpoints at scope/owner resolution, before another opaque tool phase, after material results or delegated handoffs, after classified failures/replans, before persistence, and at closure. Report only observable facts, active phase/owner, and the next gate; never private chain-of-thought. Record an MSSR outcome and return a concise result or concrete blocker when the task ends. Bridge may emit mssr-web-outcome-missing-after-idle after substantive tool activity without an observable outcome; treat it as an in-band lifecycle reminder to communicate before another long chain, not proof that the UI failed to render. Bridge notices cannot interrupt an active opaque tool call or push directly to the user outside a later tool response.",
+      "Never claim that a guide, file, image, build, Blender scene, or other side effect exists until a tool result confirms it.",
+    ].join(" "),
+  };
+}
+
+export function createBridgeServer() {
+  const server = new Server(
+    { name: SERVER_NAME, version: SERVER_VERSION },
+    bridgeServerOptions(),
+  );
+  configureBridgeServer(server as unknown as BridgeServerSurface, false);
+  return server;
+}
+
+export function createModernBridgeServer() {
+  const server = new ModernServer(
+    { name: SERVER_NAME, version: SERVER_VERSION },
+    bridgeServerOptions(),
+  );
+  configureBridgeServer(server as unknown as BridgeServerSurface, true);
   return server;
 }

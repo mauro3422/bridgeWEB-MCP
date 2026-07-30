@@ -56,6 +56,7 @@ $steps += Invoke-VerifyStep "doctor" { powershell -NoProfile -File .\scripts\bri
 $steps += Invoke-VerifyStep "check" { npm run check }
 $steps += Invoke-VerifyStep "build" { npm run build }
 $steps += Invoke-VerifyStep "smoke:http" { powershell -NoProfile -File .\scripts\test-bridge-http.ps1 }
+$steps += Invoke-VerifyStep "test:mcp-dual-era" { npm run test:mcp-dual-era }
 $steps += Invoke-VerifyStep "test:regressions" { npm run test:regressions }
 $steps += Invoke-VerifyStep "test:skill-routing" { npm run test:skill-routing }
 $steps += Invoke-VerifyStep "docs:tools:check" { npm run docs:tools:check }
