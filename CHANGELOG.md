@@ -1,3 +1,10 @@
+## 0.6.53 - 2026-07-30
+
+- Return an exact `direct → bridge_tool_query/action` execution policy from MSSR routing, including a ready-to-run delegated `skill_bootstrap` fallback when the connector omits the dedicated schema.
+- Skip redundant schema discovery when Bridge already supplied authoritative fallback arguments; retain `bridge_tool_schema` for validation recovery and unknown contracts.
+- Add per-caller/model MSSR execution metrics for physical direct calls, delegated query/action calls, fallback rate, discovery detours, time to first domain action, tool span and idle-closure reminders.
+- Add a dashboard table that exposes those connector-path metrics without treating delegated target attribution as a second physical execution or idle as proof of a stalled UI.
+
 ## 0.6.52 - 2026-07-30
 
 - Add `bridge_connector_catalog_compare` to compare caller-observed dedicated schemas with the live runtime catalog without conflating wrapper reachability with direct exposure.

@@ -353,6 +353,12 @@ GET  http://127.0.0.1:3001/api/mssr/summary?days=30&scope=active
 POST http://127.0.0.1:3001/mcp
 ```
 
+El resumen MSSR separa por caller/modelo las llamadas físicas directas de los
+fallbacks `bridge_tool_query` y `bridge_tool_action`. También informa desvíos de
+descubrimiento previos a la primera acción de dominio, tiempo hasta esa acción,
+span de tools y recordatorios por inactividad. Un recordatorio idle no demuestra
+que la interfaz de ChatGPT haya quedado bloqueada.
+
 Limites y seguridad HTTP:
 
 ```text

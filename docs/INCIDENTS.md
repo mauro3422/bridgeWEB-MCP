@@ -941,3 +941,19 @@ relacionados independientes sin duplicar filas por cada llamada.
 **Regresión:** `test-v060-tools.mjs` reproduce el baseline directo 3/11, exige 27,27 %, clasifica `skill_bootstrap` como fallback query y `mssr_trace_record` como fallback action, y conserva explícitamente `wrapperReachabilityIsDirectExposure=false`.
 
 **Seguimiento:** usar la comparación en chats nuevos o después de refrescar el conector. Sólo atribuir una mejora al host cuando cambie la lista directa observada; no retirar wrappers mientras la cobertura dedicada permanezca incompleta.
+
+## 2026-07-30 — ChatGPT Web necesitaba discovery repetido para tools MSSR omitidas
+
+**Estado:** Corregido en Bridge 0.6.53; la selección privada del catálogo del host sigue fuera del control de Bridge.
+
+**Síntoma:** Chats nuevos exponían 102/127 tools directas pero sólo 3/11 tools MSSR. Para alcanzar `skill_bootstrap`, algunas ejecuciones buscaban documentación o schemas antes de usar `bridge_tool_query`, aumentando latencia y períodos sin feedback. El dashboard mostraba outcomes y loads, pero no separaba la ruta física directa/delegada ni el tiempo hasta la primera acción de dominio.
+
+**Reproducción / evidencia:** La auditoría Web sobre runtime 0.6.52 y hash `c533eb541503ab88` observó 102 tools directas, MSSR directo 3/11, transporte legacy y `bridge_connector_catalog_compare` accesible sólo mediante query. El reinicio del conector no cambió esa selección.
+
+**Causa:** El host decide qué schemas dedicados publica. Bridge ya ofrecía wrappers seguros, pero el contrato exigía schema-first incluso cuando una respuesta MSSR acababa de construir argumentos exactos. La proyección por perfil no unía `mssr_events` con las llamadas físicas correlacionadas por `trace_id`.
+
+**Corrección:** Routing devuelve una política `direct-then-delegated` y `nextAction.fallback` listo para ejecutar. Los wrappers permiten saltar discovery cuando Bridge ya suministró argumentos autoritativos. El observatorio agrega directas, query, action, tasa fallback, desvíos preparatorios, primera acción, span y recordatorios idle por caller/modelo, manteniendo una sola llamada física y un objetivo lógico delegado.
+
+**Regresión:** `scripts/test-v060-tools.mjs` exige fallback exacto para `skill_bootstrap`, verifica que los wrappers no fuercen discovery redundante y proyecta una traza mixta con 2 llamadas directas, 1 query y 1 action sin duplicar cardinalidad. La suite completa y el dashboard HTTP validan el contrato.
+
+**Seguimiento:** Comparar estas métricas en chats Web nuevos y observar si futuras revisiones del host elevan la exposición MSSR directa o negocian MCP moderno. No interpretar idle como prueba de render o razonamiento privado.

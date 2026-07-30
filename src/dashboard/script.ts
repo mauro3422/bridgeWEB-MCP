@@ -335,6 +335,7 @@ function profileIdentity(row) {
 function renderMssrAgentProfiles(inputRows) {
   const activation = byId('mssr-agent-activation');
   const results = byId('mssr-agent-results');
+  const transport = byId('mssr-agent-transport');
   const rows = inputRows || [];
   if (activation) {
     activation.innerHTML = rows.length ? rows.map((row) => {
@@ -363,6 +364,19 @@ function renderMssrAgentProfiles(inputRows) {
         '<td>' + num(row.closureReminderEvents) + ' / ' + num(row.userCorrections) + '</td>' +
       '</tr>';
     }).join('') : '<tr><td colspan="7" class="muted">Sin outcomes por perfil en la época activa.</td></tr>';
+  }
+  if (transport) {
+    transport.innerHTML = rows.length ? rows.map((row) => '<tr>' +
+      '<td>' + profileIdentity(row) + '</td>' +
+      '<td>' + num(row.directToolCalls) + '</td>' +
+      '<td>' + num(row.delegatedQueryCalls) + '</td>' +
+      '<td>' + num(row.delegatedActionCalls) + '</td>' +
+      '<td>' + pct(row.delegatedCallRate) + '</td>' +
+      '<td title="' + esc(num(row.discoveryDetours) + ' desvíos totales') + '">' + (row.averageDiscoveryDetours === null || row.averageDiscoveryDetours === undefined ? '—' : decimalFormat.format(Number(row.averageDiscoveryDetours))) + '</td>' +
+      '<td>' + (row.averageFirstActionMs === null || row.averageFirstActionMs === undefined ? '—' : ms(row.averageFirstActionMs)) + '</td>' +
+      '<td>' + (row.averageToolSpanMs === null || row.averageToolSpanMs === undefined ? '—' : ms(row.averageToolSpanMs)) + '</td>' +
+      '<td title="' + esc(row.averageReminderIdleMs === null || row.averageReminderIdleMs === undefined ? 'sin recordatorios' : 'idle medio ' + ms(row.averageReminderIdleMs)) + '">' + num(row.closureReminderEvents) + '</td>' +
+    '</tr>').join('') : '<tr><td colspan="9" class="muted">Sin rutas MSSR observables en la época activa.</td></tr>';
   }
 }
 

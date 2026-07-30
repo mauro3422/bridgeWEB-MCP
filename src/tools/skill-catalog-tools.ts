@@ -108,12 +108,54 @@ function compactSkillRoute<T extends Record<string, unknown>>(route: T): Record<
     coverage: route.coverage,
     selectionPolicy: route.selectionPolicy,
     executionGuidance: route.executionGuidance,
+    connectorExecution: route.connectorExecution,
     nextAction: route.nextAction,
     warnings: route.warnings,
     activationInstruction: route.activationInstruction,
     sourceHealth: route.sourceHealth,
     systemAwareness: route.systemAwareness,
     __bridgeNotices: route.__bridgeNotices,
+  };
+}
+
+function connectorFallback(
+  targetToolName: string,
+  targetArguments: Record<string, unknown>,
+  traceId: string,
+  mode: "query" | "action" = "query",
+): Record<string, unknown> {
+  const wrapper = mode === "query" ? "bridge_tool_query" : "bridge_tool_action";
+  return {
+    policy: "direct-then-delegated",
+    directToolName: targetToolName,
+    instruction: `Call ${targetToolName} directly when it is present in the connector catalog. If it is absent, invoke ${wrapper} immediately with the exact fallback below; do not search the filesystem or retry guessed schemas first.`,
+    fallback: {
+      toolName: wrapper,
+      arguments: {
+        toolName: targetToolName,
+        ...(mode === "action" ? { confirmToolName: targetToolName } : {}),
+        traceId,
+        arguments: targetArguments,
+      },
+    },
+  };
+}
+
+function mssrConnectorPaths(traceId: string): Record<string, unknown> {
+  return {
+    policy: "direct-then-delegated",
+    instruction: "Use a dedicated MSSR tool when the connector exposes it. If absent, dispatch it immediately through the listed wrapper. Wrapper reachability is fallback usage, not direct exposure.",
+    query: [
+      "skill_route_audit",
+      "skill_route_vocabulary",
+      "skill_route_plan",
+      "skill_bootstrap",
+      "mssr_observatory_query",
+      "mssr_trace_evidence",
+    ],
+    action: ["mssr_trace_record", "mssr_observatory_epoch_start"],
+    wrapperControl: { traceId },
+    schemaPolicy: "The route-produced fallback arguments are authoritative. Call bridge_tool_schema only after schema-validation or when no exact fallback arguments were supplied.",
   };
 }
 
@@ -807,6 +849,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         matches,
         sourceHealth: discovered.sourceHealth,
         warnings: [...discovered.warnings, ...route.warnings],
+        connectorExecution: mssrConnectorPaths(traceId),
         activationInstruction: route.classificationMode === "structured-semantic"
           ? "Use loadOrder for the active phase. Bridge automatically propagates traceId in-session and across stateless calls only when one compatible process-shared trace exists; provide it explicitly after restart, for ambiguous candidates, or deliberate trace selection. Re-plan after a stage change, material failure, new capability need, or verification/persistence boundary."
           : "This recommendation used lexical fallback. Before mutations, infer a compact structured intent and call skill_recommend or skill_route_plan again; Bridge will retain or uniquely recover the active trace when safe.",
@@ -876,6 +919,21 @@ export const skillCatalogToolModule: BridgeToolModule = {
         robloxHealth: discovered.sourceHealth.roblox,
       });
       recordMssrRoute({ traceId, action: "plan", task, route: observedRoute as unknown as Record<string, unknown> });
+      const bootstrapArguments = {
+        task,
+        context: args.context ?? "",
+        intent: intentResult.intent,
+        caller: args.caller ?? "other",
+        model: args.model,
+        reasoningEffort: args.reasoningEffort ?? "unknown",
+        stage: route.stage,
+        completedPhases: args.completedPhases ?? [],
+        sources: args.sources,
+        maxSkills: args.maxSkills ?? 8,
+        traceId,
+        workflowKey,
+        responseMode,
+      };
       const response = {
         ...observedRoute,
         traceId,
@@ -887,25 +945,13 @@ export const skillCatalogToolModule: BridgeToolModule = {
         systemAwareness: systemAwareness.status,
         __bridgeNotices: systemAwareness.notices,
         warnings: [...discovered.warnings, ...route.warnings],
+        connectorExecution: connectorFallback("skill_bootstrap", bootstrapArguments, traceId),
         nextAction: {
           label: "Cargar automáticamente las skills de la fase",
           toolName: "skill_bootstrap",
-          arguments: {
-            task,
-            context: args.context ?? "",
-            intent: intentResult.intent,
-            caller: args.caller ?? "other",
-            model: args.model,
-            reasoningEffort: args.reasoningEffort ?? "unknown",
-            stage: route.stage,
-            completedPhases: args.completedPhases ?? [],
-            sources: args.sources,
-            maxSkills: args.maxSkills ?? 8,
-            traceId,
-            workflowKey,
-            responseMode,
-          },
-          instruction: "Usa esta acción cuando necesites aplicar la ruta: skill_bootstrap carga todas las skills de la fase sobre la misma traza. No hagas skill_load manual uno por uno salvo recuperación focal.",
+          arguments: bootstrapArguments,
+          fallback: connectorFallback("skill_bootstrap", bootstrapArguments, traceId).fallback,
+          instruction: "Usa esta acción cuando necesites aplicar la ruta: llama skill_bootstrap directamente si aparece; si no, usa inmediatamente el fallback bridge_tool_query incluido. No busques schemas ni hagas skill_load manual uno por uno salvo error de validación o recuperación focal.",
         },
       };
       return responseMode === "debug" ? { ...response, responseMode } : compactSkillRoute(response);
@@ -1035,6 +1081,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         systemAwareness: systemAwareness.status,
         __bridgeNotices: systemAwareness.notices,
         warnings: [...discovered.warnings, ...route.warnings],
+        connectorExecution: mssrConnectorPaths(traceId),
         activationInstruction: loaded.length > 0
           ? "The loaded skills govern only the current phase. Bridge carries the active trace in-session and uniquely recovers it across stateless calls when safe. Call skill_bootstrap again only at verify, persist, close, a material failure, or a newly discovered capability need; pass traceId explicitly after restart or when multiple candidates exist."
           : route.activationInstruction,

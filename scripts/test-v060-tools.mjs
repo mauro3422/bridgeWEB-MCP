@@ -90,7 +90,7 @@ const { writePersistentCache } = await import('../dist/tools/shared/persistent-c
 const { classifyRobloxMcpToolCatalog, getRobloxMcpToolRequestOptions, parseRobloxStudios } = await import('../dist/integrations/roblox-mcp-client.js');
 const { extractRobloxMcpImage } = await import('../dist/tools/roblox-studio-tools.js');
 const { clearBridgeNotices, drainBridgeNotices, emitBridgeNotice, getBridgeNoticeStatus, peekBridgeNoticeHistory } = await import('../dist/notices.js');
-const { closeMssrObservatoryForTests, getMssrTraceEvidence, recordMssrCheckpoint, recordMssrRoute } = await import('../dist/mssr-observatory.js');
+const { closeMssrObservatoryForTests, getMssrTraceEvidence, queryMssrObservatory, recordMssrCheckpoint, recordMssrRoute } = await import('../dist/mssr-observatory.js');
 const { buildToolAudit } = await import('../dist/tool-audit.js');
 const { beginToolMetric, classifyToolAuditError, closeMetricsForTests, extractToolResultMetric, finishToolMetric, getRecentMetrics, getToolAuditMetrics } = await import('../dist/metrics.js');
 const { RUNTIME_BOOT_ID, resolveMetricTaskKey, resolveMetricWorkflowKey } = await import('../dist/runtime-identity.js');
@@ -160,8 +160,8 @@ try {
   if (!catalogComparison.connectorObservation.unrecognized.includes('host_private_tool') || catalogComparison.interpretation.wrapperReachabilityIsDirectExposure !== false) throw new Error('connector catalog boundary classification failed');
   const delegatedQueryTool = registry.tools.find((tool) => tool.name === 'bridge_tool_query');
   const delegatedActionTool = registry.tools.find((tool) => tool.name === 'bridge_tool_action');
-  if (!delegatedQueryTool?.description?.includes('First inspect the target with bridge_tool_schema')) throw new Error('bridge_tool_query must require schema-first delegation');
-  if (!delegatedActionTool?.description?.includes('First inspect the target with bridge_tool_schema')) throw new Error('bridge_tool_action must require schema-first delegation');
+  if (!delegatedQueryTool?.description?.includes('use them without another discovery call')) throw new Error('bridge_tool_query must support route-provided immediate fallback');
+  if (!delegatedActionTool?.description?.includes('use them without another discovery call')) throw new Error('bridge_tool_action must support route-provided immediate fallback');
   if (!delegatedQueryTool?.inputSchema?.properties?.traceId || !delegatedActionTool?.inputSchema?.properties?.traceId) throw new Error('delegated wrappers must expose optional MSSR trace control');
   const expectedNeutral = ['whiteboard_capture_pc_view', 'whiteboard_add_text', 'whiteboard_add_svg', 'whiteboard_add_diagram', 'whiteboard_insert_image', 'mssr_trace_record', 'mssr_observatory_epoch_start'];
   if (registry.riskSummary.neutral.length !== expectedNeutral.length || expectedNeutral.some((name) => !registry.riskSummary.neutral.includes(name))) throw new Error(`unexpected neutral tools: ${registry.riskSummary.neutral.join(', ')}`);
@@ -274,6 +274,39 @@ try {
   const closedEvidence = await call('mssr_trace_evidence', {traceId:identityTraceId,limit:50});
   if (closedEvidence.lifecycle?.status !== 'closed-success' || closedEvidence.privacy?.rawPromptsStored !== false || closedEvidence.privacy?.transcriptsStored !== false) throw new Error('closed trace evidence/privacy failed');
 
+  const executionTraceId = 'fixture-observable-execution';
+  recordMssrRoute({
+    traceId: executionTraceId,
+    action: 'plan',
+    task: 'Measure direct and delegated execution',
+    route: {
+      caller: 'chatgpt-web',
+      stage: 'start',
+      classificationMode: 'structured-semantic',
+      workflowKey: 'fixture-observability',
+      agentProfile: {model:'gpt-observability',reasoningEffort:'high'},
+      contextUsed: true,
+      contextCharacters: 24,
+      workflows: [],
+      activeSkills: [],
+      deferredSkills: [],
+      loadOrder: [],
+      deferredLoadOrder: [],
+      intent: {signals:['tool-chain-needed'],ambiguity:'low'},
+      coverage: {requiredPhases:[],completedPhases:[],missingRequiredPhases:[]},
+    },
+  });
+  const observableProfile = {traceId:executionTraceId,workflowKey:'fixture-observability',caller:'chatgpt-web',model:'gpt-observability',reasoningEffort:'high',sessionKey:'fixture-observable-session',project:'bridge-mcp'};
+  finishToolMetric(beginToolMetric('skill_route_plan', {}, observableProfile), true, 12);
+  finishToolMetric(beginToolMetric('bridge_tool_query', {toolName:'skill_bootstrap'}, observableProfile), true, 12);
+  finishToolMetric(beginToolMetric('read_file_lines', {}, observableProfile), true, 12);
+  finishToolMetric(beginToolMetric('bridge_tool_action', {toolName:'write_text_file'}, observableProfile), true, 12);
+  const executionSummary = queryMssrObservatory({kind:'benchmark',scope:'active',days:30});
+  const executionProfile = executionSummary.agentProfiles.find((profile) => profile.model === 'gpt-observability');
+  if (!executionProfile) throw new Error('observable execution profile missing');
+  if (executionProfile.directToolCalls !== 2 || executionProfile.delegatedQueryCalls !== 1 || executionProfile.delegatedActionCalls !== 1 || executionProfile.delegatedCallRate !== 50) throw new Error(`direct/delegated execution projection failed: ${JSON.stringify(executionProfile)}`);
+  if (executionProfile.discoveryDetours < 2 || executionProfile.tracesWithFirstAction !== 1 || executionProfile.averageToolSpanMs === null) throw new Error(`execution timing/detour projection failed: ${JSON.stringify(executionProfile)}`);
+
 
   if (auditTool?.metadata?.lifecycle !== 'protected' || auditTool.metadata.family !== 'tool-dispatch' || !registry.riskSummary.readOnly.includes('bridge_tool_audit')) throw new Error('bridge_tool_audit metadata/risk failed');
   const auditSchema = await call('bridge_tool_schema', {toolName:'bridge_tool_audit'});
@@ -357,6 +390,8 @@ try {
   });
   if (structuredRoute.classificationMode !== 'structured-semantic' || structuredRoute.traceId !== '__test_route_trace' || structuredRoute.workflowKey !== 'roblox-network-authoring') throw new Error('structured skill routing mode/trace/workflow failed');
   if (structuredRoute.nextAction?.toolName !== 'skill_bootstrap' || structuredRoute.nextAction?.arguments?.traceId !== structuredRoute.traceId || structuredRoute.nextAction?.arguments?.workflowKey !== structuredRoute.workflowKey) throw new Error('skill_route_plan did not expose an actionable bootstrap continuation');
+  if (structuredRoute.nextAction?.fallback?.toolName !== 'bridge_tool_query' || structuredRoute.nextAction?.fallback?.arguments?.toolName !== 'skill_bootstrap' || structuredRoute.nextAction?.fallback?.arguments?.traceId !== structuredRoute.traceId) throw new Error('skill_route_plan did not expose an immediate delegated bootstrap fallback');
+  if (structuredRoute.connectorExecution?.policy !== 'direct-then-delegated') throw new Error('compact route omitted connector execution policy');
   for (const name of ['roblox-mcp-skill-router','roblox-safe-editing','roblox-connection-network-authoring']) {
     if (!structuredRoute.loadOrder.includes(name)) throw new Error(`structured route missing active skill ${name}`);
   }

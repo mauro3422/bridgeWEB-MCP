@@ -63,6 +63,33 @@ export type MssrContextSource = typeof MSSR_CONTEXT_SOURCES[number];
 export type MssrOutcomeEvidenceKind = typeof MSSR_OUTCOME_EVIDENCE_KINDS[number];
 export type MssrObservatoryScope = "active" | "all";
 
+const DELEGATED_QUERY_TOOL = "bridge_tool_query";
+const DELEGATED_ACTION_TOOL = "bridge_tool_action";
+const PREPARATION_TOOLS = new Set([
+  "project_context_load",
+  "workflow_guide_recommend",
+  "workflow_guide_load",
+  "skill_catalog",
+  "skill_recommend",
+  "skill_route_audit",
+  "skill_route_vocabulary",
+  "skill_route_plan",
+  "skill_bootstrap",
+  "skill_load",
+  "mssr_observatory_query",
+  "mssr_trace_evidence",
+  "mssr_trace_record",
+  "bridge_connector_catalog_compare",
+  "bridge_tool_schema",
+  "bridge_tool_audit",
+  "bridge_metrics_status",
+  "bridge_metrics_query",
+  "bridge_metrics_recent",
+  "bridge_metrics_summary",
+  "bridge_notice_status",
+  "bridge_notice_drain",
+]);
+
 type MssrEventInput = {
   traceId: string;
   eventType: string;
@@ -834,6 +861,17 @@ function summary(days: number, scope: MssrObservatoryScope) {
   const events = scope === "active"
     ? decoded.filter((event) => event.details.observabilityEpoch === epoch.activeEpoch)
     : decoded;
+  const decodedToolCalls = database.prepare(`
+    SELECT trace_id, started_at, ended_at, duration_ms, tool, operation_subject,
+           observability_epoch, ok
+    FROM tool_calls
+    WHERE started_at >= ? AND trace_id IS NOT NULL AND trace_id <> ''
+      AND trace_id NOT LIKE '__test_%'
+    ORDER BY started_at ASC
+  `).all(since);
+  const toolCalls = scope === "active"
+    ? decodedToolCalls.filter((row) => row.observability_epoch === epoch.activeEpoch)
+    : decodedToolCalls;
 
   const byTrace = new Map<string, MssrStoredEvent[]>();
   for (const event of events) {
@@ -841,6 +879,85 @@ function summary(days: number, scope: MssrObservatoryScope) {
     trace.push(event);
     byTrace.set(event.traceId, trace);
   }
+  const toolCallsByTrace = new Map<string, JsonRecord[]>();
+  for (const row of toolCalls) {
+    const traceId = typeof row.trace_id === "string" ? row.trace_id : "";
+    if (!traceId) continue;
+    const traceCalls = toolCallsByTrace.get(traceId) ?? [];
+    traceCalls.push(row);
+    toolCallsByTrace.set(traceId, traceCalls);
+  }
+  const effectiveToolName = (row: JsonRecord): string => {
+    const outer = typeof row.tool === "string" ? row.tool : "unknown";
+    return (outer === DELEGATED_QUERY_TOOL || outer === DELEGATED_ACTION_TOOL)
+      && typeof row.operation_subject === "string"
+      && row.operation_subject
+      ? row.operation_subject
+      : outer;
+  };
+  const executionMetrics = (traceIds: Set<string>, profileRoutes: MssrStoredEvent[]) => {
+    let directToolCalls = 0;
+    let delegatedQueryCalls = 0;
+    let delegatedActionCalls = 0;
+    let discoveryDetours = 0;
+    const firstActionDelays: number[] = [];
+    const toolSpans: number[] = [];
+    for (const traceId of traceIds) {
+      const calls = toolCallsByTrace.get(traceId) ?? [];
+      for (const call of calls) {
+        if (call.tool === DELEGATED_QUERY_TOOL) delegatedQueryCalls += 1;
+        else if (call.tool === DELEGATED_ACTION_TOOL) delegatedActionCalls += 1;
+        else directToolCalls += 1;
+      }
+      const firstRoute = profileRoutes.find((route) => route.traceId === traceId);
+      const substantive = calls.filter((call) => !PREPARATION_TOOLS.has(effectiveToolName(call)));
+      const firstAction = substantive[0];
+      if (firstRoute && firstAction && typeof firstAction.started_at === "string") {
+        const delay = Date.parse(firstAction.started_at) - Date.parse(firstRoute.occurredAt);
+        if (Number.isFinite(delay) && delay >= 0) firstActionDelays.push(delay);
+      }
+      if (firstAction) {
+        const firstStarted = typeof firstAction.started_at === "string" ? Date.parse(firstAction.started_at) : NaN;
+        const last = substantive.at(-1);
+        const lastEnded = typeof last?.ended_at === "string"
+          ? Date.parse(last.ended_at)
+          : typeof last?.started_at === "string"
+            ? Date.parse(last.started_at) + Number(last.duration_ms ?? 0)
+            : NaN;
+        if (Number.isFinite(firstStarted) && Number.isFinite(lastEnded) && lastEnded >= firstStarted) {
+          toolSpans.push(lastEnded - firstStarted);
+        }
+        const firstActionAt = typeof firstAction.started_at === "string" ? firstAction.started_at : "";
+        discoveryDetours += calls.filter((call) => (
+          PREPARATION_TOOLS.has(effectiveToolName(call))
+          && typeof call.started_at === "string"
+          && call.started_at <= firstActionAt
+        )).length;
+      } else {
+        discoveryDetours += calls.filter((call) => PREPARATION_TOOLS.has(effectiveToolName(call))).length;
+      }
+    }
+    const delegatedCalls = delegatedQueryCalls + delegatedActionCalls;
+    const physicalCalls = directToolCalls + delegatedCalls;
+    return {
+      directToolCalls,
+      delegatedQueryCalls,
+      delegatedActionCalls,
+      delegatedToolCalls: delegatedCalls,
+      delegatedCallRate: rate(delegatedCalls, physicalCalls),
+      discoveryDetours,
+      averageDiscoveryDetours: traceIds.size > 0
+        ? Math.round((discoveryDetours / traceIds.size) * 100) / 100
+        : null,
+      tracesWithFirstAction: firstActionDelays.length,
+      averageFirstActionMs: firstActionDelays.length > 0
+        ? Math.round(firstActionDelays.reduce((total, value) => total + value, 0) / firstActionDelays.length)
+        : null,
+      averageToolSpanMs: toolSpans.length > 0
+        ? Math.round(toolSpans.reduce((total, value) => total + value, 0) / toolSpans.length)
+        : null,
+    };
+  };
 
   const routes = events.filter((event) => event.eventType === "route_planned");
   const loads = events.filter((event) => event.eventType === "skill_loaded");
@@ -1032,6 +1149,10 @@ function summary(days: number, scope: MssrObservatoryScope) {
       const duration = Date.parse(outcome.occurredAt) - Date.parse(firstRoute.occurredAt);
       return Number.isFinite(duration) && duration >= 0 ? [duration] : [];
     });
+    const profileExecution = executionMetrics(profileTraceIds, profileRoutes);
+    const reminderIdleValues = profileReminderEvents.flatMap((event) => (
+      typeof event.details.idleMs === "number" ? [event.details.idleMs] : []
+    ));
     return {
       caller,
       model,
@@ -1058,13 +1179,18 @@ function summary(days: number, scope: MssrObservatoryScope) {
       replannedTraces: [...profileTraceIds].filter((traceId) => profileRoutes.filter((event) => event.traceId === traceId).length > 1).length,
       closureReminderEvents: profileReminderEvents.length,
       closureReminderRate: rate(new Set(profileReminderEvents.map((event) => event.traceId)).size, profileTraceIds.size),
+      averageReminderIdleMs: reminderIdleValues.length > 0
+        ? Math.round(reminderIdleValues.reduce((total, value) => total + value, 0) / reminderIdleValues.length)
+        : null,
       userCorrections: profileEvents.reduce((total, event) => total + (typeof event.details.userCorrections === "number" ? event.details.userCorrections : 0), 0),
+      ...profileExecution,
     };
   }).sort((a, b) => b.routedTraces - a.routedTraces
     || a.caller.localeCompare(b.caller)
     || a.model.localeCompare(b.model)
     || a.reasoningEffort.localeCompare(b.reasoningEffort));
 
+  const overallExecution = executionMetrics(traceIdsWithRoutes, routes);
   return {
     ...observatoryStatus(),
     scope,
@@ -1109,6 +1235,7 @@ function summary(days: number, scope: MssrObservatoryScope) {
         : null,
       closureReminderEvents: closureReminderEvents.length,
       closureReminderTraces: new Set(closureReminderEvents.map((event) => event.traceId)).size,
+      ...overallExecution,
       intentNormalizedEvents: intentNormalizedEvents.length,
       intentCorrectionRequiredEvents: intentCorrectionEvents.length,
       intentCorrectionTraces: intentCorrectionTraceIds.size,

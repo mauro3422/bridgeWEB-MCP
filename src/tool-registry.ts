@@ -125,12 +125,12 @@ const toolUsageGuidance = new Map<string, BridgeToolUsageGuidance>([
     recovery: [{ code: "target-not-found", toolName: "binary_upload_status", instruction: "Inspect the upload state before finishing it." }],
   }],
   ["bridge_tool_query", {
-    prerequisites: ["Use only when the dedicated connector schema is absent. Pass the active traceId at wrapper level when stateless or concurrent caller metadata cannot identify one open MSSR trace."],
+    prerequisites: ["Use only when the dedicated connector schema is absent. When MSSR routing already supplied an exact delegated fallback, invoke it immediately; inspect bridge_tool_schema only after validation failure or when arguments are unknown. Pass the active traceId at wrapper level when stateless or concurrent caller metadata cannot identify one open MSSR trace."],
     preflightTools: ["bridge_tool_schema"],
     recovery: [{ code: "schema-validation", toolName: "bridge_tool_schema", instruction: "Read the exact runtime schema and rebuild arguments without inventing fields or enums." }],
   }],
   ["bridge_tool_action", {
-    prerequisites: ["Use only when the dedicated connector schema is absent and confirmToolName exactly matches toolName. Pass the active traceId at wrapper level when stateless or concurrent caller metadata cannot identify one open MSSR trace."],
+    prerequisites: ["Use only when the dedicated connector schema is absent and confirmToolName exactly matches toolName. When MSSR routing already supplied an exact delegated fallback, invoke it immediately; inspect bridge_tool_schema only after validation failure or when arguments are unknown. Pass the active traceId at wrapper level when stateless or concurrent caller metadata cannot identify one open MSSR trace."],
     preflightTools: ["bridge_tool_schema"],
     recovery: [
       { code: "schema-validation", toolName: "bridge_tool_schema", instruction: "Read the exact runtime schema before retrying the delegated action." },
@@ -262,7 +262,7 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
   };
   const queryTool: BridgeToolSchema = {
     name: "bridge_tool_query",
-    description: "Use this read-only fallback when a runtime Bridge tool exists but its dedicated schema is missing from the current connector catalog. First inspect the target with bridge_tool_schema and then pass arguments that match that exact runtime contract. Delegates only to tools classified read-only. Stateless or concurrent callers may pass the active MSSR traceId as wrapper control without changing the delegated target schema.",
+    description: "Use this read-only fallback immediately when a runtime Bridge tool exists but its dedicated schema is missing from the current connector catalog. When routing or another Bridge response supplied exact fallback arguments, use them without another discovery call; otherwise inspect bridge_tool_schema first. Delegates only to tools classified read-only. Stateless or concurrent callers may pass the active MSSR traceId as wrapper control without changing the delegated target schema.",
     inputSchema: {
       type: "object",
       properties: {
@@ -276,7 +276,7 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
   };
   const actionTool: BridgeToolSchema = {
     name: "bridge_tool_action",
-    description: "Use this explicit non-read-only fallback when a runtime Bridge tool exists but its dedicated schema is missing from the current connector catalog. First inspect the target with bridge_tool_schema and then pass arguments that match that exact runtime contract. Delegates to neutral or destructive tools and requires exact target-name confirmation. Stateless or concurrent callers may pass the active MSSR traceId as wrapper control without changing the delegated target schema.",
+    description: "Use this explicit non-read-only fallback immediately when a runtime Bridge tool exists but its dedicated schema is missing from the current connector catalog. When routing or another Bridge response supplied exact fallback arguments, use them without another discovery call; otherwise inspect bridge_tool_schema first. Delegates to neutral or destructive tools and requires exact target-name confirmation. Stateless or concurrent callers may pass the active MSSR traceId as wrapper control without changing the delegated target schema.",
     inputSchema: {
       type: "object",
       properties: {

@@ -277,6 +277,16 @@ export const dashboardMarkup = `
       </article>
 
       <article class="card span-12">
+        <div class="card-header"><div><div class="card-kicker">Ruta observable del conector</div><h2 class="card-title">Ejecución directa y fallback por modelo</h2><p class="card-description">Cuenta llamadas físicas del Bridge: directas o delegadas por wrapper. Los desvíos son llamadas preparatorias anteriores a la primera acción de dominio; un silencio es un recordatorio por inactividad, no prueba que la interfaz haya quedado colgada.</p></div></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Perfil</th><th>Directas</th><th>Query</th><th>Action</th><th>Fallback</th><th>Desvíos / tarea</th><th>Primera acción</th><th>Span tools</th><th>Silencios</th></tr></thead>
+            <tbody id="mssr-agent-transport"><tr><td colspan="9" class="muted">Cargando rutas observables…</td></tr></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="card span-12">
         <div class="card-header"><div><div class="card-kicker">Atribución primaria</div><h2 class="card-title">Outcomes por skill primaria</h2><p class="card-description">Cada tarea cerrada acredita una sola skill primaria para no multiplicar el éxito. Las skills de apoyo siguen visibles en la traza, pero no reciben otro outcome.</p></div></div>
         <div class="table-wrap">
           <table>
