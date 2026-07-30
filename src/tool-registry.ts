@@ -17,6 +17,7 @@ import { processToolModule } from "./tools/process-tools.js";
 import { projectToolModule } from "./tools/project-tools.js";
 import { pythonToolModule } from "./tools/python-tools.js";
 import { robloxPhotoCaptureToolModule } from "./tools/roblox-photo-capture-tools.js";
+import { robloxAssetToolModule } from "./tools/roblox-asset-tools.js";
 import { robloxStudioToolModule } from "./tools/roblox-studio-tools.js";
 import { skillCatalogToolModule } from "./tools/skill-catalog-tools.js";
 import { workspaceToolModule } from "./tools/workspace-tools.js";
@@ -48,6 +49,7 @@ const destructiveToolNames = new Set([
   "git_create_branch", "git_restore_file", "git_set_remote", "git_commit_all", "git_push_current_branch",
   "project_profile_save", "workspace_snapshot", "workspace_rollback", "cache_prune",
   "bridge_request_restart", "bridge_verify_all", "workflow_guide_create", "bridge_tool_action", "roblox_mcp_action", "roblox_studio_window_capture_save", "roblox_screen_capture_save", "roblox_photo_capture_job", "roblox_place_save",
+  "roblox_asset_upload",
   "image_asset_save", "image_character_views_prepare",
   "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_finish", "binary_upload_abort",
   "blender_open", "blender_viewport_screenshot", "blender_review_bundle", "blender_execute_code", "blender_batch_script", "blender_store_reference_image", "blender_setup_character_references",
@@ -146,6 +148,11 @@ const toolUsageGuidance = new Map<string, BridgeToolUsageGuidance>([
     prerequisites: ["Inspect the live schema, verify the active Studio and repeat the exact remote tool name in confirmToolName."],
     preflightTools: ["roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list"],
     recovery: [{ code: "provider-unavailable", toolName: "roblox_mcp_status", instruction: "Recover the live Roblox MCP connection and re-inspect the schema before mutating." }],
+  }],
+  ["roblox_asset_upload", {
+    prerequisites: ["Configure ROBLOX_OPEN_CLOUD_API_KEY with Assets Read/Write permission for the exact creator.", "Verify local file hashes and repeat the exact creator id before upload."],
+    preflightTools: ["binary_file_info", "roblox_mcp_status"],
+    recovery: [{ code: "missing-capability", instruction: "Create or configure a Roblox Open Cloud API key with Assets Read/Write permission; never pass the secret as a tool argument." }],
   }],
   ["blender_execute_code", {
     prerequisites: ["Verify the interactive Blender bridge is connected before executing code."],
@@ -397,6 +404,7 @@ const defaultToolModules: readonly BridgeToolModule[] = [
   workflowGuideToolModule,
   skillCatalogToolModule,
   robloxStudioToolModule,
+  robloxAssetToolModule,
   robloxPhotoCaptureToolModule,
   binaryFileToolModule,
   imageToolModule,

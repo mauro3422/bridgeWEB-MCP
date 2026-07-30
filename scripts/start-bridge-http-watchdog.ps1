@@ -268,6 +268,13 @@ function Start-BridgeHttp {
   $psi.Environment["BRIDGE_MCP_HTTP_CLEANUP_INTERVAL_MS"] = [string]$CleanupIntervalMs
   $psi.Environment["BRIDGE_MCP_HTTP_MAX_SESSIONS"] = [string]$MaxSessions
   $psi.Environment["BRIDGE_MCP_HTTP_MAX_BODY_BYTES"] = [string]$MaxBodyBytes
+  # The watchdog can outlive changes made to the user's environment block.
+  # Refresh optional secrets from the user-scoped environment before spawning
+  # the HTTP child, without persisting or logging their values.
+  $robloxOpenCloudApiKey = [Environment]::GetEnvironmentVariable("ROBLOX_OPEN_CLOUD_API_KEY", "User")
+  if (-not [string]::IsNullOrWhiteSpace($robloxOpenCloudApiKey)) {
+    $psi.Environment["ROBLOX_OPEN_CLOUD_API_KEY"] = $robloxOpenCloudApiKey
+  }
 
   $process = [System.Diagnostics.Process]::Start($psi)
   Write-BridgeLog "Started bridge HTTP pid=$($process.Id)"

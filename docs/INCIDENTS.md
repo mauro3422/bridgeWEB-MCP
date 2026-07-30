@@ -957,3 +957,43 @@ relacionados independientes sin duplicar filas por cada llamada.
 **Regresión:** `scripts/test-v060-tools.mjs` exige fallback exacto para `skill_bootstrap`, verifica que los wrappers no fuercen discovery redundante y proyecta una traza mixta con 2 llamadas directas, 1 query y 1 action sin duplicar cardinalidad. La suite completa y el dashboard HTTP validan el contrato.
 
 **Seguimiento:** Comparar estas métricas en chats Web nuevos y observar si futuras revisiones del host elevan la exposición MSSR directa o negocian MCP moderno. No interpretar idle como prueba de render o razonamiento privado.
+
+---
+
+## 2026-07-30 — Integración de GLB local en Roblox bloqueada por ausencia de importador/assetId verificable
+
+**Estado:** Corregido y verificado en Bridge 0.6.54 y MyceliumFront.
+
+**Capa / owner:** capacidad de importación de assets del conector Roblox Studio / Bridge y flujo de handoff de modelos locales.
+
+**Síntoma:** el paquete B003 de MyceliumFront contiene Hero/LOD1/LOD2 GLB verificados, pero el catálogo vivo de Studio sólo ofrece `insert_asset` por assetId numérico y no un importador de GLB local. No existe un assetId ni una fuente B003 en Studio, ReplicatedStorage o ServerStorage.
+
+**Reproducción mínima / evidencia:** con Studio único `1.rbxl` activo en Edit, `roblox_mcp_tool_list` expone 27 tools; `insert_asset` exige `assetId`, mientras que la búsqueda de `B003` y `mushroom-single-b-family` no devuelve instancias. Los archivos locales se verificaron contra `lod-package-report.json`: Hero `eaecef87…`, LOD1 `c682f553…`, LOD2 `ce0760fe…`.
+
+**Causa:** el conector soporta inserción de contenido ya registrado en Roblox, no ingestión de un `.glb` arbitrario desde disco. Un import manual o un uploader propietario no puede sustituirse por una geometría procedural ni por un assetId inventado.
+
+**Corrección aplicada:** Bridge 0.6.54 añadió `roblox_asset_upload`, un uploader batch de Model GLB/GLTF/FBX mediante Open Cloud con SHA-256 obligatorio, confirmación exacta de creator, secreto sólo por variable de entorno, polling, readback y manifiesto sin secretos. Como el entorno actual no tenía API key, el primer lote se importó mediante el 3D Importer autenticado de la única Studio abierta. Hero/LOD1/LOD2 quedaron montados como templates visuales de `MushroomPortVisual`; `InteractionRoot`, EntityId, puertos y hitbox permanecieron independientes.
+
+**Regresión / gate:** `test-v060-tools.mjs` valida schema, clasificación destructiva y error seguro sin variable de entorno; el catálogo vivo 0.6.54 expone 128 tools e incluye `roblox_asset_upload`. MyceliumFront verificó los tres templates, cero visuales colisionables/consultables, una sola variante LOD visible en Client, cero errores Client/Server, post-Stop limpio y guardado con SHA-256 `D775732F8258A2F40036090356304865672E3A645ED1B69B502ED3FDAB183730`.
+
+**Seguimiento:** configurar `ROBLOX_OPEN_CLOUD_API_KEY` sólo en entornos autorizados para que futuros agentes usen la ruta no interactiva. Mantener el 3D Importer como fallback autenticado y registrar como fricción cualquier carrera de replicación o fallo de confirmación de foco durante guardado.
+
+---
+
+## 2026-07-30 — La primera selección LOD del cliente compitió con la replicación inicial
+
+**Estado:** Corregido y verificado en `1.rbxl`.
+
+**Capa / owner:** lifecycle Client/Server del controlador LOD / MyceliumFront.
+
+**Síntoma:** el atributo cliente indicaba `LOD2`, pero una inspección inicial encontró simultáneamente 40 piezas Hero y una pieza LOD2 visibles.
+
+**Reproducción mínima / evidencia:** crear un `MushroomPortVisual` en Server dentro de una VM fresca y observarlo en Client después de la primera muestra del controlador. El servidor replicó propiedades del Hero después de la primera aplicación local.
+
+**Causa:** `SetLOD` retornaba temprano al ver que `ActiveLOD` ya coincidía, aunque las transparencias replicadas todavía no estaban estabilizadas.
+
+**Corrección:** cada transición nueva se reaplica durante tres muestras de 0,2 segundos; después el controlador deja de tocarla. El loop sigue siendo compartido y conserva máximo un Hero.
+
+**Regresión:** Client fresco terminó con `LOD2=5/5`, `Hero=0/72`, `LOD1=0/5`, controlador presente y cero errores; Server conservó `InteractionRoot` y la hitbox.
+
+**Seguimiento:** si la replicación vuelve a sobreescribir presentación local, medir el orden de propiedades y migrar la visibilidad a una propiedad exclusivamente local en lugar de aumentar muestras sin evidencia.

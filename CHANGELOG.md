@@ -1,3 +1,9 @@
+## 0.6.54 - 2026-07-30
+
+- Add `roblox_asset_upload` for bounded, hash-verified GLB/GLTF/FBX Model uploads through the official Roblox Open Cloud Assets API.
+- Require explicit creator confirmation, read the API key only from a named environment variable, poll operations, read assets back, and optionally persist a secret-free provenance manifest.
+- Classify uploads as destructive external side effects and keep local Studio import as a separate fallback rather than accepting cookies or raw secrets in tool arguments.
+
 ## 0.6.53 - 2026-07-30
 
 - Return an exact `direct → bridge_tool_query/action` execution policy from MSSR routing, including a ready-to-run delegated `skill_bootstrap` fallback when the connector omits the dedicated schema.
