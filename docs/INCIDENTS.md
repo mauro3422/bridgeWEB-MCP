@@ -997,3 +997,23 @@ relacionados independientes sin duplicar filas por cada llamada.
 **Regresión:** Client fresco terminó con `LOD2=5/5`, `Hero=0/72`, `LOD1=0/5`, controlador presente y cero errores; Server conservó `InteractionRoot` y la hitbox.
 
 **Seguimiento:** si la replicación vuelve a sobreescribir presentación local, medir el orden de propiedades y migrar la visibilidad a una propiedad exclusivamente local en lugar de aumentar muestras sin evidencia.
+
+---
+
+## 2026-07-30 — Edición Studio reportó éxito sin aplicar un reemplazo y el primer guardado no obtuvo foco
+
+**Estado:** Recuperado; seguimiento abierto para las herramientas propietarias.
+
+**Capa / owner:** Roblox Studio MCP `multi_edit` y Bridge `roblox_place_save`.
+
+**Síntoma:** `multi_edit` informó dos ediciones aplicadas sobre `ConnectionFactory`, pero el readback no contenía `resolvedSourcePortId` y una prueba invertida conservó cactus→girasol. Más tarde, el primer `roblox_place_save` rechazó correctamente enviar `Ctrl+S` porque no pudo confirmar Studio como foreground.
+
+**Reproducción / evidencia:** después del resultado exitoso de `multi_edit`, `script_grep("resolvedSourcePortId")` devolvió cero coincidencias y el probe runtime produjo `source=C003_Harness_13_CactusSentry`. El guardado devolvió `Roblox Studio window could not be confirmed as foreground; Ctrl+S was not sent`, PID `19488`.
+
+**Causa:** la causa del falso positivo de `multi_edit` queda no resuelta. El fallo de guardado fue una restricción observable de foco de Windows, no pérdida de estado de Studio.
+
+**Corrección:** se reaplicaron dos reemplazos literales separados y se exigió readback antes de Play. La prueba fresca produjo `source=SolarBloom`, `target=CactusSentry`, `flow=2`, `Powered=true` y balance `0`. Para persistir, se enfocó exclusivamente la ventana confirmada por PID/título y se repitió `roblox_place_save`, que verificó `1.rbxl` con SHA-256 `5077B3F43DDE1476C006E5D3FB4E0E39AE9AC5F1B28BEDCCFA95BE53F99ED9E7`.
+
+**Regresión:** nunca aceptar éxito de mutación Studio sin `script_read`/`script_grep`; nunca sustituir el guardador acotado por un `Ctrl+S` no verificado. El segundo guardado confirmó Edit, ruta exacta, foreground y cambio de mtime.
+
+**Seguimiento:** auditar por qué `multi_edit` contabilizó como aplicada una sustitución ausente y mejorar la recuperación de foco de `roblox_place_save` sin ampliar su alcance.
