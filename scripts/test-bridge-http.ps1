@@ -76,8 +76,8 @@ Invoke-Check "Tools portfolio dashboard" {
   }
 
   $audit = Invoke-RestMethod "$BaseUrl/api/tools/audit?view=all&limit=200&days=30&scope=active"
-  if ([int]$audit.summary.registeredTools -ne 126 -or [int]$audit.items.Count -ne 126) {
-    throw "Tools audit endpoint did not return the full 126-tool registry"
+  if ([int]$audit.summary.registeredTools -ne 127 -or [int]$audit.items.Count -ne 127) {
+    throw "Tools audit endpoint did not return the full 127-tool registry"
   }
   if ($null -eq $audit.items[0].metadata.family -or $null -eq $audit.items[0].status -or $null -eq $audit.items[0].evidence.calls) {
     throw "Tools audit endpoint is missing metadata, recommendation status, or evidence"

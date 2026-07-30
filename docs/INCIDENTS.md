@@ -921,3 +921,23 @@ relacionados independientes sin duplicar filas por cada llamada.
 **Regresión:** `smoke:http`, `test:mcp-dual-era` y `verify:all` deben pasar juntos contra el runtime vivo.
 
 **Seguimiento:** cuando un campo de `/status` cambie como parte de un release, actualizar su consumer de verificación en el mismo commit y ejecutar el smoke contra un runtime efímero antes de publicar.
+
+---
+
+## 2026-07-30 — ChatGPT Web sólo expuso directamente 3 de 11 schemas MSSR
+
+**Estado:** Mitigado en Bridge 0.6.52; la selección privada del catálogo del host permanece fuera del control de Bridge.
+
+**Capa / owner:** catálogo del conector Web, fallback dispatch y observabilidad / `bridge-mcp` más host OpenAI.
+
+**Síntoma:** un chat Web nuevo observó directamente sólo `skill_catalog`, `skill_recommend` y `skill_load`. Las otras ocho tools del núcleo MSSR estaban presentes en el runtime, pero seis requerían `bridge_tool_query` y dos `bridge_tool_action`.
+
+**Reproducción mínima / evidencia:** Bridge 0.6.51 publicó 126 tools con hash `f8786f2168cf6e18`; la auditoría Web registró cobertura MSSR directa `3/11` (27,27 %), 1063 usos de `bridge_tool_query` y 306 de `bridge_tool_action`. Alcanzabilidad por wrapper no demostró exposición directa.
+
+**Causa:** Bridge puede publicar y listar su catálogo, pero no puede inspeccionar ni forzar la selección privada de schemas que el host entrega al modelo. Antes de esta corrección tampoco existía una comparación canónica que recibiera la observación visible del caller y la contrastara sin inferencias.
+
+**Corrección:** se añadió `bridge_connector_catalog_compare`. Recibe únicamente nombres de tools observables suministrados por el caller, los valida contra el catálogo vivo y devuelve hash, cobertura total, cobertura MSSR, nombres no reconocidos y separación de fallbacks query/action. No guarda argumentos crudos ni afirma que una ausencia de uso prueba ausencia de schema.
+
+**Regresión:** `test-v060-tools.mjs` reproduce el baseline directo 3/11, exige 27,27 %, clasifica `skill_bootstrap` como fallback query y `mssr_trace_record` como fallback action, y conserva explícitamente `wrapperReachabilityIsDirectExposure=false`.
+
+**Seguimiento:** usar la comparación en chats nuevos o después de refrescar el conector. Sólo atribuir una mejora al host cuando cambie la lista directa observada; no retirar wrappers mientras la cobertura dedicada permanezca incompleta.

@@ -1,3 +1,9 @@
+## 0.6.52 - 2026-07-30
+
+- Add `bridge_connector_catalog_compare` to compare caller-observed dedicated schemas with the live runtime catalog without conflating wrapper reachability with direct exposure.
+- Report exact runtime hash/count, recognized and unrecognized observed names, total and MSSR-focused direct coverage, and the correct query/action fallback split while preserving the host observation boundary.
+- Expand tool and HTTP regressions to 127 registered tools and cover the observed ChatGPT Web baseline of 3/11 direct MSSR schemas.
+
 ## 0.6.51 - 2026-07-30
 
 - Serve MCP protocol revision `2026-07-28` beside the existing sessionful 2025-era route from the same `/mcp` endpoint.

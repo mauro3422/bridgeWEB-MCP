@@ -30,7 +30,7 @@ const readOnlyToolNames = new Set([
   "system_info", "list_dir", "read_text_file", "list_files_smart", "read_file_lines", "read_many_files", "search_files",
   "terminal_read", "terminal_list", "work_peek", "work_show",
   "git_status", "git_diff", "git_log", "git_show_commit", "git_compare_branches",
-  "tunnel_health", "bridge_health", "bridge_self_check", "bridge_restart_status",
+  "tunnel_health", "bridge_health", "bridge_connector_catalog_compare", "bridge_self_check", "bridge_restart_status",
   "bridge_metrics_status", "bridge_metrics_summary", "bridge_metrics_recent", "bridge_metrics_query", "mssr_observatory_query", "mssr_trace_evidence", "bridge_visualization_catalog", "bridge_visualize_metrics", "bridge_notice_status", "bridge_notice_drain",
   "path_policy_status", "project_profile", "workspace_diff", "workspace_snapshot_list", "cache_status",
   "analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code",
@@ -66,7 +66,7 @@ const fallbackToolNames = new Set(["bridge_tool_query", "bridge_tool_action"]);
 const aggregatorToolNames = new Set(["bridge_metrics_query", "bridge_verify_all", "bridge_health", "bridge_self_check", "skill_bootstrap"]);
 const providerProxyToolNames = new Set(["roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list", "roblox_mcp_query", "roblox_mcp_action"]);
 const protectedToolNames = new Set([
-  "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query", "bridge_tool_action", "project_context_load",
+  "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query", "bridge_tool_action", "bridge_connector_catalog_compare", "project_context_load",
   "skill_route_plan", "skill_bootstrap", "skill_load", "mssr_trace_record", "mssr_trace_evidence", "bridge_verify_all", "roblox_place_save",
 ]);
 

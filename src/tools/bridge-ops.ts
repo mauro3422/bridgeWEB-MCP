@@ -54,6 +54,65 @@ async function getRuntimeToolCatalog() {
   }
 }
 
+async function compareConnectorCatalog(exposedToolNames: string[]) {
+  const catalog = await getRuntimeToolCatalog();
+  if (!catalog.available || !Array.isArray(catalog.names)) {
+    throw new Error(`Runtime tool catalog unavailable: ${"error" in catalog ? catalog.error : "unknown error"}`);
+  }
+  const runtimeNames = catalog.names;
+  const riskSummary = catalog.riskSummary;
+  if (!riskSummary) throw new Error("Runtime tool catalog risk summary unavailable.");
+  const runtimeSet = new Set(runtimeNames);
+  const exposed = [...new Set(exposedToolNames.map((name) => name.trim()).filter(Boolean))].sort();
+  const recognized = exposed.filter((name) => runtimeSet.has(name));
+  const unrecognized = exposed.filter((name) => !runtimeSet.has(name));
+  const absentDirectly = runtimeNames.filter((name) => !recognized.includes(name));
+  const mssrCore = [
+    "skill_catalog",
+    "skill_recommend",
+    "skill_route_audit",
+    "skill_route_vocabulary",
+    "skill_route_plan",
+    "skill_bootstrap",
+    "skill_load",
+    "mssr_observatory_query",
+    "mssr_trace_evidence",
+    "mssr_trace_record",
+    "mssr_observatory_epoch_start",
+  ];
+  const mssrDirect = mssrCore.filter((name) => recognized.includes(name));
+  const mssrDelegatedReadOnly = mssrCore.filter((name) => !recognized.includes(name) && riskSummary.readOnly.includes(name));
+  const mssrDelegatedAction = mssrCore.filter((name) => !recognized.includes(name) && !riskSummary.readOnly.includes(name));
+  return {
+    observedAt: new Date().toISOString(),
+    runtime: { count: catalog.count, hash: catalog.hash },
+    connectorObservation: {
+      supplied: exposed.length,
+      recognized: recognized.length,
+      unrecognized,
+      directCoveragePercent: runtimeNames.length > 0 ? Math.round((recognized.length / runtimeNames.length) * 10_000) / 100 : null,
+    },
+    mssr: {
+      runtime: mssrCore.length,
+      direct: mssrDirect,
+      directCoveragePercent: Math.round((mssrDirect.length / mssrCore.length) * 10_000) / 100,
+      delegatedViaQuery: mssrDelegatedReadOnly,
+      delegatedViaAction: mssrDelegatedAction,
+    },
+    absentDirectly,
+    interpretation: {
+      boundary: "This compares a caller-supplied observable connector catalog with the current Bridge runtime catalog. Bridge cannot inspect or force the host's private catalog selection.",
+      wrapperReachabilityIsDirectExposure: false,
+      refreshHint: catalog.refreshHint,
+    },
+    privacy: {
+      rawPromptsStored: false,
+      rawArgumentsStoredInToolMetrics: false,
+      acceptedValues: "bounded tool names only",
+    },
+  };
+}
+
 function getRestartRequestPath(cwd?: string) {
   return path.resolve(cwd ? resolveToolPath(cwd) : process.cwd(), DEFAULT_RESTART_REQUEST_FILE);
 }
@@ -130,6 +189,7 @@ export const bridgeOpsToolModule: BridgeToolModule = {
   tools: [
     { name: "tunnel_health", description: "Check tunnel-client local healthz and readyz endpoints using the configured tunnel admin URL by default.", inputSchema: { type: "object", properties: { baseUrl: { type: "string", default: DEFAULT_TUNNEL_ADMIN_BASE_URL } }, additionalProperties: false } },
     { name: "bridge_health", description: "Compact read-only bridge health query for tunnel, restart status, runtime tool catalog, or all lightweight checks.", inputSchema: { type: "object", properties: { check: { type: "string", enum: ["all", "tunnel", "restart", "catalog"], default: "all" }, cwd: { type: "string" } }, additionalProperties: false } },
+    { name: "bridge_connector_catalog_compare", description: "Compare the exact dedicated tool names observable in the current connector with the live Bridge runtime catalog. Use this to distinguish direct schema exposure from wrapper reachability; Bridge cannot inspect or force the host catalog, so exposedToolNames must come from the caller's observable catalog search.", inputSchema: { type: "object", properties: { exposedToolNames: { type: "array", items: { type: "string", minLength: 1, maxLength: 120 }, minItems: 1, maxItems: 256 } }, required: ["exposedToolNames"], additionalProperties: false } },
     { name: "bridge_self_check", description: "Run typecheck, build, Git status, configured tunnel health, and terminal inventory.", inputSchema: { type: "object", properties: { cwd: { type: "string" } }, additionalProperties: false } },
     { name: "bridge_request_restart", description: "Request a bridge restart by writing a restart-request file for the external watchdog. This tool does not restart or kill processes directly.", inputSchema: { type: "object", properties: { reason: { type: "string" }, mode: { type: "string", enum: ["http", "tunnel", "full"], default: "http" }, cwd: { type: "string" } }, required: ["reason"], additionalProperties: false } },
     { name: "bridge_restart_status", description: "Return pending restart-request and last restart-ack information for the bridge watchdog.", inputSchema: { type: "object", properties: { cwd: { type: "string" } }, additionalProperties: false } },
@@ -142,6 +202,10 @@ export const bridgeOpsToolModule: BridgeToolModule = {
     bridge_health: async (args) => {
       const parsed = z.object({ check: z.enum(["all", "tunnel", "restart", "catalog"]).default("all"), cwd: z.string().optional() }).parse(args);
       return await bridgeHealth(parsed.check, parsed.cwd);
+    },
+    bridge_connector_catalog_compare: async (args) => {
+      const parsed = z.object({ exposedToolNames: z.array(z.string().trim().min(1).max(120)).min(1).max(256) }).parse(args);
+      return await compareConnectorCatalog(parsed.exposedToolNames);
     },
     bridge_self_check: async (args) => {
       const parsed = z.object({ cwd: z.string().optional() }).parse(args);
