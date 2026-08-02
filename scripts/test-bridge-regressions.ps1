@@ -550,5 +550,23 @@ console.log("  OK metrics input key storage and redaction");
   finally { Remove-Item -LiteralPath $tmpScript -Force -ErrorAction SilentlyContinue }
 }
 
-Write-Host "[bridge-regression-test] all checks passed"
+Invoke-Check "Roblox place save targets only the exact Studio title and keeps bounded foreground fallback" {
+  $saveScript = Get-Content -LiteralPath "scripts\roblox-studio-save.ps1" -Raw
+  $requiredFragments = @(
+    '$expectedTitle = "$fullPlacePath - Roblox Studio"',
+    '[string]::Equals($_.MainWindowTitle, $expectedTitle, [System.StringComparison]::OrdinalIgnoreCase)',
+    'GetWindowThreadProcessId',
+    'AttachThreadInput',
+    'GetForegroundWindow() -ne $handle',
+    'Ctrl+S was not sent'
+  )
+  foreach ($fragment in $requiredFragments) {
+    if (-not $saveScript.Contains($fragment)) { throw "roblox-studio-save.ps1 is missing safety fragment: $fragment" }
+  }
+  if ($saveScript.Contains('$baseName =')) { throw 'roblox-studio-save.ps1 must not select a Studio window by basename' }
+  if ($saveScript.Contains('MainWindowTitle -like')) { throw 'roblox-studio-save.ps1 must not select a Studio window by wildcard title' }
+  Write-Host "  OK exact title targeting and bounded fail-closed foreground fallback"
+}
 
+
+Write-Host "[bridge-regression-test] all checks passed"

@@ -11,15 +11,16 @@ if (-not (Test-Path -LiteralPath $PlacePath -PathType Leaf)) {
   throw "Place file does not exist: $PlacePath"
 }
 
-$placeName = [System.IO.Path]::GetFileName($PlacePath)
-$baseName = [System.IO.Path]::GetFileNameWithoutExtension($PlacePath)
+$fullPlacePath = [System.IO.Path]::GetFullPath($PlacePath)
+$placeName = [System.IO.Path]::GetFileName($fullPlacePath)
+$expectedTitle = "$fullPlacePath - Roblox Studio"
 $processes = @(Get-Process -Name 'RobloxStudioBeta' -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 })
 if ($processes.Count -eq 0) {
   throw 'No visible Roblox Studio window was found.'
 }
 
 $matches = @($processes | Where-Object {
-  $_.MainWindowTitle -like "*$placeName*" -or $_.MainWindowTitle -like "*$baseName*"
+  [string]::Equals($_.MainWindowTitle, $expectedTitle, [System.StringComparison]::OrdinalIgnoreCase)
 })
 
 if ($matches.Count -eq 0) {
@@ -40,9 +41,17 @@ public static class BridgeStudioKeyboard {
   [DllImport("user32.dll")]
   public static extern bool SetForegroundWindow(IntPtr hWnd);
   [DllImport("user32.dll")]
+  public static extern bool BringWindowToTop(IntPtr hWnd);
+  [DllImport("user32.dll")]
   public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")]
   public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+  [DllImport("user32.dll")]
+  public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+  [DllImport("kernel32.dll")]
+  public static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")]
+  public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
   [DllImport("user32.dll")]
   public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 }
@@ -64,7 +73,26 @@ if ([BridgeStudioKeyboard]::GetForegroundWindow() -ne $handle) {
 }
 
 if ([BridgeStudioKeyboard]::GetForegroundWindow() -ne $handle) {
-  throw "Roblox Studio window could not be confirmed as foreground; Ctrl+S was not sent. PID=$($target.Id) TITLE=$($target.MainWindowTitle)"
+  [uint32]$targetProcessId = 0
+  $targetThreadId = [BridgeStudioKeyboard]::GetWindowThreadProcessId($handle, [ref]$targetProcessId)
+  $currentThreadId = [BridgeStudioKeyboard]::GetCurrentThreadId()
+  $attached = $false
+  try {
+    if ($targetThreadId -ne 0 -and $targetProcessId -eq [uint32]$target.Id -and $currentThreadId -ne $targetThreadId) {
+      $attached = [BridgeStudioKeyboard]::AttachThreadInput($currentThreadId, $targetThreadId, $true)
+    }
+    [void][BridgeStudioKeyboard]::BringWindowToTop($handle)
+    [void][BridgeStudioKeyboard]::SetForegroundWindow($handle)
+    Start-Sleep -Milliseconds $SettleMs
+  } finally {
+    if ($attached) {
+      [void][BridgeStudioKeyboard]::AttachThreadInput($currentThreadId, $targetThreadId, $false)
+    }
+  }
+}
+
+if ([BridgeStudioKeyboard]::GetForegroundWindow() -ne $handle) {
+  throw "Roblox Studio window could not be confirmed as foreground after bounded thread-input fallback; Ctrl+S was not sent. PID=$($target.Id) TITLE=$($target.MainWindowTitle)"
 }
 
 try {
