@@ -1,3 +1,9 @@
+## 0.6.55 - 2026-08-02
+
+- `roblox_screen_capture_save` now validates the returned image MIME against its binary signature and requires the destination extension to match PNG, JPEG, or WebP before writing.
+- Capture format regressions cover valid PNG/JPEG/WebP payloads, misleading extensions, mismatched declared MIME, and unsupported destinations.
+
+
 ## 0.6.54 - 2026-07-30
 
 - Add `roblox_asset_upload` for bounded, hash-verified GLB/GLTF/FBX Model uploads through the official Roblox Open Cloud Assets API.

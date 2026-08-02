@@ -31,6 +31,35 @@ function resultIsError(result: unknown): boolean {
 
 type RobloxImagePayload = { data: string; mimeType: string };
 
+const CAPTURE_MIME_BY_EXTENSION: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+};
+
+function detectCaptureMime(bytes: Buffer): string | null {
+  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length >= 12 && bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
+  return null;
+}
+
+export function validateRobloxCaptureImage(outputPath: string, image: RobloxImagePayload): { bytes: Buffer; mimeType: string } {
+  const rawBase64 = image.data.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "").replace(/\s+/g, "");
+  const bytes = Buffer.from(rawBase64, "base64");
+  if (bytes.length === 0) throw new Error("Roblox Studio MCP returned an empty image payload.");
+  const detectedMime = detectCaptureMime(bytes);
+  if (!detectedMime) throw new Error("Roblox Studio MCP returned an unsupported or invalid image signature.");
+  const declaredMime = image.mimeType.trim().toLowerCase();
+  if (declaredMime !== detectedMime) throw new Error(`Roblox Studio MCP declared ${declaredMime || "an empty MIME type"} but the image signature is ${detectedMime}.`);
+  const extension = path.extname(outputPath).toLowerCase();
+  const expectedMime = CAPTURE_MIME_BY_EXTENSION[extension];
+  if (!expectedMime) throw new Error("outputPath must use .png, .jpg, .jpeg, or .webp.");
+  if (expectedMime !== detectedMime) throw new Error(`outputPath extension ${extension} expects ${expectedMime}, but screen_capture returned ${detectedMime}.`);
+  return { bytes, mimeType: detectedMime };
+}
+
 export function extractRobloxMcpImage(value: unknown): RobloxImagePayload | null {
   const visited = new WeakSet<object>();
   const visit = (current: unknown): RobloxImagePayload | null => {
@@ -68,9 +97,7 @@ async function pathExists(filePath: string): Promise<boolean> {
 
 async function saveRobloxCaptureImage(outputPath: string, image: RobloxImagePayload, overwrite: boolean): Promise<FileSnapshot> {
   if (!overwrite && await pathExists(outputPath)) throw new Error(`Capture file already exists: ${outputPath}`);
-  const rawBase64 = image.data.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "").replace(/\s+/g, "");
-  const bytes = Buffer.from(rawBase64, "base64");
-  if (bytes.length === 0) throw new Error("Roblox Studio MCP returned an empty image payload.");
+  const { bytes } = validateRobloxCaptureImage(outputPath, image);
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   const temporaryPath = `${outputPath}.${process.pid}.${crypto.randomUUID()}.tmp`;
   try {
@@ -176,11 +203,11 @@ export const robloxStudioToolModule: BridgeToolModule = {
     },
     {
       name: "roblox_screen_capture_save",
-      description: "Capture the current Roblox Studio edit-time viewport through the persistent Studio MCP connection and save the image to an allowed local .png path. The image payload is consumed inside the Bridge so large base64 data is not returned through the connector. Use this for resilient visual iteration and evidence capture.",
+      description: "Capture the current Roblox Studio edit-time viewport through the persistent Studio MCP connection and save the image to an allowed local path whose extension matches the returned PNG, JPEG, or WebP payload. The Bridge validates declared MIME, binary signature, and destination extension before writing, so large base64 data is not returned through the connector. Use this for resilient visual iteration and evidence capture.",
       inputSchema: {
         type: "object",
         properties: {
-          outputPath: { type: "string", description: "Allowed local .png path to write." },
+          outputPath: { type: "string", description: "Allowed local .png, .jpg, .jpeg, or .webp path; the extension must match the returned MIME and image signature." },
           captureId: { type: "string", description: "Capture identifier forwarded to Roblox Studio MCP." },
           cameraPosition: { type: "array", items: { type: "number" }, minItems: 3, maxItems: 3, description: "Optional [x,y,z] camera position. Must be provided together with lookAtPosition." },
           lookAtPosition: { type: "array", items: { type: "number" }, minItems: 3, maxItems: 3, description: "Optional [x,y,z] look-at target. Must be provided together with cameraPosition." },
@@ -322,7 +349,6 @@ export const robloxStudioToolModule: BridgeToolModule = {
         throw new Error("cameraPosition and lookAtPosition must be provided together.");
       }
       const outputPath = resolveToolPath(parsed.outputPath, { access: "write" });
-      if (path.extname(outputPath).toLowerCase() !== ".png") throw new Error("outputPath must use the .png extension.");
       const remoteArguments: Record<string, unknown> = { capture_id: parsed.captureId };
       if (parsed.cameraPosition && parsed.lookAtPosition) {
         remoteArguments.camera_position = parsed.cameraPosition;

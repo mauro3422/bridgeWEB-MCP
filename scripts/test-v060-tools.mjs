@@ -89,7 +89,7 @@ process.env.BRIDGE_MCP_SKILL_ROUTING_FIXTURES_PATH = path.join(fixtureSkillRoot,
 const { createDefaultToolRegistry } = await import('../dist/tool-registry.js');
 const { writePersistentCache } = await import('../dist/tools/shared/persistent-cache.js');
 const { classifyRobloxMcpToolCatalog, getRobloxMcpToolRequestOptions, parseRobloxStudios } = await import('../dist/integrations/roblox-mcp-client.js');
-const { extractRobloxMcpImage } = await import('../dist/tools/roblox-studio-tools.js');
+const { extractRobloxMcpImage, validateRobloxCaptureImage } = await import('../dist/tools/roblox-studio-tools.js');
 const { clearBridgeNotices, drainBridgeNotices, emitBridgeNotice, getBridgeNoticeStatus, peekBridgeNoticeHistory } = await import('../dist/notices.js');
 const { closeMssrObservatoryForTests, getMssrTraceEvidence, queryMssrObservatory, recordMssrCheckpoint, recordMssrRoute } = await import('../dist/mssr-observatory.js');
 const { buildToolAudit } = await import('../dist/tool-audit.js');
@@ -140,6 +140,16 @@ try {
   const nestedRobloxImage = extractRobloxMcpImage({result:{content:[{type:'text',text:'ok'},{type:'image',data:'aGVsbG8=',mimeType:'image/png'}]}});
   if (!nestedRobloxImage || nestedRobloxImage.data !== 'aGVsbG8=' || nestedRobloxImage.mimeType !== 'image/png') throw new Error('nested Roblox MCP image extraction failed');
   if (extractRobloxMcpImage({content:[{type:'text',text:'no image'}]}) !== null) throw new Error('Roblox MCP image extraction accepted a missing image');
+  const pngFixture = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+  const jpegFixture = Buffer.from('ffd8ffe000104a4649460001', 'hex');
+  const webpFixture = Buffer.from('524946460400000057454250', 'hex');
+  if (validateRobloxCaptureImage('capture.png', {data:pngFixture.toString('base64'),mimeType:'image/png'}).mimeType !== 'image/png') throw new Error('PNG capture validation failed');
+  if (validateRobloxCaptureImage('capture.jpg', {data:jpegFixture.toString('base64'),mimeType:'image/jpeg'}).mimeType !== 'image/jpeg') throw new Error('JPEG capture validation failed');
+  if (validateRobloxCaptureImage('capture.webp', {data:webpFixture.toString('base64'),mimeType:'image/webp'}).mimeType !== 'image/webp') throw new Error('WebP capture validation failed');
+  assert.throws(() => validateRobloxCaptureImage('capture.png', {data:jpegFixture.toString('base64'),mimeType:'image/jpeg'}), /extension \.png expects image\/png, but screen_capture returned image\/jpeg/);
+  assert.throws(() => validateRobloxCaptureImage('capture.jpg', {data:jpegFixture.toString('base64'),mimeType:'image/png'}), /declared image\/png but the image signature is image\/jpeg/);
+  assert.throws(() => validateRobloxCaptureImage('capture.gif', {data:pngFixture.toString('base64'),mimeType:'image/png'}), /must use \.png, \.jpg, \.jpeg, or \.webp/);
+
 
   clearBridgeNotices();
   emitBridgeNotice({severity:'warning',code:'fixture-warning',source:'fixture',message:'Fixture notice',actions:[{label:'List sessions',toolName:'terminal_list',instruction:'Resolve a live session before retrying.'}]});
