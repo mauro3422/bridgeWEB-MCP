@@ -4,7 +4,7 @@ import os from "node:os";
 import { createRequire } from "node:module";
 import { SERVER_NAME, SERVER_VERSION } from "./config.js";
 import { getMssrObservabilityEpoch } from "./mssr-observability-epoch.js";
-import { RUNTIME_BOOT_ID, RUNTIME_STARTED_AT } from "./runtime-identity.js";
+import { normalizeModelIdentifier, RUNTIME_BOOT_ID, RUNTIME_STARTED_AT } from "./runtime-identity.js";
 
 type JsonRecord = Record<string, unknown>;
 export type BridgeMetricsScope = "active" | "all";
@@ -300,7 +300,7 @@ export function beginToolMetric(tool: string, args: unknown, profile: BridgeMetr
     workflowKey: boundedProfileText(profile.workflowKey, "unscoped", 80),
     taskKey: boundedProfileText(profile.taskKey, "unknown", 80),
     caller: boundedProfileText(profile.caller, "other", 80),
-    model: boundedProfileText(profile.model, "unknown", 80),
+    model: normalizeModelIdentifier(profile.model),
     reasoningEffort: boundedProfileText(profile.reasoningEffort, "unknown", 20),
     clientName: boundedProfileText(profile.clientName, "unknown", 120),
     sessionKey: boundedProfileText(profile.sessionKey, "unknown", 80),

@@ -5,7 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { SERVER_NAME, SERVER_VERSION } from "./config.js";
 import { getTraceToolEvidence } from "./metrics.js";
-import { RUNTIME_BOOT_ID } from "./runtime-identity.js";
+import { normalizeModelIdentifier, RUNTIME_BOOT_ID } from "./runtime-identity.js";
 import {
   getMssrObservabilityEpoch,
   mssrObservabilityStatePath,
@@ -337,7 +337,7 @@ export function recordMssrRoute(args: {
       action: args.action,
       workflowKey: typeof args.route.workflowKey === "string" ? args.route.workflowKey : null,
       agentProfile: {
-        model: typeof agentProfile.model === "string" ? agentProfile.model : "unknown",
+        model: normalizeModelIdentifier(agentProfile.model),
         reasoningEffort: typeof agentProfile.reasoningEffort === "string" ? agentProfile.reasoningEffort : "unknown",
       },
       contextUsed: args.route.contextUsed === true,
@@ -471,7 +471,7 @@ export function recordMssrCheckpoint(args: {
       summary: args.summary ? redactText(args.summary, 300) : undefined,
       signals: args.signals ?? [],
       agentProfile: {
-        model: args.model ? redactText(args.model, 80) : "unknown",
+        model: normalizeModelIdentifier(args.model),
         reasoningEffort: args.reasoningEffort ? redactText(args.reasoningEffort, 20) : "unknown",
       },
     },
@@ -637,6 +637,9 @@ function summarizeContextAssembly(events: MssrStoredEvent[]) {
     savedChars: number;
     skippedLoads: number;
     overflowLoads: number;
+    requiredOverflowLoads: number;
+    optionalOverflowLoads: number;
+    skippedForBudgetLoads: number;
     duplicateCharsAvoided: number;
     skillNames: Set<string>;
     planningModes: Set<string>;
@@ -649,6 +652,9 @@ function summarizeContextAssembly(events: MssrStoredEvent[]) {
     fallbackLoads: number;
     skippedLoads: number;
     overflowLoads: number;
+    requiredOverflowLoads: number;
+    optionalOverflowLoads: number;
+    skippedForBudgetLoads: number;
     coreChars: number;
     loadedChars: number;
     fullChars: number;
@@ -661,6 +667,9 @@ function summarizeContextAssembly(events: MssrStoredEvent[]) {
   let fallbackLoads = 0;
   let skippedLoads = 0;
   let overflowLoads = 0;
+  let requiredOverflowLoads = 0;
+  let optionalOverflowLoads = 0;
+  let skippedForBudgetLoads = 0;
   let duplicateCharsAvoided = 0;
   let ambiguousGroups = 0;
   const planningModes: string[] = [];
@@ -672,6 +681,9 @@ function summarizeContextAssembly(events: MssrStoredEvent[]) {
     const duplicate = numericDetail(event, "duplicateCharsAvoided");
     const skipped = event.details.skipped === true;
     const overflow = event.details.budgetExceeded === true;
+    const skippedForBudget = skipped && event.details.skippedReason === "optional-context-exceeds-budget";
+    const requiredOverflow = overflow && event.required === true && !skipped;
+    const optionalOverflow = overflow && event.required !== true && !skipped;
     const fallback = event.details.manifestStatus === "missing" || event.details.manifestStatus === "invalid" || event.details.fallbackFull === true;
     const mode = typeof event.details.contentMode === "string" ? event.details.contentMode : "unknown";
     const planner = typeof event.details.planningMode === "string" ? event.details.planningMode : "legacy-sequential";
@@ -683,6 +695,9 @@ function summarizeContextAssembly(events: MssrStoredEvent[]) {
     if (fallback) fallbackLoads += 1;
     if (skipped) skippedLoads += 1;
     if (overflow) overflowLoads += 1;
+    if (requiredOverflow) requiredOverflowLoads += 1;
+    if (optionalOverflow) optionalOverflowLoads += 1;
+    if (skippedForBudget) skippedForBudgetLoads += 1;
     ambiguousGroups += ambiguous;
     planningModes.push(planner);
 
@@ -694,6 +709,9 @@ function summarizeContextAssembly(events: MssrStoredEvent[]) {
       savedChars: 0,
       skippedLoads: 0,
       overflowLoads: 0,
+      requiredOverflowLoads: 0,
+      optionalOverflowLoads: 0,
+      skippedForBudgetLoads: 0,
       duplicateCharsAvoided: 0,
       skillNames: new Set<string>(),
       planningModes: new Set<string>(),
@@ -704,6 +722,9 @@ function summarizeContextAssembly(events: MssrStoredEvent[]) {
     trace.savedChars += saved;
     trace.skippedLoads += skipped ? 1 : 0;
     trace.overflowLoads += overflow ? 1 : 0;
+    trace.requiredOverflowLoads += requiredOverflow ? 1 : 0;
+    trace.optionalOverflowLoads += optionalOverflow ? 1 : 0;
+    trace.skippedForBudgetLoads += skippedForBudget ? 1 : 0;
     trace.duplicateCharsAvoided += duplicate;
     if (event.skillName) trace.skillNames.add(event.skillName);
     trace.planningModes.add(planner);
@@ -718,6 +739,9 @@ function summarizeContextAssembly(events: MssrStoredEvent[]) {
       fallbackLoads: 0,
       skippedLoads: 0,
       overflowLoads: 0,
+      requiredOverflowLoads: 0,
+      optionalOverflowLoads: 0,
+      skippedForBudgetLoads: 0,
       coreChars: 0,
       loadedChars: 0,
       fullChars: 0,
@@ -730,6 +754,9 @@ function summarizeContextAssembly(events: MssrStoredEvent[]) {
     skill.fallbackLoads += fallback ? 1 : 0;
     skill.skippedLoads += skipped ? 1 : 0;
     skill.overflowLoads += overflow ? 1 : 0;
+    skill.requiredOverflowLoads += requiredOverflow ? 1 : 0;
+    skill.optionalOverflowLoads += optionalOverflow ? 1 : 0;
+    skill.skippedForBudgetLoads += skippedForBudget ? 1 : 0;
     skill.coreChars += numericDetail(event, "coreCharsLoaded");
     skill.loadedChars += loaded;
     skill.fullChars += full;
@@ -750,9 +777,13 @@ function summarizeContextAssembly(events: MssrStoredEvent[]) {
       ? "add-context-manifest"
       : averageCoreChars >= 4500 && skill.loads >= 2
         ? "review-core"
-        : skill.skippedLoads > 0 || skill.overflowLoads > 0
+        : skill.skippedForBudgetLoads > 0
           ? "review-budget"
-          : "healthy-selective";
+          : skill.requiredOverflowLoads > 0
+            ? "review-required-context"
+            : skill.optionalOverflowLoads > 0
+              ? "review-optional-context"
+              : "healthy-selective";
     return {
       ...skill,
       averageCoreChars,
@@ -771,6 +802,9 @@ function summarizeContextAssembly(events: MssrStoredEvent[]) {
     fallbackLoads,
     skippedLoads,
     overflowLoads,
+    requiredOverflowLoads,
+    optionalOverflowLoads,
+    skippedForBudgetLoads,
     ambiguousGroups,
     loadedChars,
     fullChars,
@@ -788,6 +822,9 @@ function summarizeContextAssembly(events: MssrStoredEvent[]) {
         savingsRate: rate(trace.savedChars, trace.fullChars),
         skippedLoads: trace.skippedLoads,
         overflowLoads: trace.overflowLoads,
+        requiredOverflowLoads: trace.requiredOverflowLoads,
+        optionalOverflowLoads: trace.optionalOverflowLoads,
+        skippedForBudgetLoads: trace.skippedForBudgetLoads,
         duplicateCharsAvoided: trace.duplicateCharsAvoided,
         skills: trace.skillNames.size,
         planningModes: [...trace.planningModes],
@@ -1103,7 +1140,7 @@ function summary(days: number, scope: MssrObservatoryScope) {
       : {};
     return JSON.stringify([
       event.caller || "other",
-      typeof profile.model === "string" ? profile.model : "unknown",
+      normalizeModelIdentifier(profile.model),
       typeof profile.reasoningEffort === "string" ? profile.reasoningEffort : "unknown",
     ]);
   }));
@@ -1114,7 +1151,7 @@ function summary(days: number, scope: MssrObservatoryScope) {
         ? event.details.agentProfile as JsonRecord
         : {};
       return (event.caller || "other") === caller
-        && (typeof profile.model === "string" ? profile.model : "unknown") === model
+        && normalizeModelIdentifier(profile.model) === model
         && (typeof profile.reasoningEffort === "string" ? profile.reasoningEffort : "unknown") === reasoningEffort;
     });
     const profileTraceIds = new Set(profileRoutes.map((event) => event.traceId));

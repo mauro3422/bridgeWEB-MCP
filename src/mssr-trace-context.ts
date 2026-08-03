@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { BridgeNoticeAction, BridgeNoticeInput } from "./notices.js";
 import { findPersistedMssrTraceCandidates, readPersistedMssrTraceState } from "./mssr-observatory.js";
+import { normalizeModelIdentifier } from "./runtime-identity.js";
 
 type JsonRecord = Record<string, unknown>;
 type ToolSchemaLike = {
@@ -272,9 +273,16 @@ export function createMssrTraceSessionCoordinator(
             : null,
           idleMs: closureIdleMs,
           activityVersion,
+          missingRequiredSkills: missingRequired(current),
           limitation: "Bridge observes MCP lifecycle, not whether ChatGPT rendered final text.",
         },
         `mssr-web-outcome-missing-after-idle:${current.traceId}:${activityVersion}`,
+        [{
+          label: "Revisar evidencia de cierre",
+          toolName: "mssr_trace_evidence",
+          arguments: { traceId: current.traceId },
+          instruction: "Inspecciona la evidencia correlacionada y, sólo si la tarea realmente terminó, registra verification/persistence/outcome con datos observables en esta misma traza.",
+        }],
       );
       options.onClosureReminder?.({
         traceId: current.traceId,
@@ -688,7 +696,7 @@ export function createMssrTraceSessionCoordinator(
         stage: typeof record.stage === "string" ? record.stage : typeof args.stage === "string" ? args.stage : "start",
         taskHash: taskFingerprint(args.task),
         caller: normalizedCaller(args.caller ?? hostContext.caller),
-        model: normalizedText(asRecord(record.agentProfile)?.model, 80) || normalizedText(args.model, 80) || "unknown",
+        model: normalizeModelIdentifier(asRecord(record.agentProfile)?.model ?? args.model),
         reasoningEffort: normalizedText(asRecord(record.agentProfile)?.reasoningEffort, 20)
           || normalizedText(args.reasoningEffort, 20)
           || "unknown",

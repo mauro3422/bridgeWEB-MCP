@@ -620,8 +620,11 @@ function renderMssrContextAssembly(context) {
       const trace = String(row.traceId || '—');
       const shortTrace = trace.length > 28 ? trace.slice(0, 18) + '…' + trace.slice(-7) : trace;
       const incidents = [];
-      if (Number(row.skippedLoads || 0) > 0) incidents.push(num(row.skippedLoads) + ' skip');
-      if (Number(row.overflowLoads || 0) > 0) incidents.push(num(row.overflowLoads) + ' overflow');
+      if (Number(row.skippedForBudgetLoads || 0) > 0) incidents.push(num(row.skippedForBudgetLoads) + ' skip presupuesto');
+      else if (Number(row.skippedLoads || 0) > 0) incidents.push(num(row.skippedLoads) + ' skip');
+      if (Number(row.requiredOverflowLoads || 0) > 0) incidents.push(num(row.requiredOverflowLoads) + ' overflow requerido');
+      if (Number(row.optionalOverflowLoads || 0) > 0) incidents.push(num(row.optionalOverflowLoads) + ' presión opcional');
+      if (Number(row.overflowLoads || 0) > 0 && Number(row.requiredOverflowLoads || 0) === 0 && Number(row.optionalOverflowLoads || 0) === 0 && Number(row.skippedForBudgetLoads || 0) === 0) incidents.push(num(row.overflowLoads) + ' overflow legado');
       if (Number(row.duplicateCharsAvoided || 0) > 0) incidents.push(num(row.duplicateCharsAvoided) + ' dup. evitados');
       return '<tr>' +
         '<td><code title="' + esc(trace) + '">' + esc(shortTrace) + '</code><div class="recent-detail">' + esc(dateTime(row.latestAt)) + '</div></td>' +
@@ -639,6 +642,8 @@ function renderMssrContextAssembly(context) {
     'add-context-manifest': 'agregar manifest',
     'review-core': 'revisar core',
     'review-budget': 'revisar presupuesto',
+    'review-required-context': 'revisar contexto requerido',
+    'review-optional-context': 'revisar contexto opcional',
     'healthy-selective': 'selectivo sano'
   };
   if (pressureTarget) {

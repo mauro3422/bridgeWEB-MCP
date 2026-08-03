@@ -1,3 +1,16 @@
+## 0.6.57 - 2026-08-03
+
+- Persistent process continuation tools now accept optional `traceId` control metadata across write/read/stop and the `work_feed`/`work_peek`/`work_finish` aliases, preserving MSSR attribution through the complete terminal lifecycle without forwarding control metadata to the child process.
+- MSSR context observability now separates required-context overflow, optional-context pressure, and optional skills skipped for budget; the dashboard retains the legacy aggregate while showing the actionable category and emitting distinct maintenance recommendations.
+- Regression coverage now verifies trace-aware schemas across the whole process lifecycle and the new context-pressure classifications.
+
+## 0.6.56 - 2026-08-03
+
+- MSSR model identifiers are canonicalized before telemetry storage and profile grouping, collapsing case, spacing, and underscore variants such as `GPT-5.6 Thinking` into `gpt-5.6-thinking`.
+- `run_command`, `work_once`, `terminal_start`, and `work_begin` accept optional `traceId` control metadata so cross-project or cross-process work can be correlated explicitly without passing that value to the shell.
+- Web closure reminders now expose a read-only `mssr_trace_evidence` action and report missing required skill loads before an outcome is recorded.
+- Trace-contract regressions cover explicit work correlation, model normalization, and assisted closure evidence.
+
 ## 0.6.55 - 2026-08-02
 
 - `roblox_screen_capture_save` now validates the returned image MIME against its binary signature and requires the destination extension to match PNG, JPEG, or WebP before writing.

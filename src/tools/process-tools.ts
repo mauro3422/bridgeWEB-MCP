@@ -8,6 +8,9 @@ import { appendBounded, assertCommandAllowed, fileExists, resolveToolPath, runSh
 
 const DONE_TTL_MS = 10 * 60_000;
 const MAX_RUN_MS = 24 * 60 * 60_000;
+const TRACE_ID_PATTERN = /^[A-Za-z0-9._:-]{6,128}$/;
+const TRACE_ID_INPUT_SCHEMA = { type: "string", pattern: "^[A-Za-z0-9._:-]{6,128}$" } as const;
+const optionalTraceId = z.string().regex(TRACE_ID_PATTERN).optional();
 
 type TerminalSession = {
   id: string;
@@ -223,60 +226,60 @@ export function terminalList() {
 export const processToolModule: BridgeToolModule = {
   name: "process",
   tools: [
-    { name: "run_command", description: "Run a shell command in a cwd with timeout and captured stdout/stderr.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS } }, required: ["command"], additionalProperties: false } },
-    { name: "terminal_start", description: "Start a persistent terminal process and return a session id. Supports optional name, logFile, timeoutMs, and cleanupAfterMs for long-running tasks.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, name: { type: "string" }, logFile: { type: "string" }, timeoutMs: { type: "number", minimum: 1000, maximum: MAX_RUN_MS }, cleanupAfterMs: { type: "number", default: DONE_TTL_MS, minimum: 0, maximum: MAX_RUN_MS } }, additionalProperties: false } },
-    { name: "terminal_write", description: "Write input to a persistent terminal session.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, input: { type: "string" } }, required: ["sessionId", "input"], additionalProperties: false } },
-    { name: "terminal_read", description: "Read buffered stdout/stderr from a persistent terminal session.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, maxChars: { type: "number", default: 20000 } }, required: ["sessionId"], additionalProperties: false } },
-    { name: "terminal_stop", description: "Stop and forget a persistent terminal session.", inputSchema: { type: "object", properties: { sessionId: { type: "string" } }, required: ["sessionId"], additionalProperties: false } },
+    { name: "run_command", description: "Run a shell command in a cwd with timeout and captured stdout/stderr. Accepts optional traceId control metadata for explicit MSSR correlation across projects or processes.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["command"], additionalProperties: false } },
+    { name: "terminal_start", description: "Start a persistent terminal process and return a session id. Supports optional name, logFile, timeoutMs, cleanupAfterMs, and traceId control metadata for explicit MSSR correlation.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, name: { type: "string" }, logFile: { type: "string" }, timeoutMs: { type: "number", minimum: 1000, maximum: MAX_RUN_MS }, cleanupAfterMs: { type: "number", default: DONE_TTL_MS, minimum: 0, maximum: MAX_RUN_MS }, traceId: TRACE_ID_INPUT_SCHEMA }, additionalProperties: false } },
+    { name: "terminal_write", description: "Write input to a persistent terminal session. Accepts optional traceId control metadata to preserve MSSR attribution through the session lifecycle.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, input: { type: "string" }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId", "input"], additionalProperties: false } },
+    { name: "terminal_read", description: "Read buffered stdout/stderr from a persistent terminal session. Accepts optional traceId control metadata to preserve MSSR attribution through the session lifecycle.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, maxChars: { type: "number", default: 20000 }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId"], additionalProperties: false } },
+    { name: "terminal_stop", description: "Stop and forget a persistent terminal session. Accepts optional traceId control metadata to preserve MSSR attribution through the session lifecycle.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId"], additionalProperties: false } },
     { name: "terminal_list", description: "List active persistent terminal sessions.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
-    { name: "work_once", description: "Alias of run_command for one short project action.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS } }, required: ["command"], additionalProperties: false } },
-    { name: "work_begin", description: "Alias of terminal_start for long-running project work.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, name: { type: "string" }, logFile: { type: "string" }, timeoutMs: { type: "number", minimum: 1000, maximum: MAX_RUN_MS }, cleanupAfterMs: { type: "number", default: DONE_TTL_MS, minimum: 0, maximum: MAX_RUN_MS } }, additionalProperties: false } },
-    { name: "work_peek", description: "Alias of terminal_read for inspecting project work output.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, maxChars: { type: "number", default: 20000 } }, required: ["sessionId"], additionalProperties: false } },
+    { name: "work_once", description: "Alias of run_command for one short project action. Accepts optional traceId control metadata for explicit MSSR correlation across projects or processes.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["command"], additionalProperties: false } },
+    { name: "work_begin", description: "Alias of terminal_start for long-running project work. Accepts optional traceId control metadata for explicit MSSR correlation.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, name: { type: "string" }, logFile: { type: "string" }, timeoutMs: { type: "number", minimum: 1000, maximum: MAX_RUN_MS }, cleanupAfterMs: { type: "number", default: DONE_TTL_MS, minimum: 0, maximum: MAX_RUN_MS }, traceId: TRACE_ID_INPUT_SCHEMA }, additionalProperties: false } },
+    { name: "work_peek", description: "Alias of terminal_read for inspecting project work output. Accepts optional traceId control metadata to preserve MSSR attribution.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, maxChars: { type: "number", default: 20000 }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId"], additionalProperties: false } },
     { name: "work_show", description: "Alias of terminal_list for listing project work.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
-    { name: "work_feed", description: "Alias of terminal_write for sending input to project work.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, input: { type: "string" } }, required: ["sessionId", "input"], additionalProperties: false } },
-    { name: "work_finish", description: "Alias of terminal_stop for stopping project work.", inputSchema: { type: "object", properties: { sessionId: { type: "string" } }, required: ["sessionId"], additionalProperties: false } },
+    { name: "work_feed", description: "Alias of terminal_write for sending input to project work. Accepts optional traceId control metadata to preserve MSSR attribution.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, input: { type: "string" }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId", "input"], additionalProperties: false } },
+    { name: "work_finish", description: "Alias of terminal_stop for stopping project work. Accepts optional traceId control metadata to preserve MSSR attribution.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId"], additionalProperties: false } },
   ],
   handlers: {
     run_command: async (args) => {
-      const parsed = z.object({ command: z.string().min(1), cwd: z.string().optional(), timeoutMs: z.number().positive().max(10 * 60_000).default(DEFAULT_TIMEOUT_MS) }).parse(args);
+      const parsed = z.object({ command: z.string().min(1), cwd: z.string().optional(), timeoutMs: z.number().positive().max(10 * 60_000).default(DEFAULT_TIMEOUT_MS), traceId: optionalTraceId }).parse(args);
       return await runShellCommand(parsed.command, parsed.cwd, parsed.timeoutMs);
     },
     terminal_start: async (args) => {
-      const parsed = z.object({ command: z.string().optional(), cwd: z.string().optional(), name: z.string().optional(), logFile: z.string().optional(), timeoutMs: z.number().optional(), cleanupAfterMs: z.number().optional() }).parse(args);
+      const parsed = z.object({ command: z.string().optional(), cwd: z.string().optional(), name: z.string().optional(), logFile: z.string().optional(), timeoutMs: z.number().optional(), cleanupAfterMs: z.number().optional(), traceId: optionalTraceId }).parse(args);
       return await terminalStart(parsed);
     },
     terminal_write: (args) => {
-      const parsed = z.object({ sessionId: z.string(), input: z.string() }).parse(args);
+      const parsed = z.object({ sessionId: z.string(), input: z.string(), traceId: optionalTraceId }).parse(args);
       return terminalWrite(parsed.sessionId, parsed.input);
     },
     terminal_read: (args) => {
-      const parsed = z.object({ sessionId: z.string(), maxChars: z.number().positive().default(20000) }).parse(args);
+      const parsed = z.object({ sessionId: z.string(), maxChars: z.number().positive().default(20000), traceId: optionalTraceId }).parse(args);
       return terminalRead(parsed.sessionId, parsed.maxChars);
     },
     terminal_stop: async (args) => {
-      const parsed = z.object({ sessionId: z.string() }).parse(args);
+      const parsed = z.object({ sessionId: z.string(), traceId: optionalTraceId }).parse(args);
       return await terminalStop(parsed.sessionId);
     },
     terminal_list: () => terminalList(),
     work_once: async (args) => {
-      const parsed = z.object({ command: z.string().min(1), cwd: z.string().optional(), timeoutMs: z.number().positive().max(10 * 60_000).default(DEFAULT_TIMEOUT_MS) }).parse(args);
+      const parsed = z.object({ command: z.string().min(1), cwd: z.string().optional(), timeoutMs: z.number().positive().max(10 * 60_000).default(DEFAULT_TIMEOUT_MS), traceId: optionalTraceId }).parse(args);
       return await runShellCommand(parsed.command, parsed.cwd, parsed.timeoutMs);
     },
     work_begin: async (args) => {
-      const parsed = z.object({ command: z.string().optional(), cwd: z.string().optional(), name: z.string().optional(), logFile: z.string().optional(), timeoutMs: z.number().optional(), cleanupAfterMs: z.number().optional() }).parse(args);
+      const parsed = z.object({ command: z.string().optional(), cwd: z.string().optional(), name: z.string().optional(), logFile: z.string().optional(), timeoutMs: z.number().optional(), cleanupAfterMs: z.number().optional(), traceId: optionalTraceId }).parse(args);
       return await terminalStart(parsed);
     },
     work_peek: (args) => {
-      const parsed = z.object({ sessionId: z.string(), maxChars: z.number().positive().default(20000) }).parse(args);
+      const parsed = z.object({ sessionId: z.string(), maxChars: z.number().positive().default(20000), traceId: optionalTraceId }).parse(args);
       return terminalRead(parsed.sessionId, parsed.maxChars);
     },
     work_show: () => terminalList(),
     work_feed: (args) => {
-      const parsed = z.object({ sessionId: z.string(), input: z.string() }).parse(args);
+      const parsed = z.object({ sessionId: z.string(), input: z.string(), traceId: optionalTraceId }).parse(args);
       return terminalWrite(parsed.sessionId, parsed.input);
     },
     work_finish: async (args) => {
-      const parsed = z.object({ sessionId: z.string() }).parse(args);
+      const parsed = z.object({ sessionId: z.string(), traceId: optionalTraceId }).parse(args);
       return await terminalStop(parsed.sessionId);
     },
   },

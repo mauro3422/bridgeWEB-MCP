@@ -262,7 +262,10 @@ for (const tool of ["bridge_health", "bridge_metrics_query"]) if (!registry.has(
 for (const tool of ["read_text_file", "terminal_read", "terminal_list", "work_peek", "work_show", "bridge_health", "bridge_metrics_query", "impact_analysis", "dependency_graph"]) if (byName.get(tool)?.annotations?.readOnlyHint !== true) process.exit(61);
 for (const tool of ["write_text_file", "run_command", "terminal_start", "terminal_write", "terminal_stop", "work_once", "work_begin", "work_feed", "work_finish", "git_push_current_branch", "bridge_request_restart", "bridge_verify_all"]) if (byName.get(tool)?.annotations?.destructiveHint !== true) process.exit(62);
 if (!byName.get("work_once")?.inputSchema?.required?.includes("command")) process.exit(63);
-console.log("  OK tool annotations and compact safe tools");
+for (const tool of ["run_command", "terminal_start", "terminal_write", "terminal_read", "terminal_stop", "work_once", "work_begin", "work_peek", "work_feed", "work_finish"]) {
+  if (!byName.get(tool)?.inputSchema?.properties?.traceId) process.exit(64);
+}
+console.log("  OK tool annotations, compact safe tools, and trace-aware process lifecycle");
 '@
   $tmpScript = Join-Path ([System.IO.Path]::GetTempPath()) ("bridge-risk-annotations-" + [Guid]::NewGuid().ToString("N") + ".mjs")
   try {

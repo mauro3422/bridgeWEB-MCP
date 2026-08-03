@@ -19,7 +19,7 @@ import { createDefaultToolRegistry } from "./tool-registry.js";
 import type { BridgeToolSchema } from "./tools/types.js";
 import { createMssrTraceSessionCoordinator } from "./mssr-trace-context.js";
 import { recordMssrEvent } from "./mssr-observatory.js";
-import { normalizeWorkflowKey, resolveMetricTaskKey, resolveMetricWorkflowKey } from "./runtime-identity.js";
+import { normalizeModelIdentifier, normalizeWorkflowKey, resolveMetricTaskKey, resolveMetricWorkflowKey } from "./runtime-identity.js";
 
 export { SERVER_NAME, SERVER_VERSION } from "./config.js";
 export { bridgeRestartStatus } from "./tools/bridge-ops.js";
@@ -229,7 +229,7 @@ function withObservableAgentProfile(
   return {
     ...args,
     caller: args.caller ?? host.caller,
-    model: args.model ?? host.model,
+    model: normalizeModelIdentifier(args.model ?? host.model),
     reasoningEffort: args.reasoningEffort ?? host.reasoningEffort,
   };
 }
@@ -264,7 +264,7 @@ function requestAgentProfile(requestMeta: unknown, clientVersion: unknown): Brid
   const metadata = codexMetadata as Record<string, unknown>;
   return {
     caller: "codex-local",
-    model: typeof metadata.model === "string" ? metadata.model : undefined,
+    model: typeof metadata.model === "string" ? normalizeModelIdentifier(metadata.model) : undefined,
     reasoningEffort: typeof metadata.reasoning_effort === "string" ? metadata.reasoning_effort : undefined,
     clientName,
     sessionKey,
@@ -360,9 +360,11 @@ function metricProfile(
     caller: typeof effectiveArgs.caller === "string"
       ? effectiveArgs.caller
       : isNewRoute ? host.caller : traceSnapshot.caller ?? host.caller,
-    model: typeof effectiveArgs.model === "string"
-      ? effectiveArgs.model
-      : isNewRoute ? host.model : traceSnapshot.model ?? host.model,
+    model: normalizeModelIdentifier(
+      typeof effectiveArgs.model === "string"
+        ? effectiveArgs.model
+        : isNewRoute ? host.model : traceSnapshot.model ?? host.model,
+    ),
     reasoningEffort: typeof effectiveArgs.reasoningEffort === "string"
       ? effectiveArgs.reasoningEffort
       : isNewRoute ? host.reasoningEffort : traceSnapshot.reasoningEffort ?? host.reasoningEffort,
@@ -595,7 +597,7 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
         const resultProfile = result.agentProfile ?? delegatedResult?.agentProfile;
         if (resultProfile && typeof resultProfile === "object" && !Array.isArray(resultProfile)) {
           const profile = resultProfile as Record<string, unknown>;
-          if (metric.model === "unknown" && typeof profile.model === "string") metric.model = profile.model.slice(0, 80);
+          if (metric.model === "unknown" && typeof profile.model === "string") metric.model = normalizeModelIdentifier(profile.model);
           if (metric.reasoningEffort === "unknown" && typeof profile.reasoningEffort === "string") {
             metric.reasoningEffort = profile.reasoningEffort.slice(0, 20);
           }

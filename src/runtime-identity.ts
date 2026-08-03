@@ -3,6 +3,19 @@ import { randomUUID } from "node:crypto";
 export const RUNTIME_BOOT_ID = randomUUID();
 export const RUNTIME_STARTED_AT = new Date().toISOString();
 
+export function normalizeModelIdentifier(value: unknown, fallback = "unknown"): string {
+  if (typeof value !== "string") return fallback;
+  const normalized = value
+    .normalize("NFKC")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  return normalized || fallback;
+}
+
 const WORKFLOW_KEY_PATTERN = /^[a-z0-9][a-z0-9._-]{1,79}$/;
 
 export function normalizeWorkflowKey(value: unknown): string | undefined {

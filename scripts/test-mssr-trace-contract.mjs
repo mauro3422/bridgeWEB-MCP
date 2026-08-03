@@ -28,7 +28,7 @@ writeSkill('shared-skill-governance', 'Govern reusable skill changes and verific
 writeSkill('skill-routing-maintainer', 'Maintain MSSR routing metadata and fixtures.');
 writeSkill('mauroprime-bridge-tool-authoring', 'Author and verify Bridge MCP tools.');
 
-const [{ Client }, { InMemoryTransport }, { createBridgeServer }, observatory, traceContext, metrics, robloxClient] = await Promise.all([
+const [{ Client }, { InMemoryTransport }, { createBridgeServer }, observatory, traceContext, metrics, robloxClient, runtimeIdentity] = await Promise.all([
   import('@modelcontextprotocol/sdk/client/index.js'),
   import('@modelcontextprotocol/sdk/inMemory.js'),
   import('../dist/bridge-server.js'),
@@ -36,6 +36,7 @@ const [{ Client }, { InMemoryTransport }, { createBridgeServer }, observatory, t
   import('../dist/mssr-trace-context.js'),
   import('../dist/metrics.js'),
   import('../dist/integrations/roblox-mcp-client.js'),
+  import('../dist/runtime-identity.js'),
 ]);
 
 function payload(result) {
@@ -45,6 +46,10 @@ function payload(result) {
   if (parsed?.error) throw new Error(parsed.error);
   return parsed;
 }
+
+assert.equal(runtimeIdentity.normalizeModelIdentifier('GPT-5.6 Thinking'), 'gpt-5.6-thinking');
+assert.equal(runtimeIdentity.normalizeModelIdentifier('gpt-5.6 thinking'), 'gpt-5.6-thinking');
+assert.equal(runtimeIdentity.normalizeModelIdentifier('gpt-5.6_thinking'), 'gpt-5.6-thinking');
 
 traceContext.resetSharedMssrTraceRegistryForTests();
 let sessionCounter = 0;
@@ -271,6 +276,12 @@ try {
   }, undefined, 'ChatGPT Web');
   assert.notEqual(nextRoute.traceId, traceId, 'A new task after outcome must receive a new trace.');
   await callFresh('system_info', {}, undefined, 'ChatGPT Web');
+  await callFresh('work_once', {
+    cwd: sandbox,
+    command: 'node --version',
+    timeoutMs: 10_000,
+    traceId: nextRoute.traceId,
+  }, undefined, 'ChatGPT Web');
   const activeBridgeSummary = metrics.getMetricsSummary(50, 'active');
   const routedMetric = activeBridgeSummary.summary.find((row) => row.tool === 'skill_route_plan');
   assert.equal(routedMetric?.calls, 1);
@@ -286,6 +297,9 @@ try {
   assert.equal(genericWebMetric?.caller, 'chatgpt-web');
   assert.equal(genericWebMetric?.client_name, 'ChatGPT Web');
   assert.equal(genericWebMetric?.trace_id, nextRoute.traceId, 'Stateless generic tools must inherit the unique Web MSSR trace for metrics.');
+  const explicitlyTracedWork = activeRecent.find((row) => row.tool === 'work_once');
+  assert.equal(explicitlyTracedWork?.trace_id, nextRoute.traceId, 'work_once must accept explicit traceId metadata for cross-project/process correlation.');
+  assert.equal(explicitlyTracedWork?.routing_status, 'traced');
 
   const sessionMeta = { 'openai/session': 'web-session-fixture-001' };
   const fixtureProject = path.join(sandbox, 'fixture-project');
@@ -626,6 +640,9 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 40));
   assert.equal(reminders.length, 1, 'Substantive Web tool activity without outcome should emit one closure reminder.');
   assert.equal(reminders[0].notice.code, 'mssr-web-outcome-missing-after-idle');
+  assert.equal(reminders[0].notice.actions?.[0]?.toolName, 'mssr_trace_evidence');
+  assert.equal(reminders[0].notice.actions?.[0]?.arguments?.traceId, 'trace-watchdog-web-001');
+  assert.deepEqual(reminders[0].notice.details.missingRequiredSkills, []);
 
   watchdog.observe('trace-domain-tool', watchdogTool.args, { ok: true });
   watchdog.observe('mssr_trace_record', {
@@ -770,6 +787,58 @@ try {
       'A new route must prefer freshly loaded project context over the project of another open trace.',
     );
   });
+
+  observatory.recordMssrSkillLoad({
+    traceId: 'fixture-context-required-overflow',
+    skillName: 'required-context-fixture',
+    required: true,
+    loaded: true,
+    via: 'skill_bootstrap',
+    contentMode: 'selective',
+    totalCharsLoaded: 120,
+    fullSkillChars: 200,
+    budgetExceeded: true,
+  });
+  observatory.recordMssrSkillLoad({
+    traceId: 'fixture-context-optional-overflow',
+    skillName: 'optional-context-fixture',
+    required: false,
+    loaded: true,
+    via: 'skill_bootstrap',
+    contentMode: 'selective',
+    totalCharsLoaded: 80,
+    fullSkillChars: 180,
+    budgetExceeded: true,
+  });
+  observatory.recordMssrSkillLoad({
+    traceId: 'fixture-context-budget-skip',
+    skillName: 'skipped-context-fixture',
+    required: false,
+    loaded: false,
+    via: 'skill_bootstrap',
+    contentMode: 'selective',
+    totalCharsLoaded: 0,
+    fullSkillChars: 160,
+    budgetExceeded: true,
+    skipped: true,
+    skippedReason: 'optional-context-exceeds-budget',
+  });
+  const pressureSummary = observatory.queryMssrObservatory({ kind: 'summary', scope: 'all', days: 30 });
+  assert.ok(pressureSummary.contextAssembly.requiredOverflowLoads >= 1);
+  assert.ok(pressureSummary.contextAssembly.optionalOverflowLoads >= 1);
+  assert.ok(pressureSummary.contextAssembly.skippedForBudgetLoads >= 1);
+  assert.equal(
+    pressureSummary.contextAssembly.skillPressure.find((row) => row.name === 'required-context-fixture')?.recommendation,
+    'review-required-context',
+  );
+  assert.equal(
+    pressureSummary.contextAssembly.skillPressure.find((row) => row.name === 'optional-context-fixture')?.recommendation,
+    'review-optional-context',
+  );
+  assert.equal(
+    pressureSummary.contextAssembly.skillPressure.find((row) => row.name === 'skipped-context-fixture')?.recommendation,
+    'review-budget',
+  );
 
   console.log(JSON.stringify({
     ok: true,
