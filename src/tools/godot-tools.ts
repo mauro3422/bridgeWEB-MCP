@@ -1,7 +1,5 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import http from "node:http";
 import { z } from "zod";
 import type { BridgeToolModule } from "./types.js";
@@ -52,29 +50,11 @@ const NEVER_DISPATCH = new Set([
   "set_node_property",
 ]);
 
-function resolveTokenFile(): string {
-  const explicit = process.env.GODOT_MCP_TOKEN_FILE?.trim();
-  if (explicit) return path.resolve(explicit);
-  const base = process.env.APPDATA?.trim()
-    || (process.platform === "win32"
-      ? path.join(os.homedir(), "AppData", "Roaming")
-      : process.env.XDG_CONFIG_HOME?.trim() || path.join(os.homedir(), ".config"));
-  return path.join(base, "MauroPrime", "godot-mcp", "token");
-}
-
-async function readToken(): Promise<{ token: string; tokenFile: string }> {
-  const tokenFile = resolveTokenFile();
-  const explicit = process.env.GODOT_MCP_TOKEN?.trim();
-  const token = explicit || (await fs.readFile(tokenFile, "utf8")).trim();
-  if (token.length < 32) throw new Error(`Godot MCP token is unavailable or invalid: ${tokenFile}`);
-  return { token, tokenFile };
-}
 
 function requestJson(options: {
   port: number;
   method: "GET" | "POST";
   pathname: string;
-  token: string;
   body?: unknown;
   timeoutMs?: number;
 }): Promise<Record<string, unknown>> {
@@ -87,7 +67,6 @@ function requestJson(options: {
       method: options.method,
       timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       headers: {
-        "x-mauroprime-token": options.token,
         ...(body ? {
           "content-type": "application/json",
           "content-length": Buffer.byteLength(body),
@@ -120,26 +99,17 @@ function requestJson(options: {
 }
 
 async function providerGet(pathname: string, port: number) {
-  const { token, tokenFile } = await readToken();
-  return {
-    tokenFile,
-    result: await requestJson({ port, method: "GET", pathname, token }),
-  };
+  return await requestJson({ port, method: "GET", pathname });
 }
 
 async function providerTool(name: string, args: Record<string, unknown>, port: number, timeoutMs = DEFAULT_TIMEOUT_MS) {
-  const { token, tokenFile } = await readToken();
-  return {
-    tokenFile,
-    result: await requestJson({
-      port,
-      method: "POST",
-      pathname: "/tool",
-      token,
-      body: { name, args },
-      timeoutMs,
-    }),
-  };
+  return await requestJson({
+    port,
+    method: "POST",
+    pathname: "/tool",
+    body: { name, args },
+    timeoutMs,
+  });
 }
 
 function parseMcpText(result: Record<string, unknown>): unknown {
@@ -156,15 +126,15 @@ async function getStatus(port: number) {
   return {
     available: true,
     endpoint: `http://127.0.0.1:${port}`,
-    tokenFile: health.tokenFile,
-    health: health.result,
-    status: parseMcpText(status.result),
+    connectionScope: "localhost-only",
+    health,
+    status: parseMcpText(status),
   };
 }
 
 async function getCatalog(port: number, query?: string, includeSchemas = true) {
   const response = await providerGet("/tools", port);
-  const all = Array.isArray(response.result.tools) ? response.result.tools as Record<string, unknown>[] : [];
+  const all = Array.isArray(response.tools) ? response.tools as Record<string, unknown>[] : [];
   const normalized = query?.trim().toLowerCase();
   const visible = all.filter((tool) => {
     const name = typeof tool.name === "string" ? tool.name : "";
@@ -175,7 +145,7 @@ async function getCatalog(port: number, query?: string, includeSchemas = true) {
   });
   return {
     endpoint: `http://127.0.0.1:${port}`,
-    tokenFile: response.tokenFile,
+    connectionScope: "localhost-only",
     providerCount: all.length,
     safeCount: visible.length,
     tools: includeSchemas ? visible : visible.map(({ name, description }) => ({ name, description })),
@@ -193,7 +163,7 @@ async function safeQuery(toolName: string, args: Record<string, unknown>, port: 
   return {
     toolName,
     projectSafe: true,
-    result: parseMcpText(response.result),
+    result: parseMcpText(response),
   };
 }
 
@@ -202,7 +172,7 @@ export const godotToolModule: BridgeToolModule = {
   tools: [
     {
       name: "godot_mcp_status",
-      description: "Check the authenticated local MauroPrime Godot MCP provider, connected editor/runtime, project identity, mode, and tool count.",
+      description: "Check the localhost-only MauroPrime Godot MCP provider, connected editor/runtime, project identity, mode, and tool count.",
       inputSchema: {
         type: "object",
         properties: { port: { type: "number", default: DEFAULT_GODOT_HTTP_PORT, minimum: 1024, maximum: 65535 } },
@@ -224,7 +194,7 @@ export const godotToolModule: BridgeToolModule = {
     },
     {
       name: "godot_mcp_instance_list",
-      description: "Return the currently connected Godot project, stable project id, editor instance id, and runtime instance id from the authenticated provider.",
+      description: "Return the currently connected Godot project, stable project id, editor instance id, and runtime instance id from the local provider.",
       inputSchema: {
         type: "object",
         properties: { port: { type: "number", default: DEFAULT_GODOT_HTTP_PORT, minimum: 1024, maximum: 65535 } },
@@ -248,7 +218,7 @@ export const godotToolModule: BridgeToolModule = {
     },
     {
       name: "godot_screen_capture_save",
-      description: "Capture the connected Godot game viewport through the authenticated runtime, verify the PNG, and attach the original image for visual review.",
+      description: "Capture the connected Godot game viewport through the local runtime, verify the PNG, and attach the original image for visual review.",
       inputSchema: {
         type: "object",
         properties: {
@@ -268,7 +238,7 @@ export const godotToolModule: BridgeToolModule = {
         return {
           available: false,
           endpoint: `http://127.0.0.1:${parsed.port}`,
-          tokenFile: resolveTokenFile(),
+          connectionScope: "localhost-only",
           error: error instanceof Error ? error.message : String(error),
         };
       }

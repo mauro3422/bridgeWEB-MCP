@@ -5,15 +5,11 @@ import path from 'node:path';
 
 const repoRoot = path.resolve(new URL('..', import.meta.url).pathname.replace(/^\/(?:[A-Za-z]:)/, (value) => value.slice(1)));
 const tempRoot = path.join(repoRoot, '.tmp', 'godot-tools-test');
-const tokenFile = path.join(tempRoot, 'token');
 const capturePath = path.join(tempRoot, 'capture.png');
-const token = 'godot-test-token-0123456789abcdefghijklmnopqrstuvwxyz';
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2xkAAAAAASUVORK5CYII=', 'base64');
 
 await fs.rm(tempRoot, { recursive: true, force: true });
 await fs.mkdir(tempRoot, { recursive: true });
-await fs.writeFile(tokenFile, `${token}\n`, 'utf8');
-process.env.GODOT_MCP_TOKEN_FILE = tokenFile;
 
 const safeTools = [
   { name: 'read_scene', description: 'Read a Godot scene.', inputSchema: { type: 'object' } },
@@ -23,12 +19,6 @@ const advertisedMutation = { name: 'create_scene', description: 'Create a scene.
 
 const server = http.createServer(async (req, res) => {
   res.setHeader('content-type', 'application/json');
-  if (req.headers['x-mauroprime-token'] !== token) {
-    res.writeHead(401);
-    res.end(JSON.stringify({ error: 'Unauthorized' }));
-    return;
-  }
-
   if (req.method === 'GET' && req.url === '/health') {
     res.end(JSON.stringify({ server: 'godot-mcp-server', version: 'test', tool_count: 5 }));
     return;
@@ -119,7 +109,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    status: 'authenticated',
+    status: 'localhost-only',
     safeTools: catalog.tools.map((tool) => tool.name),
     mutationBlocked: true,
     capture: { bytes: capture.bytes, sha256: capture.sha256 },

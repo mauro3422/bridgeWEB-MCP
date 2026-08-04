@@ -1,3 +1,10 @@
+## 0.6.59 - 2026-08-04
+
+- Removed the Godot provider token file, HTTP auth header, and credential-loading path after the single-user localhost deployment proved the layer unnecessary.
+- Godot tools now connect directly to `127.0.0.1:6506` while preserving the provider observe catalog and Bridge's independent read-only allowlist.
+- Updated the Godot regression to prove credential-free localhost access, mutation blocking, verified PNG capture, and unchanged project identity reporting.
+- Updated three vulnerable runtime dependencies; `npm audit --omit=dev` now reports zero findings.
+
 ## 0.6.58 - 2026-08-04
 
 - Added an authenticated Godot provider family for ChatGPT Web: `godot_mcp_status`, `godot_mcp_tool_list`, `godot_mcp_instance_list`, `godot_mcp_query`, and `godot_screen_capture_save`.
