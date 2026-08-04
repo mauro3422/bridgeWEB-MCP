@@ -55,7 +55,7 @@ const destructiveToolNames = new Set([
   "image_asset_save", "image_character_views_prepare",
   "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_finish", "binary_upload_abort",
   "blender_open", "blender_viewport_screenshot", "blender_review_bundle", "blender_execute_code", "blender_batch_script", "blender_store_reference_image", "blender_setup_character_references",
-  "godot_screen_capture_save",
+  "godot_mcp_action", "godot_screen_capture_save",
 ]);
 
 const aliasTargets = new Map<string, string>([
@@ -71,7 +71,7 @@ const fallbackToolNames = new Set(["bridge_tool_query", "bridge_tool_action"]);
 const aggregatorToolNames = new Set(["bridge_metrics_query", "bridge_verify_all", "bridge_health", "bridge_self_check", "skill_bootstrap"]);
 const providerProxyToolNames = new Set([
   "roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list", "roblox_mcp_query", "roblox_mcp_action",
-  "godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list", "godot_mcp_query",
+  "godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list", "godot_mcp_query", "godot_mcp_action",
 ]);
 const protectedToolNames = new Set([
   "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query", "bridge_tool_action", "bridge_connector_catalog_compare", "project_context_load",
@@ -156,14 +156,19 @@ const toolUsageGuidance = new Map<string, BridgeToolUsageGuidance>([
     recovery: [{ code: "provider-unavailable", toolName: "roblox_mcp_status", instruction: "Recover the live Roblox MCP connection and re-inspect the schema before mutating." }],
   }],
   ["godot_mcp_query", {
-    prerequisites: ["Inspect the authenticated live Godot provider catalog and connected project identity before dispatch."],
+    prerequisites: ["Inspect the live localhost Godot provider catalog and connected project identity before dispatch."],
     preflightTools: ["godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list"],
-    recovery: [{ code: "provider-unavailable", toolName: "godot_mcp_status", instruction: "Start or recover the local Godot provider and verify the token-backed editor connection before retrying." }],
+    recovery: [{ code: "provider-unavailable", toolName: "godot_mcp_status", instruction: "Start or recover the local Godot provider and verify the editor connection before retrying." }],
+  }],
+  ["godot_mcp_action", {
+    prerequisites: ["Inspect the live tool schema and connected project identity. This dedicated action does not require a separate user confirmation for each Godot operation."],
+    preflightTools: ["godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list"],
+    recovery: [{ code: "provider-unavailable", toolName: "godot_mcp_status", instruction: "Start the full local Godot provider, connect the intended project, and retry the exact action." }],
   }],
   ["godot_screen_capture_save", {
     prerequisites: ["Verify a runtime instance is connected before requesting a capture."],
     preflightTools: ["godot_mcp_status", "godot_mcp_instance_list"],
-    recovery: [{ code: "provider-unavailable", toolName: "godot_mcp_status", instruction: "Run the Godot project with the MCPRuntime autoload and verify the authenticated runtime connection." }],
+    recovery: [{ code: "provider-unavailable", toolName: "godot_mcp_status", instruction: "Run the Godot project with the MCPRuntime autoload and verify the local runtime connection." }],
   }],
   ["roblox_asset_upload", {
     prerequisites: ["Configure ROBLOX_OPEN_CLOUD_API_KEY with Assets Read/Write permission for the exact creator.", "Verify local file hashes and repeat the exact creator id before upload."],

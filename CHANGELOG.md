@@ -1,3 +1,10 @@
+## 0.6.60 - 2026-08-04
+
+- Added `godot_mcp_action` for the 36 non-read-only tools in the live Godot provider catalog.
+- `godot_mcp_tool_list` now returns all live Godot tools with `read-only` or `action` classification instead of hiding authoring operations.
+- Godot action dispatch does not require a separate user confirmation for each operation; exact live tool names, schemas, upstream technical arguments, and automatic readback remain in force.
+- Updated Bridge regressions and generated docs for the 134-tool registry.
+
 ## 0.6.59 - 2026-08-04
 
 - Removed the Godot provider token file, HTTP auth header, and credential-loading path after the single-user localhost deployment proved the layer unnecessary.

@@ -39,18 +39,6 @@ export const GODOT_READ_ONLY_TOOL_NAMES = new Set([
   "map_project",
 ]);
 
-const NEVER_DISPATCH = new Set([
-  "create_scene",
-  "edit_script",
-  "run_scene",
-  "send_input",
-  "set_project_setting",
-  "add_node",
-  "delete_node",
-  "set_node_property",
-]);
-
-
 function requestJson(options: {
   port: number;
   method: "GET" | "POST";
@@ -132,29 +120,51 @@ async function getStatus(port: number) {
   };
 }
 
+type GodotToolClassification = "read-only" | "action";
+type ClassifiedGodotTool = Record<string, unknown> & {
+  name: string;
+  description: string;
+  classification: GodotToolClassification;
+};
+
+function classifyGodotTool(name: string): GodotToolClassification {
+  return GODOT_READ_ONLY_TOOL_NAMES.has(name) ? "read-only" : "action";
+}
+
 async function getCatalog(port: number, query?: string, includeSchemas = true) {
   const response = await providerGet("/tools", port);
   const all = Array.isArray(response.tools) ? response.tools as Record<string, unknown>[] : [];
   const normalized = query?.trim().toLowerCase();
-  const visible = all.filter((tool) => {
-    const name = typeof tool.name === "string" ? tool.name : "";
-    const description = typeof tool.description === "string" ? tool.description : "";
-    return GODOT_READ_ONLY_TOOL_NAMES.has(name)
-      && !NEVER_DISPATCH.has(name)
-      && (!normalized || `${name} ${description}`.toLowerCase().includes(normalized));
-  });
+  const visible: ClassifiedGodotTool[] = all
+    .filter((tool) => {
+      const name = typeof tool.name === "string" ? tool.name : "";
+      const description = typeof tool.description === "string" ? tool.description : "";
+      return !normalized || `${name} ${description}`.toLowerCase().includes(normalized);
+    })
+    .map((tool) => {
+      const name = typeof tool.name === "string" ? tool.name : "";
+      const description = typeof tool.description === "string" ? tool.description : "";
+      return { ...tool, name, description, classification: classifyGodotTool(name) };
+    });
+  const readOnlyCount = visible.filter((tool) => tool.classification === "read-only").length;
+  const actionCount = visible.length - readOnlyCount;
   return {
     endpoint: `http://127.0.0.1:${port}`,
     connectionScope: "localhost-only",
     providerCount: all.length,
-    safeCount: visible.length,
-    tools: includeSchemas ? visible : visible.map(({ name, description }) => ({ name, description })),
+    toolCount: visible.length,
+    readOnlyCount,
+    actionCount,
+    safeCount: readOnlyCount,
+    tools: includeSchemas
+      ? visible
+      : visible.map(({ name, description, classification }) => ({ name, description, classification })),
   };
 }
 
 async function safeQuery(toolName: string, args: Record<string, unknown>, port: number, timeoutMs: number) {
-  if (NEVER_DISPATCH.has(toolName) || !GODOT_READ_ONLY_TOOL_NAMES.has(toolName)) {
-    throw new Error(`Godot tool '${toolName}' is not in the MauroPrime read-only allowlist.`);
+  if (!GODOT_READ_ONLY_TOOL_NAMES.has(toolName)) {
+    throw new Error(`Godot tool '${toolName}' is not classified read-only; use godot_mcp_action.`);
   }
   const catalog = await getCatalog(port, toolName, true);
   const exact = catalog.tools.find((tool) => tool.name === toolName);
@@ -162,7 +172,22 @@ async function safeQuery(toolName: string, args: Record<string, unknown>, port: 
   const response = await providerTool(toolName, args, port, timeoutMs);
   return {
     toolName,
-    projectSafe: true,
+    classification: "read-only",
+    result: parseMcpText(response),
+  };
+}
+
+async function actionQuery(toolName: string, args: Record<string, unknown>, port: number, timeoutMs: number) {
+  if (GODOT_READ_ONLY_TOOL_NAMES.has(toolName)) {
+    throw new Error(`Godot tool '${toolName}' is classified read-only; use godot_mcp_query.`);
+  }
+  const catalog = await getCatalog(port, toolName, true);
+  const exact = catalog.tools.find((tool) => tool.name === toolName);
+  if (!exact) throw new Error(`Godot tool '${toolName}' is not exposed by the current live provider catalog.`);
+  const response = await providerTool(toolName, args, port, timeoutMs);
+  return {
+    toolName,
+    classification: "action",
     result: parseMcpText(response),
   };
 }
@@ -181,7 +206,7 @@ export const godotToolModule: BridgeToolModule = {
     },
     {
       name: "godot_mcp_tool_list",
-      description: "List the live Godot provider tools that also pass MauroPrime Bridge's independent read-only allowlist.",
+      description: "List every live Godot provider tool and classify each as read-only or action for uninterrupted local authoring loops.",
       inputSchema: {
         type: "object",
         properties: {
@@ -204,6 +229,21 @@ export const godotToolModule: BridgeToolModule = {
     {
       name: "godot_mcp_query",
       description: "Invoke one live Godot tool only when both the provider catalog and MauroPrime's independent allowlist classify it as read-only.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          toolName: { type: "string" },
+          arguments: { type: "object", additionalProperties: true, default: {} },
+          port: { type: "number", default: DEFAULT_GODOT_HTTP_PORT, minimum: 1024, maximum: 65535 },
+          timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS, minimum: 1000, maximum: 120000 },
+        },
+        required: ["toolName"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "godot_mcp_action",
+      description: "Invoke one live non-read-only Godot authoring, project-control, or playtest tool from the localhost provider. No per-operation user prompt is required; the caller must still supply the exact live tool name and arguments.",
       inputSchema: {
         type: "object",
         properties: {
@@ -276,6 +316,15 @@ export const godotToolModule: BridgeToolModule = {
         timeoutMs: z.number().int().min(1000).max(120000).default(DEFAULT_TIMEOUT_MS),
       }).parse(raw);
       return await safeQuery(parsed.toolName, parsed.arguments, parsed.port, parsed.timeoutMs);
+    },
+    godot_mcp_action: async (raw) => {
+      const parsed = z.object({
+        toolName: z.string().min(1),
+        arguments: z.record(z.string(), z.unknown()).default({}),
+        port: z.number().int().min(1024).max(65535).default(DEFAULT_GODOT_HTTP_PORT),
+        timeoutMs: z.number().int().min(1000).max(120000).default(DEFAULT_TIMEOUT_MS),
+      }).parse(raw);
+      return await actionQuery(parsed.toolName, parsed.arguments, parsed.port, parsed.timeoutMs);
     },
     godot_screen_capture_save: async (raw) => {
       const parsed = z.object({
