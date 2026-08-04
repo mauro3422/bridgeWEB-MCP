@@ -9,6 +9,7 @@ import { coreToolModule } from "./tools/core-tools.js";
 import { fileNavigationToolModule } from "./tools/file-navigation.js";
 import { fileWritingToolModule } from "./tools/file-writing.js";
 import { gitToolModule } from "./tools/git-tools.js";
+import { godotToolModule } from "./tools/godot-tools.js";
 import { imageToolModule } from "./tools/image-tools.js";
 import { metricsToolModule } from "./tools/metrics-tools.js";
 import { mssrObservatoryToolModule } from "./tools/mssr-observatory-tools.js";
@@ -39,6 +40,7 @@ const readOnlyToolNames = new Set([
   "skill_catalog", "skill_recommend", "skill_route_audit", "skill_route_vocabulary", "skill_route_plan", "skill_bootstrap", "skill_load", "roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list", "roblox_mcp_query",
   "binary_file_info", "binary_file_read_chunk", "binary_upload_status", "image_file_attach",
   "blender_status", "blender_scene_info", "blender_character_loop_status",
+  "godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list", "godot_mcp_query",
   "whiteboard_latest_capture", "whiteboard_capture_list",
   "python_validate", "python_symbols", "python_impact_analysis", "python_import_graph", "python_call_graph", "python_dead_code", "python_test_plan", "pytest_testmon",
 ]);
@@ -53,6 +55,7 @@ const destructiveToolNames = new Set([
   "image_asset_save", "image_character_views_prepare",
   "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_finish", "binary_upload_abort",
   "blender_open", "blender_viewport_screenshot", "blender_review_bundle", "blender_execute_code", "blender_batch_script", "blender_store_reference_image", "blender_setup_character_references",
+  "godot_screen_capture_save",
 ]);
 
 const aliasTargets = new Map<string, string>([
@@ -66,7 +69,10 @@ const aliasTargets = new Map<string, string>([
 
 const fallbackToolNames = new Set(["bridge_tool_query", "bridge_tool_action"]);
 const aggregatorToolNames = new Set(["bridge_metrics_query", "bridge_verify_all", "bridge_health", "bridge_self_check", "skill_bootstrap"]);
-const providerProxyToolNames = new Set(["roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list", "roblox_mcp_query", "roblox_mcp_action"]);
+const providerProxyToolNames = new Set([
+  "roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list", "roblox_mcp_query", "roblox_mcp_action",
+  "godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list", "godot_mcp_query",
+]);
 const protectedToolNames = new Set([
   "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query", "bridge_tool_action", "bridge_connector_catalog_compare", "project_context_load",
   "skill_route_plan", "skill_bootstrap", "skill_load", "mssr_trace_record", "mssr_trace_evidence", "bridge_verify_all", "roblox_place_save",
@@ -148,6 +154,16 @@ const toolUsageGuidance = new Map<string, BridgeToolUsageGuidance>([
     prerequisites: ["Inspect the live schema, verify the active Studio and repeat the exact remote tool name in confirmToolName."],
     preflightTools: ["roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list"],
     recovery: [{ code: "provider-unavailable", toolName: "roblox_mcp_status", instruction: "Recover the live Roblox MCP connection and re-inspect the schema before mutating." }],
+  }],
+  ["godot_mcp_query", {
+    prerequisites: ["Inspect the authenticated live Godot provider catalog and connected project identity before dispatch."],
+    preflightTools: ["godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list"],
+    recovery: [{ code: "provider-unavailable", toolName: "godot_mcp_status", instruction: "Start or recover the local Godot provider and verify the token-backed editor connection before retrying." }],
+  }],
+  ["godot_screen_capture_save", {
+    prerequisites: ["Verify a runtime instance is connected before requesting a capture."],
+    preflightTools: ["godot_mcp_status", "godot_mcp_instance_list"],
+    recovery: [{ code: "provider-unavailable", toolName: "godot_mcp_status", instruction: "Run the Godot project with the MCPRuntime autoload and verify the authenticated runtime connection." }],
   }],
   ["roblox_asset_upload", {
     prerequisites: ["Configure ROBLOX_OPEN_CLOUD_API_KEY with Assets Read/Write permission for the exact creator.", "Verify local file hashes and repeat the exact creator id before upload."],
@@ -421,6 +437,7 @@ const defaultToolModules: readonly BridgeToolModule[] = [
   codeGraphToolModule,
   pythonToolModule,
   blenderToolModule,
+  godotToolModule,
   whiteboardToolModule,
   bridgeWorkflowToolModule,
 ];

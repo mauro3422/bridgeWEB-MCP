@@ -1,3 +1,11 @@
+## 0.6.58 - 2026-08-04
+
+- Added an authenticated Godot provider family for ChatGPT Web: `godot_mcp_status`, `godot_mcp_tool_list`, `godot_mcp_instance_list`, `godot_mcp_query`, and `godot_screen_capture_save`.
+- Godot dispatch now requires both the live provider catalog and an independent Bridge read-only allowlist; mutation tools such as `create_scene`, `edit_script`, `run_scene`, and `send_input` are denied even if a future provider exposes them.
+- Godot captures preserve and verify the original PNG bytes, dimensions, size, and SHA-256 before attaching them to the tool result.
+- Provider health reports target project, stable project id, editor/runtime instance ids, authentication state, and observe/full mode without exposing the local token.
+- Added `godot` to MSSR's canonical domain vocabulary with dedicated project-inspection, visual-review, and runtime-debugging skills and regression fixtures that keep Godot and Blender routes separate.
+
 ## 0.6.57 - 2026-08-03
 
 - Persistent process continuation tools now accept optional `traceId` control metadata across write/read/stop and the `work_feed`/`work_peek`/`work_finish` aliases, preserving MSSR attribution through the complete terminal lifecycle without forwarding control metadata to the child process.
