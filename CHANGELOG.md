@@ -1,3 +1,11 @@
+## 0.6.61 - 2026-08-04
+
+- Added `blender_focus_review`, a three-shot "look where I point" workflow that captures the current viewport, a medium context view, and a close zoom from selected edit components, selected objects, the active object, or the 3D cursor.
+- Focus reviews persist PNG hashes and a JSON manifest, attach bounded previews to ChatGPT, and restore the original Blender viewport after capture.
+- Added a versioned Blender 5.2 addon installer so the localhost bridge loads automatically for normal interactive Blender sessions while remaining inactive in background/batch runs.
+- Updated the Blender sidebar instructions, integration docs, generated tool catalog, and regressions for the 135-tool registry.
+
+
 ## 0.6.60 - 2026-08-04
 
 - Added `godot_mcp_action` for the 36 non-read-only tools in the live Godot provider catalog.

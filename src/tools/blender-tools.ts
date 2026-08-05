@@ -16,6 +16,7 @@ const MAX_CODE_CHARS = 100_000;
 const MAX_REFERENCE_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_REFERENCE_BASE64_CHARS = 12 * 1024 * 1024;
 const MAX_REVIEW_PREVIEW_BYTES = 4 * 1024 * 1024;
+const MAX_FOCUS_PREVIEW_TOTAL_BYTES = 10 * 1024 * 1024;
 const REVIEW_VIEW_NAMES = [
   "front",
   "right",
@@ -53,6 +54,40 @@ async function pathExists(filePath: string): Promise<boolean> {
     return false;
   }
 }
+async function blenderAutostartStatus(versionLine: string | null): Promise<Record<string, unknown>> {
+  const match = versionLine?.match(/Blender\s+(\d+)\.(\d+)/i);
+  const appData = process.env.APPDATA;
+  if (!match || !appData) {
+    return { supported: false, installed: false, reason: "Blender version or APPDATA could not be resolved" };
+  }
+  const versionFolder = `${match[1]}.${match[2]}`;
+  const addonPath = path.join(
+    appData,
+    "Blender Foundation",
+    "Blender",
+    versionFolder,
+    "scripts",
+    "addons",
+    "mauro_blender_bridge",
+    "__init__.py",
+  );
+  try {
+    const content = await fs.readFile(addonPath, "utf8");
+    return {
+      supported: true,
+      installed: content.includes("MAURO_BLENDER_BRIDGE_ADDON=1"),
+      mode: "enabled-addon",
+      addonPath,
+      versionFolder,
+      bytes: Buffer.byteLength(content, "utf8"),
+      sourceCurrent: content.toLowerCase().includes(bridgeIntegrationPath("mauro_blender_bridge.py").toLowerCase()),
+    };
+  } catch {
+    return { supported: true, installed: false, mode: "enabled-addon", addonPath, versionFolder };
+  }
+}
+
+
 
 function sha256(buffer: Uint8Array): string {
   return crypto.createHash("sha256").update(buffer).digest("hex");
@@ -184,6 +219,7 @@ async function blenderStatus(port: number) {
   const executable = blenderExecutable();
   let installed = false;
   let version: Record<string, unknown> | null = null;
+  let detectedVersionLine: string | null = null;
   try {
     await ensureFile(executable, "Blender executable");
     installed = true;
@@ -191,6 +227,7 @@ async function blenderStatus(port: number) {
     const versionLine = String(processResult.stdout ?? "")
       .split(/\r?\n/)
       .find((line) => line.trim().startsWith("Blender ")) ?? null;
+    detectedVersionLine = versionLine;
     version = {
       ok: processResult.code === 0 && processResult.timedOut !== true,
       code: processResult.code,
@@ -212,10 +249,13 @@ async function blenderStatus(port: number) {
     connection = { error: String(error) };
   }
 
+  const autostart = await blenderAutostartStatus(detectedVersionLine);
+
   return {
     installed,
     executable,
     version,
+    autostart,
     interactive: {
       connected,
       host: DEFAULT_BLENDER_HOST,
@@ -499,6 +539,111 @@ async function createReviewBundle(args: {
   };
 }
 
+async function createFocusReview(args: {
+  outputDir: string;
+  filePrefix?: string;
+  focusMode: "auto" | "selection" | "active-object" | "cursor";
+  maxSize: number;
+  contextScale: number;
+  zoomScale: number;
+  includePreview: boolean;
+  overwrite: boolean;
+  port: number;
+  timeoutMs: number;
+}) {
+  const outputDir = resolveToolPath(args.outputDir, { access: "write" });
+  await fs.mkdir(outputDir, { recursive: true });
+  const scriptPath = bridgeIntegrationPath("create_focus_review.py");
+  await ensureFile(scriptPath, "Blender focus-review script");
+
+  const filePrefix = args.filePrefix?.trim()
+    || `blender-focus-${new Date().toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-")}`;
+  const config = {
+    output_dir: outputDir,
+    file_prefix: filePrefix,
+    focus_mode: args.focusMode,
+    max_size: args.maxSize,
+    context_scale: args.contextScale,
+    zoom_scale: args.zoomScale,
+    overwrite: args.overwrite,
+  };
+  const encodedConfig = Buffer.from(JSON.stringify(config), "utf8").toString("base64");
+  const code = [
+    "import base64, json, runpy",
+    `config = json.loads(base64.b64decode(${JSON.stringify(encodedConfig)}).decode('utf-8'))`,
+    `result = runpy.run_path(${JSON.stringify(scriptPath)})['create_focus_review'](config)`,
+  ].join("\n");
+
+  const commandResult = await sendBlenderCommand(
+    "execute_code",
+    { code },
+    { port: args.port, timeoutMs: args.timeoutMs },
+  );
+  const commandObject = commandResult && typeof commandResult === "object"
+    ? commandResult as Record<string, unknown>
+    : null;
+  const focusReview = commandObject?.result && typeof commandObject.result === "object"
+    ? commandObject.result as Record<string, unknown>
+    : null;
+  if (!focusReview || focusReview.stage !== "focus_review_created") {
+    throw new Error("Blender did not return a valid focus-review package");
+  }
+
+  const manifest = focusReview.manifest && typeof focusReview.manifest === "object"
+    ? focusReview.manifest as Record<string, unknown>
+    : null;
+  const manifestPath = typeof manifest?.path === "string" ? manifest.path : null;
+  if (!manifestPath) throw new Error("Focus review did not return a manifest path");
+  await ensureFile(manifestPath, "Blender focus-review manifest");
+
+  const captures = focusReview.captures && typeof focusReview.captures === "object"
+    ? focusReview.captures as Record<string, unknown>
+    : {};
+  const previews: Array<Record<string, unknown>> = [];
+  const imageAttachments: Array<Record<string, unknown>> = [];
+  let attachedBytes = 0;
+
+  for (const role of ["general", "context", "zoom"] as const) {
+    const capture = captures[role] && typeof captures[role] === "object"
+      ? captures[role] as Record<string, unknown>
+      : null;
+    const capturePath = typeof capture?.path === "string" ? capture.path : null;
+    if (!capturePath) throw new Error(`Focus review did not return the ${role} capture path`);
+    await ensureFile(capturePath, `Blender focus-review ${role} image`);
+    const stat = await fs.stat(capturePath);
+    const expectedSha256 = typeof capture?.sha256 === "string" ? capture.sha256 : null;
+    const item: Record<string, unknown> = {
+      role,
+      path: capturePath,
+      mimeType: "image/png",
+      bytes: stat.size,
+      sha256: expectedSha256,
+      attachedToToolResult: false,
+    };
+
+    if (args.includePreview && attachedBytes + stat.size <= MAX_FOCUS_PREVIEW_TOTAL_BYTES) {
+      const data = await fs.readFile(capturePath);
+      const actualSha256 = sha256(data);
+      if (expectedSha256 && actualSha256 !== expectedSha256) {
+        throw new Error(`Focus-review ${role} image hash mismatch`);
+      }
+      attachedBytes += data.length;
+      item.sha256 = actualSha256;
+      item.attachedToToolResult = true;
+      imageAttachments.push({ type: "image", mimeType: "image/png", data: data.toString("base64") });
+    } else if (args.includePreview) {
+      item.warning = `Preview attachment budget exceeded ${MAX_FOCUS_PREVIEW_TOTAL_BYTES} bytes`;
+    }
+    previews.push(item);
+  }
+
+  return {
+    focusReview,
+    previews,
+    __bridgeImages: imageAttachments,
+  };
+}
+
 export const blenderToolModule: BridgeToolModule = {
   name: "blender",
   tools: [
@@ -551,6 +696,28 @@ export const blenderToolModule: BridgeToolModule = {
         additionalProperties: false,
       },
     },
+    {
+      name: "blender_focus_review",
+      description: "Capture what Mauro is pointing at in Blender as three comparable PNGs: the current viewport, a medium context view, and a close zoom. Auto-focuses selected edit components, selected objects, the active object, or the 3D cursor, writes a manifest with hashes, and restores the original viewport.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          outputDir: { type: "string", description: "Allowed directory where the three PNGs and focus manifest will be written." },
+          filePrefix: { type: "string", description: "Optional stable prefix. When omitted, a timestamped prefix is generated." },
+          focusMode: { type: "string", enum: ["auto", "selection", "active-object", "cursor"], default: "auto" },
+          maxSize: { type: "number", default: 1200, minimum: 200, maximum: 4096 },
+          contextScale: { type: "number", default: 1, minimum: 0.25, maximum: 4 },
+          zoomScale: { type: "number", default: 1, minimum: 0.25, maximum: 4 },
+          includePreview: { type: "boolean", default: true },
+          overwrite: { type: "boolean", default: false },
+          port: { type: "number", default: DEFAULT_BLENDER_PORT, minimum: 1024, maximum: 65535 },
+          timeoutMs: { type: "number", default: 180000, minimum: 1000, maximum: 600000 },
+        },
+        required: ["outputDir"],
+        additionalProperties: false,
+      },
+    },
+
     {
       name: "blender_review_bundle",
       description: "Create a multi-view Blender review package in one call: orthographic renders, a contact sheet, and a manifest with geometry, materials, visibility, collections, rig, animation, diagnostics, hashes, and restored-scene confirmation.",
@@ -693,6 +860,22 @@ export const blenderToolModule: BridgeToolModule = {
       const stat = await fs.stat(outputPath);
       return { result, outputPath, bytes: stat.size };
     },
+    blender_focus_review: async (raw) => {
+      const parsed = z.object({
+        outputDir: z.string(),
+        filePrefix: z.string().min(1).max(96).optional(),
+        focusMode: z.enum(["auto", "selection", "active-object", "cursor"]).default("auto"),
+        maxSize: z.number().int().min(200).max(4096).default(1200),
+        contextScale: z.number().min(0.25).max(4).default(1),
+        zoomScale: z.number().min(0.25).max(4).default(1),
+        includePreview: z.boolean().default(true),
+        overwrite: z.boolean().default(false),
+        port: z.number().int().min(1024).max(65535).default(DEFAULT_BLENDER_PORT),
+        timeoutMs: z.number().int().min(1000).max(600000).default(DEFAULT_SOCKET_TIMEOUT_MS),
+      }).parse(raw);
+      return await createFocusReview(parsed);
+    },
+
     blender_review_bundle: async (raw) => {
       const parsed = z.object({
         outputDir: z.string(),

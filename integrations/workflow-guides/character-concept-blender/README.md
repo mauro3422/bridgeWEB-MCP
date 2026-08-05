@@ -23,7 +23,9 @@ image_character_views_prepare
 blender_setup_character_references
   -> assets/concepts/<slug>/blender/<slug>_references.blend
 blender_viewport_screenshot
-  -> initial visual alignment review
+  -> exact current viewport review
+blender_focus_review
+  -> general + context + zoom from the selected detail or 3D Cursor
 blender_review_bundle
   -> multi-angle renders + contact sheet + geometry/rig/animation context
 ```

@@ -362,7 +362,11 @@ def create_review_bundle(config: dict) -> dict:
     }
     saved_hide_render = {obj.name: bool(obj.hide_render) for obj in scene.objects}
     selected_before = [obj.name for obj in bpy.context.selected_objects]
-    active_before = bpy.context.view_layer.objects.active.name if bpy.context.view_layer.objects.active else None
+    active_object_before = bpy.context.view_layer.objects.active
+    active_before = active_object_before.name if active_object_before else None
+    mode_before = active_object_before.mode if active_object_before else "OBJECT"
+    if active_object_before is not None and mode_before != "OBJECT":
+        bpy.ops.object.mode_set(mode="OBJECT")
 
     temporary_collection = bpy.data.collections.get(TEMP_COLLECTION_NAME)
     if temporary_collection is not None:
@@ -498,15 +502,21 @@ def create_review_bundle(config: dict) -> dict:
             for obj in list(temporary_collection.objects):
                 temporary_collection.objects.unlink(obj)
             bpy.data.collections.remove(temporary_collection)
+        current_active = bpy.context.view_layer.objects.active
+        if current_active is not None and current_active.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
         bpy.ops.object.select_all(action="DESELECT")
         for name in selected_before:
             obj = bpy.data.objects.get(name)
             if obj is not None and obj.name in bpy.context.view_layer.objects:
                 obj.select_set(True)
+        restored_active = None
         if active_before:
-            active = bpy.data.objects.get(active_before)
-            if active is not None and active.name in bpy.context.view_layer.objects:
-                bpy.context.view_layer.objects.active = active
+            restored_active = bpy.data.objects.get(active_before)
+            if restored_active is not None and restored_active.name in bpy.context.view_layer.objects:
+                bpy.context.view_layer.objects.active = restored_active
+        if restored_active is not None and mode_before != "OBJECT":
+            bpy.ops.object.mode_set(mode=mode_before)
         bpy.context.view_layer.update()
         if "result" in locals():
             result["restoration"]["completed"] = True

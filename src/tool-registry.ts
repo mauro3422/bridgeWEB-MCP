@@ -54,7 +54,7 @@ const destructiveToolNames = new Set([
   "roblox_asset_upload",
   "image_asset_save", "image_character_views_prepare",
   "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_finish", "binary_upload_abort",
-  "blender_open", "blender_viewport_screenshot", "blender_review_bundle", "blender_execute_code", "blender_batch_script", "blender_store_reference_image", "blender_setup_character_references",
+  "blender_open", "blender_viewport_screenshot", "blender_focus_review", "blender_review_bundle", "blender_execute_code", "blender_batch_script", "blender_store_reference_image", "blender_setup_character_references",
   "godot_mcp_action", "godot_screen_capture_save",
 ]);
 
@@ -175,6 +175,12 @@ const toolUsageGuidance = new Map<string, BridgeToolUsageGuidance>([
     preflightTools: ["binary_file_info", "roblox_mcp_status"],
     recovery: [{ code: "missing-capability", instruction: "Create or configure a Roblox Open Cloud API key with Assets Read/Write permission; never pass the secret as a tool argument." }],
   }],
+  ["blender_focus_review", {
+    prerequisites: ["Leave the intended detail selected in Edit Mode, select the target object, or place the 3D Cursor where the review should focus."],
+    preflightTools: ["blender_status", "blender_scene_info"],
+    recovery: [{ code: "provider-unavailable", toolName: "blender_status", instruction: "Open Blender with the Mauro local kit and verify the interactive bridge before retrying the focus review." }],
+  }],
+
   ["blender_execute_code", {
     prerequisites: ["Verify the interactive Blender bridge is connected before executing code."],
     preflightTools: ["blender_status", "blender_scene_info"],

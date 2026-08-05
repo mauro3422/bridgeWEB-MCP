@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Mauro Blender Bridge",
     "author": "MauroPrime",
-    "version": (0, 1, 0),
+    "version": (0, 2, 0),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > Mauro Bridge",
     "description": "Local-only bridge used by bridge-mcp to inspect and automate Blender",
@@ -83,7 +83,7 @@ def _scene_info(object_limit=100):
 
     active = bpy.context.view_layer.objects.active
     return {
-        "bridge": {"name": "mauro-blender-bridge", "version": "0.1.0"},
+        "bridge": {"name": "mauro-blender-bridge", "version": "0.2.0"},
         "blender_version": bpy.app.version_string,
         "file": bpy.data.filepath or None,
         "scene": scene.name,
@@ -258,7 +258,7 @@ class MauroBlenderBridgeServer:
             result = {
                 "ok": True,
                 "bridge": "mauro-blender-bridge",
-                "version": "0.1.0",
+                "version": "0.2.0",
                 "blender_version": bpy.app.version_string,
                 "file": bpy.data.filepath or None,
             }
@@ -329,6 +329,9 @@ class MAUROBRIDGE_PT_Panel(bpy.types.Panel):
         else:
             layout.label(text="Bridge disconnected", icon="UNLINKED")
             layout.operator("mauro_bridge.start_server", icon="PLAY")
+        layout.separator()
+        layout.label(text="Point with selection or 3D Cursor", icon="RESTRICT_SELECT_OFF")
+        layout.label(text="Then ask: mira donde apunto", icon="VIEWZOOM")
 
 
 _CLASSES = (
@@ -336,6 +339,35 @@ _CLASSES = (
     MAUROBRIDGE_OT_StopServer,
     MAUROBRIDGE_PT_Panel,
 )
+
+
+def _auto_start_server():
+    if bpy.app.background:
+        return None
+    scene = bpy.context.scene
+    if scene is None or not hasattr(scene, "mauro_bridge_port"):
+        return 0.5
+    server = getattr(bpy.types, "mauro_bridge_server", None)
+    if server and server.running:
+        scene.mauro_bridge_running = True
+        return None
+    try:
+        port = int(os.environ.get("BRIDGE_BLENDER_PORT", scene.mauro_bridge_port or DEFAULT_PORT))
+        scene.mauro_bridge_port = port
+        server = MauroBlenderBridgeServer(port=port)
+        server.start()
+        bpy.types.mauro_bridge_server = server
+        scene.mauro_bridge_running = True
+        print(f"Mauro Blender Bridge autostart complete on 127.0.0.1:{port}")
+    except OSError as exc:
+        scene.mauro_bridge_running = False
+        print(f"Mauro Blender Bridge autostart could not bind: {exc!r}")
+    except Exception as exc:
+        scene.mauro_bridge_running = False
+        traceback.print_exc()
+        print(f"Mauro Blender Bridge autostart failed: {exc!r}")
+    return None
+
 
 
 def register():
@@ -351,9 +383,13 @@ def register():
         max=65535,
     )
     bpy.types.Scene.mauro_bridge_running = bpy.props.BoolProperty(default=False)
+    if not bpy.app.background and not bpy.app.timers.is_registered(_auto_start_server):
+        bpy.app.timers.register(_auto_start_server, first_interval=0.5, persistent=True)
 
 
 def unregister():
+    if bpy.app.timers.is_registered(_auto_start_server):
+        bpy.app.timers.unregister(_auto_start_server)
     server = getattr(bpy.types, "mauro_bridge_server", None)
     if server:
         server.stop()

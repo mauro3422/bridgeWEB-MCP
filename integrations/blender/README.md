@@ -23,10 +23,44 @@ Available interactive tools:
 - `blender_open`
 - `blender_scene_info`
 - `blender_viewport_screenshot`
+- `blender_focus_review`
+- `blender_review_bundle`
 - `blender_execute_code`
 
 The Blender sidebar also contains **Mauro Bridge**, where the local server can
 be stopped or started manually.
+
+### Persistent local kit
+
+Install and enable the persistent interactive addon once:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-blender-kit.ps1
+```
+
+Normal Blender windows then load the versioned Bridge source automatically on
+`127.0.0.1:9877`. Background and batch Blender runs load the addon registration
+without starting its server, so export, validation, and render scripts do not
+compete for the interactive port.
+
+Rollback is explicit:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-blender-kit.ps1 -Uninstall
+```
+
+### "Look where I point" focus review
+
+Point to a problem by selecting an object, or enter Edit Mode and select the
+relevant vertices/edge/face. The 3D Cursor is the fallback when nothing is
+selected. `blender_focus_review` then creates:
+
+1. the exact current viewport for retrospective context;
+2. a medium view around the indicated area;
+3. a close zoom using the same viewing direction.
+
+The tool restores the original viewport and writes a JSON manifest with the
+focus source, object names, camera state, PNG hashes, and restoration result.
 
 ### Batch/headless
 
