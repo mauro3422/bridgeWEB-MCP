@@ -105,14 +105,19 @@ function recommendationFor(tool: BridgeToolSchema, metric: ToolAuditMetricRow | 
     };
   }
 
-  if (errorRate >= 20 && ["schema-validation", "target-not-found", "permission-or-risk-mismatch", "expected-safety-guard"].includes(topError?.name ?? "")) {
+  const callerContractCategories = new Set([
+    "schema-validation", "target-not-found", "permission-or-risk-mismatch", "safety-guard", "expected-safety-guard",
+    "expected-integrity-mismatch", "stale-file-state", "invalid-image-payload", "source-file-unavailable",
+    "missing-upstream", "no-remote-configured",
+  ]);
+  if (errorRate >= 20 && callerContractCategories.has(topError?.name ?? "")) {
     const category = topError?.name ?? "caller-contract";
     return {
       status: "fix-ux-schema",
       recommendation: category === "target-not-found"
         ? "Improve target discovery, lifecycle visibility, or preflight validation before changing implementation."
-        : "Improve the tool description, schema ergonomics, or schema-first guidance before changing implementation.",
-      reason: `${errorRate}% of calls failed and ${category} is the dominant caller-contract error category.`,
+        : "Improve the tool description, schema ergonomics, recovery guidance, or preflight validation before changing implementation.",
+      reason: `${errorRate}% of calls failed and ${category} is the dominant caller-contract or expected-guard category.`,
       confidence,
     };
   }
@@ -244,4 +249,3 @@ export function buildToolAudit(tools: readonly BridgeToolSchema[], snapshot: Too
     items: filtered.slice(0, args.limit),
   };
 }
-

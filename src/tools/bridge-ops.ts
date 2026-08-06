@@ -67,6 +67,27 @@ async function compareConnectorCatalog(exposedToolNames: string[]) {
   const recognized = exposed.filter((name) => runtimeSet.has(name));
   const unrecognized = exposed.filter((name) => !runtimeSet.has(name));
   const absentDirectly = runtimeNames.filter((name) => !recognized.includes(name));
+  const riskFor = (name: string): "read-only" | "destructive" | "neutral" => {
+    if (riskSummary.readOnly.includes(name)) return "read-only";
+    if (riskSummary.destructive.includes(name)) return "destructive";
+    return "neutral";
+  };
+  const absentDirectDetails = absentDirectly.map((name) => {
+    const risk = riskFor(name);
+    const wrapper = risk === "read-only" ? "bridge_tool_query" : "bridge_tool_action";
+    return {
+      name,
+      risk,
+      wrapper,
+      directExposure: false,
+      schemaLookupRequired: true,
+      schemaLookup: { toolName: "bridge_tool_schema", arguments: { toolName: name } },
+      fallback: wrapper === "bridge_tool_query"
+        ? { toolName: wrapper, arguments: { toolName: name, arguments: {} } }
+        : { toolName: wrapper, arguments: { toolName: name, confirmToolName: name, arguments: {} } },
+      instruction: "Use this wrapper only because the dedicated connector schema is absent. Inspect bridge_tool_schema first unless a route response already supplied exact fallback arguments.",
+    };
+  });
   const mssrCore = [
     "skill_catalog",
     "skill_recommend",
@@ -100,6 +121,7 @@ async function compareConnectorCatalog(exposedToolNames: string[]) {
       delegatedViaAction: mssrDelegatedAction,
     },
     absentDirectly,
+    absentDirectDetails,
     interpretation: {
       boundary: "This compares a caller-supplied observable connector catalog with the current Bridge runtime catalog. Bridge cannot inspect or force the host's private catalog selection.",
       wrapperReachabilityIsDirectExposure: false,

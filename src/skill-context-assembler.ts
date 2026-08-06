@@ -51,6 +51,8 @@ export type SkillContextAssemblyInfo = {
   moduleDecisions: Array<Record<string, unknown>>;
   ambiguousGroups: AmbiguousGroup[];
   budgetExceeded: boolean;
+  requiredBudgetExceeded: boolean;
+  optionalContextOmitted: boolean;
   planningMode: SkillContextPlanningMode;
   allocationTiers: AllocationTier[];
   duplicateCharsAvoided: number;
@@ -130,6 +132,8 @@ export type GlobalSkillContextPlan = {
   estimatedCharsSaved: number;
   remainingContextChars: number;
   budgetExceeded: boolean;
+  requiredBudgetExceeded: boolean;
+  optionalContextOmitted: boolean;
   globallySelectedModules: Array<{
     skill: string;
     module: string;
@@ -456,7 +460,9 @@ function toResult(state: PlanningState, maxContextChars: number): PlannedSkillCo
         selectedModules: [],
         moduleDecisions: prepared.moduleDecisions,
         ambiguousGroups: prepared.ambiguousGroups,
-        budgetExceeded: true,
+        budgetExceeded: false,
+        requiredBudgetExceeded: false,
+        optionalContextOmitted: true,
         planningMode: "global-required-core-first",
         allocationTiers: [],
         duplicateCharsAvoided: state.duplicateCharsAvoided,
@@ -470,6 +476,10 @@ function toResult(state: PlanningState, maxContextChars: number): PlannedSkillCo
 
   const content = prepared.mode === "full" ? prepared.baseContent : finalContent(state);
   const moduleCharsLoaded = Math.max(0, content.length - prepared.baseContent.length);
+  const omittedByBudget = prepared.moduleDecisions.filter((item) => item.reason === "budget-exceeded");
+  const requiredModuleOmitted = omittedByBudget.some((decision) => prepared.modules.some((module) => module.id === decision.id && module.required));
+  const requiredBudgetExceeded = content.length > maxContextChars || requiredModuleOmitted;
+  const optionalContextOmitted = omittedByBudget.some((decision) => !prepared.modules.some((module) => module.id === decision.id && module.required));
   return {
     skill: prepared.skill,
     loaded: true,
@@ -489,8 +499,9 @@ function toResult(state: PlanningState, maxContextChars: number): PlannedSkillCo
       selectedModules: state.selected.map((module) => module.id),
       moduleDecisions: prepared.moduleDecisions,
       ambiguousGroups: prepared.ambiguousGroups,
-      budgetExceeded: content.length > maxContextChars
-        || prepared.moduleDecisions.some((item) => item.reason === "budget-exceeded"),
+      budgetExceeded: requiredBudgetExceeded,
+      requiredBudgetExceeded,
+      optionalContextOmitted,
       planningMode: "global-required-core-first",
       allocationTiers: [...state.allocationTiers],
       duplicateCharsAvoided: state.duplicateCharsAvoided,
@@ -666,6 +677,10 @@ export async function planCodexSkillContexts(args: {
   const estimatedCharsSaved = skills.reduce((sum, item) => sum + item.contextAssembly.estimatedCharsSaved, 0);
   const duplicateCharsAvoided = skills.reduce((sum, item) => sum + item.contextAssembly.duplicateCharsAvoided, 0);
   const requiredOverflowChars = Math.max(0, requiredCoreReservedChars + requiredModuleReservedChars - args.maxContextChars);
+  const requiredBudgetExceeded = requiredOverflowChars > 0
+    || totalContextCharsLoaded > args.maxContextChars
+    || skills.some((item) => item.contextAssembly.requiredBudgetExceeded);
+  const optionalContextOmitted = skills.some((item) => item.contextAssembly.optionalContextOmitted);
 
   return {
     planningMode: "global-required-core-first",
@@ -680,8 +695,9 @@ export async function planCodexSkillContexts(args: {
     totalFullSkillChars,
     estimatedCharsSaved,
     remainingContextChars: Math.max(0, args.maxContextChars - totalContextCharsLoaded),
-    budgetExceeded: totalContextCharsLoaded > args.maxContextChars
-      || skills.some((item) => item.contextAssembly.budgetExceeded),
+    budgetExceeded: requiredBudgetExceeded,
+    requiredBudgetExceeded,
+    optionalContextOmitted,
     globallySelectedModules,
     skills,
   };

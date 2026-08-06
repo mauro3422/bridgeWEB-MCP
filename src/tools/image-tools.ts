@@ -109,14 +109,14 @@ function jpegSize(buffer: Buffer): { width: number; height: number } | null {
 function inspectImageBytes(filePath: string, bytes: Buffer) {
   const extension = path.extname(filePath).toLowerCase();
   if (![".png", ".jpg", ".jpeg", ".webp"].includes(extension)) {
-    throw new Error(`Unsupported image extension for ${filePath}; use .png, .jpg, .jpeg, or .webp`);
+    throw new Error(`[invalid-image-payload] Unsupported image extension for ${filePath}; use .png, .jpg, .jpeg, or .webp.`);
   }
 
   const isPng = bytes.length >= 24 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
   const isJpeg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
   const isWebp = bytes.length >= 30 && bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP";
   const valid = extension === ".png" ? isPng : extension === ".webp" ? isWebp : isJpeg;
-  if (!valid) throw new Error(`Image bytes do not match extension ${extension}: ${filePath}`);
+  if (!valid) throw new Error(`[expected-integrity-mismatch] Image signature does not match extension ${extension}: ${filePath}`);
 
   const size = isPng ? pngSize(bytes) : isWebp ? webpSize(bytes) : jpegSize(bytes);
   return {
@@ -129,14 +129,33 @@ function inspectImageBytes(filePath: string, bytes: Buffer) {
 
 function decodeImage(input: ImageInput): DecodedImage {
   const outputPath = resolveToolPath(input.outputPath, { access: "write" });
-  const raw = input.base64
-    .replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "")
-    .replace(/\s+/g, "");
-  if (!raw || raw.length > MAX_BASE64_CHARS) throw new Error(`Image payload is empty or too large: ${outputPath}`);
+  const trimmed = input.base64.trim();
+  const dataUrl = trimmed.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]+)$/);
+  if (trimmed.startsWith("data:") && !dataUrl) {
+    throw new Error(`[invalid-image-payload] Image data URL must use an image MIME and ;base64 encoding: ${outputPath}`);
+  }
+  const declaredMime = dataUrl?.[1]?.toLowerCase().replace("image/jpg", "image/jpeg") ?? null;
+  const raw = (dataUrl?.[2] ?? trimmed).replace(/\s+/g, "");
+  if (!raw || raw.length > MAX_BASE64_CHARS) {
+    throw new Error(`[invalid-image-payload] Image payload is empty or exceeds ${MAX_BASE64_CHARS} encoded characters: ${outputPath}`);
+  }
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(raw) || raw.length % 4 === 1) {
+    throw new Error(`[invalid-image-payload] Image payload is not valid base64: ${outputPath}`);
+  }
 
   const bytes = Buffer.from(raw, "base64");
-  if (!bytes.length || bytes.length > MAX_IMAGE_BYTES) throw new Error(`Decoded image is empty or exceeds ${MAX_IMAGE_BYTES} bytes: ${outputPath}`);
+  const canonicalInput = raw.replace(/=+$/, "");
+  const canonicalDecoded = bytes.toString("base64").replace(/=+$/, "");
+  if (!bytes.length || canonicalInput !== canonicalDecoded) {
+    throw new Error(`[invalid-image-payload] Image payload failed strict base64 round-trip validation: ${outputPath}`);
+  }
+  if (bytes.length > MAX_IMAGE_BYTES) {
+    throw new Error(`[invalid-image-payload] Decoded image exceeds ${MAX_IMAGE_BYTES} bytes: ${outputPath}`);
+  }
   const metadata = inspectImageBytes(outputPath, bytes);
+  if (declaredMime && declaredMime !== metadata.mime) {
+    throw new Error(`[expected-integrity-mismatch] Data URL MIME mismatch for ${outputPath}: declared ${declaredMime}, measured ${metadata.mime}.`);
+  }
 
   return {
     input,
@@ -213,30 +232,7 @@ async function persistImages(decoded: DecodedImage[], args: {
   collectionName?: string;
 }) {
   const uniquePaths = new Set(decoded.map((item) => item.outputPath.toLowerCase()));
-  if (uniquePaths.size !== decoded.length) throw new Error("Batch contains duplicate output paths");
-
-  if (!args.overwrite) {
-    for (const item of decoded) {
-      if (await exists(item.outputPath)) throw new Error(`Image already exists: ${item.outputPath}`);
-    }
-  }
-
-  const tempPaths: string[] = [];
-  try {
-    for (const item of decoded) {
-      await fs.mkdir(path.dirname(item.outputPath), { recursive: true });
-      const tempPath = `${item.outputPath}.bridge-${crypto.randomUUID()}.tmp`;
-      await fs.writeFile(tempPath, item.bytes);
-      tempPaths.push(tempPath);
-    }
-    for (let index = 0; index < decoded.length; index += 1) {
-      if (args.overwrite && await exists(decoded[index].outputPath)) await fs.rm(decoded[index].outputPath, { force: true });
-      await fs.rename(tempPaths[index], decoded[index].outputPath);
-    }
-  } catch (error) {
-    await Promise.all(tempPaths.map((tempPath) => fs.rm(tempPath, { force: true }).catch(() => undefined)));
-    throw error;
-  }
+  if (uniquePaths.size !== decoded.length) throw new Error("[safety-guard] Batch contains duplicate output paths.");
 
   const saved = decoded.map((item) => ({
     outputPath: item.outputPath,
@@ -252,18 +248,93 @@ async function persistImages(decoded: DecodedImage[], args: {
     metadata: item.input.metadata ?? {},
   }));
 
-  let manifestPath: string | null = null;
-  if (args.manifestPath) {
-    manifestPath = resolveToolPath(args.manifestPath, { access: "write" });
-    if (path.extname(manifestPath).toLowerCase() !== ".json") throw new Error("manifestPath must use the .json extension");
-    await fs.mkdir(path.dirname(manifestPath), { recursive: true });
-    await fs.writeFile(manifestPath, JSON.stringify({
-      schemaVersion: 1,
-      collectionName: args.collectionName ?? null,
-      createdAt: new Date().toISOString(),
-      itemCount: saved.length,
-      items: saved,
-    }, null, 2), "utf8");
+  const manifestPath = args.manifestPath
+    ? resolveToolPath(args.manifestPath, { access: "write" })
+    : null;
+  if (manifestPath && path.extname(manifestPath).toLowerCase() !== ".json") {
+    throw new Error("[invalid-image-payload] manifestPath must use the .json extension.");
+  }
+  if (manifestPath && uniquePaths.has(manifestPath.toLowerCase())) {
+    throw new Error("[safety-guard] manifestPath must be distinct from every image outputPath.");
+  }
+
+  const manifest = manifestPath ? {
+    schemaVersion: 1,
+    collectionName: args.collectionName ?? null,
+    createdAt: new Date().toISOString(),
+    itemCount: saved.length,
+    items: saved,
+  } : null;
+  const targets = [...decoded.map((item) => item.outputPath), ...(manifestPath ? [manifestPath] : [])];
+  if (!args.overwrite) {
+    for (const target of targets) {
+      if (await exists(target)) throw new Error(`[stale-file-state] Persistence target already exists: ${target}`);
+    }
+  }
+
+  const transactionId = crypto.randomUUID();
+  const tempByTarget = new Map<string, string>();
+  const backupByTarget = new Map<string, string>();
+  const committedTargets: string[] = [];
+  try {
+    for (const item of decoded) {
+      await fs.mkdir(path.dirname(item.outputPath), { recursive: true });
+      const tempPath = `${item.outputPath}.bridge-${transactionId}.tmp`;
+      await fs.writeFile(tempPath, item.bytes);
+      tempByTarget.set(item.outputPath, tempPath);
+    }
+    if (manifestPath && manifest) {
+      await fs.mkdir(path.dirname(manifestPath), { recursive: true });
+      const tempPath = `${manifestPath}.bridge-${transactionId}.tmp`;
+      await fs.writeFile(tempPath, JSON.stringify(manifest, null, 2), "utf8");
+      tempByTarget.set(manifestPath, tempPath);
+    }
+
+    for (const target of targets) {
+      if (await exists(target)) {
+        if (!args.overwrite) throw new Error(`[stale-file-state] Persistence target appeared during transaction: ${target}`);
+        const backupPath = `${target}.bridge-${transactionId}.bak`;
+        await fs.rename(target, backupPath);
+        backupByTarget.set(target, backupPath);
+      }
+      const tempPath = tempByTarget.get(target);
+      if (!tempPath) throw new Error(`[expected-integrity-mismatch] Missing transaction temp file for ${target}`);
+      await fs.rename(tempPath, target);
+      tempByTarget.delete(target);
+      committedTargets.push(target);
+      const failAfter = process.env.NODE_ENV === "test"
+        ? Number(process.env.BRIDGE_MCP_TEST_IMAGE_FAIL_AFTER_COMMITS ?? "0")
+        : 0;
+      if (Number.isInteger(failAfter) && failAfter > 0 && committedTargets.length === failAfter) {
+        throw new Error("Injected image transaction failure for regression testing.");
+      }
+    }
+
+    for (const item of decoded) {
+      const readback = await fs.readFile(item.outputPath);
+      const measured = inspectImageBytes(item.outputPath, readback);
+      const digest = sha256(readback);
+      if (digest !== item.sha256 || readback.length !== item.bytes.length || measured.mime !== item.mime) {
+        throw new Error(`[expected-integrity-mismatch] Image readback mismatch for ${item.outputPath}.`);
+      }
+    }
+    if (manifestPath && manifest) {
+      const readback = JSON.parse(await fs.readFile(manifestPath, "utf8")) as { itemCount?: number; items?: Array<{ sha256?: string }> };
+      if (readback.itemCount !== saved.length || !Array.isArray(readback.items)
+        || readback.items.some((item, index) => item.sha256 !== saved[index]?.sha256)) {
+        throw new Error(`[expected-integrity-mismatch] Manifest readback mismatch for ${manifestPath}.`);
+      }
+    }
+
+    await Promise.all([...backupByTarget.values()].map((backupPath) => fs.rm(backupPath, { force: true })));
+  } catch (error) {
+    await Promise.all(committedTargets.map((target) => fs.rm(target, { force: true }).catch(() => undefined)));
+    for (const [target, backupPath] of [...backupByTarget.entries()].reverse()) {
+      if (await exists(backupPath)) await fs.rename(backupPath, target).catch(() => undefined);
+    }
+    await Promise.all([...tempByTarget.values()].map((tempPath) => fs.rm(tempPath, { force: true }).catch(() => undefined)));
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`[expected-integrity-mismatch] Atomic image persistence rolled back: ${detail}`);
   }
 
   return {
@@ -271,6 +342,7 @@ async function persistImages(decoded: DecodedImage[], args: {
     itemCount: saved.length,
     saved,
     manifestPath,
+    transaction: { atomic: true, rolledBack: false, verifiedReadback: true },
   };
 }
 
@@ -311,7 +383,7 @@ async function readBoundedResponse(response: Response, label: string): Promise<B
 async function downloadFileImage(file: OpenAIFileInput, target: AssetTargetInput): Promise<DecodedImage> {
   const url = new URL(file.download_url);
   const isLoopbackHttp = url.protocol === "http:" && (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]");
-  if (url.protocol !== "https:" && !isLoopbackHttp) throw new Error(`File download URL must use HTTPS: ${file.file_id}`);
+  if (url.protocol !== "https:" && !isLoopbackHttp) throw new Error(`[safety-guard] Authorized file download URL must use HTTPS: ${file.file_id}`);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60_000);
@@ -319,11 +391,11 @@ async function downloadFileImage(file: OpenAIFileInput, target: AssetTargetInput
   try {
     response = await fetch(url, { redirect: "follow", signal: controller.signal });
   } catch (error) {
-    throw new Error(`Unable to download authorized file ${file.file_id}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`[source-file-unavailable] Unable to download authorized file ${file.file_id}: ${error instanceof Error ? error.message : String(error)}`);
   } finally {
     clearTimeout(timeout);
   }
-  if (!response.ok) throw new Error(`Authorized file download failed (${response.status}) for ${file.file_id}`);
+  if (!response.ok) throw new Error(`[source-file-unavailable] Authorized file download failed (${response.status}) for ${file.file_id}`);
 
   const bytes = await readBoundedResponse(response, file.file_name ?? file.file_id);
   const outputPath = resolveToolPath(target.outputPath, { access: "write" });
@@ -331,7 +403,7 @@ async function downloadFileImage(file: OpenAIFileInput, target: AssetTargetInput
   const declaredMime = file.mime_type?.toLowerCase();
   const normalizedDeclaredMime = declaredMime === "image/jpg" ? "image/jpeg" : declaredMime;
   if (normalizedDeclaredMime && normalizedDeclaredMime !== measured.mime) {
-    throw new Error(`File MIME mismatch for ${file.file_id}: declared ${file.mime_type}, measured ${measured.mime}`);
+    throw new Error(`[expected-integrity-mismatch] File MIME mismatch for ${file.file_id}: declared ${file.mime_type}, measured ${measured.mime}`);
   }
 
   return {

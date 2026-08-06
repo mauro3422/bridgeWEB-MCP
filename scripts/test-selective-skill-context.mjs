@@ -174,6 +174,12 @@ try {
     "budget-exceeded",
   );
   assert.equal(constrainedPlan.requiredCoreReservedChars, requiredCoreChars);
+  assert.equal(constrainedPlan.budgetExceeded, false, 'Omitting only optional context must not report a required bootstrap overflow.');
+  assert.equal(constrainedPlan.requiredBudgetExceeded, false);
+  assert.equal(constrainedPlan.optionalContextOmitted, true);
+  assert.equal(constrainedByName.get("first-required").contextAssembly.budgetExceeded, false);
+  assert.equal(constrainedByName.get("first-required").contextAssembly.requiredBudgetExceeded, false);
+  assert.equal(constrainedByName.get("first-required").contextAssembly.optionalContextOmitted, true);
   assert.equal(constrainedPlan.globallySelectedModules[0].module, "high-priority");
 
   const overlapDir = path.join(tempRoot, "overlap");

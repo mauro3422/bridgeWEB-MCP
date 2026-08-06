@@ -173,7 +173,15 @@ async function terminalStart(args: TerminalStartArgs) {
 
 function getTerminal(id: string): TerminalSession {
   const session = terminals.get(id);
-  if (!session) throw new Error(`Unknown terminal session: ${id}`);
+  if (!session) {
+    const activeSessions = Array.from(terminals.values()).slice(0, 12).map((item) => ({
+      id: item.id,
+      name: item.name,
+      running: isSessionRunning(item),
+      cwd: item.cwd,
+    }));
+    throw new Error(`[target-not-found] Unknown terminal session: ${id}. Active sessions: ${JSON.stringify(activeSessions)}. Call terminal_list or work_show and retry with an exact returned sessionId.`);
+  }
   return session;
 }
 

@@ -471,6 +471,17 @@ function metricsFilter(scope: BridgeMetricsScope): { where: string; params: unkn
 export function classifyToolAuditError(value: string | null | undefined): string {
   const error = String(value ?? "").toLowerCase();
   if (!error) return "unknown";
+  const explicit = error.match(/^\[([a-z0-9-]+)\]/)?.[1];
+  if (explicit && [
+    "expected-integrity-mismatch", "stale-file-state", "invalid-image-payload", "source-file-unavailable",
+    "safety-guard", "missing-upstream", "no-remote-configured", "target-not-found", "patch-conflict",
+  ].includes(explicit)) return explicit;
+  if (/invalid image payload|unsupported image signature|invalid base64|data url.*image/.test(error)) return "invalid-image-payload";
+  if (/authorized source.*unavailable|source file unavailable|temporary authorized file.*missing/.test(error)) return "source-file-unavailable";
+  if (/sha-?256.*mismatch|hash mismatch|integrity mismatch|head=.*tracking=.*remote=/.test(error)) return "expected-integrity-mismatch";
+  if (/head changed|stale file|already exited|worktree changed|excluded paths are already staged/.test(error)) return "stale-file-state";
+  if (/remote .*not configured|no remote configured|required git remote/.test(error)) return "no-remote-configured";
+  if (/missing upstream|no upstream|has no upstream branch/.test(error)) return "missing-upstream";
   if (/invalid_type|unrecognized_keys|zod|required|expected .* received|must be a (json object|non-empty string)|invalid .* expected/.test(error)) return "schema-validation";
   if (/confirmtoolname|classified read-only|not classified read-only|destructive action|risk classification/.test(error)) return "permission-or-risk-mismatch";
   if (/process-result:timeout|timed? out|timeout|etimedout/.test(error)) return "timeout";
@@ -478,7 +489,7 @@ export function classifyToolAuditError(value: string | null | undefined): string
   if (/expected \d+ replacement|expected replacement|patch conflict|context mismatch/.test(error)) return "patch-conflict";
   if (/unknown modular tool|unknown (terminal|workspace|upload|snapshot|studio) (session|id|target)|not found|enoent|target .*missing|does not exist/.test(error)) return "target-not-found";
   if (/econnrefused|provider unavailable|connection closed|disconnected|tools\/list returned zero|no last-known tool cache/.test(error)) return "provider-unavailable";
-  if (/refusing|not allowed|outside allowed|denied path|escaped|requires exact|truncated snapshot rollback/.test(error)) return "expected-safety-guard";
+  if (/refusing|not allowed|outside allowed|denied path|escaped|requires exact|truncated snapshot rollback/.test(error)) return "safety-guard";
   if (/internal|sqlite|assertion|unexpected/.test(error)) return "runtime-internal";
   return "unknown";
 }

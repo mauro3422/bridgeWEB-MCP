@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   MSSR_CHECKPOINT_TYPES,
   MSSR_CONTEXT_SOURCES,
+  MSSR_OUTCOME_DIMENSION_STATUSES,
   MSSR_OUTCOME_EVIDENCE_KINDS,
   getMssrTraceEvidence,
   queryMssrObservatory,
@@ -49,7 +50,7 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
     },
     {
       name: "mssr_trace_record",
-      description: "Record one bounded MSSR trace checkpoint after a phase, verification, persistence, outcome, friction, context retrieval, or replan. Bridge injects the active trace from the current session or a unique compatible process-shared lease; provide traceId explicitly after restart, for cross-process resume, or when multiple candidates exist. Store only structured metadata and a short redacted summary, never a raw prompt or transcript.",
+      description: "Record one bounded MSSR trace checkpoint after a phase, progress heartbeat, verification, persistence, outcome, friction, context retrieval, or replan. A progress checkpoint renews Web trace liveness without completing a phase. Outcome dimensions may describe mixed subsystem results while one primary skill and overall status remain authoritative. Bridge injects the active trace from the current session or a unique compatible process-shared lease; provide traceId explicitly after restart, for cross-process resume, or when multiple candidates exist. Store only structured metadata and short redacted evidence, never a raw prompt or transcript.",
       inputSchema: {
         type: "object",
         properties: {
@@ -67,6 +68,23 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
           accepted: { type: "boolean" },
           evidenceKind: { type: "string", enum: MSSR_OUTCOME_EVIDENCE_KINDS },
           evidenceRef: { type: "string", maxLength: 300 },
+          leaseMs: { type: "number", minimum: 30000, maximum: 900000, description: "Only for eventType=progress. Renews Web trace liveness without completing a phase." },
+          dimensions: {
+            type: "array",
+            maxItems: 12,
+            description: "Bounded outcome dimensions. They explain mixed results without replacing the single overall status or primary skill.",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string", minLength: 1, maxLength: 80 },
+                status: { type: "string", enum: MSSR_OUTCOME_DIMENSION_STATUSES },
+                summary: { type: "string", maxLength: 200 },
+                evidenceRef: { type: "string", maxLength: 200 },
+              },
+              required: ["name", "status"],
+              additionalProperties: false,
+            },
+          },
           status: { type: "string", enum: checkpointStatuses },
           completedPhases: { type: "array", items: { type: "string", enum: SKILL_PHASES }, maxItems: 6 },
           contextSources: { type: "array", items: { type: "string", enum: MSSR_CONTEXT_SOURCES }, maxItems: 8 },
@@ -128,6 +146,13 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
         accepted: z.boolean().optional(),
         evidenceKind: z.enum(MSSR_OUTCOME_EVIDENCE_KINDS).optional(),
         evidenceRef: z.string().max(300).optional(),
+        leaseMs: z.number().int().min(30_000).max(900_000).optional(),
+        dimensions: z.array(z.object({
+          name: z.string().trim().min(1).max(80),
+          status: z.enum(MSSR_OUTCOME_DIMENSION_STATUSES),
+          summary: z.string().max(200).optional(),
+          evidenceRef: z.string().max(200).optional(),
+        }).strict()).max(12).optional(),
         status: z.enum(checkpointStatuses).optional(),
         completedPhases: z.array(z.enum(SKILL_PHASES)).max(6).optional(),
         contextSources: z.array(z.enum(MSSR_CONTEXT_SOURCES)).max(8).optional(),
@@ -142,6 +167,12 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
       }
       if (parsed.eventType === "outcome" && !parsed.status) {
         throw new Error("Outcome checkpoints require status.");
+      }
+      if (parsed.dimensions && parsed.eventType !== "outcome") {
+        throw new Error("Outcome dimensions are allowed only for eventType=outcome.");
+      }
+      if (parsed.leaseMs && parsed.eventType !== "progress") {
+        throw new Error("leaseMs is allowed only for eventType=progress.");
       }
       const event = recordMssrCheckpoint(parsed);
       return {

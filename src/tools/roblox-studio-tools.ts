@@ -150,30 +150,30 @@ async function waitForDiskChange(filePath: string, before: FileSnapshot, timeout
 
 async function ensureActiveEditStudio(placeName: string, stopPlay: boolean) {
   const listed = await callRobloxMcpTool("list_roblox_studios", {});
-  if (resultIsError(listed)) throw new Error(`Could not list Roblox Studios: ${resultText(listed)}`);
+  if (resultIsError(listed)) throw new Error(`[provider-unavailable] Could not list Roblox Studios: ${resultText(listed)}`);
   const studios = parseStudioList(listed);
   const matches = studios.filter((studio) => studio.name.toLowerCase() === placeName.toLowerCase());
   if (matches.length === 0) {
-    throw new Error(`No connected Roblox Studio instance exactly matched '${placeName}'. Connected: ${studios.map((item) => item.name).join(", ") || "none"}`);
+    throw new Error(`[target-not-found] No connected Roblox Studio instance exactly matched '${placeName}'. Connected: ${studios.map((item) => item.name).join(", ") || "none"}`);
   }
-  if (matches.length > 1) throw new Error(`Multiple connected Roblox Studio instances matched '${placeName}'.`);
+  if (matches.length > 1) throw new Error(`[safety-guard] Multiple connected Roblox Studio instances matched '${placeName}'.`);
   const studio = matches[0];
   if (!studio.active) {
     const selected = await callRobloxMcpTool("set_active_studio", { studio_id: studio.id });
-    if (resultIsError(selected)) throw new Error(`Could not activate Studio '${placeName}': ${resultText(selected)}`);
+    if (resultIsError(selected)) throw new Error(`[provider-unavailable] Could not activate Studio '${placeName}': ${resultText(selected)}`);
   }
 
   let stateResult = await callRobloxMcpTool("get_studio_state", {});
   let state = resultText(stateResult);
   if (/Current Studio Mode:\s*Play/i.test(state)) {
-    if (!stopPlay) throw new Error("Roblox Studio is in Play mode. Set stopPlay=true or stop Play manually before saving.");
+    if (!stopPlay) throw new Error("[safety-guard] Roblox Studio is in Play mode. Set stopPlay=true or stop Play manually before saving.");
     const stopped = await callRobloxMcpTool("start_stop_play", { is_start: false });
-    if (resultIsError(stopped)) throw new Error(`Could not stop Play mode: ${resultText(stopped)}`);
+    if (resultIsError(stopped)) throw new Error(`[provider-unavailable] Could not stop Play mode: ${resultText(stopped)}`);
     await new Promise((resolve) => setTimeout(resolve, 500));
     stateResult = await callRobloxMcpTool("get_studio_state", {});
     state = resultText(stateResult);
   }
-  if (!/Current Studio Mode:\s*Edit/i.test(state)) throw new Error(`Studio did not reach Edit mode: ${state}`);
+  if (!/Current Studio Mode:\s*Edit/i.test(state)) throw new Error(`[stale-file-state] Studio did not reach Edit mode: ${state}`);
   return { studio, state };
 }
 
@@ -376,16 +376,16 @@ export const robloxStudioToolModule: BridgeToolModule = {
       };
     },
     roblox_place_save: async (args) => {
-      if (process.platform !== "win32") throw new Error("roblox_place_save currently supports Windows only.");
+      if (process.platform !== "win32") throw new Error("[safety-guard] roblox_place_save currently supports Windows only.");
       const requestedPath = z.string().min(1).parse(args.placePath);
       const confirmedPath = z.string().min(1).parse(args.confirmPlacePath);
       const placePath = resolveToolPath(requestedPath, { access: "read" });
       const confirmed = resolveToolPath(confirmedPath, { access: "read" });
       if (path.normalize(placePath).toLowerCase() !== path.normalize(confirmed).toLowerCase()) {
-        throw new Error("confirmPlacePath must exactly match placePath after resolution.");
+        throw new Error("[safety-guard] confirmPlacePath must exactly match placePath after resolution.");
       }
       const extension = path.extname(placePath).toLowerCase();
-      if (extension !== ".rbxl" && extension !== ".rbxlx") throw new Error("placePath must end in .rbxl or .rbxlx.");
+      if (extension !== ".rbxl" && extension !== ".rbxlx") throw new Error("[schema-validation] placePath must end in .rbxl or .rbxlx.");
       const stat = await fs.stat(placePath);
       if (!stat.isFile()) throw new Error(`placePath is not a file: ${placePath}`);
 
@@ -403,13 +403,14 @@ export const robloxStudioToolModule: BridgeToolModule = {
       );
       const commandSummary = summarizeCommand(commandResult);
       if (!commandSummary.ok) {
-        throw new Error(`Roblox Studio save input failed: ${commandSummary.stderrTail || commandSummary.stdoutTail || commandSummary.error || "unknown error"}`);
+        throw new Error(`[process-exit] Roblox Studio save input failed: ${commandSummary.stderrTail || commandSummary.stdoutTail || commandSummary.error || "unknown error"}`);
       }
       const after = await waitForDiskChange(placePath, before, verifyTimeoutMs);
       const diskChanged = changed(before, after);
       return {
         ok: diskChanged,
         savedAndVerified: diskChanged,
+        errorCategory: diskChanged ? null : "expected-integrity-mismatch",
         placePath,
         studio: studio.studio,
         studioState: studio.state,

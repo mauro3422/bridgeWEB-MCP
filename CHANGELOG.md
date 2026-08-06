@@ -1,3 +1,13 @@
+## 0.6.66 - 2026-08-06
+
+- Added `git_multi_repo_publish`, a manifest-driven preflight/apply workflow with exhaustive path classification, per-repository validation, exact HEAD confirmation, verified local-only commits, no force push and HEAD/tracking/direct-remote readback.
+- Made image batches and manifests one rollback-capable transaction, added strict base64/data-URL/MIME/signature validation, authorized-file smoke coverage and explicit image/integrity/source error categories.
+- Added MSSR `progress` heartbeats with bounded Web trace leases plus bounded multidimensional outcome details while retaining one primary skill and overall status.
+- Improved `apply_patch`, `edit_lines` and terminal alias failures with hashes, valid ranges, nearby context, active-session guidance and safe next actions without fuzzy mutation.
+- Expanded Bridge error taxonomy and audit interpretation, detailed connector fallback guidance, and separated required context overflow from optional context omission.
+- Added focused regressions for multi-repository publication, image persistence/rollback, edit recovery, terminal preflight, connector diagnostics, error taxonomy and MSSR schema/lifecycle behavior.
+
+
 ## 0.6.65 - 2026-08-06
 
 - Fixed stateless MSSR continuity when one ChatGPT session has several open traces across repositories: an exact session/project match still wins, otherwise a single recently planned route may dominate stale same-session candidates while genuinely concurrent fresh traces remain ambiguous.

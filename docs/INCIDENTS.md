@@ -1141,3 +1141,17 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Regresión:** `test-mssr-trace-contract.mjs` crea dos trazas de la misma sesión, envejece una y exige que una llamada stateless desde un tercer proyecto herede la ruta fresca sin warning; el fixture concurrente existente sigue exigiendo ambigüedad cuando ambas rutas permanecen compatibles y recientes.
 
 **Seguimiento:** después de activar 0.6.65, solicitar reinicio completo y volver a comparar el catálogo visible. Si la conversación conserva 127 tools, usar `bridge_tool_query`/`bridge_tool_action` y abrir un chat nuevo para obtener schemas dedicados; no duplicar tools ni afirmar que Bridge puede refrescar el catálogo privado del host.
+
+## 2026-08-06 — Hardening de publicación, imágenes y lifecycle Web
+
+**Estado:** Corregido en Bridge 0.6.66.
+
+**Síntomas observados:** cierres multi-repositorio requirieron scripts temporales y cientos de llamadas wrapper; `image_asset_save` falló repetidamente con payloads no autoritativos y no ofrecía rollback conjunto con el manifiesto; el reminder Web podía aparecer durante builds largos; conflictos de edición y sesiones vencidas devolvían poca evidencia; varias fallas quedaban como `unknown`.
+
+**Causa:** faltaban una operación manifest-driven de alto nivel, una transacción única para imágenes+manifest, un lease de progreso distinto de las fases MSSR y categorías/recovery estructurados en los límites de edición, catálogo y terminal.
+
+**Corrección:** se agregó `git_multi_repo_publish`; persistencia atómica con readback y restauración; `progress` con lease acotado y outcome multidimensional; hashes/rangos/contexto en ediciones; detalle de fallback por tool ausente; preflight de sesiones y taxonomía específica de integridad, payload, fuente, estado stale, remoto y safety guard.
+
+**Regresión:** `test-git-multi-repo-publication.mjs`, `test-image-persistence.mjs`, `test-image-file-import.mjs`, `test-system-hardening.mjs`, `test-mssr-trace-contract.mjs` y `test-selective-skill-context.mjs`, integrados en `test:regressions`. El gate completo verifica además 140 tools, routing y `TOOLS.md`.
+
+**Límites:** la transacción de publicación es segura y verificable por repositorio, no atómica entre repositorios. El host de ChatGPT sigue siendo dueño de refrescar su catálogo dedicado; la reachability por wrapper no se reporta como exposición directa.

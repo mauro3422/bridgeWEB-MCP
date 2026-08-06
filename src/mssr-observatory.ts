@@ -31,6 +31,7 @@ export const MSSR_CHECKPOINT_TYPES = [
   "phase_completed",
   "verification",
   "persistence",
+  "progress",
   "outcome",
   "friction",
   "context_used",
@@ -47,6 +48,8 @@ export const MSSR_OUTCOME_EVIDENCE_KINDS = [
   "other",
 ] as const;
 
+export const MSSR_OUTCOME_DIMENSION_STATUSES = ["success", "degraded", "failed", "skipped", "pending"] as const;
+
 export const MSSR_CONTEXT_SOURCES = [
   "current-conversation",
   "personal-context",
@@ -61,6 +64,7 @@ export const MSSR_CONTEXT_SOURCES = [
 export type MssrCheckpointType = typeof MSSR_CHECKPOINT_TYPES[number];
 export type MssrContextSource = typeof MSSR_CONTEXT_SOURCES[number];
 export type MssrOutcomeEvidenceKind = typeof MSSR_OUTCOME_EVIDENCE_KINDS[number];
+export type MssrOutcomeDimensionStatus = typeof MSSR_OUTCOME_DIMENSION_STATUSES[number];
 export type MssrObservatoryScope = "active" | "all";
 
 const DELEGATED_QUERY_TOOL = "bridge_tool_query";
@@ -430,6 +434,13 @@ export function recordMssrCheckpoint(args: {
   accepted?: boolean;
   evidenceKind?: MssrOutcomeEvidenceKind;
   evidenceRef?: string;
+  leaseMs?: number;
+  dimensions?: Array<{
+    name: string;
+    status: MssrOutcomeDimensionStatus;
+    summary?: string;
+    evidenceRef?: string;
+  }>;
   status?: "success" | "partial" | "failed" | "skipped";
   completedPhases?: string[];
   contextSources?: MssrContextSource[];
@@ -447,6 +458,15 @@ export function recordMssrCheckpoint(args: {
   const score = typeof args.score === "number" && Number.isFinite(args.score)
     ? Math.max(0, Math.min(1, args.score))
     : undefined;
+  const leaseMs = args.eventType === "progress"
+    ? Math.min(15 * 60_000, Math.max(30_000, Math.floor(args.leaseMs ?? 5 * 60_000)))
+    : undefined;
+  const dimensions = (args.dimensions ?? []).slice(0, 12).map((item) => ({
+    name: redactText(item.name, 80),
+    status: item.status,
+    summary: item.summary ? redactText(item.summary, 200) : undefined,
+    evidenceRef: item.evidenceRef ? redactText(item.evidenceRef, 200) : undefined,
+  }));
   return recordMssrEvent({
     traceId: args.traceId,
     eventType: args.eventType,
@@ -468,6 +488,8 @@ export function recordMssrCheckpoint(args: {
       accepted: args.accepted,
       evidenceKind: args.evidenceKind,
       evidenceRef: args.evidenceRef ? redactText(args.evidenceRef, 300) : undefined,
+      leaseMs,
+      dimensions,
       summary: args.summary ? redactText(args.summary, 300) : undefined,
       signals: args.signals ?? [],
       agentProfile: {

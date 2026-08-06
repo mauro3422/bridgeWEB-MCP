@@ -30,6 +30,7 @@ type ActiveTraceState = {
   lastToolName: string | null;
   toolActivityVersion: number;
   closureReminderVersion: number;
+  progressLeaseUntil: number;
 };
 
 const ROUTE_TOOLS = new Set(["skill_recommend", "skill_route_plan", "skill_bootstrap"]);
@@ -193,6 +194,8 @@ export type MssrTraceSessionSnapshot = {
   requiredSkills: string[];
   loadedSkills: string[];
   missingRequiredSkills: string[];
+  progressLeaseUntil: string | null;
+  progressLeaseRemainingMs: number;
   sharedOpenTraces: number;
 };
 
@@ -239,7 +242,7 @@ export function createMssrTraceSessionCoordinator(
   const closureIdleMs = Math.max(
     10,
     options.closureIdleMs
-      ?? (Number(process.env.BRIDGE_MCP_WEB_CLOSURE_IDLE_MS) || 60_000),
+      ?? (Number(process.env.BRIDGE_MCP_WEB_CLOSURE_IDLE_MS) || 3 * 60_000),
   );
 
   function scheduleClosureReminder(state: ActiveTraceState, toolName: string): void {
@@ -250,6 +253,7 @@ export function createMssrTraceSessionCoordinator(
     state.toolActivityVersion += 1;
     state.updatedAt = now;
     const activityVersion = state.toolActivityVersion;
+    const reminderDelayMs = Math.max(closureIdleMs, state.progressLeaseUntil - now);
     clearClosureTimer(state.traceId);
     const timer = setTimeout(() => {
       closureTimers.delete(state.traceId);
@@ -262,7 +266,7 @@ export function createMssrTraceSessionCoordinator(
         "warning",
         "mssr-web-outcome-missing-after-idle",
         "mssr-trace-context",
-        `La traza Web ${current.traceId} usó herramientas y quedó ${closureIdleMs} ms sin outcome observable. Si la tarea terminó, registra el cierre MSSR y devuelve el resultado; si sigue activa, comunica progreso o un bloqueo concreto antes de otra cadena larga.`,
+        `La traza Web ${current.traceId} usó herramientas y quedó ${reminderDelayMs} ms sin outcome observable. Si la tarea terminó, registra el cierre MSSR y devuelve el resultado; si sigue activa, registra un checkpoint progress con lease acotado o comunica un bloqueo concreto.`,
         {
           traceId: current.traceId,
           caller: current.caller,
@@ -271,7 +275,9 @@ export function createMssrTraceSessionCoordinator(
           lastToolCompletedAt: current.lastToolCompletedAt
             ? new Date(current.lastToolCompletedAt).toISOString()
             : null,
-          idleMs: closureIdleMs,
+          idleMs: reminderDelayMs,
+          baseIdleMs: closureIdleMs,
+          progressLeaseUntil: current.progressLeaseUntil > 0 ? new Date(current.progressLeaseUntil).toISOString() : null,
           activityVersion,
           missingRequiredSkills: missingRequired(current),
           limitation: "Bridge observes MCP lifecycle, not whether ChatGPT rendered final text.",
@@ -289,11 +295,11 @@ export function createMssrTraceSessionCoordinator(
         caller: current.caller,
         stage: current.stage,
         toolName: current.lastToolName ?? toolName,
-        idleMs: closureIdleMs,
+        idleMs: reminderDelayMs,
         activityVersion,
         notice: reminderNotice,
       });
-    }, closureIdleMs);
+    }, reminderDelayMs);
     timer.unref?.();
     closureTimers.set(state.traceId, timer);
   }
@@ -325,6 +331,7 @@ export function createMssrTraceSessionCoordinator(
       lastToolName: null,
       toolActivityVersion: 0,
       closureReminderVersion: 0,
+      progressLeaseUntil: 0,
     };
     sharedTraces.set(traceId, state);
     return state;
@@ -720,6 +727,7 @@ export function createMssrTraceSessionCoordinator(
         lastToolName: previous?.lastToolName ?? null,
         toolActivityVersion: previous?.toolActivityVersion ?? 0,
         closureReminderVersion: previous?.closureReminderVersion ?? 0,
+        progressLeaseUntil: previous?.progressLeaseUntil ?? 0,
       };
       if (toolName === "skill_bootstrap") {
         for (const name of loadedSkillNames(record.loaded)) state.loadedSkills.add(name);
@@ -746,8 +754,14 @@ export function createMssrTraceSessionCoordinator(
     if (toolName === "mssr_trace_record" && record && validTraceId(record.traceId)) {
       const state = sharedTraces.get(String(record.traceId));
       if (state) {
+        if (args.eventType === "progress") {
+          const leaseMs = Math.min(15 * 60_000, Math.max(30_000, Number(args.leaseMs) || 5 * 60_000));
+          state.progressLeaseUntil = Date.now() + leaseMs;
+          state.updatedAt = Date.now();
+        }
         if (args.eventType === "outcome") {
           state.closed = true;
+          state.progressLeaseUntil = 0;
           clearClosureTimer(state.traceId);
         }
         if (typeof args.stage === "string") state.stage = args.stage;
@@ -780,6 +794,8 @@ export function createMssrTraceSessionCoordinator(
       requiredSkills: state ? [...state.requiredSkills].sort() : [],
       loadedSkills: state ? [...state.loadedSkills].sort() : [],
       missingRequiredSkills: missingRequired(state),
+      progressLeaseUntil: state?.progressLeaseUntil ? new Date(state.progressLeaseUntil).toISOString() : null,
+      progressLeaseRemainingMs: state ? Math.max(0, state.progressLeaseUntil - Date.now()) : 0,
       sharedOpenTraces: openSharedTraces().length,
     };
   }

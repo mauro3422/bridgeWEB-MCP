@@ -9,6 +9,7 @@ import { coreToolModule } from "./tools/core-tools.js";
 import { fileNavigationToolModule } from "./tools/file-navigation.js";
 import { fileWritingToolModule } from "./tools/file-writing.js";
 import { gitToolModule } from "./tools/git-tools.js";
+import { gitPublicationToolModule } from "./tools/git-publication-tools.js";
 import { godotToolModule } from "./tools/godot-tools.js";
 import { imageToolModule } from "./tools/image-tools.js";
 import { metricsToolModule } from "./tools/metrics-tools.js";
@@ -48,7 +49,7 @@ const readOnlyToolNames = new Set([
 const destructiveToolNames = new Set([
   "write_text_file", "apply_patch", "edit_lines", "run_command", "terminal_start", "terminal_write", "terminal_stop",
   "work_once", "work_begin", "work_feed", "work_finish",
-  "git_create_branch", "git_restore_file", "git_set_remote", "git_commit_all", "git_push_current_branch",
+  "git_create_branch", "git_restore_file", "git_set_remote", "git_commit_all", "git_push_current_branch", "git_multi_repo_publish",
   "project_profile_save", "workspace_snapshot", "workspace_rollback", "cache_prune",
   "bridge_request_restart", "bridge_verify_all", "workflow_guide_create", "bridge_tool_action", "roblox_mcp_action", "roblox_studio_window_capture_save", "roblox_screen_capture_save", "roblox_photo_capture_job", "roblox_place_save",
   "roblox_asset_upload",
@@ -75,7 +76,7 @@ const providerProxyToolNames = new Set([
 ]);
 const protectedToolNames = new Set([
   "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query", "bridge_tool_action", "bridge_connector_catalog_compare", "project_context_load",
-  "skill_route_plan", "skill_bootstrap", "skill_load", "mssr_trace_record", "mssr_trace_evidence", "bridge_verify_all", "roblox_place_save",
+  "skill_route_plan", "skill_bootstrap", "skill_load", "mssr_trace_record", "mssr_trace_evidence", "bridge_verify_all", "git_multi_repo_publish", "roblox_place_save",
 ]);
 
 const toolUsageGuidance = new Map<string, BridgeToolUsageGuidance>([
@@ -437,6 +438,7 @@ const defaultToolModules: readonly BridgeToolModule[] = [
   imageToolModule,
   processToolModule,
   gitToolModule,
+  gitPublicationToolModule,
   projectToolModule,
   workspaceToolModule,
   cacheToolModule,

@@ -733,12 +733,24 @@ try {
   watchdog.observe('trace-domain-tool', watchdogTool.args, { ok: true });
   watchdog.observe('mssr_trace_record', {
     traceId: 'trace-watchdog-web-001',
+    eventType: 'progress',
+    caller: 'chatgpt-web',
+    stage: 'implement',
+    leaseMs: 30_000,
+  }, { traceId: 'trace-watchdog-web-001' });
+  const heartbeatSnapshot = watchdog.snapshot();
+  assert.ok(heartbeatSnapshot.progressLeaseRemainingMs > 29_000, 'Progress must renew a bounded liveness lease.');
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(reminders.length, 1, 'A live progress lease must suppress another premature reminder.');
+  watchdog.observe('mssr_trace_record', {
+    traceId: 'trace-watchdog-web-001',
     eventType: 'outcome',
     caller: 'chatgpt-web',
     stage: 'close',
   }, { traceId: 'trace-watchdog-web-001' });
   await new Promise((resolve) => setTimeout(resolve, 40));
-  assert.equal(reminders.length, 1, 'Outcome should cancel a pending closure reminder.');
+  assert.equal(reminders.length, 1, 'Outcome should cancel the progress-leased closure reminder.');
+  assert.equal(watchdog.snapshot().progressLeaseRemainingMs, 0);
 
   const codexWatchdog = traceContext.createMssrTraceSessionCoordinator(schemas, {
     closureIdleMs: 20,
