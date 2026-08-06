@@ -336,7 +336,8 @@ export function createMssrTraceSessionCoordinator(
     const exact = candidates.filter((state) => state.sessionKey === hostContext.sessionKey
       && state.project === hostContext.project
       && (hostContext.caller === "other" || state.caller === hostContext.caller));
-    if (exact.length <= 1) return exact.length === 1 ? exact : candidates;
+    if (exact.length === 1) return exact;
+    if (exact.length === 0) return dominantFreshRouteCandidate(candidates);
     const now = Date.now();
     const freshRoutes = exact.filter((state) => now - state.lastRoutePlannedAt <= EXACT_HOST_ROUTE_DOMINANCE_MS);
     return freshRoutes.length === 1 ? freshRoutes : exact;
@@ -804,6 +805,14 @@ export function createMssrTraceSessionCoordinator(
   }
 
   return { prepare, observe, snapshot, resolveMetricContext };
+}
+
+export function ageSharedMssrTraceForTests(traceId: string, ageMs: number): void {
+  const state = sharedTraces.get(traceId);
+  if (!state) throw new Error(`Unknown shared MSSR trace: ${traceId}`);
+  const age = Math.max(0, ageMs);
+  state.lastRoutePlannedAt = Date.now() - age;
+  state.updatedAt = Date.now() - age;
 }
 
 export function resetSharedMssrTraceRegistryForTests(): void {

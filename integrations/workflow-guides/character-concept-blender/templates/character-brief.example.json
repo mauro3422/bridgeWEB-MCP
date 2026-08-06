@@ -1,9 +1,10 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "character": {
     "name": "chat-fox",
     "species": "anthropomorphic fox",
     "designMode": "stylized low-poly friendly",
+    "intendedHeightMeters": 1.65,
     "bodyProportions": {
       "headToBodyRatio": "1:5.5",
       "build": "slim mascot humanoid",
@@ -18,7 +19,7 @@
       "eyes": "large teal eyes",
       "ears": "two large pointed fox ears",
       "muzzle": "short rounded fox muzzle",
-      "tail": "one large fluffy tail, teal with white tip",
+      "tail": "one large fluffy tail, teal with white tip, rooted at lower spine",
       "markings": [
         "glowing geometric forehead glyph",
         "glowing circuit lines on forearms",
@@ -26,7 +27,8 @@
         "glowing constellation-like tail markings"
       ],
       "clothing": "none",
-      "accessories": "none"
+      "accessories": "none",
+      "asymmetries": []
     },
     "modeling": {
       "pose": "relaxed A-pose",
@@ -41,17 +43,53 @@
     "mode": "quality",
     "background": "pure white",
     "renderStyle": "clean soft 3D-like concept render",
-    "views": ["front", "side", "back", "three-quarter"],
+    "masters": {
+      "design": "front_right_3q",
+      "geometry": "front"
+    },
+    "views": [
+      {
+        "role": "front_right_3q",
+        "usage": "design",
+        "projection": "perspective"
+      },
+      {
+        "role": "front",
+        "usage": "construction",
+        "projection": "orthographic"
+      },
+      {
+        "role": "rear",
+        "usage": "construction",
+        "projection": "orthographic"
+      },
+      {
+        "role": "right",
+        "usage": "construction",
+        "projection": "orthographic"
+      }
+    ],
+    "landmarks": [
+      "top_of_head",
+      "eye_line",
+      "chin",
+      "shoulders",
+      "elbows",
+      "wrists",
+      "hips",
+      "knees",
+      "ankles",
+      "ground"
+    ],
     "negativeConstraints": [
       "no extra limbs",
       "no extra tail",
       "no alternate outfit",
+      "no changed markings",
       "no props",
-      "no text",
-      "no labels",
-      "no cropped feet",
-      "no cropped ears",
-      "no dramatic perspective",
+      "no text or watermark",
+      "no cropped extremities",
+      "no dramatic perspective in construction views",
       "no environment"
     ]
   }

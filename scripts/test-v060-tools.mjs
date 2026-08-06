@@ -161,11 +161,11 @@ try {
   if (drainedNotices.length !== 1 || getBridgeNoticeStatus().pendingCount !== 0) throw new Error('Bridge notice one-shot drain failed');
   if (!noticeHistory.some((item) => item.code === 'fixture-warning' && item.actions?.[0]?.toolName === 'terminal_list')) throw new Error('Bridge notice history did not retain actionable reminder after drain');
 
-  if (registry.tools.length !== 135) throw new Error(`expected 135 tools, got ${registry.tools.length}`);
+  if (registry.tools.length !== 139) throw new Error(`expected 139 tools, got ${registry.tools.length}`);
   const catalogComparison = await call('bridge_connector_catalog_compare', {
     exposedToolNames: ['skill_catalog', 'skill_recommend', 'skill_load', 'host_private_tool'],
   });
-  if (catalogComparison.runtime.count !== 135 || catalogComparison.mssr.runtime !== 11) throw new Error('connector catalog comparison runtime baseline failed');
+  if (catalogComparison.runtime.count !== 139 || catalogComparison.mssr.runtime !== 11) throw new Error('connector catalog comparison runtime baseline failed');
   if (catalogComparison.mssr.directCoveragePercent !== 27.27) throw new Error(`unexpected MSSR direct coverage: ${catalogComparison.mssr.directCoveragePercent}`);
   if (!catalogComparison.mssr.delegatedViaQuery.includes('skill_bootstrap') || !catalogComparison.mssr.delegatedViaAction.includes('mssr_trace_record')) throw new Error('connector catalog wrapper classification failed');
   if (!catalogComparison.connectorObservation.unrecognized.includes('host_private_tool') || catalogComparison.interpretation.wrapperReachabilityIsDirectExposure !== false) throw new Error('connector catalog boundary classification failed');
@@ -177,7 +177,7 @@ try {
   const expectedNeutral = ['whiteboard_capture_pc_view', 'whiteboard_add_text', 'whiteboard_add_svg', 'whiteboard_add_diagram', 'whiteboard_insert_image', 'mssr_trace_record', 'mssr_observatory_epoch_start'];
   if (registry.riskSummary.neutral.length !== expectedNeutral.length || expectedNeutral.some((name) => !registry.riskSummary.neutral.includes(name))) throw new Error(`unexpected neutral tools: ${registry.riskSummary.neutral.join(', ')}`);
   for (const moduleName of ['project','workspace','cache','workflow-guides','skill-catalog-and-roblox-proxy','roblox-studio-ops','roblox-assets','roblox-photo-capture','notices','mssr-observatory','binary-files','images','blender','godot','tablet-whiteboard']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
-  for (const toolName of ['project_context_load','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','bridge_connector_catalog_compare','bridge_tool_schema','bridge_tool_audit','skill_catalog','skill_recommend','skill_route_audit','skill_route_vocabulary','skill_route_plan','skill_bootstrap','skill_load','mssr_observatory_query','mssr_trace_evidence','mssr_trace_record','mssr_observatory_epoch_start','bridge_notice_status','bridge_notice_drain','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_studio_list','roblox_mcp_query','roblox_mcp_action','roblox_asset_upload','roblox_studio_window_capture_save','roblox_screen_capture_save','roblox_photo_capture_job','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_file_attach','image_asset_save','image_character_views_prepare','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_focus_review','blender_review_bundle','blender_execute_code','blender_batch_script','blender_setup_character_references','blender_character_loop_status','godot_mcp_status','godot_mcp_tool_list','godot_mcp_instance_list','godot_mcp_query','godot_screen_capture_save','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list','whiteboard_add_text','whiteboard_add_svg','whiteboard_add_diagram','whiteboard_insert_image']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/Blender/whiteboard tool ${toolName}`);
+  for (const toolName of ['project_context_load','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','bridge_connector_catalog_compare','bridge_tool_schema','bridge_tool_audit','skill_catalog','skill_recommend','skill_route_audit','skill_route_vocabulary','skill_route_plan','skill_bootstrap','skill_load','mssr_observatory_query','mssr_trace_evidence','mssr_trace_record','mssr_observatory_epoch_start','bridge_notice_status','bridge_notice_drain','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_studio_list','roblox_mcp_query','roblox_mcp_action','roblox_asset_upload','roblox_studio_window_capture_save','roblox_screen_capture_save','roblox_photo_capture_job','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_file_attach','image_asset_save','image_asset_import_files','image_character_views_prepare','image_reference_pack_prepare','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_focus_review','blender_review_bundle','blender_execute_code','blender_batch_script','blender_validate_reference_pack','blender_install_reference_pack','blender_setup_character_references','blender_character_loop_status','godot_mcp_status','godot_mcp_tool_list','godot_mcp_instance_list','godot_mcp_query','godot_screen_capture_save','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list','whiteboard_add_text','whiteboard_add_svg','whiteboard_add_diagram','whiteboard_insert_image']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/Blender/whiteboard tool ${toolName}`);
   if (!registry.riskSummary.destructive.includes('roblox_mcp_action') || !registry.riskSummary.destructive.includes('roblox_studio_window_capture_save') || !registry.riskSummary.destructive.includes('roblox_screen_capture_save') || !registry.riskSummary.destructive.includes('roblox_photo_capture_job') || !registry.riskSummary.destructive.includes('roblox_place_save')) throw new Error('Roblox action/capture/save risk classification failed');
   for (const name of ['godot_mcp_status','godot_mcp_tool_list','godot_mcp_instance_list','godot_mcp_query']) if (!registry.riskSummary.readOnly.includes(name)) throw new Error(`Godot query tool ${name} must be read-only`);
   if (!registry.riskSummary.destructive.includes('godot_screen_capture_save')) throw new Error('Godot capture must be classified as a filesystem-writing action');
@@ -207,10 +207,27 @@ try {
   const focusReviewTool = registry.tools.find((tool) => tool.name === 'blender_focus_review');
   if (!focusReviewTool || !registry.riskSummary.destructive.includes('blender_focus_review')) throw new Error('Blender focus review classification failed');
   if (!focusReviewTool.inputSchema?.properties?.focusMode || !focusReviewTool.inputSchema?.properties?.outputDir || !focusReviewTool.description?.includes('current viewport')) throw new Error('Blender focus review schema/description failed');
+  const referencePrepareTool = registry.tools.find((tool) => tool.name === 'image_reference_pack_prepare');
+  const referenceValidateTool = registry.tools.find((tool) => tool.name === 'blender_validate_reference_pack');
+  const referenceInstallTool = registry.tools.find((tool) => tool.name === 'blender_install_reference_pack');
+  if (!referencePrepareTool || !registry.riskSummary.destructive.includes('image_reference_pack_prepare')) throw new Error('Generic reference-pack preparation classification failed');
+  if (!referencePrepareTool.inputSchema?.properties?.items || !referencePrepareTool.inputSchema?.properties?.masters || !referencePrepareTool.inputSchema?.properties?.alignment) throw new Error('Generic reference-pack preparation schema failed');
+  if (!referenceValidateTool || !registry.riskSummary.readOnly.includes('blender_validate_reference_pack')) throw new Error('Reference-pack validation classification failed');
+  if (!referenceValidateTool.inputSchema?.properties?.requiredRoles || !referenceValidateTool.inputSchema?.properties?.requireSemanticQa) throw new Error('Reference-pack validation schema failed');
+  if (!referenceInstallTool || !registry.riskSummary.destructive.includes('blender_install_reference_pack')) throw new Error('Reference-pack installation classification failed');
+  if (!referenceInstallTool.inputSchema?.properties?.layout || !referenceInstallTool.inputSchema?.properties?.outputBlend) throw new Error('Reference-pack installation schema failed');
+
 
   const imageAttachTool = registry.tools.find((tool) => tool.name === 'image_file_attach');
   if (!imageAttachTool || !registry.riskSummary.readOnly.includes('image_file_attach')) throw new Error('Local image attachment classification failed');
   if (!imageAttachTool.inputSchema?.properties?.items) throw new Error('Local image attachment schema failed');
+  const imageImportTool = registry.tools.find((tool) => tool.name === 'image_asset_import_files');
+  const imageImportFileDef = imageImportTool?.inputSchema?.$defs?.OpenAIFile;
+  if (!imageImportTool || !registry.riskSummary.destructive.includes('image_asset_import_files')) throw new Error('Authorized image-file import classification failed');
+  if (!imageImportTool.inputSchema?.properties?.files || !imageImportTool.inputSchema?.properties?.targets) throw new Error('Authorized image-file import schema failed');
+  if (JSON.stringify(imageImportTool._meta?.['openai/fileParams']) !== JSON.stringify(['files'])) throw new Error('Authorized image-file import fileParams metadata failed');
+  if (!imageImportFileDef?.properties?.download_url || !imageImportFileDef?.properties?.file_id || !imageImportFileDef?.properties?.mime_type || !imageImportFileDef?.properties?.file_name) throw new Error('Authorized image-file import file schema properties failed');
+  if (JSON.stringify(imageImportFileDef.required) !== JSON.stringify(['download_url','file_id'])) throw new Error('Authorized image-file import file schema required fields failed');
   const workOnceTool = registry.tools.find((tool) => tool.name === 'work_once');
   const auditTool = registry.tools.find((tool) => tool.name === 'bridge_tool_audit');
   if (workOnceTool?.metadata?.role !== 'alias' || workOnceTool.metadata.aliasOf !== 'run_command' || workOnceTool.metadata.family !== 'process') throw new Error('tool alias metadata failed');
@@ -352,7 +369,7 @@ try {
   const skillLoadSchema = await call('bridge_tool_schema', {toolName:'skill_load'});
   if (!skillLoadSchema.tool?.metadata?.usage?.recovery?.some((rule) => rule.code === 'mssr-orphan-skill-load' && rule.toolName === 'skill_bootstrap')) throw new Error('skill_load MSSR recovery metadata failed');
   const aliasAudit = await call('bridge_tool_audit', {view:'aliases',scope:'active',days:30,limit:20});
-  if (aliasAudit.summary?.registeredTools !== 135 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
+  if (aliasAudit.summary?.registeredTools !== 139 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
   const delegatedMetric = beginToolMetric('bridge_tool_query', {toolName:'bridge_tool_audit',arguments:{view:'all'}}, {caller:'chatgpt-web',sessionKey:'fixture-session',project:'fixture-project'});
   finishToolMetric(delegatedMetric, true, 128);
   const delegatedSnapshot = getToolAuditMetrics(30, 'active');
@@ -408,7 +425,7 @@ try {
   if (!pluginCatalog.skills.some((skill) => skill.name === 'fixture-plugin-skill')) throw new Error(`skill catalog did not discover the managed plugin cache: ${JSON.stringify(pluginCatalog.warnings)}`);
 
   const structuredRoute = await call('skill_route_plan', {
-    task:'DiseÃ±ar mÃ¡quinas conectables por puertos, transportar recursos y guardar el proyecto',
+    task:'DiseÃƒÂ±ar mÃƒÂ¡quinas conectables por puertos, transportar recursos y guardar el proyecto',
     sources:['codex-local'],
     stage:'start',
     maxSkills:8,
@@ -436,7 +453,7 @@ try {
   }
   if (!structuredRoute.coverage.requiredPhases.includes('verification') || !structuredRoute.coverage.requiredPhases.includes('persistence')) throw new Error('structured route phase coverage failed');
   const recommendedRoute = await call('skill_recommend', {
-    task:'DiseÃ±ar mÃ¡quinas conectables por puertos',
+    task:'DiseÃƒÂ±ar mÃƒÂ¡quinas conectables por puertos',
     sources:['codex-local'],
     caller:'chatgpt-web',
     stage:'start',
@@ -478,7 +495,7 @@ try {
     stage:'verify',
     completedPhases:['discovery','safety','implementation'],
     intent:{
-      summary:'VerificaciÃ³n del sistema Roblox ya implementado',
+      summary:'VerificaciÃƒÂ³n del sistema Roblox ya implementado',
       domains:['roblox'],
       actions:['test','review'],
       artifacts:['network-system','resource-system','game'],

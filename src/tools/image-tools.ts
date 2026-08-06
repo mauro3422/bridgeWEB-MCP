@@ -11,13 +11,23 @@ const MAX_BATCH_ITEMS = 8;
 const MAX_ATTACH_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_ATTACH_TOTAL_BYTES = 24 * 1024 * 1024;
 
-const itemSchema = z.object({
+const assetTargetSchema = z.object({
   outputPath: z.string().min(1),
-  base64: z.string().min(1).max(MAX_BASE64_CHARS),
   role: z.string().max(80).optional(),
   prompt: z.string().max(10_000).optional(),
   source: z.string().max(200).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+const itemSchema = assetTargetSchema.extend({
+  base64: z.string().min(1).max(MAX_BASE64_CHARS),
+});
+
+const openAIFileSchema = z.object({
+  download_url: z.string().url(),
+  file_id: z.string().min(1).max(256),
+  mime_type: z.string().max(200).optional(),
+  file_name: z.string().max(512).optional(),
 });
 
 const localImageItemSchema = z.object({
@@ -26,11 +36,13 @@ const localImageItemSchema = z.object({
   expectedSha256: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
 });
 
+type AssetTargetInput = z.infer<typeof assetTargetSchema>;
 type ImageInput = z.infer<typeof itemSchema>;
+type OpenAIFileInput = z.infer<typeof openAIFileSchema>;
 type LocalImageInput = z.infer<typeof localImageItemSchema>;
 
 type DecodedImage = {
-  input: ImageInput;
+  input: AssetTargetInput;
   outputPath: string;
   extension: string;
   mime: string;
@@ -195,13 +207,11 @@ async function attachLocalImages(args: { items: LocalImageInput[] }) {
   };
 }
 
-async function saveImages(args: {
-  items: ImageInput[];
+async function persistImages(decoded: DecodedImage[], args: {
   overwrite: boolean;
   manifestPath?: string;
   collectionName?: string;
 }) {
-  const decoded = args.items.map(decodeImage);
   const uniquePaths = new Set(decoded.map((item) => item.outputPath.toLowerCase()));
   if (uniquePaths.size !== decoded.length) throw new Error("Batch contains duplicate output paths");
 
@@ -264,7 +274,128 @@ async function saveImages(args: {
   };
 }
 
+async function saveImages(args: {
+  items: ImageInput[];
+  overwrite: boolean;
+  manifestPath?: string;
+  collectionName?: string;
+}) {
+  return await persistImages(args.items.map(decodeImage), args);
+}
+
+async function readBoundedResponse(response: Response, label: string): Promise<Buffer> {
+  if (!response.body) throw new Error(`File download returned no body: ${label}`);
+  const declaredLength = Number(response.headers.get("content-length") ?? "0");
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_IMAGE_BYTES) {
+    throw new Error(`File download exceeds ${MAX_IMAGE_BYTES} bytes: ${label}`);
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Buffer[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value?.length) continue;
+    total += value.length;
+    if (total > MAX_IMAGE_BYTES) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error(`File download exceeds ${MAX_IMAGE_BYTES} bytes: ${label}`);
+    }
+    chunks.push(Buffer.from(value));
+  }
+  if (!total) throw new Error(`File download is empty: ${label}`);
+  return Buffer.concat(chunks, total);
+}
+
+async function downloadFileImage(file: OpenAIFileInput, target: AssetTargetInput): Promise<DecodedImage> {
+  const url = new URL(file.download_url);
+  const isLoopbackHttp = url.protocol === "http:" && (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]");
+  if (url.protocol !== "https:" && !isLoopbackHttp) throw new Error(`File download URL must use HTTPS: ${file.file_id}`);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60_000);
+  let response: Response;
+  try {
+    response = await fetch(url, { redirect: "follow", signal: controller.signal });
+  } catch (error) {
+    throw new Error(`Unable to download authorized file ${file.file_id}: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+  if (!response.ok) throw new Error(`Authorized file download failed (${response.status}) for ${file.file_id}`);
+
+  const bytes = await readBoundedResponse(response, file.file_name ?? file.file_id);
+  const outputPath = resolveToolPath(target.outputPath, { access: "write" });
+  const measured = inspectImageBytes(outputPath, bytes);
+  const declaredMime = file.mime_type?.toLowerCase();
+  const normalizedDeclaredMime = declaredMime === "image/jpg" ? "image/jpeg" : declaredMime;
+  if (normalizedDeclaredMime && normalizedDeclaredMime !== measured.mime) {
+    throw new Error(`File MIME mismatch for ${file.file_id}: declared ${file.mime_type}, measured ${measured.mime}`);
+  }
+
+  return {
+    input: {
+      ...target,
+      source: target.source ?? "chatgpt-authorized-file-param",
+      metadata: {
+        ...(target.metadata ?? {}),
+        authorizedFile: {
+          fileId: file.file_id,
+          fileName: file.file_name ?? null,
+          declaredMime: file.mime_type ?? null,
+          originalBytesPreserved: true,
+        },
+      },
+    },
+    outputPath,
+    extension: measured.extension,
+    mime: measured.mime,
+    bytes,
+    width: measured.width,
+    height: measured.height,
+    sha256: sha256(bytes),
+  };
+}
+
+async function importFileImages(args: {
+  files: OpenAIFileInput[];
+  targets: AssetTargetInput[];
+  overwrite: boolean;
+  manifestPath?: string;
+  collectionName?: string;
+}) {
+  if (args.files.length !== args.targets.length) {
+    throw new Error(`files and targets must have the same length; got ${args.files.length} and ${args.targets.length}`);
+  }
+  const decoded = await Promise.all(args.files.map((file, index) => downloadFileImage(file, args.targets[index])));
+  return await persistImages(decoded, args);
+}
+
 const characterViewRoleSchema = z.enum(["front", "side", "back", "three-quarter"]);
+const referencePackRoles = [
+  "front",
+  "rear",
+  "left",
+  "right",
+  "top",
+  "bottom",
+  "front_left_3q",
+  "front_right_3q",
+  "rear_left_3q",
+  "rear_right_3q",
+] as const;
+const referencePackRoleSchema = z.enum(referencePackRoles);
+const referencePackUsageSchema = z.enum(["construction", "design"]);
+const referencePackProjectionSchema = z.enum(["orthographic", "perspective"]);
+const referencePackQaSchema = z.object({
+  status: z.enum(["pass", "pending", "fail"]).default("pending"),
+  notes: z.array(z.string().max(500)).max(20).default([]),
+});
+const normalizedLandmarkSchema = z.object({
+  x: z.number().min(0).max(1),
+  y: z.number().min(0).max(1),
+});
 
 async function ensureImageFile(filePath: string, label: string): Promise<void> {
   let stat;
@@ -365,6 +496,134 @@ async function prepareCharacterViews(args: {
 }
 
 
+async function prepareReferencePack(args: {
+  baseName: string;
+  assetKind: "character" | "prop" | "environment" | "other";
+  items: Array<{
+    role: (typeof referencePackRoles)[number];
+    inputPath: string;
+    usage: "construction" | "design";
+    projection: "orthographic" | "perspective";
+    semanticQa: { status: "pass" | "pending" | "fail"; notes: string[] };
+    landmarks: Record<string, { x: number; y: number }>;
+  }>;
+  masters: { design?: (typeof referencePackRoles)[number]; geometry?: (typeof referencePackRoles)[number] };
+  operationMode: "reference-only" | "offline-preparation";
+  userModeling: boolean;
+  targetBlendFile?: string;
+  outputDir: string;
+  manifestPath?: string;
+  targetWidth: number;
+  targetHeight: number;
+  backgroundThreshold: number;
+  cropMargin: number;
+  canvasMargin: number;
+  alignment: "center" | "baseline";
+  outputFormat: "jpeg" | "png";
+  jpegQuality: number;
+  overwrite: boolean;
+  timeoutMs: number;
+}) {
+  if (args.userModeling && args.operationMode !== "reference-only") {
+    throw new Error("userModeling=true requires operationMode=reference-only");
+  }
+  let targetBlendFile: string | undefined;
+  if (args.targetBlendFile) {
+    targetBlendFile = resolveToolPath(args.targetBlendFile, { access: "read" });
+    if (path.extname(targetBlendFile).toLowerCase() !== ".blend") {
+      throw new Error("targetBlendFile must use the .blend extension");
+    }
+  }
+  const roles = new Set(args.items.map((item) => item.role));
+  if (roles.size !== args.items.length) throw new Error("Reference-pack roles must be unique");
+  if (args.items.length < 2) throw new Error("Reference packs require at least two views");
+  const cardinalRoles = new Set(["front", "rear", "left", "right", "top", "bottom"]);
+  for (const item of args.items) {
+    if (item.usage === "construction" && !cardinalRoles.has(item.role)) {
+      throw new Error(`Construction role '${item.role}' must be an axis-aligned cardinal view`);
+    }
+    if (item.usage === "construction" && item.projection !== "orthographic") {
+      throw new Error(`Construction role '${item.role}' must use orthographic projection`);
+    }
+  }
+  for (const [label, role] of Object.entries(args.masters)) {
+    if (role && !roles.has(role)) throw new Error(`${label} master '${role}' is not present in the pack`);
+  }
+
+  const items = [];
+  for (const item of args.items) {
+    const inputPath = resolveToolPath(item.inputPath, { access: "read" });
+    await ensureImageFile(inputPath, `${item.role} source image`);
+    items.push({ ...item, inputPath });
+  }
+
+  const outputDir = resolveToolPath(args.outputDir, { access: "write" });
+  await fs.mkdir(outputDir, { recursive: true });
+  const manifestPath = resolveToolPath(
+    args.manifestPath ?? path.join(outputDir, `${args.baseName}_reference-pack.json`),
+    { access: "write" },
+  );
+  if (path.extname(manifestPath).toLowerCase() !== ".json") throw new Error("manifestPath must use the .json extension");
+
+  const scriptPath = path.resolve(process.cwd(), "integrations", "images", "prepare_reference_pack.py");
+  await ensureImageFile(scriptPath, "Reference-pack preparation script");
+  const configPath = path.join(outputDir, `.prepare-reference-pack-${crypto.randomUUID()}.json`);
+  const config = {
+    baseName: args.baseName,
+    assetKind: args.assetKind,
+    items,
+    masters: args.masters,
+    operationMode: args.operationMode,
+    userModeling: args.userModeling,
+    targetBlendFile,
+    outputDir,
+    manifestPath,
+    targetWidth: args.targetWidth,
+    targetHeight: args.targetHeight,
+    backgroundThreshold: args.backgroundThreshold,
+    cropMargin: args.cropMargin,
+    canvasMargin: args.canvasMargin,
+    alignment: args.alignment,
+    outputFormat: args.outputFormat,
+    jpegQuality: args.jpegQuality,
+    overwrite: args.overwrite,
+  };
+  await fs.writeFile(configPath, JSON.stringify(config, null, 2), "utf8");
+
+  try {
+    const pythonExecutable = process.env.BRIDGE_PYTHON_EXE || "python";
+    const processResult = await runProcess(
+      pythonExecutable,
+      [scriptPath, "--config", configPath],
+      process.cwd(),
+      args.timeoutMs,
+    );
+    if (processResult.code !== 0 || processResult.timedOut) {
+      throw new Error(`Reference-pack preparation failed: ${processResult.stderr || processResult.stdout || processResult.error || "unknown error"}`);
+    }
+    const marker = String(processResult.stdout ?? "")
+      .split(/\r?\n/)
+      .find((line) => line.startsWith("REFERENCE_PACK_PREPARED="));
+    const generated = marker ? JSON.parse(marker.slice("REFERENCE_PACK_PREPARED=".length)) : null;
+    const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+    return {
+      stage: "prepared",
+      outputDir,
+      manifestPath,
+      generated,
+      manifest,
+      process: {
+        code: processResult.code,
+        timedOut: processResult.timedOut,
+        durationMs: processResult.durationMs,
+      },
+    };
+  } finally {
+    await fs.rm(configPath, { force: true }).catch(() => undefined);
+  }
+}
+
+
 export const imageToolModule: BridgeToolModule = {
   name: "images",
   tools: [
@@ -427,6 +686,130 @@ export const imageToolModule: BridgeToolModule = {
       },
     },
     {
+      name: "image_asset_import_files",
+      description: "Import one or more ChatGPT-authorized image file parameters without recompression. Downloads the temporary authorized files, validates image signatures, MIME, dimensions and byte limits, saves them atomically, records SHA-256 provenance, and can write a JSON manifest.",
+      inputSchema: {
+        type: "object",
+        $defs: {
+          OpenAIFile: {
+            type: "object",
+            properties: {
+              download_url: { type: "string" },
+              file_id: { type: "string" },
+              mime_type: { type: "string" },
+              file_name: { type: "string" },
+            },
+            required: ["download_url", "file_id"],
+            additionalProperties: false,
+          },
+        },
+        properties: {
+          files: {
+            type: "array",
+            minItems: 1,
+            maxItems: MAX_BATCH_ITEMS,
+            items: { $ref: "#/$defs/OpenAIFile" },
+          },
+          targets: {
+            type: "array",
+            minItems: 1,
+            maxItems: MAX_BATCH_ITEMS,
+            items: {
+              type: "object",
+              properties: {
+                outputPath: { type: "string" },
+                role: { type: "string" },
+                prompt: { type: "string" },
+                source: { type: "string" },
+                metadata: { type: "object", additionalProperties: true },
+              },
+              required: ["outputPath"],
+              additionalProperties: false,
+            },
+          },
+          overwrite: { type: "boolean", default: false },
+          manifestPath: { type: "string" },
+          collectionName: { type: "string" },
+        },
+        required: ["files", "targets"],
+        additionalProperties: false,
+      },
+      _meta: {
+        "openai/fileParams": ["files"],
+      },
+    },
+    {
+      name: "image_reference_pack_prepare",
+      description: "Normalize and version a generic Blender modeling reference pack without stretching. Records a durable coordination contract for offline preparation or reference-only generation while Mauro models, including the intended .blend handoff and a hard no-live-Blender tool policy.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          baseName: { type: "string" },
+          assetKind: { type: "string", enum: ["character", "prop", "environment", "other"], default: "prop" },
+          items: {
+            type: "array",
+            minItems: 2,
+            maxItems: 10,
+            items: {
+              type: "object",
+              properties: {
+                role: { type: "string", enum: [...referencePackRoles] },
+                inputPath: { type: "string" },
+                usage: { type: "string", enum: ["construction", "design"] },
+                projection: { type: "string", enum: ["orthographic", "perspective"] },
+                semanticQa: {
+                  type: "object",
+                  properties: {
+                    status: { type: "string", enum: ["pass", "pending", "fail"], default: "pending" },
+                    notes: { type: "array", items: { type: "string" }, maxItems: 20, default: [] },
+                  },
+                  additionalProperties: false,
+                },
+                landmarks: {
+                  type: "object",
+                  description: "Optional named normalized source-image points in the 0..1 range, for example ground, top, shoulder, hinge or drawer-center.",
+                  additionalProperties: {
+                    type: "object",
+                    properties: { x: { type: "number", minimum: 0, maximum: 1 }, y: { type: "number", minimum: 0, maximum: 1 } },
+                    required: ["x", "y"],
+                    additionalProperties: false,
+                  },
+                },
+              },
+              required: ["role", "inputPath", "usage", "projection"],
+              additionalProperties: false,
+            },
+          },
+          masters: {
+            type: "object",
+            properties: {
+              design: { type: "string", enum: [...referencePackRoles] },
+              geometry: { type: "string", enum: [...referencePackRoles] },
+            },
+            additionalProperties: false,
+          },
+          operationMode: { type: "string", enum: ["reference-only", "offline-preparation"], default: "offline-preparation" },
+          userModeling: { type: "boolean", default: false },
+          targetBlendFile: { type: "string", description: "Optional intended .blend handoff path. The preparation tool never opens or modifies it." },
+          outputDir: { type: "string" },
+          manifestPath: { type: "string" },
+          targetWidth: { type: "number", default: 1400, minimum: 256, maximum: 4096 },
+          targetHeight: { type: "number", default: 1400, minimum: 256, maximum: 4096 },
+          backgroundThreshold: { type: "number", default: 10, minimum: 1, maximum: 80 },
+          cropMargin: { type: "number", default: 0.04, minimum: 0, maximum: 0.3 },
+          canvasMargin: { type: "number", default: 0.06, minimum: 0, maximum: 0.3 },
+          alignment: { type: "string", enum: ["center", "baseline"], default: "center" },
+          outputFormat: { type: "string", enum: ["jpeg", "png"], default: "png" },
+          jpegQuality: { type: "number", default: 94, minimum: 50, maximum: 100 },
+          overwrite: { type: "boolean", default: false },
+          timeoutMs: { type: "number", default: 180000, minimum: 1000, maximum: 600000 },
+        },
+        required: ["baseName", "items", "outputDir"],
+        additionalProperties: false,
+      },
+    },
+
+    {
       name: "image_character_views_prepare",
       description: "Use this after image_asset_save when a character has exactly one front, side, back, and three-quarter source view. Normalizes the set for Blender, aligns feet and scale, exports lightweight references, and returns quality warnings plus a manifest.",
       inputSchema: {
@@ -480,6 +863,51 @@ export const imageToolModule: BridgeToolModule = {
       }).parse(raw);
       return await saveImages(parsed);
     },
+    image_asset_import_files: async (raw) => {
+      const parsed = z.object({
+        files: z.array(openAIFileSchema).min(1).max(MAX_BATCH_ITEMS),
+        targets: z.array(assetTargetSchema).min(1).max(MAX_BATCH_ITEMS),
+        overwrite: z.boolean().default(false),
+        manifestPath: z.string().optional(),
+        collectionName: z.string().max(160).optional(),
+      }).parse(raw);
+      return await importFileImages(parsed);
+    },
+    image_reference_pack_prepare: async (raw) => {
+      const parsed = z.object({
+        baseName: z.string().min(1).max(120),
+        assetKind: z.enum(["character", "prop", "environment", "other"]).default("prop"),
+        items: z.array(z.object({
+          role: referencePackRoleSchema,
+          inputPath: z.string(),
+          usage: referencePackUsageSchema,
+          projection: referencePackProjectionSchema,
+          semanticQa: referencePackQaSchema.default({ status: "pending", notes: [] }),
+          landmarks: z.record(z.string().min(1).max(120), normalizedLandmarkSchema).default({}),
+        })).min(2).max(10),
+        masters: z.object({
+          design: referencePackRoleSchema.optional(),
+          geometry: referencePackRoleSchema.optional(),
+        }).default({}),
+        operationMode: z.enum(["reference-only", "offline-preparation"]).default("offline-preparation"),
+        userModeling: z.boolean().default(false),
+        targetBlendFile: z.string().optional(),
+        outputDir: z.string(),
+        manifestPath: z.string().optional(),
+        targetWidth: z.number().int().min(256).max(4096).default(1400),
+        targetHeight: z.number().int().min(256).max(4096).default(1400),
+        backgroundThreshold: z.number().min(1).max(80).default(10),
+        cropMargin: z.number().min(0).max(0.3).default(0.04),
+        canvasMargin: z.number().min(0).max(0.3).default(0.06),
+        alignment: z.enum(["center", "baseline"]).default("center"),
+        outputFormat: z.enum(["jpeg", "png"]).default("png"),
+        jpegQuality: z.number().int().min(50).max(100).default(94),
+        overwrite: z.boolean().default(false),
+        timeoutMs: z.number().int().min(1000).max(600000).default(180000),
+      }).parse(raw);
+      return await prepareReferencePack(parsed);
+    },
+
     image_character_views_prepare: async (raw) => {
       const parsed = z.object({
         baseName: z.string().min(1).max(120),

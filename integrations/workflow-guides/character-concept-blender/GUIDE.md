@@ -1,235 +1,298 @@
-# Character Concept → Blender Skill
+# Character Concept → Blender
 
 ## Purpose
 
-Create consistent game-character concept views, persist them safely, normalize them for 3D reference, mount them in Blender, and keep the workflow resumable.
+Create consistent character design and construction views, persist and normalize them, validate the real files and semantic directions, install them as correct Blender Image Empties, and keep the loop resumable.
 
-This skill coordinates two kinds of tools:
+The image generator creates or edits visual references. Bridge tools save, inspect, normalize, validate, install and review them.
 
-- Chat image generation: creates or edits the visual concept.
-- Bridge tools: save, validate, normalize, version, open, and inspect assets on MauroPrime.
+## Two-master contract
 
-The bridge does not generate the image itself. The chat generates it, then hands the resulting bytes to `image_asset_save`.
+Lock two separate authorities:
+
+1. **Design master** — normally `front_right_3q`, perspective allowed. It owns style, materials, markings, clothing, facial identity and volume intent.
+2. **Geometric master** — `front`, orthographic visual language. It owns proportions, center, baseline, landmark heights and construction alignment.
+
+Do not treat the three-quarter design image as measurable geometry. Do not let the front construction view redesign materials or hidden features.
+
+## Concurrent reference-only mode
+
+When Mauro says he is modeling while the agent generates references, stop the pipeline before any live Blender phase. Generate and save images, run semantic review, and prepare the pack with:
+
+```text
+operationMode: reference-only
+userModeling: true
+targetBlendFile: <exact intended .blend path>
+```
+
+The persisted manifest must report `blenderInteractionAllowed: false`, defer installation and list live Blender tools as forbidden. Do not call `blender_open`, inspect the scene, focus Blender, capture its viewport, install references, execute code or save the `.blend`. Resume installation only after a later `blender_status` exact-path/PID/port preflight and no conflicting recent human activity.
+
 
 ## Default mode
 
-Use **quality mode** unless the user explicitly asks for speed.
+Use quality mode unless speed is explicitly more important.
 
 ### Quality mode
 
-1. Create and approve a canonical front view.
-2. Use the canonical front image plus the locked character brief as reference for the side view.
-3. Repeat for the back view.
-4. Repeat for the three-quarter view.
-5. Regenerate only the failed view when quality control finds drift.
+```text
+brief_locked
+→ design_master_approved
+→ geometric_front_approved
+→ each derived view generated and reviewed separately
+→ sources_saved
+→ reference_pack_prepared
+→ semantic_and_byte_validation_passed
+→ blender_scene_installed
+→ installed_planes_reviewed
+→ ready_for_blockout
+```
+
+Regenerate only the failing view. Preserve accepted sources and record a new pack revision when an approved trait changes.
 
 ### Fast mode
 
-1. Create and approve a canonical front view.
-2. Generate side, back, and three-quarter views in one batch using the same canonical reference and locked brief.
-3. Review all outputs before saving.
+After both masters are approved, derive the remaining views in one batch. Every output still requires individual semantic QA before installation.
 
-Batch generation is faster, but quality mode usually preserves proportions, markings, face, hands, feet, and tail placement more reliably.
+## Phase 1 — Lock the brief
 
-## State machine
+Create `character-brief.json`. Lock at least:
 
-The loop must always finish a state by writing or updating a manifest.
-
-```text
-brief_locked
-  -> canonical_front_generated
-  -> views_generated
-  -> views_saved
-  -> views_normalized
-  -> blender_scene_created
-  -> blender_opened_and_verified
-  -> viewport_reviewed
-  -> ready_for_blockout
-```
-
-If a step fails, report the last completed state and the exact file or operation required to resume. Never end the loop with an empty response.
-
-## Phase 1 — Lock the character brief
-
-Create `character-brief.json` from the template. Lock these fields before producing the final views:
-
-- species
-- body proportions
-- head-to-body ratio
-- palette
-- eye shape and color
-- ear shape
-- muzzle shape
-- hands and feet
-- tail count, size, and resting side
-- markings and their exact locations
-- clothing/accessories
-- material style
-- target game triangle budget
-- rig family
+- species and character identity;
+- head-to-body ratio and body proportions;
+- shoulder, hip, hand and foot shapes;
+- face, eyes, ears and muzzle;
+- tail count, base, length and resting direction;
+- palette and exact markings;
+- clothing and accessories;
+- material style;
+- intended height and game triangle budget;
+- rig family and moving appendages;
+- asymmetries and handed features.
 
 Anything not locked may drift between views.
 
-## Phase 2 — Generate images
+## Phase 2 — Generate the design master
 
-Each final image must contain exactly one view:
-
-- `front`
-- `side`
-- `back`
-- `three-quarter`
+Generate one controlled full-body three-quarter image using `prompts/design-master.md`.
 
 Requirements:
 
-- full body, head to feet visible
-- neutral standing pose
-- arms relaxed and separated from torso
-- legs separated enough to read the silhouette
-- clean white background
-- camera at the same approximate height and focal style
-- no labels, borders, props, shadows that hide the feet, or extra subjects
-- same character identity and proportions in every image
-- same tail count and tail base position
-- same markings, colors, eyes, paws, muzzle, ears, and chest shape
+- exactly one complete character;
+- relaxed neutral pose;
+- readable face, torso depth, hands, feet and tail base;
+- neutral background and level camera;
+- no text, border, scenery or unrelated props;
+- no cropped extremities;
+- no dramatic action or lens distortion.
 
-For a riggable humanoid, prefer a relaxed A-pose over a strict straight-arm pose when the generator can preserve it consistently.
+Approve identity, materials, markings and volume intent before generating construction views.
 
-## Phase 3 — Visual quality control
+## Phase 3 — Generate the geometric front
 
-Review each view against the canonical front and the brief.
+Generate `front` using `prompts/front.md`, attaching the approved design master.
 
-### Identity checks
+Requirements:
 
-- same number and shape of ears
-- same eye color and eye spacing
-- same muzzle length
-- same head/body proportion
-- same shoulder, hip, hand, and foot proportions
-- same tail count, length, volume, and tip color
-- same chest and face markings
-- same circuitry, tattoos, stripes, or symbols
+- true front orthographic-like construction view;
+- full body visible;
+- relaxed A-pose when rigging is expected;
+- arms separated from torso and legs separated enough to read the silhouette;
+- centered body and common foot baseline;
+- no camera tilt, dramatic perspective or cast shadow hiding the feet.
 
-### Modeling checks
+The front becomes `masters.geometry`. It must preserve the design master rather than becoming a new design.
 
-- silhouette is readable
-- limbs do not merge into torso
-- hands and feet are not malformed
-- no hidden second tail or extra limb
-- front and side imply compatible torso depth
-- back view shows shoulder blades, spine area, tail base, and leg spacing
-- side view is a true profile, not a three-quarter angle
-- feet are on a common baseline
+## Phase 4 — Derive construction views
 
-Regenerate only the failing view, using the canonical front and the best matching existing view as references.
+Use `prompts/derived-view.md`. Attach both approved masters and one adjacent approved construction view when useful.
 
-## Phase 4 — Save assets
+Canonical ids:
 
-Call `image_asset_save` with one item or a batch.
+```text
+front
+rear
+left
+right
+top
+bottom
+front_left_3q
+front_right_3q
+rear_left_3q
+rear_right_3q
+```
 
-Always include:
+For a symmetric starter character, the minimum useful set is:
 
-- `outputPath`
-- `role`
-- `prompt`
-- `source`
-- useful metadata such as generation id, reference image id, character name, and mode
+```text
+front
+rear
+right or left
+front_right_3q or front_left_3q
+```
 
-For a turnaround batch, also provide:
+For asymmetric characters, generate both `left` and `right`. Add `top` or `bottom` only when the silhouette, mounts, wings, tail layout or equipment requires it.
 
-- `collectionName`
-- `manifestPath`
+Every cardinal construction view must be orthographic-like. A true side is not a three-quarter view; a rear view must not show the face.
+
+## Phase 5 — Semantic visual QA
+
+Before marking a view `pass`, inspect the actual image.
+
+### Direction
+
+- front and rear are true opposites;
+- left and right expose opposite sides and preserve handed details;
+- top is overhead;
+- cardinal construction views do not use a perspective camera;
+- three-quarter images are labeled as design views, not construction measurements.
+
+### Identity
+
+- same face, eyes, ears and muzzle;
+- same head/body ratio, shoulders, hips, hands and feet;
+- same tail count, base, length and markings;
+- same clothing, accessories, circuitry, tattoos, stripes and symbols;
+- no extra limbs, digits, ears, horns or hidden duplicate appendages.
+
+### Construction compatibility
+
+- compatible total height and baseline;
+- compatible torso and limb lengths;
+- front and side imply plausible depth;
+- moving parts and asymmetries remain on the correct side;
+- no clipped subject, merged limbs or unreadable joints.
+
+Record concrete notes. Use `pending` when not reviewed and `fail` when the direction or identity is wrong. Installation should require `pass`.
+
+## Phase 6 — Save sources
+
+Call `image_asset_save` with stable roles, prompts, source provider and useful metadata. Keep source masters separate from normalized derivatives.
 
 Recommended layout:
 
 ```text
-assets/concepts/<character-slug>/
+assets/concepts/<slug>/
+  brief/character-brief.json
   source/
+    <slug>_front_right_3q.png
     <slug>_front.png
-    <slug>_side.png
-    <slug>_back.png
-    <slug>_three-quarter.png
+    <slug>_rear.png
+    <slug>_right.png
     generation-manifest.json
   prepared/
-    <slug>_front.jpg
-    <slug>_side.jpg
-    <slug>_back.jpg
-    <slug>_three-quarter.jpg
-    prepared-manifest.json
+    <slug>_<role>.png
+    <slug>_reference-pack.json
   blender/
     <slug>_references.blend
-    <slug>_references.loop.json
-    viewport.png
-  character-brief.json
+    <slug>_references.reference-install.json
+  review/
 ```
 
-## Phase 5 — Normalize views
+Never silently overwrite an accepted source pack.
 
-Call `image_character_views_prepare` after saving the source images.
+## Phase 7 — Prepare the generic pack
 
-The preparation stage:
+Prefer `image_reference_pack_prepare` for new work.
 
-- detects the mostly white background
-- finds the subject bounds
-- adds safe crop margin
-- scales all views to the same canvas
-- aligns feet to a common baseline
-- exports lightweight Blender reference images
-- computes hashes, dimensions, subject ratios, and warnings
-- creates a resumable manifest
-
-Do not silently ignore warnings. Regenerate a source view when the subject is clipped, too small, or inconsistent in scale.
-
-## Phase 6 — Blender setup
-
-Call `blender_setup_character_references` with the prepared views.
-
-Expected result:
-
-- a saved `.blend`
-- named reference objects
-- front and side visible by default
-- back and three-quarter retained as hidden review references
-- a `.loop.json` checkpoint
-- Blender opened on a free local port
-- bridge connection verified before returning
-
-Then capture a viewport image and inspect alignment before beginning geometry. Once geometry exists, prefer `blender_review_bundle` over separate screenshot calls: target the model collection, request front/right/back/three-quarter views, inspect the attached contact sheet, and use the returned bounds, geometry, material, visibility, rig, animation, warning, hash, and restoration data as the editing context.
-
-## Phase 7 — Iteration loop
+Each item declares:
 
 ```text
-Generate or edit one view
-  -> save source
-  -> normalize all four views
-  -> rebuild/update Blender references
-  -> capture viewport
-  -> inspect
-  -> regenerate only the inconsistent view
+role
+inputPath
+usage: construction | design
+projection: orthographic | perspective
+semanticQa
+optional landmarks
 ```
 
-Preserve approved images. Never overwrite them without `overwrite: true` and an explicit reason in metadata.
+Use:
 
-## Prompt structure
+- `alignment: baseline` for grounded characters;
+- PNG masters when practical;
+- identical target canvas for all views;
+- named landmarks when exact cross-view alignment matters.
 
-Every view prompt should contain four sections:
+Useful character landmarks include top of head, eyes, chin, shoulders, elbows, wrists, hips, knees, ankles and ground.
 
-1. **Identity lock** — immutable character traits from the brief.
-2. **View instruction** — front, true side, back, or three-quarter.
-3. **Modeling constraints** — neutral pose, separated limbs, full body, white background.
-4. **Negative constraints** — no extra limbs, no alternate outfit, no text, no props, no crop, no perspective distortion.
+Preparation may crop, translate and uniformly scale. It must never non-uniformly stretch an image to force agreement.
 
-Use the prompt templates in `prompts/`.
+`image_character_views_prepare` remains the historical four-view normalization path, not the preferred generic contract.
+
+## Phase 8 — Validate
+
+Call `blender_validate_reference_pack` with the roles required for this character and `requireSemanticQa: true`.
+
+Validation checks the actual bytes and manifest:
+
+- unique canonical roles;
+- cardinal construction views marked orthographic;
+- semantic QA status;
+- signatures, dimensions, byte counts and SHA-256;
+- shared construction canvas;
+- accidental duplicate images for different cardinal directions;
+- required roles and valid master references;
+- blocking and cross-view warnings.
+
+Regenerate or repair only failed views. Do not install a failed or pending pack.
+
+## Phase 9 — Install in Blender
+
+Call `blender_install_reference_pack` with `layout: axis_aligned`.
+
+Expected construction layout:
+
+```text
+front + rear  → same XZ plane, opposite image-side visibility
+left + right  → same YZ plane, opposite image-side visibility
+top + bottom  → same XY plane, opposite image-side visibility
+```
+
+Construction references must be:
+
+- behind geometry;
+- visible in orthographic axis-aligned views;
+- hidden in perspective;
+- locked from selection;
+- excluded from rendering;
+- placed in `REFERENCES_CONSTRUCTION`.
+
+Design three-quarter views belong in `REFERENCES_DESIGN` and remain hidden by default.
+
+Use `layout: surround` only for explicit inspection. It offsets references and permits perspective viewing, so it is not the modeling default.
+
+`blender_setup_character_references` remains a compatibility wrapper for front/side/back/three-quarter packs. It now installs through the same generic axis-aligned contract.
+
+## Phase 10 — Review and iterate
+
+Before blockout:
+
+1. capture front, side and optional top views;
+2. verify the correct reference appears from each side;
+3. verify planes share the intended origin and scale;
+4. confirm perspective hides construction references;
+5. inspect the installation manifest.
+
+Once geometry exists:
+
+- use `blender_review_bundle` for fixed front/right/back/three-quarter/top renders and metadata;
+- use `blender_focus_review` when Mauro selects a face, edge, vertex, object or 3D Cursor location and asks to inspect it;
+- recapture the same views after corrections.
+
+## Repair one view
+
+Use `prompts/repair-view.md`. Attach both masters, the failed view and an adjacent approved construction view when useful. Describe exact visible errors and immutable features. Never ask vaguely to “improve” the image.
 
 ## Completion rule
 
-A concept loop is complete only when all are true:
+The loop is ready for blockout only when:
 
-- four source images exist
-- generation manifest exists
-- four prepared images exist
-- prepared manifest has no blocking warning
-- Blender reference scene exists
-- Blender connection was verified
-- viewport screenshot exists and was reviewed
+- the brief and both masters exist;
+- required derived views exist;
+- each installed view has semantic QA `pass`;
+- source and prepared manifests exist;
+- `blender_validate_reference_pack.valid` is true;
+- the `.blend` and installation manifest exist;
+- the installed Image Empties were checked for side, axis, depth, selection and render behavior;
+- the viewport or review capture was inspected.
 
-Otherwise report the current state and continue from the next unfinished phase.
+References stay in the working `.blend`. Save a separate clean deliverable without `REF_*`, temporary cameras, lights or helpers before game export.

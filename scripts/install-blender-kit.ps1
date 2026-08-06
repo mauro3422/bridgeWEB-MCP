@@ -110,7 +110,7 @@ $content = @"
 bl_info = {
     'name': 'Mauro Blender Bridge',
     'author': 'MauroPrime',
-    'version': (0, 2, 0),
+    'version': (0, 3, 0),
     'blender': (4, 0, 0),
     'location': 'View3D > Sidebar > Mauro Bridge',
     'description': 'Local-only Bridge inspection and visual-review kit',

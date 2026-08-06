@@ -1,3 +1,35 @@
+## 0.6.65 - 2026-08-06
+
+- Fixed stateless MSSR continuity when one ChatGPT session has several open traces across repositories: an exact session/project match still wins, otherwise a single recently planned route may dominate stale same-session candidates while genuinely concurrent fresh traces remain ambiguous.
+- Added a regression for the observed cross-project failure and retained explicit `traceId` support on process tools and delegated wrappers.
+- Re-verified the connector boundary against the live 139-tool runtime: the current host catalog exposes 127 tools directly and safely reaches omitted tools through `bridge_tool_query` or `bridge_tool_action`; Bridge continues to report, rather than misrepresent, host-owned catalog staleness.
+
+
+## 0.6.64 - 2026-08-05
+
+- Added exact Blender session coordination across the addon and tools: live status now reports the connected `.blend`, PID, port ownership, dirty/save state, disk modification time, active object/mode, last load/save, and last Bridge versus human-or-external scene activity.
+- Added four explicit operation modes: `reference-only`, `inspect`, `scene-write`, and `foreground-capture`. Live scene tools now require `expectedBlendFile`; path drift, port ownership conflicts, and recent human activity block focus or mutation by default.
+- `blender_open` no longer treats any connected Blender as the requested target: it refuses to redirect a port already owned by another `.blend`.
+- `image_reference_pack_prepare` now persists an atomic coordination manifest for disk-only reference generation, including `userModeling`, intended `targetBlendFile`, deferred installation, and the live Blender tools forbidden while Mauro models.
+- Added `blender-session-coordination`, routing fixtures, skill dependencies, and regressions for exact-target, concurrent-human-work, and reference-only behavior.
+
+
+## 0.6.63 - 2026-08-05
+
+- Replaced `blender_viewport_screenshot`'s freshness-unsafe `bpy.ops.screen.screenshot_area` path with an exact foreground-window client-region capture pinned to the connected Blender PID and live viewport bounds.
+- The tool now returns observed viewport orientation plus capture backend/focus evidence, exposes a bounded settle delay, and still requires pixel review for semantic correctness.
+- Added a regression that rejects the legacy framebuffer path and verifies PID pinning, viewport-coordinate forwarding, foreground validation, bounded resizing, and exact-window capture.
+
+
+## 0.6.62 - 2026-08-04
+
+- Added the generic Blender reference-pack chain: `image_reference_pack_prepare` → `blender_validate_reference_pack` → `blender_install_reference_pack`.
+- Separated perspective design masters from orthographic geometric masters and added canonical cardinal/design roles, semantic QA, optional landmarks, byte/hash validation and opposite-pair warnings.
+- Installed construction Image Empties axis-aligned at the origin with paired side visibility, orthographic-only display, depth behind geometry, locked selection and no render; design views live separately and are hidden by default.
+- Reimplemented `blender_setup_character_references` as a compatibility adapter over the generic installer and added a real Blender integration regression.
+- Expanded the runtime catalog from 135 to 138 tools.
+
+
 ## 0.6.61 - 2026-08-04
 
 - Added `blender_focus_review`, a three-shot "look where I point" workflow that captures the current viewport, a medium context view, and a close zoom from selected edit components, selected objects, the active object, or the 3D cursor.

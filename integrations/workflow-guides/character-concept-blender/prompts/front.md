@@ -1,46 +1,39 @@
-# Canonical front-view prompt
+# Geometric front-view prompt
 
-Use this after filling values from `character-brief.json`.
+Attach the approved three-quarter design master and fill immutable values from `character-brief.json`.
 
 ```text
-Create the canonical full-body FRONT view of the same original character described below.
+Create the canonical full-body TRUE FRONT GEOMETRIC MASTER of EXACTLY the same character shown in the approved design reference.
 
 IDENTITY LOCK
-- Name: {{name}}
-- Species: {{species}}
-- Body proportions: {{bodyProportions}}
-- Primary palette: {{primaryPalette}}
-- Secondary palette: {{secondaryPalette}}
-- Eyes: {{eyes}}
-- Ears: {{ears}}
-- Muzzle: {{muzzle}}
-- Hands: {{hands}}
-- Feet: {{feet}}
-- Tail: {{tail}}
-- Exact markings: {{markings}}
-- Clothing/accessories: {{clothingAndAccessories}}
+{{identityLock}}
+
+AUTHORITY BOUNDARY
+- preserve the design reference's exact face, species, materials, palette, markings, clothing, accessories, hands, feet, tail count and tail base
+- do not redesign hidden features or simplify defining visual traits
+- this image is the geometric construction authority for proportions and alignment
 
 VIEW
-- true front orthographic-like character concept view
-- character centered and symmetrical
-- full body visible from ear tips to feet
-- neutral relaxed A-pose suitable for later 3D modeling
+- true front orthographic-like character construction view
+- level camera with no tilt and no dramatic perspective
+- character centered and symmetrical except for explicitly locked asymmetries
+- full body visible from highest feature to feet
+- relaxed neutral A-pose suitable for rigging
 - arms separated from torso and hands readable
 - legs separated enough to read the silhouette
 - feet share one horizontal baseline
 
 PRESENTATION
 - clean pure-white background
-- consistent soft studio lighting
-- clean stylized 3D-like concept render
-- low-poly-friendly shapes and readable silhouette
-- no text, labels, borders, props, scenery, or other subjects
+- soft neutral lighting without a cast shadow hiding the feet
+- constant subject scale and centered canvas
+- no text, labels, borders, watermark, props, scenery or other subjects
 
 NEGATIVE CONSTRAINTS
-- no extra limbs or digits
-- no second tail
-- no alternate markings or colors
-- no alternate clothing
-- no cropped ears, hands, tail, or feet
-- no dramatic perspective, action pose, or camera tilt
+- no alternate identity, proportions, markings, colors, clothing or materials
+- no extra limbs, digits, ears, horns or tails
+- no cropped ears, hands, tail or feet
+- no three-quarter angle, camera tilt, action pose or foreshortening
 ```
+
+Visually compare it against the design master before accepting it as `masters.geometry: front`.

@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Mauro Blender Bridge",
     "author": "MauroPrime",
-    "version": (0, 2, 0),
+    "version": (0, 3, 0),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > Mauro Bridge",
     "description": "Local-only bridge used by bridge-mcp to inspect and automate Blender",
@@ -13,17 +13,116 @@ import json
 import os
 import socket
 import threading
+import time
 import traceback
 from contextlib import redirect_stdout
+from datetime import datetime, timezone
 from pathlib import Path
 
 import bpy
+from bpy.app.handlers import persistent
 
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9877
 MAX_REQUEST_BYTES = 2 * 1024 * 1024
 COMMAND_TIMEOUT_SECONDS = 180
+
+
+def _utc_now():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _file_disk_state():
+    filepath = bpy.data.filepath or None
+    if not filepath:
+        return {"exists": False, "modified_at": None, "bytes": None}
+    try:
+        stat = Path(filepath).stat()
+        return {
+            "exists": True,
+            "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat().replace("+00:00", "Z"),
+            "bytes": stat.st_size,
+        }
+    except OSError:
+        return {"exists": False, "modified_at": None, "bytes": None}
+
+
+_ACTIVITY = {
+    "runtime_started_at": _utc_now(),
+    "last_command_at": None,
+    "last_command_type": None,
+    "active_command_type": None,
+    "last_file_load_at": None,
+    "last_file_save_at": None,
+    "last_scene_update_at": None,
+    "last_scene_update_source": None,
+    "last_human_or_external_update_at": None,
+    "last_bridge_scene_update_at": None,
+}
+
+_BRIDGE_MUTATION_GRACE_UNTIL = 0.0
+
+
+def _runtime_status():
+    active = bpy.context.view_layer.objects.active if bpy.context.view_layer else None
+    return {
+        "pid": os.getpid(),
+        "file": bpy.data.filepath or None,
+        "is_saved": bool(bpy.data.filepath),
+        "is_dirty": bool(bpy.data.is_dirty),
+        "disk": _file_disk_state(),
+        "scene": bpy.context.scene.name if bpy.context.scene else None,
+        "mode": bpy.context.mode if bpy.context else None,
+        "active_object": active.name if active else None,
+        "activity": dict(_ACTIVITY),
+    }
+
+
+@persistent
+def _on_load_post(_unused):
+    now = _utc_now()
+    _ACTIVITY["last_file_load_at"] = now
+    _ACTIVITY["last_scene_update_at"] = now
+    _ACTIVITY["last_scene_update_source"] = "file-load"
+
+
+@persistent
+def _on_save_post(_unused):
+    _ACTIVITY["last_file_save_at"] = _utc_now()
+
+
+@persistent
+def _on_depsgraph_update_post(_scene, _depsgraph):
+    now = _utc_now()
+    bridge_owned = _ACTIVITY.get("active_command_type") == "execute_code" or time.monotonic() <= _BRIDGE_MUTATION_GRACE_UNTIL
+    source = "bridge" if bridge_owned else "human-or-external"
+    _ACTIVITY["last_scene_update_at"] = now
+    _ACTIVITY["last_scene_update_source"] = source
+    if source == "bridge":
+        _ACTIVITY["last_bridge_scene_update_at"] = now
+    else:
+        _ACTIVITY["last_human_or_external_update_at"] = now
+
+
+def _register_activity_handlers():
+    for handlers, callback in (
+        (bpy.app.handlers.load_post, _on_load_post),
+        (bpy.app.handlers.save_post, _on_save_post),
+        (bpy.app.handlers.depsgraph_update_post, _on_depsgraph_update_post),
+    ):
+        if callback not in handlers:
+            handlers.append(callback)
+
+
+def _unregister_activity_handlers():
+    for handlers, callback in (
+        (bpy.app.handlers.load_post, _on_load_post),
+        (bpy.app.handlers.save_post, _on_save_post),
+        (bpy.app.handlers.depsgraph_update_post, _on_depsgraph_update_post),
+    ):
+        if callback in handlers:
+            handlers.remove(callback)
 
 
 def _json_safe(value):
@@ -83,7 +182,8 @@ def _scene_info(object_limit=100):
 
     active = bpy.context.view_layer.objects.active
     return {
-        "bridge": {"name": "mauro-blender-bridge", "version": "0.2.0"},
+        "bridge": {"name": "mauro-blender-bridge", "version": "0.3.0"},
+        "runtime": _runtime_status(),
         "blender_version": bpy.app.version_string,
         "file": bpy.data.filepath or None,
         "scene": scene.name,
@@ -104,12 +204,7 @@ def _scene_info(object_limit=100):
     }
 
 
-def _viewport_screenshot(filepath, max_size=1200):
-    output = Path(filepath).expanduser().resolve()
-    if output.suffix.lower() != ".png":
-        raise ValueError("Viewport screenshots must use a .png path")
-    output.parent.mkdir(parents=True, exist_ok=True)
-
+def _viewport_context():
     window = bpy.context.window
     screen = window.screen if window else None
     if screen is None:
@@ -118,31 +213,50 @@ def _viewport_screenshot(filepath, max_size=1200):
     area = next((candidate for candidate in screen.areas if candidate.type == "VIEW_3D"), None)
     if area is None:
         raise RuntimeError("No VIEW_3D area is available")
-
     region = next((candidate for candidate in area.regions if candidate.type == "WINDOW"), None)
-    with bpy.context.temp_override(window=window, screen=screen, area=area, region=region):
-        bpy.ops.screen.screenshot_area(filepath=str(output))
+    if region is None:
+        raise RuntimeError("No VIEW_3D window region is available")
+    space = next((candidate for candidate in area.spaces if candidate.type == "VIEW_3D"), None)
+    if space is None:
+        raise RuntimeError("No VIEW_3D space is available")
+    return window, screen, area, region, space
 
-    image = bpy.data.images.load(str(output), check_existing=False)
-    try:
-        width, height = image.size
-        if max(width, height) > max_size:
-            scale = max_size / max(width, height)
-            width = max(1, int(width * scale))
-            height = max(1, int(height * scale))
-            image.scale(width, height)
-            image.filepath_raw = str(output)
-            image.file_format = "PNG"
-            image.save()
-        return {
-            "filepath": str(output),
-            "width": int(width),
-            "height": int(height),
-            "bytes": output.stat().st_size,
-        }
-    finally:
-        bpy.data.images.remove(image)
 
+def _viewport_capture_context():
+    window, _screen, area, region, space = _viewport_context()
+    region_3d = space.region_3d
+    area.tag_redraw()
+    return {
+        "pid": os.getpid(),
+        "file": bpy.data.filepath or None,
+        "window": {
+            "width": int(window.width),
+            "height": int(window.height),
+        },
+        "area": {
+            "x": int(area.x),
+            "y": int(area.y),
+            "width": int(area.width),
+            "height": int(area.height),
+        },
+        "region": {
+            "x": int(region.x),
+            "y": int(region.y),
+            "width": int(region.width),
+            "height": int(region.height),
+        },
+        "viewport": {
+            "perspective": region_3d.view_perspective,
+            "rotation": [float(value) for value in region_3d.view_rotation],
+            "location": [float(value) for value in region_3d.view_location],
+            "distance": float(region_3d.view_distance),
+        },
+        "capture_contract": {
+            "backend": "exact-window-client-region",
+            "requires_foreground": True,
+            "freshness": "window-focus-and-settle-required",
+        },
+    }
 
 def _execute_code(code):
     capture = io.StringIO()
@@ -252,28 +366,40 @@ class MauroBlenderBridgeServer:
                 pass
 
     def _dispatch(self, command):
+        global _BRIDGE_MUTATION_GRACE_UNTIL
         command_type = command.get("type")
         params = command.get("params") or {}
-        if command_type == "ping":
-            result = {
-                "ok": True,
-                "bridge": "mauro-blender-bridge",
-                "version": "0.2.0",
-                "blender_version": bpy.app.version_string,
-                "file": bpy.data.filepath or None,
-            }
-        elif command_type == "get_scene_info":
-            result = _scene_info(int(params.get("object_limit", 100)))
-        elif command_type == "get_viewport_screenshot":
-            result = _viewport_screenshot(
-                str(params["filepath"]),
-                int(params.get("max_size", 1200)),
-            )
-        elif command_type == "execute_code":
-            result = _execute_code(str(params.get("code", "")))
-        else:
-            return {"status": "error", "message": f"Unknown command: {command_type}"}
-        return {"status": "success", "result": result}
+        _ACTIVITY["last_command_at"] = _utc_now()
+        _ACTIVITY["last_command_type"] = command_type
+        _ACTIVITY["active_command_type"] = command_type
+        try:
+            if command_type == "ping":
+                result = {
+                    "ok": True,
+                    "bridge": "mauro-blender-bridge",
+                    "version": "0.3.0",
+                    "blender_version": bpy.app.version_string,
+                    "file": bpy.data.filepath or None,
+                    "runtime": _runtime_status(),
+                }
+            elif command_type == "get_scene_info":
+                result = _scene_info(int(params.get("object_limit", 100)))
+            elif command_type == "get_viewport_capture_context":
+                result = _viewport_capture_context()
+                result["runtime"] = _runtime_status()
+            elif command_type == "get_viewport_screenshot":
+                raise RuntimeError(
+                    "Direct Blender framebuffer screenshots are freshness-unsafe; use Bridge exact-window viewport capture."
+                )
+            elif command_type == "execute_code":
+                _BRIDGE_MUTATION_GRACE_UNTIL = time.monotonic() + 2.0
+                result = _execute_code(str(params.get("code", "")))
+                result["runtime"] = _runtime_status()
+            else:
+                return {"status": "error", "message": f"Unknown command: {command_type}"}
+            return {"status": "success", "result": result}
+        finally:
+            _ACTIVITY["active_command_type"] = None
 
 
 class MAUROBRIDGE_OT_StartServer(bpy.types.Operator):
@@ -383,11 +509,15 @@ def register():
         max=65535,
     )
     bpy.types.Scene.mauro_bridge_running = bpy.props.BoolProperty(default=False)
+    _register_activity_handlers()
+    if _ACTIVITY["last_file_load_at"] is None:
+        _on_load_post(None)
     if not bpy.app.background and not bpy.app.timers.is_registered(_auto_start_server):
         bpy.app.timers.register(_auto_start_server, first_interval=0.5, persistent=True)
 
 
 def unregister():
+    _unregister_activity_handlers()
     if bpy.app.timers.is_registered(_auto_start_server):
         bpy.app.timers.unregister(_auto_start_server)
     server = getattr(bpy.types, "mauro_bridge_server", None)

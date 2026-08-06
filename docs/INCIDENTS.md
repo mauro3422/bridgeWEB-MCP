@@ -1030,3 +1030,114 @@ relacionados independientes sin duplicar filas por cada llamada.
 - **Corrección aplicada:** se validó el contrato autoritativo mediante atributos replicados y el remoto real `BuildActionRequest`; `RemovePlant` aceptó una planta inicial del jugador y limpió dos conexiones sin dangling.
 - **Regresión:** en futuras QA, no usar estas dos APIs como prueba automatizada de UI; separar interacción visual humana de validación de remotos/estado. Clasificar estos mensajes como artefactos de QA, no errores runtime del juego.
 - **Seguimiento:** considerar una herramienta MCP dedicada y limitada para input de Play sólo si este bloqueo se repite y la prueba visual humana resulta insuficiente.
+
+## 2026-08-01 — Input y captura de Roblox MCP agotaron tiempo; guardado volvió a rechazar foreground
+
+- **Estado:** No resuelto; el juego y el catálogo se recuperaron sin reiniciar.
+- **Capa / owner:** Roblox Studio MCP `user_mouse_input`/`screen_capture` y Bridge `roblox_screen_capture_save`/`roblox_place_save`.
+- **Síntoma:** dos llamadas acotadas a `user_mouse_input` agotaron 60 s sin aplicar el clic. Luego `roblox_screen_capture_save` mantuvo una operación activa durante más de dos minutos y no produjo archivo. Tras liberarse la cola, `roblox_place_save` volvió a abstenerse de enviar `Ctrl+S` porque no confirmó foreground para PID `19488` y el título exacto de `1.rbxl`.
+- **Evidencia:** `roblox_mcp_status` mostró `activeOperations=1` durante la captura y volvió a `0`; consultas pequeñas Client/Server, Stop y consola funcionaron después. El save devolvió literalmente `Ctrl+S was not sent`.
+- **Causa:** no resuelta. El patrón apunta al lifecycle/foco del proveedor, no a la lógica de MyceliumFront.
+- **Corrección/recuperación:** no se apilaron mutaciones; se esperó la liberación, se verificó el mismo Studio y modo, se cerró Play por `start_stop_play` y se documentó el guardado como pendiente. Una captura de ventana se usó sólo para revisión preliminar, no como evidencia del pipeline.
+- **Regresión:** añadir smoke tests de `user_mouse_input` y `screen_capture` que confirmen finalización/cancelación y cero operaciones activas; mejorar `roblox_place_save` con un gate alternativo verificable sin ampliar el target más allá del PID/título exactos.
+
+- **Recurrencia 2026-08-01, proof CS2:** `roblox_place_save` volvió a rechazar correctamente el primer intento sobre PID `19488` y título exacto `D:\Dev\MyceliumFront\1.rbxl - Roblox Studio` porque no confirmó foreground; `Ctrl+S` no fue enviado. Se seleccionó y activó la única ventana coincidente mediante Computer Use, sin enviar teclas, y se repitió el guardado acotado. El segundo intento confirmó foreground, Edit y cambio de disco de SHA-256 `7f973feeffc2055145eaab797eddaeb05bfb31298460927240247d002bf9d9eb` a `2e109c7241a9be5a83569fcc03c8013eaeff26b8ee027fa0bdfbd502bc635c53`. La causa del fallo inicial de foco sigue no resuelta; queda reproducido el mismo patrón y la misma necesidad de gate alternativo verificable.
+
+- **Recurrencia 2026-08-01, proof CS2 V4:** el catálogo vivo ya no expuso `get_script_source`; el intento falló sin mutación y la recuperación correcta fue refrescar `roblox_mcp_tool_list`, leer el schema vivo y usar `script_read`. Además, `screen_capture` devolvió bytes JPEG (`image/jpeg`, firma `/9j/`) y `image_asset_save` rechazó correctamente el primer destino `.png` antes de escribir; repetir con `.jpg` produjo tres masters válidos de 1360×457 con SHA-256 y dashboard sin archivos faltantes. El primer `roblox_place_save` volvió a abstenerse por foreground; tras activar exclusivamente la ventana exacta mediante Computer Use, el segundo intento verificó cambio de `1.rbxl` de `da5793e9fcf200b357457215a32cd09db6bdc8a57e9f69ea75c9313c051eff49` a `def67f681c5a34be9b63923beb74d35198a7290f8aaa25c9bace52e4b800de42`. Regresión: consumir siempre el catálogo/schema vivo, derivar la extensión desde el MIME/firma y mantener el save fail-closed con recuperación de foco acotada.
+
+- **Recurrencia 2026-08-01, build lab CS2 V5:** cuatro capturas solicitadas con destino `.png` volvieron a reportar `image/jpeg`; se preservaron los originales y se copiaron con extensión `.jpg` antes de registrar el run `crater-seed-cs2-v005-build-lab`, cuyo gate verificó cuatro hashes sin faltantes. `roblox_place_save` identificó PID `19488` y el título exacto pero abortó antes de `Ctrl+S`; Computer Use activó únicamente esa ventana y el segundo intento oficial verificó Edit y cambio de SHA-256 `def67f681c5a34be9b63923beb74d35198a7290f8aaa25c9bace52e4b800de42` → `bce5a4b65d5086ad77dc1af1da230dea9e54adbb7145607320cc197d167a14a5`. El patrón confirma dos seguimientos abiertos: extensión derivada del MIME real y fallback interno de foreground tan acotado como el guardador actual.
+
+---
+
+## 2026-08-05 — Imágenes generadas no podían persistirse desde parámetros de archivo de ChatGPT
+
+**Estado:** Corregido y verificado en source/runtime `0.6.62`; pendiente confirmar la tool dedicada desde un chat nuevo cuyo catálogo directo incluya el schema actualizado.
+
+**Capa / owner:** `src/tools/image-tools.ts`, `src/tools/types.ts`, `src/tool-registry.ts` y contrato de tools ChatGPT Apps/MCP.
+
+**Síntoma:** los resultados de `image_gen` llegaban al chat como referencias de archivo autorizadas, pero `image_asset_save` sólo aceptaba texto Base64/data URL. Pasar un `file_id` como Base64 falló por payload inválido; la ruta temporal `/mnt/data` del host tampoco era visible para el proceso Bridge. Después del restart, el runtime tenía la tool nueva, pero el catálogo directo de la conversación actual permaneció stale.
+
+**Reproducción mínima / evidencia:**
+
+```text
+image_asset_save(base64="file_...") -> Base64 inválido
+binary_file_info("/mnt/data/...") -> ruta fuera de roots / no compartida
+restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin refresh
+```
+
+**Causa demostrada:** el Bridge no declaraba un parámetro superior de archivo ni `_meta["openai/fileParams"]`. Por lo tanto el host no transformaba la referencia autorizada en un objeto con `download_url`, `file_id`, `mime_type` y `file_name`; tratarla como string o ruta local no podía preservar los bytes originales.
+
+**Corrección aplicada:** se añadió `image_asset_import_files`, que:
+
+- declara `files` en `_meta["openai/fileParams"]`;
+- acepta objetos de archivo autorizados con `download_url`, `file_id` y MIME/nombre opcionales;
+- descarga con límite de tiempo y bytes;
+- exige HTTPS, salvo loopback HTTP exclusivo para pruebas locales;
+- valida firma real, MIME, dimensiones y extensión;
+- persiste exactamente los bytes recibidos, calcula SHA-256 y registra procedencia;
+- reutiliza el manifiesto atómico del pipeline de imágenes existente.
+
+**Prueba de regresión:**
+
+- PNG fixture de 67 bytes importado byte por byte, con SHA-256 y dimensiones `1×1` idénticos;
+- URL HTTP no-loopback rechazada;
+- `npm run check` y `npm run build` pasaron;
+- `scripts/test-v060-tools.mjs` pasó con `139` tools y validó schema, riesgo y `openai/fileParams`;
+- `npm run docs:tools` y `npm run docs:tools:check` pasaron;
+- Bridge reinició correctamente en `0.6.62`.
+
+**Seguimiento:** abrir una conversación nueva y ejecutar `image_asset_import_files` mediante su schema directo con un resultado real de `image_gen`. La recuperación exacta desde caché local de Chrome funcionó para este incidente, pero no debe convertirse en el flujo normal ni en sustituto del parámetro de archivo autorizado.
+
+## 2026-08-05 — `blender_viewport_screenshot` aceptaba framebuffers anteriores como evidencia de la vista actual
+
+**Estado:** Corregido y verificado en source/runtime `0.6.63`.
+
+**Capa / owner:** `integrations/blender/mauro_blender_bridge.py`, `src/tools/blender-tools.ts`, `scripts/blender-viewport-window-capture.ps1` y contrato de evidencia visual Blender.
+
+**Síntoma observable:** después de cambiar `region_3d` entre vistas ortográficas, la herramienta podía devolver un PNG del framebuffer anterior. Se reprodujo metadata `LEFT` acompañada por píxeles de `RIGHT`; hashes distintos, objetos existentes y quaternions correctos no detectaban por sí solos la falsedad semántica. Un trace previo cerró 6/6 usando esas capturas.
+
+**Experimentos descartados:** retrasar `bpy.ops.screen.screenshot_area`, forzar `tag_redraw`/`redraw_timer` y dibujar mediante `GPUOffScreen` no garantizó el lado visible actual de pares de Image Empties coplanares.
+
+**Causa raíz:** la captura ocurría sobre memoria/framebuffer de Blender que no necesariamente había sido presentado tras el cambio programático de vista. El contrato confundía orientación runtime con frescura de píxeles.
+
+**Corrección:** Blender entrega PID, región exacta y orientación observada mediante `get_viewport_capture_context`; Bridge enfoca y valida esa ventana exacta, espera un intervalo acotado y captura mediante `CopyFromScreen` sólo la región cliente del viewport. El comando directo antiguo ahora falla explícitamente como freshness-unsafe.
+
+**Regresión:** `scripts/test-blender-viewport-capture.mjs` exige pinning por PID, bounds del viewport, validación de foreground, resize acotado, ausencia de `screenshot_area` y uso del helper exact-window. La prueba viva en un Blender nuevo, puerto `9879`, produjo seis capturas cardinales correctas y distintas en `electronics-repair-simulator/blender/review/workbench_v004/bridge_063_live`.
+
+**Contrapartida conocida:** se capturan los píxeles realmente presentados; un overlay visible sobre Blender también puede aparecer. La revisión semántica debe abrir los PNG y rechazar evidencia obstruida, no confiar sólo en metadata o hashes.
+## 2026-08-05 — La sesión Blender conectada no demostraba proyecto correcto ni concurrencia segura
+
+**Estado:** Corregido y verificado en runtime `0.6.64` con addon Blender `0.3.0`.
+
+**Capa / owner:** `integrations/blender/mauro_blender_bridge.py`, `src/tools/blender-tools.ts`, `src/tools/image-tools.ts`, `integrations/images/prepare_reference_pack.py` y skills Blender.
+
+**Síntoma observable:** una herramienta podía encontrar un puerto Blender sano y continuar aunque ese puerto perteneciera a otro `.blend`. El estado no exponía última carga/guardado, modificación en disco, dirty state ni actividad reciente humana. Además, generar referencias mientras Mauro modelaba no tenía un modo contractual que prohibiera foco, captura o mutación del Blender vivo.
+
+**Riesgo:** trabajar sobre el proyecto equivocado, robar foco, reencuadrar el viewport, mezclar cambios humanos y del agente, guardar accidentalmente una escena dirty o instalar referencias durante una sesión de modelado activa.
+
+**Corrección:** el addon publica ruta exacta, PID, estado dirty/saved, timestamp de disco, escena/modo/objeto activo y actividad de carga, guardado y depsgraph clasificada como Bridge o human/external. Las herramientas usan cuatro modos (`reference-only`, `inspect`, `scene-write`, `foreground-capture`), exigen `expectedBlendFile` para interacción viva, rechazan drift de ruta o puerto y bloquean foco/escritura ante actividad humana reciente salvo override explícito. Otras instancias se reportan y nunca se cierran automáticamente.
+
+**Automatización de referencias:** `image_reference_pack_prepare` persiste atómicamente `coordination.operationMode`, `userModeling`, `targetBlendFile`, `blenderInteractionAllowed=false`, instalación diferida y la lista de herramientas Blender prohibidas. Esto permite que ChatGPT genere y deje referencias listas mientras Mauro continúa modelando sin tocar la sesión.
+
+**Evidencia runtime:** una instancia aislada en puerto `9884` quedó fijada a `PID 9644` y al `.blend` v003 exacto; reportó carga, estado saved/clean y timestamp/hash de disco. `reference-only` devolvió `blenderInteractionAllowed=false`; una ruta v002 fue rechazada; `blender_open` se negó a redirigir el puerto; una edición diferida disparó `human-or-external` y bloqueó `scene-write`. Se detectaron otras tres instancias —una dirty— sin cerrarlas ni enfocarlas. El `.blend` conservó SHA-256 `3a9531f3fd961dc14be8efd9c53b2c350d3242229dfa56ecf01655c5d041f805`; sólo se cerró el PID aislado sin guardar.
+
+**Regresiones:** `scripts/test-blender-session-coordination.mjs`, casos MSSR positivos/negativos/continuación, manifiesto reference-only en `test-blender-reference-pipeline.mjs`, validación de skills y prueba runtime aislada por puerto/PID.
+
+
+
+
+## 2026-08-06 — Continuidad MSSR stateless ambigua entre repositorios y catálogo Web stale
+
+**Estado:** Continuidad corregida en Bridge 0.6.65; exposición directa del catálogo mitigada y verificada, con selección final todavía propiedad del host.
+
+**Capa / owner:** `src/mssr-trace-context.ts`, regresiones de trazas, wrappers Bridge y catálogo del conector ChatGPT Web.
+
+**Síntoma observable:** al alternar entre repositorios dentro de la misma sesión Web, una llamada stateless podía encontrar dos trazas abiertas del mismo caller y quedar `mssr-trace-ambiguous`, aunque una ruta había sido planificada recientemente y la otra llevaba mucho tiempo inactiva. En paralelo, el runtime publicaba 139 tools pero el catálogo directo de la conversación ya abierta conservaba 127 y omitía doce schemas nuevos, incluido `image_asset_import_files`.
+
+**Causa demostrada:** la resolución por sesión buscaba primero coincidencia exacta de proyecto y, si no existía, devolvía todas las trazas de esa sesión sin aplicar la dominancia temporal ya usada en otros scopes. El segundo comportamiento no nace en Bridge: el host fija su catálogo observable al conectar y Bridge no puede forzar esa selección privada desde el servidor.
+
+**Corrección:** cuando existe una coincidencia exacta sesión/proyecto se conserva; si no existe, el coordinador aplica la regla de ruta reciente a las candidatas de la misma sesión. Sólo una ruta planificada dentro de la ventana puede desplazar candidatas stale; dos rutas frescas continúan siendo ambiguas. Las tools de proceso y los wrappers mantienen `traceId` explícito para selección deliberada. `bridge_connector_catalog_compare` verificó 127/139 schemas directos (91,37 %), MSSR 11/11 directo y listó las doce omisiones sin confundir wrapper con exposición dedicada.
+
+**Regresión:** `test-mssr-trace-contract.mjs` crea dos trazas de la misma sesión, envejece una y exige que una llamada stateless desde un tercer proyecto herede la ruta fresca sin warning; el fixture concurrente existente sigue exigiendo ambigüedad cuando ambas rutas permanecen compatibles y recientes.
+
+**Seguimiento:** después de activar 0.6.65, solicitar reinicio completo y volver a comparar el catálogo visible. Si la conversación conserva 127 tools, usar `bridge_tool_query`/`bridge_tool_action` y abrir un chat nuevo para obtener schemas dedicados; no duplicar tools ni afirmar que Bridge puede refrescar el catálogo privado del host.

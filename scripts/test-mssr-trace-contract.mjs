@@ -301,6 +301,42 @@ try {
   assert.equal(explicitlyTracedWork?.trace_id, nextRoute.traceId, 'work_once must accept explicit traceId metadata for cross-project/process correlation.');
   assert.equal(explicitlyTracedWork?.routing_status, 'traced');
 
+  const genericTextPath = path.join(sandbox, 'generic-traced-write.txt');
+  const genericTextWrite = await callFresh('write_text_file', {
+    path: genericTextPath,
+    content: 'generic traced write fixture\n',
+  }, undefined, 'ChatGPT Web');
+  assert.equal(
+    genericTextWrite.bridgeNotices?.items?.some((notice) => notice.code === 'mssr-unrouted-tool-call') ?? false,
+    false,
+    'write_text_file must inherit the unique Web trace without an unrouted warning.',
+  );
+  assert.equal(fs.readFileSync(genericTextPath, 'utf8'), 'generic traced write fixture\n');
+
+  const genericBinaryBytes = Buffer.from('generic traced binary fixture', 'utf8');
+  const genericBinaryPath = path.join(sandbox, 'generic-traced-write.bin');
+  const genericBinaryWrite = await callFresh('binary_file_write', {
+    outputPath: genericBinaryPath,
+    data: genericBinaryBytes.toString('base64'),
+    encoding: 'base64',
+    expectedBytes: genericBinaryBytes.length,
+    expectedSha256: createHash('sha256').update(genericBinaryBytes).digest('hex'),
+  }, undefined, 'ChatGPT Web');
+  assert.equal(
+    genericBinaryWrite.bridgeNotices?.items?.some((notice) => notice.code === 'mssr-unrouted-tool-call') ?? false,
+    false,
+    'binary_file_write must inherit the unique Web trace without an unrouted warning.',
+  );
+  assert.deepEqual(fs.readFileSync(genericBinaryPath), genericBinaryBytes);
+
+  const postWriteRecent = metrics.getRecentMetrics(30, 'active').recent;
+  const tracedTextWrite = postWriteRecent.find((row) => row.tool === 'write_text_file');
+  const tracedBinaryWrite = postWriteRecent.find((row) => row.tool === 'binary_file_write');
+  assert.equal(tracedTextWrite?.trace_id, nextRoute.traceId, 'write_text_file metrics must retain the active Web trace.');
+  assert.equal(tracedTextWrite?.routing_status, 'traced');
+  assert.equal(tracedBinaryWrite?.trace_id, nextRoute.traceId, 'binary_file_write metrics must retain the active Web trace.');
+  assert.equal(tracedBinaryWrite?.routing_status, 'traced');
+
   const sessionMeta = { 'openai/session': 'web-session-fixture-001' };
   const fixtureProject = path.join(sandbox, 'fixture-project');
   fs.mkdirSync(fixtureProject, { recursive: true });
@@ -602,6 +638,56 @@ try {
     ambiguousRotatedSnapshot.sharedOpenTraces,
     2,
     'Session rotation must not guess when two open traces remain compatible with the same caller.',
+  );
+
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const staleSameSessionOwner = traceContext.createMssrTraceSessionCoordinator(schemas);
+  staleSameSessionOwner.resolveMetricContext({
+    caller: 'chatgpt-web',
+    sessionKey: 'session-cross-project-continuity',
+    project: 'older-project',
+  });
+  staleSameSessionOwner.observe('skill_route_plan', {
+    task: 'older cross-project task',
+    caller: 'chatgpt-web',
+    stage: 'implement',
+  }, {
+    traceId: 'trace-cross-project-stale-001',
+    stage: 'implement',
+    activeSkills: [],
+  });
+  traceContext.ageSharedMssrTraceForTests('trace-cross-project-stale-001', 120_000);
+
+  const freshSameSessionOwner = traceContext.createMssrTraceSessionCoordinator(schemas);
+  freshSameSessionOwner.resolveMetricContext({
+    caller: 'chatgpt-web',
+    sessionKey: 'session-cross-project-continuity',
+    project: 'newer-project',
+  });
+  freshSameSessionOwner.observe('skill_route_plan', {
+    task: 'newer cross-project task',
+    caller: 'chatgpt-web',
+    stage: 'implement',
+  }, {
+    traceId: 'trace-cross-project-fresh-001',
+    stage: 'implement',
+    activeSkills: [],
+  });
+
+  const crossProjectResolver = traceContext.createMssrTraceSessionCoordinator(schemas);
+  const crossProjectTool = crossProjectResolver.prepare('trace-domain-tool', { payload: 'fixture' }, {
+    caller: 'chatgpt-web',
+    sessionKey: 'session-cross-project-continuity',
+    project: 'third-project-without-exact-trace',
+  });
+  assert.equal(
+    crossProjectTool.args.traceId,
+    'trace-cross-project-fresh-001',
+    'A stateless cross-project call must recover the single fresh route in the same session instead of becoming ambiguous with a stale trace.',
+  );
+  assert.equal(
+    crossProjectTool.notices.some((item) => item.code === 'mssr-trace-ambiguous'),
+    false,
   );
 
   traceContext.resetSharedMssrTraceRegistryForTests();

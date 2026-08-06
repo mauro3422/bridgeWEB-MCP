@@ -29,6 +29,7 @@ export type BridgeToolSchema = {
   description: string;
   inputSchema: BridgeToolInputSchema;
   annotations?: Record<string, boolean>;
+  _meta?: Record<string, unknown>;
   metadata?: BridgeToolMetadata;
 };
 

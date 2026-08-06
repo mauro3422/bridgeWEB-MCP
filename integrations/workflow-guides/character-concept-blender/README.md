@@ -1,42 +1,54 @@
-# Character Pipeline
+# Character Concept → Blender
 
-This folder contains the reusable workflow for turning an AI-generated character concept into consistent Blender reference planes.
+This workflow turns generated character concepts into a consistent Blender modeling reference pack. It distinguishes visual design from geometric construction instead of asking one image to serve both purposes.
+
+## Authorities
+
+- **Design master:** normally `front_right_3q`; owns style, materials, markings and volume intent.
+- **Geometric master:** `front`; owns proportions, baseline, center and construction alignment.
+
+## Recommended flow
+
+```text
+locked character brief
+  → generate and approve design master
+  → generate and approve front geometric master
+  → derive rear / side / optional opposite side
+  → semantic visual QA for every view
+  → image_asset_save
+  → image_reference_pack_prepare
+  → blender_validate_reference_pack
+  → blender_install_reference_pack
+  → inspect installed planes
+  → begin blockout
+  → blender_review_bundle / blender_focus_review
+```
+
+`image_character_views_prepare` and `blender_setup_character_references` remain available for the historical four-view character flow. New work should use the generic prepare → validate → install chain because it supports canonical left/right/top roles, per-view semantic QA, landmarks and props as well as characters.
 
 ## Tools
 
-- `image_asset_save`: saves one generated image or an atomic batch, validates the file signature, records dimensions and hashes, and optionally writes a generation manifest.
-- `image_character_views_prepare`: normalizes a complete front/side/back/three-quarter set, aligns the subject, exports lightweight references, and writes quality warnings.
-- `blender_setup_character_references`: creates the `.blend`, writes a resumable loop manifest, opens Blender, and verifies the local socket connection.
-- `blender_character_loop_status`: reports the last completed stage and missing files.
+- `image_asset_save`: persists generated originals atomically with dimensions, hashes, prompts and provenance.
+- `image_reference_pack_prepare`: crops and uniformly scales a generic pack without stretching; records roles, masters, semantic QA, occupancy, optional landmarks and cross-view warnings.
+- `blender_validate_reference_pack`: verifies actual image bytes, roles, hashes, canvas dimensions, projections, semantic-QA state and required views.
+- `blender_install_reference_pack`: creates the axis-aligned Blender working scene with side-aware Image Empties and a verified installation manifest.
+- `blender_viewport_screenshot`: captures the exact current viewport.
+- `blender_focus_review`: captures general/context/zoom evidence around a selected detail or the 3D Cursor.
+- `blender_review_bundle`: renders repeatable model views and records geometry, materials, visibility, rig and animation context.
+- `blender_character_loop_status`: reads either the compatibility character checkpoint or the generic installed-pack references.
 
-## Recommended command flow from chat
+## Blender layout
+
+Construction references are installed as locked non-rendering Image Empties behind geometry:
 
 ```text
-image_gen: canonical front
-  -> visual approval
-image_gen: side/back/three-quarter using canonical front
-  -> visual QC
-image_asset_save
-  -> assets/concepts/<slug>/source/generation-manifest.json
-image_character_views_prepare
-  -> assets/concepts/<slug>/prepared/prepared-manifest.json
-blender_setup_character_references
-  -> assets/concepts/<slug>/blender/<slug>_references.blend
-blender_viewport_screenshot
-  -> exact current viewport review
-blender_focus_review
-  -> general + context + zoom from the selected detail or 3D Cursor
-blender_review_bundle
-  -> multi-angle renders + contact sheet + geometry/rig/animation context
+front + rear  → shared XZ plane, opposite visible sides
+left + right  → shared YZ plane, opposite visible sides
+top + bottom  → shared XY plane, opposite visible sides
 ```
 
-## Why generation and persistence are separate
+They appear in orthographic axis-aligned views and remain hidden in perspective. Perspective design masters live in `REFERENCES_DESIGN` and are hidden by default.
 
-The chat image model creates or edits images. The local MCP bridge persists and processes their bytes. Keeping the two responsibilities separate means the same storage and Blender pipeline can accept images from ChatGPT, another generator, a drawing app, or a manually edited file.
+`layout: surround` is an explicit inspection arrangement. It must not be used as the geometric modeling default.
 
-## Modes
-
-- **Quality:** generate and review each view after the canonical front. Recommended for production characters.
-- **Fast:** generate the remaining views as a batch after approving the canonical front. Recommended for exploration.
-
-See `GUIDE.md` for the full state machine and completion rules.
+See `GUIDE.md` for the state machine, generation constraints, semantic QA and completion gates.
