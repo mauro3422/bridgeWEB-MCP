@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "name": "cross-project-asset-library",
+  "title": "Cross-Project Asset Library Loop",
+  "description": "Use and maintain MauroAssetLibrary as the shared read-only catalog across Blender, Godot, Roblox and future asset projects: resolve ownership, inspect or refresh normalized evidence, preserve approval/source-drift gates, hand work back to the owning project, and verify the generated dashboard without turning the library into source authority.",
+  "activation": {
+    "keywords": [
+      "asset library",
+      "MauroAssetLibrary",
+      "biblioteca de assets",
+      "dashboard de assets",
+      "catálogo de assets",
+      "catalogo de assets",
+      "source drift",
+      "asset dashboard",
+      "global asset library",
+      "provider asset"
+    ],
+    "phrases": [
+      "abrí la biblioteca de assets",
+      "actualizá MauroAssetLibrary",
+      "subí este asset al dashboard global",
+      "agregá este proyecto a la biblioteca de assets",
+      "mirá el estado de este asset en la biblioteca",
+      "refrescá el catálogo global de assets",
+      "continuá este asset desde la biblioteca",
+      "publicá la evidencia de este asset en la biblioteca"
+    ],
+    "negativeKeywords": [
+      "review visual de roblox",
+      "photo rig",
+      "capturar roblox",
+      "hacer el modelo",
+      "modelar el asset",
+      "gameplay",
+      "generar una referencia solamente"
+    ],
+    "examples": [
+      "Terminamos un asset en Blender; actualizá la biblioteca global y verificá que aparezca con su aprobación correcta.",
+      "Abrí MauroAssetLibrary y decime qué assets están bloqueados por source drift.",
+      "Agregá mi nuevo proyecto Godot como provider de la biblioteca sin mover sus fuentes canónicas.",
+      "Desde el dashboard global abrí el asset pendiente y continuá en su proyecto dueño.",
+      "Refrescá la biblioteca después de aprobar A4 y comprobá que cambien los gates de export/Godot."
+    ]
+  },
+  "entrypoint": "GUIDE.md",
+  "phases": {
+    "resolve-intent-and-owner": "phases/resolve-intent-and-owner.md",
+    "inspect-library-state": "phases/inspect-library-state.md",
+    "refresh-or-onboard-provider": "phases/refresh-or-onboard-provider.md",
+    "evaluate-gates-and-drift": "phases/evaluate-gates-and-drift.md",
+    "handoff-to-owner": "phases/handoff-to-owner.md",
+    "publish-and-verify": "phases/publish-and-verify.md",
+    "maintenance-feedback": "phases/maintenance-feedback.md"
+  },
+  "recommendedTools": [
+    "project_context_load",
+    "workflow_guide_recommend",
+    "workflow_guide_load",
+    "skill_bootstrap",
+    "git_status",
+    "workspace_snapshot",
+    "workspace_diff",
+    "read_many_files",
+    "read_file_lines",
+    "binary_file_info",
+    "image_file_attach",
+    "work_once",
+    "mssr_trace_record"
+  ],
+  "scopeNotes": "Global guide available to all projects connected through Mauro's Bridge MCP."
+}
