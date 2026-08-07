@@ -1,3 +1,8 @@
+## 0.6.67 - 2026-08-07
+
+- Made `work_show` accept explicit `traceId` control metadata like the rest of the process aliases, preventing unrouted MSSR telemetry during concurrent ChatGPT Web workflows.
+- Added regression coverage requiring trace-aware schemas across the complete process lifecycle alias set.
+
 ## 0.6.66 - 2026-08-06
 
 - Added `git_multi_repo_publish`, a manifest-driven preflight/apply workflow with exhaustive path classification, per-repository validation, exact HEAD confirmation, verified local-only commits, no force push and HEAD/tracking/direct-remote readback.

@@ -243,7 +243,7 @@ export const processToolModule: BridgeToolModule = {
     { name: "work_once", description: "Alias of run_command for one short project action. Accepts optional traceId control metadata for explicit MSSR correlation across projects or processes.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["command"], additionalProperties: false } },
     { name: "work_begin", description: "Alias of terminal_start for long-running project work. Accepts optional traceId control metadata for explicit MSSR correlation.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, name: { type: "string" }, logFile: { type: "string" }, timeoutMs: { type: "number", minimum: 1000, maximum: MAX_RUN_MS }, cleanupAfterMs: { type: "number", default: DONE_TTL_MS, minimum: 0, maximum: MAX_RUN_MS }, traceId: TRACE_ID_INPUT_SCHEMA }, additionalProperties: false } },
     { name: "work_peek", description: "Alias of terminal_read for inspecting project work output. Accepts optional traceId control metadata to preserve MSSR attribution.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, maxChars: { type: "number", default: 20000 }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId"], additionalProperties: false } },
-    { name: "work_show", description: "Alias of terminal_list for listing project work.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
+    { name: "work_show", description: "Alias of terminal_list for listing project work. Accepts optional traceId control metadata to preserve MSSR attribution.", inputSchema: { type: "object", properties: { traceId: TRACE_ID_INPUT_SCHEMA }, additionalProperties: false } },
     { name: "work_feed", description: "Alias of terminal_write for sending input to project work. Accepts optional traceId control metadata to preserve MSSR attribution.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, input: { type: "string" }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId", "input"], additionalProperties: false } },
     { name: "work_finish", description: "Alias of terminal_stop for stopping project work. Accepts optional traceId control metadata to preserve MSSR attribution.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId"], additionalProperties: false } },
   ],
@@ -281,7 +281,10 @@ export const processToolModule: BridgeToolModule = {
       const parsed = z.object({ sessionId: z.string(), maxChars: z.number().positive().default(20000), traceId: optionalTraceId }).parse(args);
       return terminalRead(parsed.sessionId, parsed.maxChars);
     },
-    work_show: () => terminalList(),
+    work_show: (args) => {
+      z.object({ traceId: optionalTraceId }).parse(args);
+      return terminalList();
+    },
     work_feed: (args) => {
       const parsed = z.object({ sessionId: z.string(), input: z.string(), traceId: optionalTraceId }).parse(args);
       return terminalWrite(parsed.sessionId, parsed.input);
