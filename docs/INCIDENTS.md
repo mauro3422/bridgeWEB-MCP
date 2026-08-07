@@ -19,6 +19,28 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-08-07 — Outcome MSSR exitoso aceptado con close/maintenance obsoleto
+
+**Estado:** Corregido, publicado y verificado en runtime vivo `0.6.67`.
+
+**Capa / owner:** lifecycle de trazas MSSR en `src/mssr-trace-context.ts` y reconstrucción observable en `src/mssr-observatory.ts`.
+
+**Síntoma:** una traza podía completar `close -> maintenance`, reanudarse después, persistir trabajo adicional y aun así registrar `status=success` sin repetir `close -> maintenance`. La skill de mantenimiento sí había sido seleccionada; el cierre previo simplemente había quedado obsoleto.
+
+**Reproducción mínima:** `close + maintenance -> resume -> persistence -> outcome(success)`. Antes del fix el outcome era aceptado. Después del fix el mismo intento devuelve `mssr-success-outcome-blocked-stale-close` hasta ejecutar un close/maintenance nuevo.
+
+**Causa:** el coordinador conservaba skills requeridas/cargadas y estado `closed`, pero no una generación de lifecycle que relacionara el último trabajo/persistencia con el último close y maintenance. La reconstrucción desde SQLite/JSONL tampoco preservaba esa frescura.
+
+**Corrección aplicada:** se añadieron `maintenanceRequired`, `lifecycleRevision`, `closeRevision` y `maintenanceRevision`; replans no-close y persistence invalidan cierres previos, mientras un `phase_completed` de maintenance sólo sella la generación del close actual. `partial`, `failed` y `skipped` siguen siendo registrables. El estado se reconstruye desde eventos existentes, sin migración de DB ni hard-codear el nombre de una skill.
+
+**Regresión:** `test-mssr-trace-contract.mjs` cubre el caso rojo, recuperación con close fresco y reconstrucción tras pérdida de memoria del coordinador; `test-delegated-mssr-route-project.mjs` migra el flujo nominal. `npm run test:regressions` pasó completo. En el Bridge vivo, la traza `mssr-20260807175750-4dfea939-84f` fue bloqueada deliberadamente tras la última persistence con `lifecycleRevision=4`, `closeRevision=0`, `maintenanceRevision=0`.
+
+**Persistencia:** MSSR `6669d92f4842ce50a0e4991bd2eb69cffe223519`; Bridge `6eebd2016e68233bd94f61032b2b3045c1bd2a27`; ambos publicados y verificados por HEAD, tracking ref y ref remota directa.
+
+**Seguimiento:** cerrado para `trace-contract-v1`. Mantener la invariancia: cualquier trabajo o persistence posterior al último close/maintenance exige un nuevo close antes de `outcome(success)`.
+
+---
+
 ## 2026-07-25 — Guía propuesta aunque existía una skill propietaria
 
 **Estado:** Corregido y verificado en el servicio vivo `0.6.14`.
