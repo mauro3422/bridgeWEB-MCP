@@ -23,6 +23,7 @@ for (const [name, description] of [
   ["mssr-agent-routing", "Route substantial work through MSSR and preserve trace continuity."],
   ["shared-skill-governance", "Govern reusable skill changes and verification."],
   ["skill-routing-maintainer", "Maintain MSSR routing metadata and fixtures."],
+  ["skill-maintenance-loop", "Close routed work after the latest persistence and convert reusable friction into durable maintenance."],
   ["git-change-publication", "Verify and publish repository changes with explicit persistence evidence."],
   ["mauroprime-bridge-tool-authoring", "Author and verify Bridge MCP tools."],
   ["systematic-debugging", "Diagnose repeated failures and verify the smallest reversible fix."],
@@ -237,6 +238,55 @@ try {
     false,
     "A verification-stage bootstrap must attribute its own loads before evaluating the required-skill boundary.",
   );
+
+  await call("mssr_trace_record", {
+    traceId: route.traceId,
+    eventType: "verification",
+    caller: "chatgpt-web",
+    stage: "verify",
+    status: "success",
+    verificationPassed: true,
+    evidenceKind: "tests",
+    summary: "Delegated verification checkpoint completed.",
+  });
+  await call("mssr_trace_record", {
+    traceId: route.traceId,
+    eventType: "persistence",
+    caller: "chatgpt-web",
+    stage: "persist",
+    status: "success",
+    persisted: true,
+    evidenceKind: "tests",
+    summary: "Delegated fixture persistence checkpoint completed.",
+  });
+  const closeEnvelope = await call("bridge_tool_query", {
+    toolName: "skill_bootstrap",
+    arguments: {
+      task: freshTask,
+      context: "Verification and persistence completed; close the same delegated trace and run required maintenance on the latest state.",
+      intent: { ...verifyIntent, actions: [...verifyIntent.actions, "maintain"] },
+      caller: "chatgpt-web",
+      stage: "close",
+      completedPhases: ["discovery", "safety", "implementation", "verification", "persistence"],
+      sources: ["codex-local"],
+      maxSkills: 12,
+      traceId: route.traceId,
+    },
+  });
+  assert.equal(closeEnvelope.result.traceId, route.traceId);
+  await call("mssr_trace_record", {
+    traceId: route.traceId,
+    eventType: "phase_completed",
+    caller: "chatgpt-web",
+    stage: "close",
+    status: "success",
+    completedPhases: ["discovery", "safety", "implementation", "verification", "persistence", "maintenance"],
+    primarySkill: closeEnvelope.result.activeSkills.find((skill) => skill.required)?.name ?? route.activeSkills[0]?.name,
+    verificationPassed: true,
+    persisted: true,
+    evidenceKind: "tests",
+    summary: "Delegated close-stage maintenance completed after the latest persistence.",
+  });
 
   const outcome = await call("mssr_trace_record", {
     traceId: route.traceId,

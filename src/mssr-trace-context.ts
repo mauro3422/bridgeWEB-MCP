@@ -24,6 +24,10 @@ type ActiveTraceState = {
   loadedSkills: Set<string>;
   routeCount: number;
   closed: boolean;
+  maintenanceRequired: boolean;
+  lifecycleRevision: number;
+  closeRevision: number;
+  maintenanceRevision: number;
   updatedAt: number;
   lastRoutePlannedAt: number;
   lastToolCompletedAt: number | null;
@@ -113,6 +117,30 @@ function missingRequired(state: ActiveTraceState | null): string[] {
   return [...state.requiredSkills].filter((name) => !state.loadedSkills.has(name)).sort();
 }
 
+function routeRequiresMaintenance(record: JsonRecord): boolean {
+  const coverage = asRecord(record.coverage);
+  if (Array.isArray(coverage?.requiredPhases) && coverage.requiredPhases.includes("maintenance")) return true;
+  const phasePlan = Array.isArray(record.phasePlan) ? record.phasePlan : [];
+  return phasePlan.some((item) => {
+    const phase = asRecord(item);
+    return phase?.phase === "maintenance" && phase.required === true;
+  });
+}
+
+function maintenanceCompleted(args: JsonRecord): boolean {
+  return args.eventType === "phase_completed"
+    && args.stage === "close"
+    && args.status === "success"
+    && Array.isArray(args.completedPhases)
+    && args.completedPhases.includes("maintenance");
+}
+
+function hasFreshMaintenanceClose(state: ActiveTraceState): boolean {
+  return !state.maintenanceRequired
+    || (state.closeRevision === state.lifecycleRevision
+      && state.maintenanceRevision === state.lifecycleRevision);
+}
+
 function notice(
   severity: "info" | "warning" | "error",
   code: string,
@@ -191,6 +219,11 @@ export type MssrTraceSessionSnapshot = {
   project: string | null;
   routeCount: number;
   closed: boolean;
+  maintenanceRequired: boolean;
+  lifecycleRevision: number;
+  closeRevision: number;
+  maintenanceRevision: number;
+  maintenanceCloseFresh: boolean;
   requiredSkills: string[];
   loadedSkills: string[];
   missingRequiredSkills: string[];
@@ -668,6 +701,35 @@ export function createMssrTraceSessionCoordinator(
         ));
         return { args, notices, blocked };
       }
+      if (eventType === "outcome" && args.status === "success" && state && !state.closed && !hasFreshMaintenanceClose(state)) {
+        const blocked = {
+          code: "mssr-success-outcome-blocked-stale-close",
+          message: `No se puede cerrar con éxito la traza ${state.traceId}: el último cierre con maintenance quedó stale después de trabajo o persistencia posterior.`,
+          details: {
+            traceId: state.traceId,
+            stage: state.stage,
+            maintenanceRequired: state.maintenanceRequired,
+            lifecycleRevision: state.lifecycleRevision,
+            closeRevision: state.closeRevision,
+            maintenanceRevision: state.maintenanceRevision,
+            recovery: "Replanifica la misma traza en stage=close después de la última persistencia, completa maintenance y recién entonces registra el outcome.",
+          },
+        };
+        notices.push(notice(
+          "error",
+          blocked.code,
+          toolName,
+          blocked.message,
+          blocked.details,
+          `${blocked.code}:${state.traceId}:${state.lifecycleRevision}:${state.closeRevision}:${state.maintenanceRevision}`,
+          [{
+            label: "Replanificar cierre MSSR",
+            toolName: "skill_bootstrap",
+            instruction: "Reusa esta traceId y la tarea/contexto resueltos, avanza a stage=close, ejecuta las skills requeridas de maintenance y registra phase_completed antes del outcome.",
+          }],
+        ));
+        return { args, notices, blocked };
+      }
       if (eventType === "outcome" && !state) {
         notices.push(notice(
           "warning",
@@ -697,11 +759,16 @@ export function createMssrTraceSessionCoordinator(
       const previous = sharedTraces.get(traceId);
       const skills = routeSkills(record.activeSkills);
       const now = Date.now();
+      const stage = typeof record.stage === "string" ? record.stage : typeof args.stage === "string" ? args.stage : "start";
+      const previousRevision = previous?.lifecycleRevision ?? 0;
+      const lifecycleRevision = previous
+        ? (stage === "close" ? previousRevision : previousRevision + 1)
+        : 1;
       const state: ActiveTraceState = {
         traceId,
         workflowKey: previous?.workflowKey
           ?? (normalizedText(record.workflowKey, 80) || normalizedText(args.workflowKey, 80) || "unscoped"),
-        stage: typeof record.stage === "string" ? record.stage : typeof args.stage === "string" ? args.stage : "start",
+        stage,
         taskHash: taskFingerprint(args.task),
         caller: normalizedCaller(args.caller ?? hostContext.caller),
         model: normalizeModelIdentifier(asRecord(record.agentProfile)?.model ?? args.model),
@@ -721,6 +788,10 @@ export function createMssrTraceSessionCoordinator(
         loadedSkills: previous ? new Set(previous.loadedSkills) : new Set<string>(),
         routeCount: previous ? previous.routeCount + 1 : 1,
         closed: false,
+        maintenanceRequired: previous?.maintenanceRequired === true || routeRequiresMaintenance(record),
+        lifecycleRevision,
+        closeRevision: stage === "close" ? lifecycleRevision : previous?.closeRevision ?? 0,
+        maintenanceRevision: previous?.maintenanceRevision ?? 0,
         updatedAt: now,
         lastRoutePlannedAt: now,
         lastToolCompletedAt: previous?.lastToolCompletedAt ?? null,
@@ -759,6 +830,12 @@ export function createMssrTraceSessionCoordinator(
           state.progressLeaseUntil = Date.now() + leaseMs;
           state.updatedAt = Date.now();
         }
+        if (args.eventType === "persistence") {
+          state.lifecycleRevision += 1;
+        }
+        if (maintenanceCompleted(args) && state.closeRevision === state.lifecycleRevision) {
+          state.maintenanceRevision = state.lifecycleRevision;
+        }
         if (args.eventType === "outcome") {
           state.closed = true;
           state.progressLeaseUntil = 0;
@@ -791,6 +868,11 @@ export function createMssrTraceSessionCoordinator(
       project: state?.project ?? null,
       routeCount: state?.routeCount ?? 0,
       closed: state?.closed ?? false,
+      maintenanceRequired: state?.maintenanceRequired ?? false,
+      lifecycleRevision: state?.lifecycleRevision ?? 0,
+      closeRevision: state?.closeRevision ?? 0,
+      maintenanceRevision: state?.maintenanceRevision ?? 0,
+      maintenanceCloseFresh: state ? hasFreshMaintenanceClose(state) : true,
       requiredSkills: state ? [...state.requiredSkills].sort() : [],
       loadedSkills: state ? [...state.loadedSkills].sort() : [],
       missingRequiredSkills: missingRequired(state),

@@ -137,6 +137,10 @@ export type PersistedMssrTraceState = {
   loadedSkills: string[];
   routeCount: number;
   closed: boolean;
+  maintenanceRequired: boolean;
+  lifecycleRevision: number;
+  closeRevision: number;
+  maintenanceRevision: number;
   updatedAt: number;
 };
 
@@ -549,6 +553,32 @@ export function readPersistedMssrTraceState(traceId: string): PersistedMssrTrace
       if ((item as JsonRecord).required === true) requiredSkills.add(name);
     }
   }
+  let maintenanceRequired = false;
+  let lifecycleRevision = 0;
+  let closeRevision = 0;
+  let maintenanceRevision = 0;
+  for (const event of events) {
+    if (event.eventType === "route_planned") {
+      const requiredPhases = Array.isArray(event.details.requiredPhases) ? event.details.requiredPhases : [];
+      if (requiredPhases.includes("maintenance")) maintenanceRequired = true;
+      if (lifecycleRevision === 0) lifecycleRevision = 1;
+      else if (event.stage !== "close") lifecycleRevision += 1;
+      if (event.stage === "close") closeRevision = lifecycleRevision;
+      continue;
+    }
+    if (event.eventType === "persistence") {
+      lifecycleRevision = Math.max(1, lifecycleRevision) + 1;
+      continue;
+    }
+    if (event.eventType === "phase_completed"
+      && event.stage === "close"
+      && event.ok === true
+      && Array.isArray(event.details.completedPhases)
+      && event.details.completedPhases.includes("maintenance")
+      && closeRevision === lifecycleRevision) {
+      maintenanceRevision = lifecycleRevision;
+    }
+  }
   const loadedSkills = new Set(events
     .filter((event) => event.eventType === "skill_loaded" && event.ok === true && event.skillName)
     .map((event) => String(event.skillName)));
@@ -586,6 +616,10 @@ export function readPersistedMssrTraceState(traceId: string): PersistedMssrTrace
     loadedSkills: [...loadedSkills].sort(),
     routeCount: routes.length,
     closed: Boolean(latestOutcome && Date.parse(latestOutcome.occurredAt) >= Date.parse(latestRoute.occurredAt)),
+    maintenanceRequired,
+    lifecycleRevision,
+    closeRevision,
+    maintenanceRevision,
     updatedAt: Date.parse(latestEvent.occurredAt) || Date.now(),
   };
 }

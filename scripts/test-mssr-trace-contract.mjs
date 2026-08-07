@@ -26,6 +26,7 @@ function writeSkill(name, description) {
 writeSkill('mssr-agent-routing', 'Route substantial work through MSSR and preserve trace continuity.');
 writeSkill('shared-skill-governance', 'Govern reusable skill changes and verification.');
 writeSkill('skill-routing-maintainer', 'Maintain MSSR routing metadata and fixtures.');
+writeSkill('skill-maintenance-loop', 'Close routed work after the latest persistence and convert reusable friction into durable maintenance.');
 writeSkill('mauroprime-bridge-tool-authoring', 'Author and verify Bridge MCP tools.');
 
 const [{ Client }, { InMemoryTransport }, { createBridgeServer }, observatory, traceContext, metrics, robloxClient, runtimeIdentity] = await Promise.all([
@@ -168,6 +169,37 @@ try {
     summary: 'Fixture persistence checkpoint recorded.',
   });
   assert.equal(persistence.traceId, traceId);
+
+  const close = await callFresh('skill_route_plan', {
+    task,
+    context: 'Verification and persistence are complete; close after the latest persisted state and run maintenance if required.',
+    intent: { ...intent, actions: ['review', 'verify', 'maintain', 'document'], risk: 'read-only' },
+    caller: 'chatgpt-web',
+    stage: 'close',
+    completedPhases: ['discovery', 'implementation', 'verification', 'persistence'],
+    sources: ['codex-local'],
+    maxSkills: 12,
+  });
+  assert.equal(close.traceId, traceId, 'Close replan must reuse the active trace after persistence.');
+  for (const skill of close.activeSkills.filter((item) => item.required)) {
+    if (loaded.has(skill.name)) continue;
+    const result = await callFresh('skill_load', { name: skill.name, source: 'codex', stage: 'close' });
+    assert.equal(result.traceId, traceId, `close skill should inherit trace for ${skill.name}`);
+    loaded.add(skill.name);
+  }
+  const maintenance = await callFresh('mssr_trace_record', {
+    eventType: 'phase_completed',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    status: 'success',
+    completedPhases: ['discovery', 'safety', 'implementation', 'verification', 'persistence', 'maintenance'],
+    primarySkill: close.activeSkills.find((item) => item.required)?.name ?? required[0],
+    verificationPassed: true,
+    persisted: true,
+    evidenceKind: 'tests',
+    summary: 'Close-stage maintenance completed after the latest persistence.',
+  });
+  assert.equal(maintenance.traceId, traceId);
 
   const outcome = await callFresh('mssr_trace_record', {
     eventType: 'outcome',
@@ -432,6 +464,39 @@ try {
     'Explicit resume after a process restart must restore successful persisted skill loads.',
   );
   assert.deepEqual(afterRestart.snapshot().missingRequiredSkills, []);
+  const restartClose = await callFresh('skill_route_plan', {
+    task: 'Start a separate MSSR task after the previous outcome closed.',
+    context: 'The trace survived process-memory loss; perform a fresh close over the recovered state before final outcome.',
+    intent: { ...intent, actions: ['review', 'verify', 'maintain'], risk: 'read-only' },
+    caller: 'chatgpt-web',
+    stage: 'close',
+    traceId: nextRoute.traceId,
+    completedPhases: ['discovery', 'implementation', 'verification', 'persistence'],
+    sources: ['codex-local'],
+    maxSkills: 12,
+  });
+  assert.equal(restartClose.traceId, nextRoute.traceId);
+  for (const skill of restartClose.activeSkills.filter((item) => item.required)) {
+    await callFresh('skill_load', {
+      name: skill.name,
+      source: 'codex',
+      traceId: nextRoute.traceId,
+      required: true,
+      stage: 'close',
+    });
+  }
+  await callFresh('mssr_trace_record', {
+    traceId: nextRoute.traceId,
+    eventType: 'phase_completed',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    status: 'success',
+    completedPhases: ['discovery', 'safety', 'implementation', 'verification', 'persistence', 'maintenance'],
+    primarySkill: restartClose.activeSkills.find((item) => item.required)?.name ?? nextRoute.activeSkills[0]?.name,
+    verificationPassed: true,
+    persisted: true,
+    summary: 'Recovered trace completed fresh close-stage maintenance.',
+  });
   await callFresh('mssr_trace_record', {
     traceId: nextRoute.traceId,
     eventType: 'outcome',
@@ -440,7 +505,7 @@ try {
     status: 'success',
     verificationPassed: true,
     persisted: true,
-    primarySkill: nextRoute.activeSkills[0]?.name,
+    primarySkill: restartClose.activeSkills.find((item) => item.required)?.name ?? nextRoute.activeSkills[0]?.name,
     summary: 'Close the explicit restart fixture before testing rotated-session fallback.',
   });
 
@@ -517,6 +582,18 @@ try {
   }
   await callFresh('mssr_trace_record', {
     traceId: closeRoute.traceId,
+    eventType: 'phase_completed',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    status: 'success',
+    completedPhases: ['discovery', 'safety', 'implementation', 'verification', 'persistence', 'maintenance'],
+    primarySkill: closeRoute.activeSkills.find((item) => item.required)?.name ?? closeRoute.activeSkills[0]?.name,
+    verificationPassed: true,
+    persisted: true,
+    summary: 'Rotated-session close-stage maintenance completed after recovered required loads.',
+  }, closeRecoveryRotatedMeta, 'openai-mcp');
+  await callFresh('mssr_trace_record', {
+    traceId: closeRoute.traceId,
     eventType: 'outcome',
     caller: 'chatgpt-web',
     stage: 'close',
@@ -582,10 +659,183 @@ try {
     stage: 'close',
   });
   assert.equal(recoveredSuccess.blocked, undefined, 'The same trace may close after the missing load is repaired.');
+
+  const staleClose = traceContext.createMssrTraceSessionCoordinator(schemas);
+  staleClose.observe('skill_route_plan', { task: 'stale close lifecycle fixture', caller: 'chatgpt-web', stage: 'close' }, {
+    traceId: 'trace-stale-close-001',
+    stage: 'close',
+    activeSkills: [{ name: 'skill-maintenance-loop', required: true }],
+    coverage: { requiredPhases: ['discovery', 'verification', 'persistence', 'maintenance'] },
+  });
+  staleClose.observe('skill_load', {
+    name: 'skill-maintenance-loop',
+    traceId: 'trace-stale-close-001',
+    required: true,
+    stage: 'close',
+  }, { traceId: 'trace-stale-close-001' });
+  staleClose.observe('mssr_trace_record', {
+    traceId: 'trace-stale-close-001',
+    eventType: 'phase_completed',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    status: 'success',
+    completedPhases: ['discovery', 'safety', 'implementation', 'verification', 'persistence', 'maintenance'],
+    primarySkill: 'skill-maintenance-loop',
+  }, { traceId: 'trace-stale-close-001' });
+  staleClose.observe('skill_route_plan', {
+    task: 'stale close lifecycle fixture',
+    caller: 'chatgpt-web',
+    stage: 'resume',
+    traceId: 'trace-stale-close-001',
+  }, {
+    traceId: 'trace-stale-close-001',
+    stage: 'resume',
+    activeSkills: [],
+  });
+  staleClose.observe('mssr_trace_record', {
+    traceId: 'trace-stale-close-001',
+    eventType: 'persistence',
+    caller: 'chatgpt-web',
+    stage: 'persist',
+    status: 'success',
+    persisted: true,
+  }, { traceId: 'trace-stale-close-001' });
+  const staleOutcome = staleClose.prepare('mssr_trace_record', {
+    traceId: 'trace-stale-close-001',
+    eventType: 'outcome',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    status: 'success',
+    verificationPassed: true,
+    persisted: true,
+  });
+  assert.equal(
+    staleOutcome.blocked?.code,
+    'mssr-success-outcome-blocked-stale-close',
+    'A resume/persistence after close maintenance must require a fresh close+maintenance pass before success outcome.',
+  );
+  assert.equal(staleClose.snapshot().maintenanceCloseFresh, false);
+
+  staleClose.observe('skill_route_plan', {
+    task: 'stale close lifecycle fixture',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    traceId: 'trace-stale-close-001',
+  }, {
+    traceId: 'trace-stale-close-001',
+    stage: 'close',
+    activeSkills: [{ name: 'skill-maintenance-loop', required: true }],
+    coverage: { requiredPhases: ['discovery', 'verification', 'persistence', 'maintenance'] },
+  });
+  staleClose.observe('mssr_trace_record', {
+    traceId: 'trace-stale-close-001',
+    eventType: 'phase_completed',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    status: 'success',
+    completedPhases: ['discovery', 'safety', 'implementation', 'verification', 'persistence', 'maintenance'],
+    primarySkill: 'skill-maintenance-loop',
+  }, { traceId: 'trace-stale-close-001' });
+  const refreshedOutcome = staleClose.prepare('mssr_trace_record', {
+    traceId: 'trace-stale-close-001',
+    eventType: 'outcome',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    status: 'success',
+    verificationPassed: true,
+    persisted: true,
+  });
+  assert.equal(refreshedOutcome.blocked, undefined, 'A fresh close+maintenance pass after the latest persistence must permit success outcome.');
+  assert.equal(staleClose.snapshot().maintenanceCloseFresh, true);
+
   const replacement = negative.prepare('skill_route_plan', { task: 'different unfinished task', stage: 'start' });
   assert.ok(replacement.notices.some((item) => item.code === 'mssr-active-trace-replaced-before-outcome'));
 
+  const persistedStaleTraceId = 'trace-stale-close-persisted-001';
+  observatory.recordMssrEvent({
+    traceId: persistedStaleTraceId,
+    eventType: 'route_planned',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    ok: true,
+    taskHash: createHash('sha256').update('persisted stale close lifecycle fixture').digest('hex'),
+    details: {
+      workflowKey: 'persisted-stale-close-fixture',
+      requiredPhases: ['discovery', 'verification', 'persistence', 'maintenance'],
+      activeSkills: [{ name: 'skill-maintenance-loop', required: true }],
+      agentProfile: { model: 'gpt-5.6-sol', reasoningEffort: 'high' },
+    },
+  });
+  observatory.recordMssrEvent({
+    traceId: persistedStaleTraceId,
+    eventType: 'skill_loaded',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    skillName: 'skill-maintenance-loop',
+    required: true,
+    ok: true,
+    details: {},
+  });
+  observatory.recordMssrEvent({
+    traceId: persistedStaleTraceId,
+    eventType: 'phase_completed',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    ok: true,
+    details: { status: 'success', completedPhases: ['discovery', 'verification', 'persistence', 'maintenance'] },
+  });
+  observatory.recordMssrEvent({
+    traceId: persistedStaleTraceId,
+    eventType: 'route_planned',
+    caller: 'chatgpt-web',
+    stage: 'resume',
+    ok: true,
+    taskHash: createHash('sha256').update('persisted stale close lifecycle fixture').digest('hex'),
+    details: {
+      workflowKey: 'persisted-stale-close-fixture',
+      requiredPhases: ['discovery', 'verification', 'persistence', 'maintenance'],
+      activeSkills: [],
+      agentProfile: { model: 'gpt-5.6-sol', reasoningEffort: 'high' },
+    },
+  });
+  observatory.recordMssrEvent({
+    traceId: persistedStaleTraceId,
+    eventType: 'persistence',
+    caller: 'chatgpt-web',
+    stage: 'persist',
+    ok: true,
+    details: { status: 'success', persisted: true },
+  });
+  const persistedStaleState = observatory.readPersistedMssrTraceState(persistedStaleTraceId);
+  assert.equal(persistedStaleState?.maintenanceRequired, true);
+  assert.ok((persistedStaleState?.lifecycleRevision ?? 0) > (persistedStaleState?.closeRevision ?? 0));
+  assert.notEqual(persistedStaleState?.maintenanceRevision, persistedStaleState?.lifecycleRevision);
   traceContext.resetSharedMssrTraceRegistryForTests();
+  const restoredStaleClose = traceContext.createMssrTraceSessionCoordinator(schemas);
+  const restoredStaleOutcome = restoredStaleClose.prepare('mssr_trace_record', {
+    traceId: persistedStaleTraceId,
+    eventType: 'outcome',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    status: 'success',
+    verificationPassed: true,
+    persisted: true,
+  });
+  assert.equal(
+    restoredStaleOutcome.blocked?.code,
+    'mssr-success-outcome-blocked-stale-close',
+    'A stale close reconstructed from persisted observatory events must remain blocked after coordinator-memory loss.',
+  );
+  observatory.recordMssrEvent({
+    traceId: persistedStaleTraceId,
+    eventType: 'outcome',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    ok: true,
+    details: { status: 'partial', persisted: true, fixtureCleanup: true },
+  });
+  traceContext.resetSharedMssrTraceRegistryForTests();
+
   const rotatedOwner = traceContext.createMssrTraceSessionCoordinator(schemas);
   rotatedOwner.resolveMetricContext({
     caller: 'chatgpt-web',
@@ -804,12 +1054,12 @@ try {
       eventType: 'outcome',
       caller: 'codex-local',
       stage: 'close',
-      status: 'success',
+      status: 'partial',
       primarySkill: codexRoute.activeSkills[0].name,
       supportingSkills: [],
       verificationPassed: true,
       persisted: false,
-      summary: 'Project attribution fixture closed.',
+      summary: 'Project attribution fixture closed as partial because it intentionally does not exercise persistence/maintenance.',
     });
     await call('project_context_load', {
       projectRoot: laterProject,
