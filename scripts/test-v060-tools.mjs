@@ -809,7 +809,15 @@ try {
   try { await call('workspace_diff',{snapshotId:tamperSnap.snapshot.id,projectRoot:root}); } catch (error) { traversalRejected = /invalid snapshot|relative path|escaped/i.test(String(error)); }
   if (!traversalRejected) throw new Error('tampered snapshot traversal was not rejected');
 
+  const staleCacheDir = path.join(process.env.BRIDGE_MCP_CACHE_DIR, 'stale-fixture');
+  fs.mkdirSync(staleCacheDir, {recursive:true});
+  const staleCachePath = path.join(staleCacheDir, 'stale.json');
+  fs.writeFileSync(staleCachePath, JSON.stringify({version:2,namespace:'stale-fixture',key:'stale',value:{old:true}}));
+  const staleCacheTime = new Date(Date.now() - 8 * 24 * 60 * 60_000);
+  fs.utimesSync(staleCachePath, staleCacheTime, staleCacheTime);
+
   writePersistentCache('fixture','one',{value:1});
+  if (fs.existsSync(staleCachePath)) throw new Error('first persistent cache write did not prune stale entries');
   writePersistentCache('fixture','two',{value:2});
   writePersistentCache('fixture','three',{value:3});
   const cacheBefore = await call('cache_status',{});
@@ -826,3 +834,5 @@ try {
   closeMetricsForTests();
   fs.rmSync(sandbox,{recursive:true,force:true});
 }
+
+

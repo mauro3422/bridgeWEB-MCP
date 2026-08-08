@@ -8,6 +8,7 @@ const DEFAULT_TTL_MS = 7 * 24 * 60 * 60_000;
 const DEFAULT_MAX_BYTES = 128 * 1024 * 1024;
 const DEFAULT_MAX_ENTRIES = 2000;
 let writesSincePrune = 0;
+let initialPrunePending = true;
 
 function positiveEnv(name: string, fallback: number) {
   const value = Number.parseInt(String(process.env[name] ?? ""), 10);
@@ -180,9 +181,12 @@ export function writePersistentCache<T>(namespace: string, key: string, value: T
   fs.writeFileSync(tempPath, JSON.stringify({ version: CACHE_VERSION, namespace, key, createdAt: new Date().toISOString(), value }), "utf8");
   fs.renameSync(tempPath, filePath);
   writesSincePrune += 1;
-  if (writesSincePrune >= 50) {
+  if (initialPrunePending || writesSincePrune >= 50) {
+    initialPrunePending = false;
     writesSincePrune = 0;
     try { prunePersistentCache(); } catch { /* cache pruning must not break analysis */ }
   }
   return { enabled: true, namespace, hit: false, key, path: filePath };
 }
+
+

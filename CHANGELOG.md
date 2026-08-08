@@ -1,3 +1,8 @@
+## 0.6.70 - 2026-08-08
+
+- Enforced persistent analysis-cache TTL/size bounds on the first cache write of each Bridge runtime, then retained the existing periodic prune cadence, preventing restarts from leaving multi-gigabyte stale cache indefinitely.
+- Added regression coverage proving a stale cache entry is removed by the first persistent cache write.
+
 ## 0.6.69 - 2026-08-07
 
 - Added modular project-context loading through optional `.bridge/project-context.json`: minimal core at project bootstrap, then stage/intent-selected `context`, `memory`, `state`, and scoped `directive` modules with legacy full-document fallback.
@@ -373,3 +378,4 @@
 - Added the routed `roblox-mcp-incident-recovery` procedure from the versioned MauroPrime skills repository.
 - Hardened Roblox Studio MCP discovery with explicit `healthy`, `degraded`, and `unavailable` source state, bounded retry, discovery-only cache, and nonzero live-catalog verification.
 - Hardened multi-client StudioMCP lifecycle and ownership diagnostics while preserving valid direct and Bridge-managed routes.
+
