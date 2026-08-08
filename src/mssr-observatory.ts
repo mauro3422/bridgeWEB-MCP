@@ -1079,7 +1079,8 @@ function summary(days: number, scope: MssrObservatoryScope) {
     : decoded;
   const decodedToolCalls = database.prepare(`
     SELECT trace_id, started_at, ended_at, duration_ms, tool, operation_subject,
-           observability_epoch, ok
+           observability_epoch, ok, caller, client_name, session_key,
+           model, reasoning_effort, host_agent, host_variant, host_parent_session_key
     FROM tool_calls
     WHERE started_at >= ? AND trace_id IS NOT NULL AND trace_id <> ''
       AND trace_id NOT LIKE '__test_%'
@@ -1103,6 +1104,101 @@ function summary(days: number, scope: MssrObservatoryScope) {
     traceCalls.push(row);
     toolCallsByTrace.set(traceId, traceCalls);
   }
+  type TraceHostIdentity = {
+    state: "not-observed" | "single" | "mixed";
+    model: string;
+    reasoningEffort: string;
+    hostAgent: string;
+    hostVariant: string;
+    sessionKeys: string[];
+    parentSessionKeys: string[];
+  };
+  const usable = (value: unknown): string | undefined => (
+    typeof value === "string" && value && value !== "unknown" ? value : undefined
+  );
+  const hostIdentityByTrace = new Map<string, TraceHostIdentity>();
+  for (const [traceId, calls] of toolCallsByTrace) {
+    // Only the authenticated OpenCode plugin exposes these fields.  Rows that
+    // merely share a trace do not become host evidence by association alone.
+    const observed = calls.filter((call) => call.client_name === "opencode-cli");
+    if (!observed.length) continue;
+    const identities = new Map<string, Omit<TraceHostIdentity, "state" | "sessionKeys" | "parentSessionKeys">>();
+    const sessionKeys = new Set<string>();
+    const parentSessionKeys = new Set<string>();
+    for (const call of observed) {
+      const identity = {
+        model: normalizeModelIdentifier(call.model),
+        reasoningEffort: usable(call.reasoning_effort) ?? "unknown",
+        hostAgent: usable(call.host_agent) ?? "unknown",
+        hostVariant: usable(call.host_variant) ?? "unknown",
+      };
+      identities.set(JSON.stringify(identity), identity);
+      const sessionKey = usable(call.session_key);
+      if (sessionKey) sessionKeys.add(sessionKey);
+      const parentSessionKey = usable(call.host_parent_session_key);
+      if (parentSessionKey) parentSessionKeys.add(parentSessionKey);
+    }
+    if (identities.size === 1) {
+      const identity = [...identities.values()][0];
+      hostIdentityByTrace.set(traceId, {
+        state: "single", ...identity,
+        sessionKeys: [...sessionKeys].sort(),
+        parentSessionKeys: [...parentSessionKeys].sort(),
+      });
+    } else {
+      // A single lifecycle result may legitimately span an agent handoff. Keep
+      // that ambiguity visible rather than choosing the newest host call.
+      hostIdentityByTrace.set(traceId, {
+        state: "mixed",
+        model: "multiple-observed",
+        reasoningEffort: "multiple-observed",
+        hostAgent: "multiple-observed",
+        hostVariant: "multiple-observed",
+        sessionKeys: [...sessionKeys].sort(),
+        parentSessionKeys: [...parentSessionKeys].sort(),
+      });
+    }
+  }
+  const lifecycleProfile = (route: MssrStoredEvent) => {
+    const explicit = route.details.agentProfile && typeof route.details.agentProfile === "object"
+      ? route.details.agentProfile as JsonRecord
+      : {};
+    const observed = hostIdentityByTrace.get(route.traceId);
+    if (observed?.state === "single") {
+      return {
+        caller: route.caller || "other",
+        model: observed.model,
+        reasoningEffort: observed.reasoningEffort,
+        hostAgent: observed.hostAgent,
+        hostVariant: observed.hostVariant,
+        identitySource: "trace-correlated-host",
+        observedSessionCount: observed.sessionKeys.length,
+        observedParentSessionCount: observed.parentSessionKeys.length,
+      };
+    }
+    if (observed?.state === "mixed") {
+      return {
+        caller: route.caller || "other",
+        model: "multiple-observed",
+        reasoningEffort: "multiple-observed",
+        hostAgent: "multiple-observed",
+        hostVariant: "multiple-observed",
+        identitySource: "trace-host-mixed",
+        observedSessionCount: observed.sessionKeys.length,
+        observedParentSessionCount: observed.parentSessionKeys.length,
+      };
+    }
+    return {
+      caller: route.caller || "other",
+      model: normalizeModelIdentifier(explicit.model),
+      reasoningEffort: typeof explicit.reasoningEffort === "string" ? explicit.reasoningEffort : "unknown",
+      hostAgent: "unknown",
+      hostVariant: "unknown",
+      identitySource: "lifecycle-only",
+      observedSessionCount: 0,
+      observedParentSessionCount: 0,
+    };
+  };
   const effectiveToolName = (row: JsonRecord): string => {
     const outer = typeof row.tool === "string" ? row.tool : "unknown";
     return (outer === DELEGATED_QUERY_TOOL || outer === DELEGATED_ACTION_TOOL)
@@ -1112,7 +1208,8 @@ function summary(days: number, scope: MssrObservatoryScope) {
       : outer;
   };
   const executionMetrics = (traceIds: Set<string>, profileRoutes: MssrStoredEvent[]) => {
-    let directToolCalls = 0;
+    let bridgeDirectToolCalls = 0;
+    let hostObservedToolCalls = 0;
     let delegatedQueryCalls = 0;
     let delegatedActionCalls = 0;
     let discoveryDetours = 0;
@@ -1121,9 +1218,10 @@ function summary(days: number, scope: MssrObservatoryScope) {
     for (const traceId of traceIds) {
       const calls = toolCallsByTrace.get(traceId) ?? [];
       for (const call of calls) {
-        if (call.tool === DELEGATED_QUERY_TOOL) delegatedQueryCalls += 1;
+        if (call.client_name === "opencode-cli") hostObservedToolCalls += 1;
+        else if (call.tool === DELEGATED_QUERY_TOOL) delegatedQueryCalls += 1;
         else if (call.tool === DELEGATED_ACTION_TOOL) delegatedActionCalls += 1;
-        else directToolCalls += 1;
+        else bridgeDirectToolCalls += 1;
       }
       const firstRoute = profileRoutes.find((route) => route.traceId === traceId);
       const substantive = calls.filter((call) => !PREPARATION_TOOLS.has(effectiveToolName(call)));
@@ -1154,9 +1252,14 @@ function summary(days: number, scope: MssrObservatoryScope) {
       }
     }
     const delegatedCalls = delegatedQueryCalls + delegatedActionCalls;
-    const physicalCalls = directToolCalls + delegatedCalls;
+    const physicalCalls = bridgeDirectToolCalls + hostObservedToolCalls + delegatedCalls;
     return {
-      directToolCalls,
+      // Compatibility alias: direct means Bridge-executed and excludes host
+      // telemetry. Lifecycle rows live in mssr_events and are never counted.
+      directToolCalls: bridgeDirectToolCalls,
+      bridgeDirectToolCalls,
+      hostObservedToolCalls,
+      physicalToolCalls: physicalCalls,
       delegatedQueryCalls,
       delegatedActionCalls,
       delegatedToolCalls: delegatedCalls,
@@ -1314,26 +1417,34 @@ function summary(days: number, scope: MssrObservatoryScope) {
     })
     .sort((a, b) => b.routedTraces - a.routedTraces || a.caller.localeCompare(b.caller));
   const profileKeys = new Set(routes.map((event) => {
-    const profile = event.details.agentProfile && typeof event.details.agentProfile === "object"
-      ? event.details.agentProfile as JsonRecord
-      : {};
+    const profile = lifecycleProfile(event);
     return JSON.stringify([
-      event.caller || "other",
-      normalizeModelIdentifier(profile.model),
-      typeof profile.reasoningEffort === "string" ? profile.reasoningEffort : "unknown",
+      profile.caller,
+      profile.model,
+      profile.reasoningEffort,
+      profile.hostAgent,
+      profile.hostVariant,
+      profile.identitySource,
     ]);
   }));
   const agentProfiles = [...profileKeys].map((key) => {
-    const [caller, model, reasoningEffort] = JSON.parse(key) as [string, string, string];
+    const [caller, model, reasoningEffort, hostAgent, hostVariant, identitySource] = JSON.parse(key) as [string, string, string, string, string, string];
     const profileRoutes = routes.filter((event) => {
-      const profile = event.details.agentProfile && typeof event.details.agentProfile === "object"
-        ? event.details.agentProfile as JsonRecord
-        : {};
-      return (event.caller || "other") === caller
-        && normalizeModelIdentifier(profile.model) === model
-        && (typeof profile.reasoningEffort === "string" ? profile.reasoningEffort : "unknown") === reasoningEffort;
+      const profile = lifecycleProfile(event);
+      return profile.caller === caller
+        && profile.model === model
+        && profile.reasoningEffort === reasoningEffort
+        && profile.hostAgent === hostAgent
+        && profile.hostVariant === hostVariant
+        && profile.identitySource === identitySource;
     });
     const profileTraceIds = new Set(profileRoutes.map((event) => event.traceId));
+    const observedSessionKeys = new Set(profileRoutes.flatMap((event) => (
+      hostIdentityByTrace.get(event.traceId)?.sessionKeys ?? []
+    )));
+    const observedParentSessionKeys = new Set(profileRoutes.flatMap((event) => (
+      hostIdentityByTrace.get(event.traceId)?.parentSessionKeys ?? []
+    )));
     const profileLoads = successfulLoads.filter((event) => profileTraceIds.has(event.traceId));
     const profileTraceIdsWithLoads = new Set(profileLoads.map((event) => event.traceId));
     const profileRequired = new Set<string>();
@@ -1373,6 +1484,11 @@ function summary(days: number, scope: MssrObservatoryScope) {
       caller,
       model,
       reasoningEffort,
+      hostAgent,
+      hostVariant,
+      identitySource,
+      observedSessionCount: observedSessionKeys.size,
+      observedParentSessionCount: observedParentSessionKeys.size,
       routedTraces: profileTraceIds.size,
       routeEvents: profileRoutes.length,
       structuredRouteRate: rate(profileRoutes.filter((event) => event.classificationMode === "structured-semantic").length, profileRoutes.length),
@@ -1404,7 +1520,8 @@ function summary(days: number, scope: MssrObservatoryScope) {
   }).sort((a, b) => b.routedTraces - a.routedTraces
     || a.caller.localeCompare(b.caller)
     || a.model.localeCompare(b.model)
-    || a.reasoningEffort.localeCompare(b.reasoningEffort));
+    || a.reasoningEffort.localeCompare(b.reasoningEffort)
+    || a.hostAgent.localeCompare(b.hostAgent));
 
   const overallExecution = executionMetrics(traceIdsWithRoutes, routes);
   return {

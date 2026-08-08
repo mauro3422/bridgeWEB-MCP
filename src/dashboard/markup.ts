@@ -257,7 +257,7 @@ export const dashboardMarkup = `
       </article>
 
       <article class="card span-6">
-        <div class="card-header"><div><div class="card-kicker">Uso individual del sistema</div><h2 class="card-title">Activación MSSR por modelo</h2><p class="card-description">Comprueba si cada perfil enruta, carga lo requerido y verifica. Una tarea todavía abierta muestra sus fases finales como pendientes.</p></div></div>
+        <div class="card-header"><div><div class="card-kicker">Uso individual del sistema</div><h2 class="card-title">Activación MSSR por identidad observada</h2><p class="card-description">Une lifecycle MSSR con metadata host sólo cuando comparten exactamente un traceId. Si no existe evidencia host, se conserva el perfil del lifecycle.</p></div></div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Perfil</th><th>Tareas</th><th>Routing</th><th>Route → load</th><th>Requeridas</th><th>Verificación</th></tr></thead>
@@ -267,7 +267,7 @@ export const dashboardMarkup = `
       </article>
 
       <article class="card span-6">
-        <div class="card-header"><div><div class="card-kicker">Resultado individual</div><h2 class="card-title">Rendimiento MSSR por modelo</h2><p class="card-description">Se completa al registrar outcomes. “Pendiente” significa que la tarea sigue abierta; no equivale a 0% de calidad ni a un fallo.</p></div></div>
+        <div class="card-header"><div><div class="card-kicker">Resultado individual</div><h2 class="card-title">Rendimiento MSSR por identidad observada</h2><p class="card-description">Se completa al registrar outcomes. “Pendiente” significa que la tarea sigue abierta; no equivale a 0% de calidad ni a un fallo.</p></div></div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Perfil</th><th>Cierre / estado</th><th>Éxito</th><th>Aceptación</th><th>Score</th><th>Tiempo</th><th>Loop / correcciones</th></tr></thead>
@@ -277,11 +277,11 @@ export const dashboardMarkup = `
       </article>
 
       <article class="card span-12">
-        <div class="card-header"><div><div class="card-kicker">Ruta observable del conector</div><h2 class="card-title">Ejecución directa y fallback por modelo</h2><p class="card-description">Cuenta llamadas físicas del Bridge: directas o delegadas por wrapper. Los desvíos son llamadas preparatorias anteriores a la primera acción de dominio; un silencio es un recordatorio por inactividad, no prueba que la interfaz haya quedado colgada.</p></div></div>
+        <div class="card-header"><div><div class="card-kicker">Ruta observable del conector</div><h2 class="card-title">Llamadas físicas y lifecycle MSSR</h2><p class="card-description">Cuenta llamadas físicas observadas: ejecución directa del Bridge, fallback y llamadas nativas de OpenCode. Los eventos route/load/verify/outcome quedan separados como lifecycle MSSR; no se suman como tool calls.</p></div></div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Perfil</th><th>Directas</th><th>Query</th><th>Action</th><th>Fallback</th><th>Desvíos / tarea</th><th>Primera acción</th><th>Span tools</th><th>Silencios</th></tr></thead>
-            <tbody id="mssr-agent-transport"><tr><td colspan="9" class="muted">Cargando rutas observables…</td></tr></tbody>
+            <thead><tr><th>Perfil</th><th>Bridge directas</th><th>Host OpenCode</th><th>Query</th><th>Action</th><th>Fallback</th><th>Desvíos / tarea</th><th>Primera acción</th><th>Span tools</th><th>Silencios</th></tr></thead>
+            <tbody id="mssr-agent-transport"><tr><td colspan="10" class="muted">Cargando rutas observables…</td></tr></tbody>
           </table>
         </div>
       </article>

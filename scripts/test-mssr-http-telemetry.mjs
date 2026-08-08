@@ -87,6 +87,9 @@ try {
   assert.ok(Array.isArray(beforeOutcome.surfaces), `summary missing surfaces: ${JSON.stringify(beforeOutcome)}`);
   assert.equal(beforeOutcome.surfaces.find((item) => item.caller === "opencode-local")?.routedTraces, 1);
   assert.equal(beforeOutcome.surfaces.find((item) => item.caller === "opencode-local")?.outcomeTraces, 0, "outcome must not be inferred");
+  const lifecycleOnlyProfile = beforeOutcome.agentProfiles.find((item) => item.caller === "opencode-local");
+  assert.equal(lifecycleOnlyProfile?.identitySource, "lifecycle-only", "unobserved host metadata must remain unobserved");
+  assert.equal(lifecycleOnlyProfile?.hostAgent, "unknown");
   const duplicate = await send();
   assert.equal((await duplicate.json()).duplicate, true);
 
@@ -97,7 +100,7 @@ try {
     source: "opencode-plugin",
     caller: "opencode-local",
     host: {
-      sessionKey: "c".repeat(64), messageKey: "d".repeat(64), callKey: "a".repeat(64),
+      sessionKey: "c".repeat(64), parentSessionKey: "9".repeat(64), messageKey: "d".repeat(64), callKey: "a".repeat(64),
       agent: "build", model: "opencode/deepseek-v4-flash-free", reasoningEffort: "high",
       variant: "high", project: "fixture-project", projectKey: "e".repeat(64),
     },
@@ -138,6 +141,7 @@ try {
   assert.equal(observed.duration_ms, 425);
   assert.equal(observed.ok, 0);
   assert.equal(observed.trace_id, traceId);
+  assert.equal(observed.host_parent_session_key, "9".repeat(64), "only the host-provided parent-session hash is persisted");
   assert.equal(observed.error, null, "host error text must never be stored");
 
   const outcome = {
@@ -159,6 +163,37 @@ try {
   const surface = afterOutcome.surfaces.find((item) => item.caller === "opencode-local");
   assert.equal(surface.outcomeTraces, 1);
   assert.equal(surface.outcomeCoverage, 100);
+  const lifecycleProfile = afterOutcome.agentProfiles.find((item) =>
+    item.caller === "opencode-local"
+    && item.hostAgent === "build"
+    && item.model === "opencode/deepseek-v4-flash-free"
+    && item.identitySource === "trace-correlated-host");
+  assert.ok(lifecycleProfile, "lifecycle rows must expose the one host identity observed on their trace");
+  assert.equal(lifecycleProfile.reasoningEffort, "high");
+  assert.equal(lifecycleProfile.hostVariant, "high");
+  assert.equal(lifecycleProfile.observedSessionCount, 1, "only hashed host session cardinality is projected");
+  assert.equal(lifecycleProfile.observedParentSessionCount, 1, "parent relationship is counted only when OpenCode exposed a hash");
+  assert.equal(lifecycleProfile.hostObservedToolCalls, 2, "native OpenCode calls remain physical host observations");
+  assert.equal(lifecycleProfile.bridgeDirectToolCalls, 0, "host observations must not be labelled Bridge execution");
+  assert.equal(lifecycleProfile.physicalToolCalls, 2, "lifecycle events must not inflate physical call cardinality");
+  const handoff = {
+    ...hostCall,
+    eventId: `mssr-host-${"f".repeat(64)}`,
+    traceId,
+    host: {
+      ...hostCall.host,
+      callKey: "f".repeat(64),
+      agent: "explore",
+      variant: "low",
+    },
+  };
+  assert.equal((await postHostCall(handoff)).status, 202);
+  const mixedSummary = await (await fetch(`${base}/api/mssr/summary?scope=all`)).json();
+  const mixedProfile = mixedSummary.agentProfiles.find((item) =>
+    item.caller === "opencode-local" && item.identitySource === "trace-host-mixed");
+  assert.ok(mixedProfile, "an agent handoff must remain explicit instead of picking the latest host identity");
+  assert.equal(mixedProfile.hostAgent, "multiple-observed");
+  assert.equal(mixedProfile.hostObservedToolCalls, 3);
   console.log("MSSR external lifecycle + OpenCode host-call telemetry and dashboard escaping: PASS");
 } finally {
   if (child.exitCode === null) {

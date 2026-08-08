@@ -330,6 +330,16 @@
 
 # Changelog
 
+## 0.6.76 — 2026-08-08
+
+- Correlate OpenCode host identity with MSSR lifecycle profiles only through an
+  exact shared `traceId`; lifecycle-only traces stay unknown and mixed agent
+  handoffs remain explicitly `multiple-observed`.
+- Separate Bridge-executed, delegated, and OpenCode host-observed physical tool
+  calls from route/load/checkpoint lifecycle events in dashboard totals.
+- Persist the optional OpenCode parent-session relationship only as a salted
+  hash and expose cardinality rather than identifiers in the dashboard.
+
 ## 0.6.75 — 2026-08-08
 
 - Accept authenticated `mssr-host-call-v1` events from the OpenCode plugin and

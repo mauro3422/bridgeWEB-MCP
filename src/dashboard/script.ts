@@ -330,8 +330,26 @@ function renderSkillOutcomes(inputRows) {
 }
 
 function profileIdentity(row) {
+  const agent = row.hostAgent && row.hostAgent !== 'unknown'
+    ? 'agente ' + row.hostAgent
+    : row.identitySource === 'lifecycle-only'
+      ? 'agente no expuesto por lifecycle'
+      : 'agente no expuesto';
+  const variant = row.hostVariant && row.hostVariant !== 'unknown'
+    ? ' · variante ' + row.hostVariant
+    : '';
+  const observedSessions = Number(row.observedSessionCount || 0);
+  const observedParents = Number(row.observedParentSessionCount || 0);
+  const source = row.identitySource === 'trace-correlated-host'
+    ? 'host correlacionado por traceId'
+    : row.identitySource === 'trace-host-mixed'
+      ? 'host múltiple observado'
+      : 'sólo lifecycle';
   return '<code>' + esc(exposed(row.caller, 'cliente no identificado')) + '</code><div class="recent-detail">' +
-    esc(exposed(row.model, 'modelo no expuesto') + ' · ' + exposed(row.reasoningEffort, 'esfuerzo no expuesto')) + '</div>';
+    esc(agent + ' · ' + exposed(row.model, 'modelo no expuesto') + ' · ' + exposed(row.reasoningEffort, 'esfuerzo no expuesto') + variant) + '</div><div class="recent-detail">' +
+    esc(source
+      + (observedSessions ? ' · ' + observedSessions + ' sesión(es) anónima(s)' : '')
+      + (observedParents ? ' · ' + observedParents + ' padre(s) expuesto(s)' : '')) + '</div>';
 }
 
 function renderMssrAgentProfiles(inputRows) {
@@ -370,7 +388,8 @@ function renderMssrAgentProfiles(inputRows) {
   if (transport) {
     transport.innerHTML = rows.length ? rows.map((row) => '<tr>' +
       '<td>' + profileIdentity(row) + '</td>' +
-      '<td>' + num(row.directToolCalls) + '</td>' +
+      '<td>' + num(row.bridgeDirectToolCalls ?? row.directToolCalls) + '</td>' +
+      '<td>' + num(row.hostObservedToolCalls) + '</td>' +
       '<td>' + num(row.delegatedQueryCalls) + '</td>' +
       '<td>' + num(row.delegatedActionCalls) + '</td>' +
       '<td>' + pct(row.delegatedCallRate) + '</td>' +
@@ -378,7 +397,7 @@ function renderMssrAgentProfiles(inputRows) {
       '<td>' + (row.averageFirstActionMs === null || row.averageFirstActionMs === undefined ? '—' : ms(row.averageFirstActionMs)) + '</td>' +
       '<td>' + (row.averageToolSpanMs === null || row.averageToolSpanMs === undefined ? '—' : ms(row.averageToolSpanMs)) + '</td>' +
       '<td title="' + esc(row.averageReminderIdleMs === null || row.averageReminderIdleMs === undefined ? 'sin recordatorios' : 'idle medio ' + ms(row.averageReminderIdleMs)) + '">' + num(row.closureReminderEvents) + '</td>' +
-    '</tr>').join('') : '<tr><td colspan="9" class="muted">Sin rutas MSSR observables en la época activa.</td></tr>';
+    '</tr>').join('') : '<tr><td colspan="10" class="muted">Sin rutas MSSR observables en la época activa.</td></tr>';
   }
 }
 

@@ -470,6 +470,15 @@ identificadores correlacionables con hash como métricas de ejecución. Estos
 eventos no inventan outcomes MSSR y nunca contienen prompts, argumentos,
 outputs ni errores crudos.
 
+La proyección lifecycle usa esa identidad únicamente cuando la llamada host y
+la ruta comparten el mismo `traceId`. Si falta evidencia host conserva
+`lifecycle-only`; si una traza contiene varios agentes o modelos muestra
+`multiple-observed` en vez de elegir el más reciente. Una relación padre de
+subagente sólo existe cuando OpenCode expone `parentID`: Bridge persiste su hash
+y el dashboard muestra únicamente la cardinalidad de padres observados. Las
+llamadas físicas del Bridge, wrappers y host OpenCode se cuentan por separado
+de los eventos route/load/checkpoint.
+
 La misma época gobierna ahora las métricas generales de tools. `/api/metrics/*` y `bridge_metrics_*` usan `scope=active` por defecto, mientras `scope=all` conserva el acumulado. Cada llamada nueva guarda `traceId`, `caller`, `model` y `reasoningEffort` cuando son observables; el dashboard muestra llamadas, errores y latencia agrupados por ese perfil para no mezclar Codex con ChatGPT Web ni variantes de modelo.
 
 La identidad de superficie también se obtiene del `clientInfo` del handshake MCP. Una tool genérica o stateless hereda la única traza abierta compatible con su caller para fines de observabilidad, sin inyectar argumentos fuera de schema ni volver a ejecutar MSSR entre llamadas. El dashboard MSSR separa por perfil routing estructurado, route→load, cargas requeridas, verificación, cierre, éxito, aceptación, score, duración, recordatorios de loop y correcciones del usuario.

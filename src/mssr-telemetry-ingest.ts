@@ -60,6 +60,7 @@ export function ingestMssrTelemetry(payload: unknown) {
       model: envelope.host.model,
       reasoningEffort: envelope.host.reasoningEffort,
       sessionKey: envelope.host.sessionKey,
+      parentSessionKey: envelope.host.parentSessionKey,
       project: envelope.host.project,
       hostAgent: envelope.host.agent,
       hostVariant: envelope.host.variant,

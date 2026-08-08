@@ -41,6 +41,7 @@ export type BridgeMetricProfile = {
   reasoningEffort?: string;
   clientName?: string;
   sessionKey?: string;
+  parentSessionKey?: string;
   project?: string;
   relatedProject?: string;
   hostAgent?: string;
@@ -81,6 +82,7 @@ export type BridgeMetricStart = {
   reasoningEffort: string;
   clientName: string;
   sessionKey: string;
+  parentSessionKey: string;
   project: string;
   relatedProject: string;
   hostAgent: string;
@@ -134,6 +136,7 @@ function ensureToolCallProfileColumns(database: DatabaseSync): void {
     ["reasoning_effort", "TEXT"],
     ["client_name", "TEXT"],
     ["session_key", "TEXT"],
+    ["host_parent_session_key", "TEXT"],
     ["project", "TEXT"],
     ["related_project", "TEXT"],
     ["routing_status", "TEXT"],
@@ -207,6 +210,7 @@ function getDb(): DatabaseSync | null {
       reasoning_effort TEXT,
       client_name TEXT,
       session_key TEXT,
+      host_parent_session_key TEXT,
       project TEXT,
       related_project TEXT,
       routing_status TEXT,
@@ -246,6 +250,7 @@ function getDb(): DatabaseSync | null {
     CREATE INDEX IF NOT EXISTS idx_tool_calls_task_key ON tool_calls(task_key, started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_client_name ON tool_calls(client_name, started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_session_key ON tool_calls(session_key, started_at);
+    CREATE INDEX IF NOT EXISTS idx_tool_calls_host_parent_session_key ON tool_calls(host_parent_session_key, started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_project ON tool_calls(project, started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_related_project ON tool_calls(related_project, started_at);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_routing_status ON tool_calls(routing_status, started_at);
@@ -257,10 +262,10 @@ function getDb(): DatabaseSync | null {
       id, started_at, ended_at, duration_ms, tool, ok, error, input_keys,
       output_chars, server_name, server_version, pid, hostname, platform, cwd,
       observability_epoch, runtime_boot_id, trace_id, workflow_key, caller, model, reasoning_effort, client_name,
-      session_key, project, routing_status, mssr_eligible, operation_subject,
+      session_key, host_parent_session_key, project, routing_status, mssr_eligible, operation_subject,
       task_key, related_project, result_ok, result_code, result_status,
       host_agent, host_variant, message_key, call_key, project_key
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   return db;
 }
@@ -327,6 +332,7 @@ export function beginToolMetric(tool: string, args: unknown, profile: BridgeMetr
     reasoningEffort: boundedProfileText(profile.reasoningEffort, "unknown", 20),
     clientName: boundedProfileText(profile.clientName, "unknown", 120),
     sessionKey: boundedProfileText(profile.sessionKey, "unknown", 80),
+    parentSessionKey: boundedProfileText(profile.parentSessionKey, "unknown", 80),
     project: boundedProfileText(profile.project, "unknown", 120),
     relatedProject: boundedProfileText(profile.relatedProject, "none", 120),
     hostAgent: boundedProfileText(profile.hostAgent, "unknown", 160),
@@ -407,6 +413,7 @@ export function finishToolMetric(
       reasoningEffort: metric.reasoningEffort,
       clientName: metric.clientName,
       sessionKey: metric.sessionKey,
+      parentSessionKey: metric.parentSessionKey,
       project: metric.project,
       relatedProject: metric.relatedProject,
       hostAgent: metric.hostAgent,
@@ -448,6 +455,7 @@ export function finishToolMetric(
       metric.reasoningEffort,
       metric.clientName,
       metric.sessionKey,
+      metric.parentSessionKey,
       metric.project,
       metric.routingStatus,
       metric.mssrEligible ? 1 : 0,
@@ -716,7 +724,7 @@ export function getRecentMetrics(limit = 25, scope: BridgeMetricsScope = "active
     SELECT started_at, duration_ms, tool, ok, error, input_keys, operation_subject, output_chars, pid,
       result_ok, result_code, result_status,
       runtime_boot_id, trace_id, workflow_key, task_key, caller, model, reasoning_effort, client_name, session_key, project, related_project,
-      host_agent, host_variant, message_key, call_key, project_key,
+      host_parent_session_key, host_agent, host_variant, message_key, call_key, project_key,
       routing_status, mssr_eligible
     FROM tool_calls
     WHERE ${filter.where}
@@ -733,7 +741,7 @@ export function getMetricsErrors(limit = 25, scope: BridgeMetricsScope = "active
   const rows = sqlite.prepare(`
     SELECT started_at, duration_ms, tool, error, input_keys, operation_subject, output_chars, pid,
       runtime_boot_id, trace_id, workflow_key, task_key, caller, model, reasoning_effort, client_name, session_key, project, related_project,
-      host_agent, host_variant, message_key, call_key, project_key,
+      host_parent_session_key, host_agent, host_variant, message_key, call_key, project_key,
       routing_status, mssr_eligible
     FROM tool_calls
     WHERE ok = 0 AND ${filter.where}
@@ -843,6 +851,7 @@ export function getTraceToolEvidence(traceId: string, limit = 500) {
     SELECT started_at, ended_at, duration_ms, tool, ok, error, operation_subject,
       server_version, pid, runtime_boot_id, trace_id, workflow_key, task_key,
       caller, client_name, session_key, project, related_project, routing_status
+      , host_parent_session_key
     FROM tool_calls
     WHERE trace_id = ?
     ORDER BY started_at ASC
@@ -904,6 +913,7 @@ export function getTraceToolEvidence(traceId: string, limit = 500) {
     workflowKeys: distinct("workflow_key"),
     taskKeys: distinct("task_key"),
     sessionKeys: distinct("session_key"),
+    parentSessionKeys: distinct("host_parent_session_key"),
     projects: distinct("project"),
     calls,
     privacy: {
