@@ -12,7 +12,7 @@ process.env.BRIDGE_MCP_LOG_DIR = logDir;
 process.env.BRIDGE_MCP_MSSR_STATE = path.join(metricsDir, "mssr-observability-state.json");
 
 const [{ normalizeMssrIntent }, { skillCatalogToolModule }, observatory] = await Promise.all([
-  import("../dist/mssr-intent-normalizer.js"),
+  import("@mauroprime/mssr"),
   import("../dist/tools/skill-catalog-tools.js"),
   import("../dist/mssr-observatory.js"),
 ]);

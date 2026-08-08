@@ -213,12 +213,15 @@ Mauro usa este bridge como “mini-Codex” local. Priorizar estabilidad sobre f
 - Never claim a file, process, scene, build, or remote update exists until a tool result verifies it.
 
 
-## MauroPrime Structured Skill Router (MSSR)
+## MSSR — Modular Semantic Skill Router
 
 - MSSR is an independent sibling system. Canonical documentation: `C:\Dev\mssr\docs\skill-routing\README.md`.
 - Custom skill Git source: `C:\Dev\mauroprime-skills\skills`; Codex runtime paths under `~/.codex/skills/<name>` are junctions to that repository.
 - Canonical Git-tracked contract and fixtures: `C:\Dev\mssr\config\skill-routing\`.
 - Bridge imports `@mauroprime/mssr` and remains an adapter for ChatGPT, local/plugin discovery, skill content loading and Roblox health. It is not the MSSR owner or an execution bottleneck.
+- Project bootstrap supports optional `.bridge/project-context.json`. `project_context_load` loads AGENTS plus only the manifest core before intent when possible; once canonical intent exists, project `context`, `memory`, `state`, and scoped `directive` modules are selected by stage and semantic tags instead of blindly injecting all durable documents.
+- Keep `PROJECT_CONTEXT.md` for stable facts, `PROJECT_MEMORY.md` for durable decisions/lessons, and `PROJECT_STATE.md` for mutable current status. A `directive` module is only a conditional local refinement and cannot weaken user instructions, AGENTS, safety, approvals, permissions, or verification. Pass the same `projectRoot` into `skill_bootstrap` so phase changes can re-select project modules with skill context.
+- Persist deliberate project knowledge with `project_context_update` instead of blind append when the dedicated tool is available. Use stable headings, pass `expectedSha256` after reading an existing target, and register module metadata only when the section should be selectable by MSSR. `directive` registration is explicit and conditional; never use it to smuggle a broad permanent rule that belongs in AGENTS.
 - Before substantial specialized work, infer compact structured intent with `domains`, `actions`, `artifacts`, `needs`, `signals`, `risk`, and `ambiguity`, then use `skill_route_plan` or `skill_bootstrap`.
 - Always emit at least one semantic `signal`. Use only `nominal` when no anomaly exists; otherwise include observable incident, capability-discovery, tool-chain, provider-refresh or replan signals.
 - The current agent produces that intent during its normal turn; MSSR does not call a hidden classifier model. Pass `caller=codex-local` or `caller=chatgpt-web` when known and follow the returned execution guidance.

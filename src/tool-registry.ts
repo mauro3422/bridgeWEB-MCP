@@ -17,6 +17,7 @@ import { mssrObservatoryToolModule } from "./tools/mssr-observatory-tools.js";
 import { noticeToolModule } from "./tools/notice-tools.js";
 import { processToolModule } from "./tools/process-tools.js";
 import { projectToolModule } from "./tools/project-tools.js";
+import { projectContextToolModule } from "./tools/project-context-tools.js";
 import { pythonToolModule } from "./tools/python-tools.js";
 import { robloxPhotoCaptureToolModule } from "./tools/roblox-photo-capture-tools.js";
 import { robloxAssetToolModule } from "./tools/roblox-asset-tools.js";
@@ -50,7 +51,7 @@ const destructiveToolNames = new Set([
   "write_text_file", "apply_patch", "edit_lines", "run_command", "terminal_start", "terminal_write", "terminal_stop",
   "work_once", "work_begin", "work_feed", "work_finish",
   "git_create_branch", "git_restore_file", "git_set_remote", "git_commit_all", "git_push_current_branch", "git_multi_repo_publish",
-  "project_profile_save", "workspace_snapshot", "workspace_rollback", "cache_prune",
+  "project_profile_save", "project_context_update", "workspace_snapshot", "workspace_rollback", "cache_prune",
   "bridge_request_restart", "bridge_verify_all", "workflow_guide_create", "bridge_tool_action", "roblox_mcp_action", "roblox_studio_window_capture_save", "roblox_screen_capture_save", "roblox_photo_capture_job", "roblox_place_save",
   "roblox_asset_upload",
   "image_asset_save", "image_asset_import_files", "image_character_views_prepare", "image_reference_pack_prepare",
@@ -75,7 +76,7 @@ const providerProxyToolNames = new Set([
   "godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list", "godot_mcp_query", "godot_mcp_action",
 ]);
 const protectedToolNames = new Set([
-  "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query", "bridge_tool_action", "bridge_connector_catalog_compare", "project_context_load",
+  "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query", "bridge_tool_action", "bridge_connector_catalog_compare", "project_context_load", "project_context_update",
   "skill_route_plan", "skill_bootstrap", "skill_load", "mssr_trace_record", "mssr_trace_evidence", "bridge_verify_all", "git_multi_repo_publish", "roblox_place_save",
 ]);
 
@@ -84,6 +85,14 @@ const toolUsageGuidance = new Map<string, BridgeToolUsageGuidance>([
     prerequisites: ["Use once at the start of substantial work in a known repository."],
     preflightTools: ["skill_bootstrap"],
     recovery: [{ code: "mssr-unrouted-tool-call", toolName: "skill_bootstrap", instruction: "Bootstrap the current MSSR phase with structured intent so required skills are loaded automatically." }],
+  }],
+  ["project_context_update", {
+    prerequisites: ["Update only deliberate durable project facts/decisions/state; use stable section headings and expectedSha256 when modifying an already-read file."],
+    preflightTools: ["project_context_load"],
+    recovery: [
+      { code: "target-not-found", toolName: "project_context_load", instruction: "Reload the project root/context and retry the durable update against the intended repository." },
+      { code: "concurrent-modification", toolName: "project_context_load", instruction: "Reload current project context, reconcile the changed section, and retry with the new expectedSha256." },
+    ],
   }],
   ["skill_route_plan", {
     prerequisites: ["Provide structured intent with at least one non-nominal signal when friction or uncertainty exists."],
@@ -430,6 +439,7 @@ const defaultToolModules: readonly BridgeToolModule[] = [
   fileNavigationToolModule,
   fileWritingToolModule,
   workflowGuideToolModule,
+  projectContextToolModule,
   skillCatalogToolModule,
   robloxStudioToolModule,
   robloxAssetToolModule,

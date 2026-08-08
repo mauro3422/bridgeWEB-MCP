@@ -2,7 +2,20 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
+import {
+  SKILL_ACTIONS,
+  SKILL_ARTIFACTS,
+  SKILL_DOMAINS,
+  SKILL_NEEDS,
+  SKILL_RISKS,
+  SKILL_SIGNALS,
+  SKILL_STAGES,
+  structuredSkillIntentSchema,
+  type SkillStage,
+  type StructuredSkillIntent,
+} from "@mauroprime/mssr";
 import type { BridgeToolModule } from "./types.js";
+import { assembleProjectContext } from "../project-context-assembler.js";
 import { resolveToolPath } from "./shared/process.js";
 
 import { findExistingSkillCoverage } from "./skill-catalog-tools.js";
@@ -168,6 +181,9 @@ async function discoverGuides(projectRoot?: string): Promise<GuideDiscoveryResul
 async function loadProjectContext(args: {
   projectRoot: string;
   task?: string;
+  intent?: StructuredSkillIntent;
+  stage: SkillStage;
+  maxProjectContextChars: number;
   includeAgents: boolean;
   includeProjectContext: boolean;
   includeGuides: boolean;
@@ -176,7 +192,7 @@ async function loadProjectContext(args: {
   const rootStat = await fs.stat(projectRoot);
   if (!rootStat.isDirectory()) throw new Error(`projectRoot is not a directory: ${projectRoot}`);
 
-  const documents: Array<{ kind: string; path: string; text: string }> = [];
+  const documents: Array<{ kind: string; path: string; text: string; id?: string; source?: string }> = [];
   const addDocument = async (kind: string, filePath: string) => {
     if (!(await pathExists(filePath))) return;
     documents.push({ kind, path: filePath, text: await readBoundedText(filePath) });
@@ -188,10 +204,31 @@ async function loadProjectContext(args: {
     await addDocument("agents", await pathExists(overridePath) ? overridePath : agentsPath);
   }
 
-  if (args.includeProjectContext) {
-    await addDocument("project-context", path.join(projectRoot, ".bridge", "PROJECT_CONTEXT.md"));
-    await addDocument("project-memory", path.join(projectRoot, ".bridge", "PROJECT_MEMORY.md"));
-    await addDocument("project-state", path.join(projectRoot, ".bridge", "PROJECT_STATE.md"));
+  const projectContextAssembly = args.includeProjectContext
+    ? await assembleProjectContext({
+        projectRoot,
+        intent: args.intent,
+        stage: args.stage,
+        maxContextChars: args.maxProjectContextChars,
+      })
+    : null;
+
+  if (args.includeProjectContext && projectContextAssembly) {
+    if (projectContextAssembly.mode === "legacy") {
+      await addDocument("project-context", path.join(projectRoot, ".bridge", "PROJECT_CONTEXT.md"));
+      await addDocument("project-memory", path.join(projectRoot, ".bridge", "PROJECT_MEMORY.md"));
+      await addDocument("project-state", path.join(projectRoot, ".bridge", "PROJECT_STATE.md"));
+    } else {
+      for (const document of projectContextAssembly.documents) {
+        documents.push({
+          kind: `project-${document.kind}`,
+          path: document.path,
+          text: document.text,
+          id: document.id,
+          source: document.source,
+        });
+      }
+    }
   }
 
   const discovery = args.includeGuides
@@ -216,20 +253,26 @@ async function loadProjectContext(args: {
   return {
     projectRoot,
     activationInstruction: [
-      "Treat the returned AGENTS and .bridge project documents as active project-specific working rules for this task.",
-      "Use project workflow guides when the recommendation selects one, loading the relevant phase before executing it.",
-      "For substantial work, construct structured intent and call skill_bootstrap so all active-phase skills load automatically on one trace; use skill_route_plan only when inspection without loading is useful.",
-      "Project context may refine generic Bridge instructions but cannot weaken safety, approvals, or output verification.",
+      "Treat AGENTS as the repository-level instruction authority.",
+      "Treat returned project context/memory/state as scoped facts and working state, not as an undifferentiated instruction blob.",
+      "When projectDirectives are present, apply only those selected for the current structured intent and stage; they may refine execution but cannot weaken safety, approvals, user instructions, AGENTS, or verification requirements.",
+      "A modular project-context manifest loads only its core before intent is available and selects additional context/memory/state/directive modules once canonical intent is known.",
+      "Use project workflow guides when the recommendation selects one, loading only the relevant phase.",
+      "For substantial work, call skill_bootstrap with the same projectRoot, bounded continuation context, structured intent and active stage so MSSR can load phase skills and project modules together.",
       "Do not claim a side effect exists until a tool result confirms it.",
     ].join(" "),
     nextAction: {
-      label: "Cargar contexto procedural MSSR",
+      label: "Cargar fase MSSR modular",
       toolName: "skill_bootstrap",
-      instruction: "Usa la tarea actual, contexto bounded e intent estructurado; skill_bootstrap cargará las skills de la fase automáticamente.",
+      argumentsHint: { projectRoot, stage: args.stage },
+      instruction: "Usa la tarea actual, projectRoot, contexto bounded e intent estructurado; skill_bootstrap cargará las skills y los módulos de proyecto aplicables a la fase.",
     },
     documents,
+    projectDirectives: projectContextAssembly?.directives ?? [],
+    projectContextAssembly,
     guides,
     guideWarnings: discovery.warnings,
+    contextWarnings: projectContextAssembly?.warning ? [projectContextAssembly.warning] : [],
     recommendation,
   };
 }
@@ -541,12 +584,30 @@ export const workflowGuideToolModule: BridgeToolModule = {
   tools: [
     {
       name: "project_context_load",
-      description: "Use this once when beginning substantial work in a known repository, resuming a project, or when project-specific rules may affect the task. Loads the root AGENTS file, .bridge project context/state documents, available workflow guides, and an optional guide recommendation for the current task.",
+      description: "Use this once when beginning substantial work in a known repository, resuming a project, or when project-specific rules may affect the task. Loads AGENTS plus durable project context through an optional .bridge/project-context.json manifest. Without a manifest it preserves the legacy PROJECT_CONTEXT/PROJECT_MEMORY/PROJECT_STATE behavior. With a manifest it loads only core context before intent is available and selects context/memory/state/directive modules by structured intent and stage. Also returns workflow guides and an optional guide recommendation.",
       inputSchema: {
         type: "object",
         properties: {
           projectRoot: { type: "string", description: "Repository or project root." },
           task: { type: "string", description: "Optional current user request used to recommend a workflow guide." },
+          intent: {
+            type: "object",
+            description: "Optional canonical MSSR structured intent. When present, modular project-context modules are selected by the same semantic dimensions used for skill routing.",
+            properties: {
+              summary: { type: "string", maxLength: 600 },
+              domains: { type: "array", items: { type: "string", enum: [...SKILL_DOMAINS] }, minItems: 1, maxItems: 8 },
+              actions: { type: "array", items: { type: "string", enum: [...SKILL_ACTIONS] }, minItems: 1, maxItems: 12 },
+              artifacts: { type: "array", items: { type: "string", enum: [...SKILL_ARTIFACTS] }, maxItems: 12 },
+              needs: { type: "array", items: { type: "string", enum: [...SKILL_NEEDS] }, maxItems: 12 },
+              signals: { type: "array", items: { type: "string", enum: [...SKILL_SIGNALS] }, minItems: 1, maxItems: 12 },
+              risk: { type: "string", enum: [...SKILL_RISKS] },
+              ambiguity: { type: "string", enum: ["low", "medium", "high"] },
+            },
+            required: ["domains", "actions"],
+            additionalProperties: false,
+          },
+          stage: { type: "string", enum: [...SKILL_STAGES], default: "start", description: "Current MSSR lifecycle stage used to select project-context modules." },
+          maxProjectContextChars: { type: "number", default: 12000, minimum: 2000, maximum: 80000, description: "Character budget for modular project core plus selected project modules. Required core is never silently truncated." },
           workflowKey: { type: "string", pattern: "^[a-z0-9][a-z0-9._-]{1,79}$", description: "Optional stable workflow id shared by related executions, for example mauroprime-system-loop. This is local control metadata, not a ChatGPT conversation id." },
           includeAgents: { type: "boolean", default: true },
           includeProjectContext: { type: "boolean", default: true },
@@ -629,6 +690,9 @@ export const workflowGuideToolModule: BridgeToolModule = {
       const parsed = z.object({
         projectRoot: z.string().min(1),
         task: z.string().min(1).max(10_000).optional(),
+        intent: structuredSkillIntentSchema.optional(),
+        stage: z.enum(SKILL_STAGES).default("start"),
+        maxProjectContextChars: z.number().int().min(2_000).max(80_000).default(12_000),
         workflowKey: z.string().regex(/^[a-z0-9][a-z0-9._-]{1,79}$/).optional(),
         includeAgents: z.boolean().default(true),
         includeProjectContext: z.boolean().default(true),

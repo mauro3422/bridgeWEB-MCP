@@ -1,3 +1,11 @@
+## 0.6.69 - 2026-08-07
+
+- Added modular project-context loading through optional `.bridge/project-context.json`: minimal core at project bootstrap, then stage/intent-selected `context`, `memory`, `state`, and scoped `directive` modules with legacy full-document fallback.
+- Extended `project_context_load` and `skill_bootstrap` so a routed phase can carry the same `projectRoot` and re-select project modules alongside skill context at meaningful lifecycle boundaries.
+- Added protected `project_context_update`: stable-section upsert into context/memory/state, optimistic `expectedSha256` concurrency, verified writes, rollback across the Markdown+manifest pair, and optional MSSR module/directive registration.
+- Moved MSSR intent normalization out of Bridge into `@mauroprime/mssr` and reused portable semantic/context-update primitives for project knowledge, keeping Bridge as the host adapter/materializer/writer.
+- Added regression coverage for modular project context, transactional project-memory updates, and generated tool contracts/documentation for the new schemas.
+
 ## 0.6.67 - 2026-08-07
 
 - Made `work_show` accept explicit `traceId` control metadata like the rest of the process aliases, preventing unrouted MSSR telemetry during concurrent ChatGPT Web workflows.

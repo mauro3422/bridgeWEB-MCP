@@ -28,8 +28,10 @@ import {
   SKILL_STAGES,
   auditSkillRouting,
   canonicalizeSkillEntries,
+  normalizeMssrIntent,
   planSkillRoute,
   structuredSkillIntentSchema,
+  type IntentNormalizationResult,
   type SkillEntry,
   type SkillSource,
 } from "./skill-routing.js";
@@ -47,10 +49,7 @@ import {
 } from "../mssr-observatory.js";
 import { requireWorkflowKey } from "../runtime-identity.js";
 import { buildMssrSystemAwareness } from "../mssr-system-awareness.js";
-import {
-  normalizeMssrIntent,
-  type IntentNormalizationResult,
-} from "../mssr-intent-normalizer.js";
+import { assembleProjectContext } from "../project-context-assembler.js";
 
 const MAX_SKILL_FILE_CHARS = 160_000;
 const MAX_DISCOVERED_SKILLS = 600;
@@ -675,6 +674,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         type: "object",
         properties: {
           task: { type: "string", description: "Current user message or concise task statement." },
+          projectRoot: { type: "string", description: "Optional repository root already loaded with project_context_load. When provided, MSSR can select modular project context/directives for this route stage." },
           context: { type: "string", maxLength: 4000, description: "Bounded resolved context from the recent relevant conversation. For multi-turn specialized work, normally pass a 500-2000 character summary covering the accepted goal, constraints, completed work/current phase, and unresolved references, even when the current message is not an obvious acknowledgment. Omit only for a genuinely standalone first turn. Do not send hidden chain-of-thought, irrelevant history, or a full transcript." },
           intent: structuredIntentInputSchema,
           caller: { type: "string", enum: [...SKILL_CALLERS], default: "other", description: "Client executing the route. Use codex-local when direct shell/filesystem tools exist, chatgpt-web when local access is mediated by Bridge, or other when unknown." },
@@ -684,6 +684,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
           completedPhases: { type: "array", items: { type: "string", enum: [...SKILL_PHASES] }, default: [] },
           sources: { type: "array", items: { type: "string", enum: ["codex-local", "codex-system", "codex-plugin", "roblox"] } },
           maxSkills: { type: "number", default: 8, minimum: 1, maximum: 16 },
+          maxProjectContextChars: { type: "number", default: 12000, minimum: 2000, maximum: 80000, description: "Character budget for modular project core plus project modules selected for this stage." },
           responseMode: { type: "string", enum: routeResponseModes, default: "compact", description: "compact returns the actionable phase route; debug includes full scores, metadata and phase diagnostics." },
           workflowKey: { type: "string", pattern: "^[a-z0-9][a-z0-9._-]{1,79}$", description: "Optional stable workflow id shared by related traces, for example mauroprime-system-loop. It is local observability metadata, not a ChatGPT conversation id." },
           traceId: { type: "string", description: "Optional existing MSSR trace id for a replan. A new id is generated when omitted." },
@@ -694,11 +695,12 @@ export const skillCatalogToolModule: BridgeToolModule = {
     },
     {
       name: "skill_bootstrap",
-      description: "Load the current phase of a structured skill route. By default it globally plans selective Codex context from context-modules.json manifests: reserve every required skill core first, then required modules, globally rank optional modules, and admit optional skill packages only when they fit. Skills without manifests fall back to the full SKILL.md for compatibility; contentMode=full preserves the explicit legacy/debug path. The response reports savings, skips, overflow, duplicate avoidance, and allocation tiers. For Roblox routes it also returns a cached-at-most-five-seconds systemAwareness snapshot and delivers deduplicated recovery notices when the target, catalog, or Studio state needs attention. Deferred skills remain metadata-only.",
+      description: "Load the current phase of a structured MSSR route. It globally plans selective Codex skill context from context-modules.json manifests and, when projectRoot is supplied, also re-selects project context/memory/state/directive modules from .bridge/project-context.json for the same stage and structured intent without duplicating the already-loaded project core. Required skill cores are reserved first; optional procedural context remains budgeted. Projects without a modular manifest keep the observable legacy project-context fallback loaded by project_context_load. The response reports skill-context savings plus scoped project-context decisions. Deferred skills and project modules remain metadata-only.",
       inputSchema: {
         type: "object",
         properties: {
           task: { type: "string", description: "Current user message or concise task statement." },
+          projectRoot: { type: "string", description: "Optional repository root already loaded with project_context_load. When provided, MSSR can select modular project context/directives for this route stage." },
           context: { type: "string", maxLength: 4000, description: "Bounded resolved context from the recent relevant conversation. For multi-turn specialized work, normally pass a 500-2000 character summary covering the accepted goal, constraints, completed work/current phase, and unresolved references, even when the current message is not an obvious acknowledgment. Omit only for a genuinely standalone first turn. Do not send hidden chain-of-thought, irrelevant history, or a full transcript." },
           intent: structuredIntentInputSchema,
           caller: { type: "string", enum: [...SKILL_CALLERS], default: "other", description: "Client executing the route. Use codex-local when direct shell/filesystem tools exist, chatgpt-web when local access is mediated by Bridge, or other when unknown." },
@@ -708,6 +710,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
           completedPhases: { type: "array", items: { type: "string", enum: [...SKILL_PHASES] }, default: [] },
           sources: { type: "array", items: { type: "string", enum: ["codex-local", "codex-system", "codex-plugin", "roblox"] } },
           maxSkills: { type: "number", default: 8, minimum: 1, maximum: 16 },
+          maxProjectContextChars: { type: "number", default: 12000, minimum: 2000, maximum: 80000, description: "Character budget for modular project core plus project modules selected for this stage." },
           contentMode: { type: "string", enum: ["selective", "full"], default: "selective", description: "Use selective to assemble manifest-guided core/modules. Use full only for explicit diagnosis, compatibility comparison, or recovery." },
           includeReferences: { type: "string", enum: ["auto", "none"], default: "auto", description: "Auto selects matching manifest modules. None loads only the declared core while preserving routing." },
           maxContextChars: { type: "number", default: 24000, minimum: 4000, maximum: 100000, description: "Global character budget for assembled Codex skill context. Required cores are never silently truncated; budget overflow is reported." },
@@ -921,6 +924,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
       recordMssrRoute({ traceId, action: "plan", task, route: observedRoute as unknown as Record<string, unknown> });
       const bootstrapArguments = {
         task,
+        projectRoot: args.projectRoot,
         context: args.context ?? "",
         intent: intentResult.intent,
         caller: args.caller ?? "other",
@@ -930,6 +934,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         completedPhases: args.completedPhases ?? [],
         sources: args.sources,
         maxSkills: args.maxSkills ?? 8,
+        maxProjectContextChars: args.maxProjectContextChars ?? 12_000,
         traceId,
         workflowKey,
         responseMode,
@@ -984,8 +989,22 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const contentMode = z.enum(["selective", "full"]).catch("selective").parse(args.contentMode ?? "selective") as SkillContextMode;
       const referenceMode = z.enum(["auto", "none"]).catch("auto").parse(args.includeReferences ?? "auto") as SkillReferenceMode;
       const maxContextChars = z.number().int().min(4_000).max(100_000).catch(24_000).parse(args.maxContextChars ?? 24_000);
+      const maxProjectContextChars = z.number().int().min(2_000).max(80_000).catch(12_000).parse(args.maxProjectContextChars ?? 12_000);
       const routedIntent = structuredSkillIntentSchema.parse(route.intent);
-      const observedRoute = { ...route, agentProfile: profile, workflowKey: workflowKey ?? null };
+      const projectRoot = typeof args.projectRoot === "string" && args.projectRoot.trim()
+        ? path.resolve(args.projectRoot.trim())
+        : null;
+      if (projectRoot) assertPathAllowed(projectRoot, "read");
+      const projectContextAssembly = projectRoot
+        ? await assembleProjectContext({
+            projectRoot,
+            intent: routedIntent,
+            stage: route.stage,
+            maxContextChars: maxProjectContextChars,
+            includeCore: false,
+          })
+        : null;
+      const observedRoute = { ...route, agentProfile: profile, workflowKey: workflowKey ?? null, projectRoot };
       recordMssrRoute({ traceId, action: "bootstrap", task, route: observedRoute as unknown as Record<string, unknown> });
       const activeByName = new Map(route.activeSkills.map((skill) => [skill.name, skill]));
       const loaded: Array<Record<string, unknown>> = [];
@@ -1077,13 +1096,25 @@ export const skillCatalogToolModule: BridgeToolModule = {
           ...codexPlan,
           skills: contextAssemblySkills,
         },
+        projectContext: projectContextAssembly ? {
+          projectRoot,
+          stage: route.stage,
+          ...projectContextAssembly,
+          activationInstruction: projectContextAssembly.mode === "modular"
+            ? "Treat selected project context/memory/state as scoped repository facts. Treat project directives as active only for this MSSR stage and intent; they refine execution but cannot weaken user instructions, AGENTS, safety, approvals, or verification."
+            : "No modular project-context manifest is active for this repository; rely on project_context_load legacy documents already loaded by the host.",
+        } : null,
         sourceHealth: discovered.sourceHealth,
         systemAwareness: systemAwareness.status,
         __bridgeNotices: systemAwareness.notices,
-        warnings: [...discovered.warnings, ...route.warnings],
+        warnings: [
+          ...discovered.warnings,
+          ...route.warnings,
+          ...(projectContextAssembly?.warning ? [projectContextAssembly.warning] : []),
+        ],
         connectorExecution: mssrConnectorPaths(traceId),
         activationInstruction: loaded.length > 0
-          ? "The loaded skills govern only the current phase. Bridge carries the active trace in-session and uniquely recovers it across stateless calls when safe. Call skill_bootstrap again only at verify, persist, close, a material failure, or a newly discovered capability need; pass traceId explicitly after restart or when multiple candidates exist."
+          ? "The loaded skills and selected project modules govern only the current phase. Project directives are scoped refinements, never higher-precedence authorization. Bridge carries the active trace in-session and uniquely recovers it across stateless calls when safe. Call skill_bootstrap again at verify, persist, close, a material failure, or a newly discovered capability need so both skill context and project context can be re-selected; pass traceId explicitly after restart or when multiple candidates exist."
           : route.activationInstruction,
       };
     },
