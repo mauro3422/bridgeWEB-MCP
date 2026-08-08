@@ -199,9 +199,11 @@ function renderAgentProfiles(inputRows) {
   const tasks = new Set(rows.map((row) => row.task_key).filter((value) => value && value !== 'unknown'));
   setText('agent-profile-summary', num(tasks.size) + ' tareas observables · ' + num(sessions.size) + ' sesiones anónimas · ' + num(rows.length) + ' agrupaciones. Una agrupación no equivale a un agente.');
   target.innerHTML = rows.map((row) => '<tr>' +
-    '<td><code>' + esc(exposed(row.caller, 'cliente no identificado')) + '</code></td>' +
+    '<td><code>' + esc(exposed(row.caller, 'cliente no identificado')) + '</code><div class="recent-detail">' +
+      esc(row.host_agent && row.host_agent !== 'unknown' ? 'agente ' + row.host_agent : 'agente no expuesto') + '</div></td>' +
     '<td>' + esc(exposed(row.model, 'modelo no expuesto')) + '</td>' +
-    '<td>' + esc(exposed(row.reasoning_effort, 'esfuerzo no expuesto')) + '</td>' +
+    '<td>' + esc(exposed(row.reasoning_effort, 'esfuerzo no expuesto')) + '<div class="recent-detail">' +
+      esc(row.host_variant && row.host_variant !== 'unknown' ? 'variante ' + row.host_variant : 'variante no expuesta') + '</div></td>' +
     '<td><code>' + esc(exposed(row.task_key, 'tarea no identificada')) + '</code><div class="recent-detail" title="' + esc(row.session_key || 'unknown') + '">' +
       esc(row.session_key && row.session_key !== 'unknown' ? 'sesión ' + String(row.session_key).slice(-10) : 'sesión no expuesta') + '</div></td>' +
     '<td><code>' + esc(exposed(row.project, 'proyecto primario no expuesto')) + '</code><div class="recent-detail">' +

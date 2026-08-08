@@ -464,6 +464,12 @@ Para `caller=chatgpt-web`, el coordinador arma un watchdog después de actividad
 
 La telemetría actual usa una época persistida `trace-contract-v1`. `/api/mssr/summary?scope=active` y el dashboard muestran sólo la línea base actual; `scope=all` conserva la historia anterior para comparar sin borrarla. `mssr_observatory_epoch_start` abre deliberadamente una línea base activa nueva con confirmación y razón, sin eliminar eventos previos. Las métricas `surfaces` separan `codex-local`, `chatgpt-web` y `other`; `agentProfiles` cruza ese caller con `model` y `reasoningEffort` (`gpt-5.6-terra`, `gpt-5.6-sol`, `low`, `medium`, `high`, etc.). En Codex, Bridge toma automáticamente esos campos de `x-codex-turn-metadata` cuando el host los entrega; otros hosts pueden declararlos explícitamente. Bridge no los infiere por latencia, longitud o conducta: cuando no puede probarlos registra `unknown`. MSSR se consulta antes de cadenas especializadas y se replantea al cambiar de fase, ante fallos materiales, cambios de provider/schema, capabilities nuevas o fricción reusable; no se ejecuta entre cada lectura o comando exitoso de la misma fase.
 
+OpenCode aporta esa identidad desde un plugin de host separado: `/api/mssr/events`
+acepta `mssr-host-call-v1` y guarda agente, modelo, variante, duración, estado e
+identificadores correlacionables con hash como métricas de ejecución. Estos
+eventos no inventan outcomes MSSR y nunca contienen prompts, argumentos,
+outputs ni errores crudos.
+
 La misma época gobierna ahora las métricas generales de tools. `/api/metrics/*` y `bridge_metrics_*` usan `scope=active` por defecto, mientras `scope=all` conserva el acumulado. Cada llamada nueva guarda `traceId`, `caller`, `model` y `reasoningEffort` cuando son observables; el dashboard muestra llamadas, errores y latencia agrupados por ese perfil para no mezclar Codex con ChatGPT Web ni variantes de modelo.
 
 La identidad de superficie también se obtiene del `clientInfo` del handshake MCP. Una tool genérica o stateless hereda la única traza abierta compatible con su caller para fines de observabilidad, sin inyectar argumentos fuera de schema ni volver a ejecutar MSSR entre llamadas. El dashboard MSSR separa por perfil routing estructurado, route→load, cargas requeridas, verificación, cierre, éxito, aceptación, score, duración, recordatorios de loop y correcciones del usuario.

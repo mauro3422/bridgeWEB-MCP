@@ -407,6 +407,24 @@ export function recordExternalMssrTelemetry(input: unknown): { event: MssrStored
   return { event: stored, duplicate: false };
 }
 
+/** Correlate one host-observed MSSR route call only when exactly one lifecycle route occurred inside its bounded call window. */
+export function resolveExternalMssrRouteTrace(startedAt: string, endedAt: string, caller = "opencode-local"): string | undefined {
+  const database = getDb();
+  if (!database) return undefined;
+  const startMs = Date.parse(startedAt);
+  const endMs = Date.parse(endedAt);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs || endMs - startMs > 24 * 60 * 60_000) return undefined;
+  const lower = new Date(startMs - 1_000).toISOString();
+  const upper = new Date(endMs + 1_000).toISOString();
+  const rows = database.prepare(`
+    SELECT DISTINCT trace_id FROM mssr_events
+    WHERE caller = ? AND event_type = 'route_planned'
+      AND occurred_at >= ? AND occurred_at <= ?
+      AND trace_id NOT LIKE '__test_%'
+  `).all(caller, lower, upper);
+  return rows.length === 1 && typeof rows[0]?.trace_id === "string" ? rows[0].trace_id : undefined;
+}
+
 function routeSkills(value: unknown): Array<{ name: string; source?: string; required: boolean; score?: number }> {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {

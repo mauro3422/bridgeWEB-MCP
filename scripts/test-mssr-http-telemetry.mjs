@@ -90,6 +90,56 @@ try {
   const duplicate = await send();
   assert.equal((await duplicate.json()).duplicate, true);
 
+  const routeHostCall = {
+    protocolVersion: "mssr-host-call-v1",
+    eventId: `mssr-host-${"a".repeat(64)}`,
+    emittedAt: new Date().toISOString(),
+    source: "opencode-plugin",
+    caller: "opencode-local",
+    host: {
+      sessionKey: "c".repeat(64), messageKey: "d".repeat(64), callKey: "a".repeat(64),
+      agent: "build", model: "opencode/deepseek-v4-flash-free", reasoningEffort: "high",
+      variant: "high", project: "fixture-project", projectKey: "e".repeat(64),
+    },
+    tool: {
+      name: "mssr_mssr_route_plan", startedAt: new Date(Date.now() - 2_000).toISOString(), endedAt: new Date(Date.now() + 2_000).toISOString(),
+      durationMs: 4_000, status: "success",
+    },
+  };
+  const postHostCall = (body) => fetch(`${base}/api/mssr/events`, {
+    method: "POST",
+    headers: { "authorization": `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const routeObserved = await postHostCall(routeHostCall);
+  const routeObservedBody = await routeObserved.json();
+  assert.equal(routeObserved.status, 202, JSON.stringify(routeObservedBody));
+  assert.equal(routeObservedBody.traceId, traceId, "host route must correlate to the unique lifecycle route");
+  const hostCall = {
+    ...routeHostCall,
+    eventId: `mssr-host-${"b".repeat(64)}`,
+    host: { ...routeHostCall.host, callKey: "b".repeat(64) },
+    tool: {
+      name: "bash", startedAt: new Date().toISOString(), endedAt: new Date(Date.now() + 425).toISOString(),
+      durationMs: 425, status: "error",
+    },
+  };
+  const hostAccepted = await postHostCall(hostCall);
+  const hostAcceptedBody = await hostAccepted.json();
+  assert.equal(hostAccepted.status, 202, JSON.stringify(hostAcceptedBody));
+  assert.equal(hostAcceptedBody.traceId, traceId, "next host call must inherit the session trace");
+  assert.equal((await postHostCall(hostCall).then((response) => response.json())).duplicate, true);
+  const recent = await (await fetch(`${base}/api/metrics/recent?scope=all&limit=20`)).json();
+  const observed = recent.recent.find((item) => item.call_key === "b".repeat(64));
+  assert.ok(observed, "OpenCode host call metric missing");
+  assert.equal(observed.host_agent, "build");
+  assert.equal(observed.host_variant, "high");
+  assert.equal(observed.model, "opencode/deepseek-v4-flash-free");
+  assert.equal(observed.duration_ms, 425);
+  assert.equal(observed.ok, 0);
+  assert.equal(observed.trace_id, traceId);
+  assert.equal(observed.error, null, "host error text must never be stored");
+
   const outcome = {
     ...envelope,
     eventId: `mssr-ext-http-outcome-${Date.now()}`,
@@ -109,7 +159,7 @@ try {
   const surface = afterOutcome.surfaces.find((item) => item.caller === "opencode-local");
   assert.equal(surface.outcomeTraces, 1);
   assert.equal(surface.outcomeCoverage, 100);
-  console.log("MSSR external HTTP telemetry and dashboard escaping: PASS");
+  console.log("MSSR external lifecycle + OpenCode host-call telemetry and dashboard escaping: PASS");
 } finally {
   if (child.exitCode === null) {
     child.kill();

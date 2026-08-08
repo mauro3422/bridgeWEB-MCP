@@ -330,6 +330,16 @@
 
 # Changelog
 
+## 0.6.75 — 2026-08-08
+
+- Accept authenticated `mssr-host-call-v1` events from the OpenCode plugin and
+  persist them as idempotent tool-call metrics rather than lifecycle claims.
+- Add exact OpenCode agent, variant, anonymized message/call/project keys, real
+  provider/model, duration, status, and optional MSSR trace attribution.
+- Keep raw prompts, arguments, outputs, error text, transcripts, secrets, and
+  private reasoning out of host-observed metrics; surface agent and variant in
+  dashboard execution profiles.
+
 ## Unreleased
 
 - Extend persisted MSSR recovery to generic eligible tools and metric attribution after a Bridge restart; `resolveMetricContext` now uses the same exact-session/project then unique-caller fallback as trace-aware tools.
