@@ -39,7 +39,7 @@ import {
   planCodexSkillContexts,
   type SkillContextMode,
   type SkillReferenceMode,
-} from "../skill-context-assembler.js";
+} from "@mauroprime/mssr";
 import {
   hashMssrTask,
   recordMssrEvent,

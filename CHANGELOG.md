@@ -1,3 +1,9 @@
+## Unreleased
+
+- Delegated portable trace lifecycle decisions and selective skill-context
+  materialization to `@mauroprime/mssr`, while retaining Bridge-owned sessions,
+  recovery, leases, telemetry, notices, persistence and transport.
+
 ## 0.6.72 - 2026-08-08
 
 - Completed stale-schema `projectRoot` carryover across separate MCP server instances by scoping the loaded root to the observable host session plus `workflowKey`, while retaining the local anonymous-session fallback.
@@ -390,4 +396,3 @@
 - Added the routed `roblox-mcp-incident-recovery` procedure from the versioned MauroPrime skills repository.
 - Hardened Roblox Studio MCP discovery with explicit `healthy`, `degraded`, and `unavailable` source state, bounded retry, discovery-only cache, and nonzero live-catalog verification.
 - Hardened multi-client StudioMCP lifecycle and ownership diagnostics while preserving valid direct and Bridge-managed routes.
-
