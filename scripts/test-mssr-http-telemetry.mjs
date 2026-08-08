@@ -194,6 +194,118 @@ try {
   assert.ok(mixedProfile, "an agent handoff must remain explicit instead of picking the latest host identity");
   assert.equal(mixedProfile.hostAgent, "multiple-observed");
   assert.equal(mixedProfile.hostObservedToolCalls, 3);
+
+  const routeEnvelopeFor = (traceId, eventId, workflowKey) => ({
+    ...envelope,
+    eventId,
+    traceId,
+    event: { kind: "route", action: "plan", taskHash: "a".repeat(64), route: { ...envelope.event.route, workflowKey } },
+  });
+  const hostEnvelopeFor = (traceId, eventId, opts) => ({
+    protocolVersion: "mssr-host-call-v1",
+    eventId,
+    emittedAt: new Date().toISOString(),
+    source: "opencode-plugin",
+    caller: "opencode-local",
+    traceId,
+    host: {
+      sessionKey: opts.sessionKey, parentSessionKey: "9".repeat(64), messageKey: "d".repeat(64),
+      callKey: opts.callKey, agent: opts.agent, model: "opencode/deepseek-v4-flash-free",
+      reasoningEffort: opts.reasoningEffort, variant: opts.variant, project: "fixture-project", projectKey: "e".repeat(64),
+    },
+    tool: {
+      name: opts.toolName || "bash", startedAt: new Date().toISOString(), endedAt: new Date(Date.now() + 300).toISOString(),
+      durationMs: 300, status: "success",
+    },
+  });
+  const highTraceId = `mssr-opencode-http-high-${Date.now()}`;
+  const lowTraceId = `mssr-opencode-http-low-${Date.now()}`;
+  const lifecycleOnlyTraceId = `mssr-opencode-http-lifecycle-${Date.now()}`;
+  assert.equal((await postHostCall(routeEnvelopeFor(highTraceId, `mssr-ext-http-high-route-${Date.now()}`, "http-regression-high"))).status, 202);
+  assert.equal((await postHostCall(hostEnvelopeFor(highTraceId, `mssr-host-${"3".repeat(64)}`, {
+    sessionKey: "1".repeat(64), callKey: "1".repeat(64), agent: "build", reasoningEffort: "high", variant: "high",
+  }))).status, 202);
+  assert.equal((await postHostCall(routeEnvelopeFor(lowTraceId, `mssr-ext-http-low-route-${Date.now()}`, "http-regression-low"))).status, 202);
+  assert.equal((await postHostCall(hostEnvelopeFor(lowTraceId, `mssr-host-${"4".repeat(64)}`, {
+    sessionKey: "2".repeat(64), callKey: "2".repeat(64), agent: "plan", reasoningEffort: "low", variant: "low",
+  }))).status, 202);
+  assert.equal((await postHostCall(routeEnvelopeFor(lifecycleOnlyTraceId, `mssr-ext-http-lifecycle-route-${Date.now()}`, "http-regression-lifecycle"))).status, 202);
+
+  const routeEnvelopeWithEffort = (traceId, eventId, workflowKey, reasoningEffort) => ({
+    ...envelope,
+    eventId,
+    traceId,
+    event: { kind: "route", action: "plan", taskHash: "a".repeat(64), route: {
+      ...envelope.event.route, workflowKey, agentProfile: { ...envelope.event.route.agentProfile, reasoningEffort },
+    } },
+  });
+  const detourTraceId = `mssr-opencode-http-detour-${Date.now()}`;
+  assert.equal((await postHostCall(routeEnvelopeFor(detourTraceId, `mssr-ext-http-detour-route-${Date.now()}`, "http-regression-detour"))).status, 202);
+  assert.equal((await postHostCall(hostEnvelopeFor(detourTraceId, `mssr-host-${"5".repeat(64)}`, {
+    sessionKey: "7".repeat(64), callKey: "5".repeat(64), agent: "build",
+    reasoningEffort: "medium", variant: "medium", toolName: "project_context_load",
+  }))).status, 202);
+  assert.equal((await postHostCall(hostEnvelopeFor(detourTraceId, `mssr-host-${"6".repeat(64)}`, {
+    sessionKey: "7".repeat(64), callKey: "6".repeat(64), agent: "build",
+    reasoningEffort: "medium", variant: "medium", toolName: "project_context_load",
+  }))).status, 202);
+  const replanTraceId = `mssr-opencode-http-replan-${Date.now()}`;
+  assert.equal((await postHostCall(routeEnvelopeWithEffort(replanTraceId, `mssr-ext-http-replan-low-${Date.now()}`, "http-regression-replan", "low"))).status, 202);
+  assert.equal((await postHostCall(routeEnvelopeWithEffort(replanTraceId, `mssr-ext-http-replan-high-${Date.now()}`, "http-regression-replan", "high"))).status, 202);
+
+  const finalSummary = await (await fetch(`${base}/api/mssr/summary?scope=all`)).json();
+  const comparison = finalSummary.reasoningEffortComparison;
+  assert.ok(Array.isArray(comparison), "summary must expose reasoningEffortComparison");
+  assert.deepEqual(comparison.map((row) => row.bucket),
+    ["low", "high", "other", "unknown", "multiple-observed"], "all effort buckets must be present in fixed order");
+  const byBucket = new Map(comparison.map((row) => [row.bucket, row]));
+  const lowBucket = byBucket.get("low");
+  assert.equal(lowBucket.traces, 1);
+  assert.deepEqual(lowBucket.identitySources, { "trace-correlated-host": 1 }, "low must stay a single-observed host bucket");
+  assert.equal(lowBucket.physicalToolCalls, 1);
+  assert.equal(lowBucket.hostObservedToolCalls, 1);
+  assert.equal(lowBucket.bridgeDirectToolCalls, 0);
+  assert.equal(lowBucket.delegatedToolCalls, 0);
+  const highBucket = byBucket.get("high");
+  assert.equal(highBucket.traces, 2, "replan lifecycle-only trace must collapse into a single high bucket");
+  assert.deepEqual(highBucket.identitySources, { "trace-correlated-host": 1, "lifecycle-only": 1 }, "high merges the host trace and the canonicalized replan trace");
+  assert.equal(highBucket.routeEvents, 3, "all route events of replanned traces must remain in their single bucket");
+  assert.equal(highBucket.physicalToolCalls, 1);
+  assert.equal(highBucket.hostObservedToolCalls, 1);
+  const otherBucket = byBucket.get("other");
+  assert.equal(otherBucket.traces, 1, "a non-standard effort must fall into other");
+  assert.deepEqual(otherBucket.identitySources, { "trace-correlated-host": 1 });
+  assert.equal(otherBucket.physicalToolCalls, 2);
+  assert.equal(otherBucket.hostObservedToolCalls, 2);
+  assert.equal(otherBucket.discoveryDetours, 2, "preparation host calls before any substantive action count as discovery detours");
+  assert.equal(otherBucket.averageDiscoveryDetoursPerTrace, 2, "average discovery detours must be a plain ratio, not a percentage");
+  const unknownBucket = byBucket.get("unknown");
+  assert.equal(unknownBucket.traces, 1);
+  assert.deepEqual(unknownBucket.identitySources, { "lifecycle-only": 1 }, "unobserved host metadata must stay lifecycle-only");
+  assert.equal(unknownBucket.physicalToolCalls, 0, "lifecycle-only traces have no physical host calls");
+  assert.equal(unknownBucket.hostObservedToolCalls, 0);
+  const mixedBucket = byBucket.get("multiple-observed");
+  assert.equal(mixedBucket.traces, 1);
+  assert.deepEqual(mixedBucket.identitySources, { "trace-host-mixed": 1 }, "handoffs must bucket as multiple-observed");
+  assert.equal(mixedBucket.physicalToolCalls, 3, "only the three OpenCode host calls count as physical on the handoff trace");
+  assert.equal(mixedBucket.hostObservedToolCalls, 3);
+  assert.equal(mixedBucket.bridgeDirectToolCalls, 0);
+  assert.equal(mixedBucket.outcomeCoverage, 100, "bucket outcome coverage derives from exact trace counts");
+  assert.equal(mixedBucket.outcomeSuccessRate, 100);
+  const routedTraceIds = [traceId, highTraceId, lowTraceId, lifecycleOnlyTraceId, detourTraceId, replanTraceId];
+  const uniqueRoutedTraces = new Set(routedTraceIds).size;
+  const sumBucketTraces = comparison.reduce((total, row) => total + row.traces, 0);
+  assert.equal(sumBucketTraces, uniqueRoutedTraces, "each routed trace must land in exactly one effort bucket");
+  const sumBucketPhysical = comparison.reduce((total, row) => total + row.physicalToolCalls, 0);
+  assert.equal(sumBucketPhysical, 3 + 1 + 1 + 2, "physical host calls must not be duplicated across buckets");
+  assert.equal(byBucket.get("low").traces, 1, "replan trace must not bleed into a second bucket");
+  assert.ok(!String(byBucket.get("other").averageDiscoveryDetoursPerTrace).includes("200"), "average discovery detours must never be a percentage");
+  const durationKeys = ["averageFirstActionMs", "averageToolSpanMs", "averageCompletionMs", "averageReminderIdleMs", "averageDurationMs"];
+  for (const row of comparison) {
+    for (const key of durationKeys) {
+      assert.equal(Object.hasOwn(row, key), false, `reasoningEffort bucket ${row.bucket} must not expose ${key}`);
+    }
+  }
   console.log("MSSR external lifecycle + OpenCode host-call telemetry and dashboard escaping: PASS");
 } finally {
   if (child.exitCode === null) {

@@ -1523,6 +1523,75 @@ function summary(days: number, scope: MssrObservatoryScope) {
     || a.reasoningEffort.localeCompare(b.reasoningEffort)
     || a.hostAgent.localeCompare(b.hostAgent));
 
+  type ReasoningEffortBucket = "low" | "high" | "other" | "unknown" | "multiple-observed";
+  const reasoningEffortBuckets: ReasoningEffortBucket[] = ["low", "high", "other", "unknown", "multiple-observed"];
+  const reasoningEffortBucketOf = (value: string): ReasoningEffortBucket => {
+    if (value === "low" || value === "high" || value === "multiple-observed") return value;
+    if (value === "unknown") return "unknown";
+    return "other";
+  };
+  // Canonical per-trace assignment so a trace with multiple route events
+  // (replans) lands in exactly one bucket. Host-correlated identities are
+  // authoritative and already consistent across a trace (single/mixed); a
+  // lifecycle-only trace resolves to its last route event deterministically by
+  // existing event order (occurred_at ASC).
+  const canonicalBucketByTrace = new Map<string, ReasoningEffortBucket>();
+  const canonicalRouteByTrace = new Map<string, MssrStoredEvent>();
+  for (const traceId of traceIdsWithRoutes) {
+    const traceRoutes = routes.filter((route) => route.traceId === traceId);
+    const lastRoute = traceRoutes[traceRoutes.length - 1];
+    const host = hostIdentityByTrace.get(traceId);
+    const explicitProfile = lastRoute.details.agentProfile && typeof lastRoute.details.agentProfile === "object"
+      ? lastRoute.details.agentProfile as JsonRecord
+      : {};
+    const effort = host && host.state !== "not-observed"
+      ? lifecycleProfile(lastRoute).reasoningEffort
+      : typeof explicitProfile.reasoningEffort === "string"
+        ? String(explicitProfile.reasoningEffort)
+        : "unknown";
+    canonicalBucketByTrace.set(traceId, reasoningEffortBucketOf(effort));
+    canonicalRouteByTrace.set(traceId, lastRoute);
+  }
+  const reasoningEffortComparison = reasoningEffortBuckets.map((bucket) => {
+    const bucketTraceIds = new Set(
+      [...canonicalBucketByTrace.entries()]
+        .filter(([, assigned]) => assigned === bucket)
+        .map(([traceId]) => traceId),
+    );
+    const bucketRoutes = routes.filter((route) => bucketTraceIds.has(route.traceId));
+    const bucketExecution = executionMetrics(bucketTraceIds, bucketRoutes);
+    const bucketTracesWithLoads = new Set(successfulLoads.filter((event) => bucketTraceIds.has(event.traceId)).map((event) => event.traceId));
+    const bucketPrimaryOutcomes = primaryOutcomeEvents.filter((event) => bucketTraceIds.has(event.traceId));
+    const bucketSuccessfulOutcomes = bucketPrimaryOutcomes.filter((event) => event.details.status === "success" || event.ok === true);
+    const bucketOutcomeTraces = new Set(bucketPrimaryOutcomes.map((event) => event.traceId));
+    const identitySources = new Map<string, number>();
+    for (const traceId of bucketTraceIds) {
+      const route = canonicalRouteByTrace.get(traceId);
+      const source = route ? lifecycleProfile(route).identitySource : "lifecycle-only";
+      identitySources.set(source, (identitySources.get(source) ?? 0) + 1);
+    }
+    return {
+      bucket,
+      traces: bucketTraceIds.size,
+      routeEvents: bucketRoutes.length,
+      identitySources: Object.fromEntries([...identitySources.entries()].sort()),
+      physicalToolCalls: bucketExecution.physicalToolCalls,
+      bridgeDirectToolCalls: bucketExecution.bridgeDirectToolCalls,
+      hostObservedToolCalls: bucketExecution.hostObservedToolCalls,
+      delegatedToolCalls: bucketExecution.delegatedToolCalls,
+      delegatedQueryCalls: bucketExecution.delegatedQueryCalls,
+      delegatedActionCalls: bucketExecution.delegatedActionCalls,
+      delegatedCallRate: rate(bucketExecution.delegatedToolCalls, bucketExecution.physicalToolCalls),
+      discoveryDetours: bucketExecution.discoveryDetours,
+      averageDiscoveryDetoursPerTrace: bucketExecution.averageDiscoveryDetours,
+      routeLoadCoverage: rate([...bucketTraceIds].filter((traceId) => bucketTracesWithLoads.has(traceId)).length, bucketTraceIds.size),
+      verificationCoverage: rate([...bucketTraceIds].filter((traceId) => verificationTraces.has(traceId)).length, bucketTraceIds.size),
+      persistenceCoverage: rate([...bucketTraceIds].filter((traceId) => persistenceTraces.has(traceId)).length, bucketTraceIds.size),
+      outcomeCoverage: rate(bucketOutcomeTraces.size, bucketTraceIds.size),
+      outcomeSuccessRate: rate(bucketSuccessfulOutcomes.length, bucketPrimaryOutcomes.length),
+    };
+  });
+
   const overallExecution = executionMetrics(traceIdsWithRoutes, routes);
   return {
     ...observatoryStatus(),
@@ -1579,6 +1648,7 @@ function summary(days: number, scope: MssrObservatoryScope) {
     contextAssembly,
     surfaces: surfaceBenchmarks,
     agentProfiles,
+    reasoningEffortComparison,
     top: {
       selectedSkills: topCounts(selectedSkillNames),
       loadedSkills: topCounts(successfulLoads.flatMap((event) => event.skillName ? [event.skillName] : [])),

@@ -339,6 +339,9 @@
   calls from route/load/checkpoint lifecycle events in dashboard totals.
 - Persist the optional OpenCode parent-session relationship only as a salted
   hash and expose cardinality rather than identifiers in the dashboard.
+- Add a descriptive reasoning-effort comparison to MSSR observability, assigning
+  each trace to one canonical effort bucket, preserving physical-call cardinality,
+  and reporting discovery detours as a true per-trace average rather than a rate.
 
 ## 0.6.75 — 2026-08-08
 

@@ -682,6 +682,38 @@ function renderMssrContextAssembly(context) {
 }
 
 
+function renderMssrEffortComparison(inputRows) {
+  const target = byId('mssr-effort-comparison');
+  if (!target) return;
+  const rows = inputRows || [];
+  if (!rows.length) {
+    target.innerHTML = '<tr><td colspan="13" class="muted">Sin comparativa por esfuerzo en la época activa.</td></tr>';
+    return;
+  }
+  const identitySummary = (sources) => {
+    const parts = [];
+    if (Number(sources['trace-correlated-host'] || 0) > 0) parts.push('host ' + num(sources['trace-correlated-host']));
+    if (Number(sources['lifecycle-only'] || 0) > 0) parts.push('lifecycle ' + num(sources['lifecycle-only']));
+    if (Number(sources['trace-host-mixed'] || 0) > 0) parts.push('mixto ' + num(sources['trace-host-mixed']));
+    return parts.length ? parts.join(' · ') : 'sin trazas';
+  };
+  target.innerHTML = rows.map((row) => '<tr>' +
+    '<td><strong>' + esc(row.bucket) + '</strong><div class="recent-detail">' + esc(identitySummary(row.identitySources || {})) + '</div></td>' +
+    '<td>' + num(row.traces) + '</td>' +
+    '<td>' + num(row.physicalToolCalls) + '</td>' +
+    '<td>' + num(row.bridgeDirectToolCalls) + '</td>' +
+    '<td>' + num(row.hostObservedToolCalls) + '</td>' +
+    '<td title="' + esc(num(row.delegatedQueryCalls) + ' query · ' + num(row.delegatedActionCalls) + ' action') + '">' + num(row.delegatedToolCalls) + '</td>' +
+    '<td>' + pct(row.delegatedCallRate) + '</td>' +
+    '<td title="' + esc(num(row.discoveryDetours) + ' desvíos totales') + '">' + (row.averageDiscoveryDetoursPerTrace === null || row.averageDiscoveryDetoursPerTrace === undefined ? '—' : decimalFormat.format(Number(row.averageDiscoveryDetoursPerTrace))) + '</td>' +
+    '<td>' + pct(row.routeLoadCoverage) + '</td>' +
+    '<td>' + pct(row.verificationCoverage) + '</td>' +
+    '<td>' + pct(row.persistenceCoverage) + '</td>' +
+    '<td>' + pct(row.outcomeCoverage) + '</td>' +
+    '<td>' + pct(row.outcomeSuccessRate) + '</td>' +
+  '</tr>').join('');
+}
+
 function updateMssr(mssr) {
   const benchmark = mssr.benchmark || {};
   const observability = mssr.observability || {};
@@ -705,6 +737,7 @@ function updateMssr(mssr) {
   renderMssrProgress(benchmark);
   renderMssrContextAssembly(mssr.contextAssembly || {});
   renderMssrAgentProfiles(mssr.agentProfiles || []);
+  renderMssrEffortComparison(mssr.reasoningEffortComparison || []);
   renderSkillCounts('mssr-selected-skills', mssr.top && mssr.top.selectedSkills ? mssr.top.selectedSkills : [], 'Sin skills seleccionadas en la época activa.');
   renderSkillCounts('mssr-loaded-skills', mssr.top && mssr.top.loadedSkills ? mssr.top.loadedSkills : [], 'Sin skills cargadas en la época activa.');
   renderSkillOutcomes(mssr.top && mssr.top.skillOutcomes ? mssr.top.skillOutcomes : []);

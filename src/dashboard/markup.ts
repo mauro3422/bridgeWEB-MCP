@@ -287,6 +287,18 @@ export const dashboardMarkup = `
       </article>
 
       <article class="card span-12">
+        <div class="card-header">
+          <div><div class="card-kicker">Comparativa por esfuerzo de razonamiento</div><h2 class="card-title">Ejecución observable por bucket</h2><p class="card-description">Metadata del host correlacionada al mismo <code>trace_id</code> que el lifecycle; el esfuerzo jamás se deriva de la variante. <code>unknown</code> y <code>multiple-observed</code> quedan separados y <code>other</code> agrupa valores no estándar. Compara ejecución y routing observables —llamadas físicas, split bridge/host/delegadas, desvíos y coberturas lifecycle/outcome— y no mide calidad ni expone razonamiento privado.</p></div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Esfuerzo</th><th>Trazas</th><th>Llamadas físicas</th><th>Bridge directas</th><th>Host OpenCode</th><th>Query / action</th><th>Fallback</th><th>Desvíos / traza</th><th>Route → load</th><th>Verificación</th><th>Persistencia</th><th>Outcome</th><th>Éxito</th></tr></thead>
+            <tbody id="mssr-effort-comparison"><tr><td colspan="13" class="muted">Cargando comparativa…</td></tr></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="card span-12">
         <div class="card-header"><div><div class="card-kicker">Atribución primaria</div><h2 class="card-title">Outcomes por skill primaria</h2><p class="card-description">Cada tarea cerrada acredita una sola skill primaria para no multiplicar el éxito. Las skills de apoyo siguen visibles en la traza, pero no reciben otro outcome.</p></div></div>
         <div class="table-wrap">
           <table>
