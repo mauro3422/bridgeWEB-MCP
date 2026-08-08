@@ -1,8 +1,14 @@
 ## Unreleased
 
+## 0.6.73 - 2026-08-08
+
 - Delegated portable trace lifecycle decisions and selective skill-context
   materialization to `@mauroprime/mssr`, while retaining Bridge-owned sessions,
   recovery, leases, telemetry, notices, persistence and transport.
+- Classified last-known Roblox metadata used by nonblocking discovery as
+  `cached` instead of a live-provider degradation. Structured non-Roblox routes
+  no longer inspect the optional Roblox source or repeat warnings merely because
+  Studio is closed; Roblox routes still require live health before execution.
 
 ## 0.6.72 - 2026-08-08
 

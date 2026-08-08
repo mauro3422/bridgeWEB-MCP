@@ -48,7 +48,7 @@ import {
   resolveMssrTraceId,
 } from "../mssr-observatory.js";
 import { requireWorkflowKey } from "../runtime-identity.js";
-import { buildMssrSystemAwareness } from "../mssr-system-awareness.js";
+import { buildMssrSystemAwareness, isRobloxMssrRoute } from "../mssr-system-awareness.js";
 import { assembleProjectContext } from "../project-context-assembler.js";
 
 const MAX_SKILL_FILE_CHARS = 160_000;
@@ -331,6 +331,16 @@ function robloxHealthSummary(health: RobloxMcpToolCatalogHealth, skillCount: num
     usingCachedTools: health.usingCachedTools,
     warning: health.warning,
   };
+}
+
+function shouldDiscoverRoblox(
+  args: Record<string, unknown>,
+  selectedSources: SkillSource[] | null,
+  intent: unknown,
+): boolean {
+  if (selectedSources) return selectedSources.includes("roblox");
+  if (args.intent !== undefined) return isRobloxMssrRoute(intent);
+  return true;
 }
 
 async function discoverRobloxSkills(): Promise<{ skills: SkillEntry[]; health: RobloxMcpToolCatalogHealth }> {
@@ -822,7 +832,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const selectedSources = sourceFilter(args.sources);
       const maxResults = z.number().int().min(1).max(16).catch(8).parse(args.maxResults ?? 8);
       const responseMode = z.enum(routeResponseModes).catch("compact").parse(args.responseMode ?? "compact");
-      const discovered = await discoverAllSkills(!selectedSources || selectedSources.includes("roblox"));
+      const discovered = await discoverAllSkills(shouldDiscoverRoblox(args, selectedSources, intentResult.intent));
       const skills = discovered.skills.filter((skill) => !selectedSources || selectedSources.includes(skill.source));
       const route = await planSkillRoute({
         task,
@@ -867,7 +877,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const robloxDegraded = Boolean(
         (!selectedSources || selectedSources.includes("roblox"))
         && discovered.sourceHealth.roblox
-        && discovered.sourceHealth.roblox.status !== "healthy",
+        && ["degraded", "unavailable"].includes(discovered.sourceHealth.roblox.status),
       );
       const sourceMaintenanceReasons = robloxDegraded
         ? [discovered.sourceHealth.roblox?.warning ?? "Roblox MCP source is degraded."]
@@ -900,7 +910,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
       if (intentResult.recovery) return intentResult.recovery;
       const selectedSources = sourceFilter(args.sources);
       const responseMode = z.enum(routeResponseModes).catch("compact").parse(args.responseMode ?? "compact");
-      const discovered = await discoverAllSkills(!selectedSources || selectedSources.includes("roblox"));
+      const discovered = await discoverAllSkills(shouldDiscoverRoblox(args, selectedSources, intentResult.intent));
       const skills = discovered.skills.filter((skill) => !selectedSources || selectedSources.includes(skill.source));
       const route = await planSkillRoute({
         task,
@@ -966,7 +976,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const intentResult = resolveIntentOrRecovery(args, "skill_bootstrap", task);
       if (intentResult.recovery) return intentResult.recovery;
       const selectedSources = sourceFilter(args.sources);
-      const discovered = await discoverAllSkills(!selectedSources || selectedSources.includes("roblox"));
+      const discovered = await discoverAllSkills(shouldDiscoverRoblox(args, selectedSources, intentResult.intent));
       const skills = discovered.skills.filter((skill) => !selectedSources || selectedSources.includes(skill.source));
       const route = await planSkillRoute({
         task,

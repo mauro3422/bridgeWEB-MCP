@@ -88,7 +88,7 @@ process.env.BRIDGE_MCP_SKILL_ROUTING_FIXTURES_PATH = path.join(fixtureSkillRoot,
 
 const { createDefaultToolRegistry } = await import('../dist/tool-registry.js');
 const { writePersistentCache } = await import('../dist/tools/shared/persistent-cache.js');
-const { classifyRobloxMcpToolCatalog, getRobloxMcpToolRequestOptions, parseRobloxStudios } = await import('../dist/integrations/roblox-mcp-client.js');
+const { asRobloxMcpDiscoveryHealth, classifyRobloxMcpToolCatalog, getRobloxMcpToolRequestOptions, parseRobloxStudios } = await import('../dist/integrations/roblox-mcp-client.js');
 const { extractRobloxMcpImage, validateRobloxCaptureImage } = await import('../dist/tools/roblox-studio-tools.js');
 const { clearBridgeNotices, drainBridgeNotices, emitBridgeNotice, getBridgeNoticeStatus, peekBridgeNoticeHistory } = await import('../dist/notices.js');
 const { closeMssrObservatoryForTests, getMssrTraceEvidence, queryMssrObservatory, recordMssrCheckpoint, recordMssrRoute } = await import('../dist/mssr-observatory.js');
@@ -117,6 +117,8 @@ try {
     errors: ['tools/list returned zero tools'],
   });
   if (cachedRobloxCatalog.status !== 'degraded' || cachedRobloxCatalog.liveToolCount !== 0 || cachedRobloxCatalog.effectiveToolCount !== 1 || !cachedRobloxCatalog.usingCachedTools || !cachedRobloxCatalog.warning?.includes('last-known')) throw new Error('degraded Roblox tool cache classification failed');
+  const discoveryRobloxCatalog = asRobloxMcpDiscoveryHealth(cachedRobloxCatalog);
+  if (discoveryRobloxCatalog.status !== 'cached' || discoveryRobloxCatalog.warning !== undefined || !discoveryRobloxCatalog.usingCachedTools) throw new Error('cached Roblox discovery classification failed');
   const unavailableRobloxCatalog = classifyRobloxMcpToolCatalog({
     liveTools: [],
     attempts: 2,
@@ -453,6 +455,14 @@ try {
     if (!structuredRoute.deferredLoadOrder.includes(name)) throw new Error(`structured route missing deferred skill ${name}`);
   }
   if (!structuredRoute.coverage.requiredPhases.includes('verification') || !structuredRoute.coverage.requiredPhases.includes('persistence')) throw new Error('structured route phase coverage failed');
+  const nonRobloxRoute = await call('skill_route_plan', {
+    task:'Publicar un repositorio TypeScript',
+    stage:'verify',
+    traceId:'__test_non_roblox_route',
+    intent:{domains:['git','coding'],actions:['verify','publish'],artifacts:['repository'],needs:['version-control'],signals:['nominal'],risk:'external-side-effect',ambiguity:'low'},
+  });
+  if (nonRobloxRoute.sourceHealth?.roblox !== undefined) throw new Error('non-Roblox structured route inspected optional Roblox source');
+  if (nonRobloxRoute.warnings?.some((warning) => /Roblox/i.test(warning))) throw new Error('non-Roblox structured route leaked Roblox health warning');
   const recommendedRoute = await call('skill_recommend', {
     task:'DiseÃƒÂ±ar mÃƒÂ¡quinas conectables por puertos',
     sources:['codex-local'],
@@ -834,5 +844,4 @@ try {
   closeMetricsForTests();
   fs.rmSync(sandbox,{recursive:true,force:true});
 }
-
 

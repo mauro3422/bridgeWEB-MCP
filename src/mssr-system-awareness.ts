@@ -18,7 +18,7 @@ export type MssrSystemTargetState =
   | "active-unknown";
 
 type RobloxSourceHealth = {
-  status: "healthy" | "degraded" | "unavailable";
+  status: "healthy" | "cached" | "degraded" | "unavailable";
   liveToolCount: number;
   effectiveToolCount: number;
   skillCount: number;
@@ -118,7 +118,7 @@ export function classifyRobloxTargetState(input: {
   inspectionError?: string;
 }): MssrSystemTargetState {
   if (input.catalogStatus === "unavailable") return "catalog-unavailable";
-  if (input.catalogStatus === "degraded") return "catalog-degraded";
+  if (input.catalogStatus === "cached" || input.catalogStatus === "degraded") return "catalog-degraded";
   if (input.inspectionError) return "studio-inspection-failed";
   if (input.studios.length === 0) return "no-studio";
   if (!input.activeStudio) {

@@ -18,6 +18,7 @@ assert.equal(parseRobloxStudioMode({ content: [] }), "Unknown");
 
 assert.equal(classifyRobloxTargetState({ catalogStatus: "unavailable", studios: [], activeStudio: null, mode: "Unknown" }), "catalog-unavailable");
 assert.equal(classifyRobloxTargetState({ catalogStatus: "degraded", studios: [], activeStudio: null, mode: "Unknown" }), "catalog-degraded");
+assert.equal(classifyRobloxTargetState({ catalogStatus: "cached", studios: [], activeStudio: null, mode: "Unknown" }), "catalog-degraded");
 assert.equal(classifyRobloxTargetState({ catalogStatus: "healthy", studios: [], activeStudio: null, mode: "Unknown" }), "no-studio");
 assert.equal(classifyRobloxTargetState({ catalogStatus: "healthy", studios: [studio], activeStudio: null, mode: "Unknown" }), "single-studio-inactive");
 assert.equal(classifyRobloxTargetState({ catalogStatus: "healthy", studios: [studio, { id: "studio-2", name: "2.rbxl", active: false }], activeStudio: null, mode: "Unknown" }), "multiple-studios-no-active");

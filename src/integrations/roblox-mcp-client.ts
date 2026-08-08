@@ -12,7 +12,7 @@ export type RobloxMcpTool = {
 };
 
 export type RobloxMcpToolCatalogHealth = {
-  status: "healthy" | "degraded" | "unavailable";
+  status: "healthy" | "cached" | "degraded" | "unavailable";
   tools: RobloxMcpTool[];
   liveToolCount: number;
   effectiveToolCount: number;
@@ -22,6 +22,16 @@ export type RobloxMcpToolCatalogHealth = {
   cacheCapturedAt?: string;
   warning?: string;
 };
+
+export function asRobloxMcpDiscoveryHealth(health: RobloxMcpToolCatalogHealth): RobloxMcpToolCatalogHealth {
+  if (health.status === "healthy" || health.tools.length === 0) return health;
+  return {
+    ...health,
+    status: "cached",
+    usingCachedTools: true,
+    warning: undefined,
+  };
+}
 
 export type RobloxStudioInstance = {
   id: string;
@@ -345,25 +355,18 @@ export async function inspectRobloxMcpTools(options: {
 
 export async function inspectRobloxMcpToolsForDiscovery(): Promise<RobloxMcpToolCatalogHealth> {
   if (recentToolCatalog?.health.tools.length) {
-    return {
-      ...recentToolCatalog.health,
-      status: recentToolCatalog.health.status === "unavailable" ? "degraded" : recentToolCatalog.health.status,
-      warning: [
-        recentToolCatalog.health.warning,
-        "Skill discovery reused the last-known Roblox catalog without waiting for the exclusive Studio operation queue.",
-      ].filter(Boolean).join(" "),
-    };
+    return asRobloxMcpDiscoveryHealth(recentToolCatalog.health);
   }
 
   const cached = await readCachedToolCatalog();
-  return classifyRobloxMcpToolCatalog({
+  return asRobloxMcpDiscoveryHealth(classifyRobloxMcpToolCatalog({
     liveTools: [],
     cachedTools: cached.tools,
     cacheCapturedAt: cached.capturedAt,
     attempts: 0,
     durationMs: 0,
     errors: ["live Roblox catalog refresh skipped for nonblocking skill discovery"],
-  });
+  }));
 }
 
 export async function listRobloxMcpTools(): Promise<RobloxMcpTool[]> {
