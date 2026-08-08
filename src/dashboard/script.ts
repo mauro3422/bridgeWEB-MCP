@@ -215,7 +215,7 @@ function renderAgentProfiles(inputRows) {
 }
 
 function compactErrorMessage(value) {
-  const text = String(value || 'Error sin detalle').replace(/\s+/g, ' ').trim();
+  const text = String(value || 'Error sin detalle').replace(/\\s+/g, ' ').trim();
   return text.length > 150 ? text.slice(0, 147) + '…' : text;
 }
 

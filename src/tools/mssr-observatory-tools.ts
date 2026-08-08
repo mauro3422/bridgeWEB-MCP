@@ -56,7 +56,7 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
         properties: {
           traceId: { type: "string" },
           eventType: { type: "string", enum: MSSR_CHECKPOINT_TYPES },
-          caller: { type: "string", enum: ["codex-local", "chatgpt-web", "other"] },
+          caller: { type: "string", enum: ["codex-local", "opencode-local", "chatgpt-web", "other"] },
           model: { type: "string", maxLength: 80, description: "Observable host-reported model identifier. Use unknown when unavailable." },
           reasoningEffort: { type: "string", enum: reasoningEfforts, default: "unknown", description: "Observable host-reported reasoning effort; never inferred from behavior." },
           stage: { type: "string", enum: SKILL_STAGES },
@@ -134,7 +134,7 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
       const parsed = z.object({
         traceId: z.string().regex(/^[A-Za-z0-9._:-]{6,128}$/),
         eventType: z.enum(MSSR_CHECKPOINT_TYPES),
-        caller: z.enum(["codex-local", "chatgpt-web", "other"]).optional(),
+        caller: z.enum(["codex-local", "opencode-local", "chatgpt-web", "other"]).optional(),
         model: z.string().trim().min(1).max(80).optional(),
         reasoningEffort: z.enum(reasoningEfforts).default("unknown"),
         stage: z.enum(SKILL_STAGES).optional(),

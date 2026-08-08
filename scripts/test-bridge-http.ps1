@@ -58,6 +58,9 @@ Invoke-Check "MSSR dashboard" {
   if ($dashboard.Content -notmatch 'id="mssr-structured"' -or $dashboard.Content -notmatch 'id="mssr-continuity"' -or $dashboard.Content -notmatch 'id="mssr-skill-outcomes"' -or $dashboard.Content -notmatch 'id="mssr-selected-skills"' -or $dashboard.Content -notmatch 'id="mssr-loaded-skills"' -or $dashboard.Content -notmatch 'id="agent-profiles"' -or $dashboard.Content -notmatch 'id="mssr-agent-activation"' -or $dashboard.Content -notmatch 'id="mssr-agent-results"' -or $dashboard.Content -notmatch 'id="current-runtime-boot"' -or $dashboard.Content -notmatch 'Cobertura MSSR' -or $dashboard.Content -notmatch 'Conexiones MCP' -or $dashboard.Content -notmatch 'modelo no expuesto' -or $dashboard.Content -notmatch 'pendiente' -or $dashboard.Content -notmatch 'Herramientas MCP' -or $dashboard.Content -notmatch 'cargarla no demuestra') {
     throw "Dashboard does not expose MSSR and per-agent profile sections"
   }
+  if (-not $dashboard.Content.Contains("replace(/\s+/g") -or $dashboard.Content.Contains("replace(/s+/g")) {
+    throw "Dashboard error compaction regex lost its whitespace escape in the served HTML"
+  }
   $mssr = Invoke-RestMethod "$BaseUrl/api/mssr/summary?days=30&scope=active"
   $all = Invoke-RestMethod "$BaseUrl/api/mssr/summary?days=30&scope=all"
   if ($null -eq $mssr.benchmark -or $null -eq $mssr.top.skillOutcomes) {
@@ -68,6 +71,43 @@ Invoke-Check "MSSR dashboard" {
   }
   if ([int]$all.eventCount -lt [int]$mssr.eventCount) { throw "All-history scope cannot contain fewer events than active scope" }
   Write-Host "  OK epoch=$($mssr.observability.activeEpoch) routes=$($mssr.benchmark.routeEvents) outcomes=$($mssr.benchmark.attributedOutcomeTraces) allEvents=$($all.eventCount)"
+}
+
+Invoke-Check "authenticated external MSSR telemetry" {
+  $tokenPath = Join-Path (Get-Location) "data\mssr-ingest.token"
+  if (-not (Test-Path -LiteralPath $tokenPath)) { throw "MSSR ingest token was not created at $tokenPath" }
+  $eventId = "__test_opencode_" + [Guid]::NewGuid().ToString("N")
+  $traceId = "__test_opencode_trace_" + [Guid]::NewGuid().ToString("N")
+  $body = @{
+    protocolVersion = "mssr-telemetry-v1"
+    eventId = $eventId
+    emittedAt = [DateTime]::UtcNow.ToString("o")
+    source = "opencode-cli"
+    traceId = $traceId
+    caller = "opencode-local"
+    event = @{
+      kind = "route"
+      action = "plan"
+      taskHash = "a" * 64
+      route = @{
+        caller = "opencode-local"; stage = "start"; classificationMode = "structured-semantic"
+        workflowKey = "__test_opencode"; agentProfile = @{ model = "unknown"; reasoningEffort = "unknown" }
+        contextUsed = $false; contextCharacters = 0; workflows = @(); activeSkills = @(); deferredSkills = @()
+        loadOrder = @(); deferredLoadOrder = @(); signals = @("nominal"); ambiguity = "low"
+        requiredPhases = @(); completedPhases = @(); missingRequiredPhases = @()
+      }
+    }
+  } | ConvertTo-Json -Depth 12 -Compress
+  $unauthorized = 0
+  try { Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/api/mssr/events" -Method Post -ContentType "application/json" -Body $body | Out-Null }
+  catch { $unauthorized = [int]$_.Exception.Response.StatusCode }
+  if ($unauthorized -ne 401) { throw "External MSSR ingest without token must return 401, got $unauthorized" }
+  $token = (Get-Content -Raw -LiteralPath $tokenPath).Trim()
+  $accepted = Invoke-RestMethod -Uri "$BaseUrl/api/mssr/events" -Method Post -ContentType "application/json" -Headers @{ Authorization = "Bearer $token" } -Body $body
+  if ($accepted.accepted -ne $true -or $accepted.traceId -ne $traceId -or $accepted.duplicate -ne $false) { throw "External MSSR event was not accepted" }
+  $duplicate = Invoke-RestMethod -Uri "$BaseUrl/api/mssr/events" -Method Post -ContentType "application/json" -Headers @{ Authorization = "Bearer $token" } -Body $body
+  if ($duplicate.duplicate -ne $true) { throw "External MSSR ingest is not idempotent" }
+  Write-Host "  OK authenticated, bounded and idempotent trace=$traceId"
 }
 Invoke-Check "Tools portfolio dashboard" {
   $dashboard = Invoke-WebRequest -UseBasicParsing "$BaseUrl/dashboard"

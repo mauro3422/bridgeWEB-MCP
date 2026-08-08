@@ -1,4 +1,16 @@
-## Unreleased
+## 0.6.74 - 2026-08-08
+
+- Added a token-authenticated, 64 KiB-bounded `/api/mssr/events` receiver for
+  privacy-safe `mssr-telemetry-v1` events from external host adapters. Events
+  are schema-validated, lifecycle-validated, idempotent, and projected with the
+  canonical `opencode-local` caller; raw task text and transcripts are rejected
+  by contract.
+- Fixed the dashboard Errors tab dropping every letter `s`: the whitespace
+  regular expression is now correctly escaped through the TypeScript template
+  literal, with a regression against the served HTML.
+- Added an isolated HTTP regression proving authentication, deduplication,
+  honest no-outcome state before an explicit checkpoint, OpenCode surface
+  projection, and the dashboard escaping fix.
 
 ## 0.6.73 - 2026-08-08
 

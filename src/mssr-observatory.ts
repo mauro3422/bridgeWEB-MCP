@@ -10,6 +10,9 @@ import {
   type MssrCheckpointType,
   type MssrOutcomeDimensionStatus,
   type MssrOutcomeEvidenceKind,
+  mssrTelemetryEnvelopeSchema,
+  validateMssrCheckpointLifecycle,
+  type MssrTelemetryEnvelope,
 } from "@mauroprime/mssr";
 import { SERVER_NAME, SERVER_VERSION } from "./config.js";
 import { getTraceToolEvidence } from "./metrics.js";
@@ -89,6 +92,7 @@ const PREPARATION_TOOLS = new Set([
 ]);
 
 type MssrEventInput = {
+  eventId?: string;
   traceId: string;
   eventType: string;
   caller?: string;
@@ -259,7 +263,7 @@ export function hashMssrTask(task: string): string {
 export function recordMssrEvent(input: MssrEventInput): MssrStoredEvent {
   const epoch = getMssrObservabilityEpoch();
   const event: MssrStoredEvent = {
-    id: `${Date.now().toString(36)}-${randomUUID().slice(0, 12)}`,
+    id: input.eventId ?? `${Date.now().toString(36)}-${randomUUID().slice(0, 12)}`,
     occurredAt: new Date().toISOString(),
     traceId: resolveMssrTraceId(input.traceId),
     eventType: redactText(input.eventType, 80),
@@ -300,6 +304,107 @@ export function recordMssrEvent(input: MssrEventInput): MssrStoredEvent {
     os.platform(),
   );
   return event;
+}
+
+function hasMssrEvent(eventId: string): boolean {
+  const database = getDb();
+  if (!database) return false;
+  return Boolean(database.prepare("SELECT id FROM mssr_events WHERE id = ? LIMIT 1").get(eventId));
+}
+
+/** Persist one authenticated, privacy-bounded event emitted by an external MSSR host adapter. */
+export function recordExternalMssrTelemetry(input: unknown): { event: MssrStoredEvent; duplicate: boolean } {
+  const envelope = mssrTelemetryEnvelopeSchema.parse(input) as MssrTelemetryEnvelope;
+  if (hasMssrEvent(envelope.eventId)) {
+    const existing = getDb()?.prepare(`
+      SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
+             skill_name, required, ok, task_hash, details_json
+      FROM mssr_events WHERE id = ? LIMIT 1
+    `).get(envelope.eventId);
+    if (!existing) throw new Error("External MSSR event deduplication readback failed.");
+    return { event: decodeRow(existing), duplicate: true };
+  }
+
+  if (envelope.event.kind === "route") {
+    const route = envelope.event.route;
+    return { duplicate: false, event: recordMssrEvent({
+      eventId: envelope.eventId,
+      traceId: envelope.traceId,
+      eventType: "route_planned",
+      caller: envelope.caller,
+      stage: route.stage,
+      classificationMode: route.classificationMode,
+      taskHash: envelope.event.taskHash,
+      ok: true,
+      details: {
+        action: envelope.event.action,
+        workflowKey: route.workflowKey ?? null,
+        agentProfile: route.agentProfile,
+        contextUsed: route.contextUsed,
+        contextCharacters: route.contextCharacters,
+        workflows: route.workflows,
+        activeSkills: route.activeSkills,
+        deferredSkills: route.deferredSkills,
+        loadOrder: route.loadOrder,
+        deferredLoadOrder: route.deferredLoadOrder,
+        signals: route.signals,
+        ambiguity: route.ambiguity,
+        requiredPhases: route.requiredPhases,
+        completedPhases: route.completedPhases,
+        missingRequiredPhases: route.missingRequiredPhases,
+        externalSource: envelope.source,
+        emittedAt: envelope.emittedAt,
+      },
+    }) };
+  }
+
+  if (envelope.event.kind === "skill_load") {
+    const load = envelope.event;
+    return { duplicate: false, event: recordMssrEvent({
+      eventId: envelope.eventId,
+      traceId: envelope.traceId,
+      eventType: "skill_loaded",
+      caller: envelope.caller,
+      stage: load.stage,
+      skillName: load.skillName,
+      required: load.required,
+      ok: load.loaded,
+      details: {
+        source: load.source,
+        via: load.via,
+        warning: load.warning,
+        externalSource: envelope.source,
+        emittedAt: envelope.emittedAt,
+      },
+    }) };
+  }
+
+  const checkpoint = envelope.event.checkpoint;
+  const persisted = readPersistedMssrTraceState(envelope.traceId);
+  const violations = validateMssrCheckpointLifecycle(persisted ? {
+    stage: persisted.stage as never,
+    requiredSkills: persisted.requiredSkills,
+    selectedSkills: persisted.selectedSkills,
+    loadedSkills: persisted.loadedSkills,
+    routeCount: persisted.routeCount,
+    closed: persisted.closed,
+    maintenanceRequired: persisted.maintenanceRequired,
+    lifecycleRevision: persisted.lifecycleRevision,
+    closeRevision: persisted.closeRevision,
+    maintenanceRevision: persisted.maintenanceRevision,
+  } : null, checkpoint);
+  if (violations.some((item) => item.blocking)) {
+    throw Object.assign(new Error(`External MSSR checkpoint rejected: ${violations.map((item) => item.code).join(", ")}.`), { statusCode: 409 });
+  }
+  const stored = recordMssrCheckpoint({
+    ...checkpoint,
+    eventId: envelope.eventId,
+    traceId: envelope.traceId,
+    caller: envelope.caller,
+    externalSource: envelope.source,
+    emittedAt: envelope.emittedAt,
+  });
+  return { event: stored, duplicate: false };
 }
 
 function routeSkills(value: unknown): Array<{ name: string; source?: string; required: boolean; score?: number }> {
@@ -420,6 +525,7 @@ export function recordMssrSkillLoad(args: {
 }
 
 export function recordMssrCheckpoint(args: {
+  eventId?: string;
   traceId: string;
   eventType: MssrCheckpointType;
   caller?: string;
@@ -449,6 +555,8 @@ export function recordMssrCheckpoint(args: {
   signals?: string[];
   model?: string;
   reasoningEffort?: string;
+  externalSource?: string;
+  emittedAt?: string;
 }): MssrStoredEvent {
   const ok = args.status === undefined ? undefined : args.status === "success";
   const primarySkill = args.primarySkill ?? args.skillName;
@@ -466,6 +574,7 @@ export function recordMssrCheckpoint(args: {
     evidenceRef: item.evidenceRef ? redactText(item.evidenceRef, 200) : undefined,
   }));
   return recordMssrEvent({
+    eventId: args.eventId,
     traceId: args.traceId,
     eventType: args.eventType,
     caller: args.caller,
@@ -494,6 +603,8 @@ export function recordMssrCheckpoint(args: {
         model: normalizeModelIdentifier(args.model),
         reasoningEffort: args.reasoningEffort ? redactText(args.reasoningEffort, 20) : "unknown",
       },
+      externalSource: args.externalSource,
+      emittedAt: args.emittedAt,
     },
   });
 }

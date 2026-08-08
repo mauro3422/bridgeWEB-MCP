@@ -19,6 +19,26 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-08-08 — OpenCode no aparecía en MSSR y Errores perdía cada letra `s`
+
+**Estado:** Corregido en fuente `0.6.74`; pendiente de readback del runtime vivo al registrar este incidente.
+
+**Capa/owner:** transporte HTTP y proyección dashboard de `bridge-mcp`; contrato de host compartido en `@mauroprime/mssr`.
+
+**Síntoma observable:** OpenCode estaba conectado al facade MSSR portable, pero el dashboard tenía cero rutas atribuibles a OpenCode. En la pestaña Errores, la API y SQLite conservaban los mensajes, mientras el DOM quitaba todas las letras `s`.
+
+**Reproducción mínima:** el provider dinámico ejecutaba sólo `tools/list`, por lo que ninguna ruta/checkpoint salía del proceso OpenCode. El HTML servido contenía `replace(/s+/g, ' ')` aunque la fuente TypeScript mostraba `replace(/\s+/g, ' ')` dentro de un template literal.
+
+**Causa demostrada:** no existía un sink persistente entre el adaptador standalone y el observatorio; OpenCode además usaba el caller genérico `other`. En el dashboard, la barra invertida del regex no estaba doblemente escapada para sobrevivir el template literal exterior.
+
+**Corrección:** Bridge recibe `mssr-telemetry-v1` mediante `POST /api/mssr/events`, token local, límite de 64 KiB, schema estricto, validación lifecycle y deduplicación. Proyecta `opencode-local` y conserva sólo metadata acotada. El regex ahora se emite como `/\s+/g`. Ningún idle o exit crea outcomes.
+
+**Regresión:** `scripts/test-mssr-http-telemetry.mjs` prueba proceso fresco, 401 sin token, aceptación/deduplicación autenticada, 0 outcomes antes del checkpoint explícito, superficie OpenCode, outcome explícito y HTML servido. `scripts/test-bridge-http.ps1` repite token y escaping contra runtime vivo.
+
+**Seguimiento:** publicar MSSR antes del Bridge, reiniciar `0.6.74` y ejecutar una ruta real desde OpenCode CLI hasta el dashboard.
+
+---
+
 ## 2026-08-08 — Studio cerrado degradaba rutas MSSR ajenas a Roblox
 
 **Estado:** Corregido, publicado y verificado en runtime vivo `0.6.73`.

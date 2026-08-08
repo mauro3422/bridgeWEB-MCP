@@ -12,6 +12,7 @@ import { closeRobloxMcpConnection } from "./integrations/roblox-mcp-client.js";
 import { getMetricsErrors, getMetricsOverview, getMetricsStatus, getMetricsSummary, getMetricsTimeline, getRecentMetrics } from "./metrics.js";
 import { peekBridgeNoticeHistory } from "./notices.js";
 import { queryMssrObservatory } from "./mssr-observatory.js";
+import { authorizeMssrTelemetry, ensureMssrTelemetryToken, ingestMssrTelemetry } from "./mssr-telemetry-ingest.js";
 import { TOOL_AUDIT_VIEWS, type ToolAuditView } from "./tool-audit.js";
 import { getDefaultToolAudit } from "./tool-registry.js";
 import { RUNTIME_BOOT_ID } from "./runtime-identity.js";
@@ -104,10 +105,10 @@ function sendHtml(res: ServerResponse, statusCode: number, html: string) {
   res.end(html);
 }
 
-async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+async function readJsonBody(req: IncomingMessage, maxBytes = MAX_REQUEST_BODY_BYTES): Promise<unknown> {
   const contentLength = Number.parseInt(String(req.headers["content-length"] || ""), 10);
-  if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BODY_BYTES) {
-    throw Object.assign(new Error(`Request body exceeds ${MAX_REQUEST_BODY_BYTES} bytes.`), { statusCode: 413 });
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    throw Object.assign(new Error(`Request body exceeds ${maxBytes} bytes.`), { statusCode: 413 });
   }
 
   const chunks: Buffer[] = [];
@@ -115,8 +116,8 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   for await (const chunk of req) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     totalBytes += buffer.length;
-    if (totalBytes > MAX_REQUEST_BODY_BYTES) {
-      throw Object.assign(new Error(`Request body exceeds ${MAX_REQUEST_BODY_BYTES} bytes.`), { statusCode: 413 });
+    if (totalBytes > maxBytes) {
+      throw Object.assign(new Error(`Request body exceeds ${maxBytes} bytes.`), { statusCode: 413 });
     }
     chunks.push(buffer);
   }
@@ -456,6 +457,7 @@ async function handleDualEraMcpRequest(req: IncomingMessage, res: ServerResponse
 }
 
 async function main() {
+  ensureMssrTelemetryToken();
   ready = true;
 
   const cleanupTimer = setInterval(() => {
@@ -498,6 +500,16 @@ async function main() {
           days: getDays(url, 30, 365),
           scope: url.searchParams.get("scope") === "all" ? "all" : "active",
         }) as Record<string, unknown>);
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/mssr/events") {
+        if (!authorizeMssrTelemetry(req.headers.authorization)) {
+          sendJson(res, 401, { error: "mssr_telemetry_unauthorized", requestId });
+          return;
+        }
+        const payload = await readJsonBody(req, 64 * 1024);
+        sendJson(res, 202, ingestMssrTelemetry(payload));
         return;
       }
 
@@ -588,7 +600,7 @@ async function main() {
       sendJson(res, 404, {
         error: "not_found",
         requestId,
-        routes: ["GET /healthz", "GET /readyz", "GET /status", "GET /dashboard", "GET /api/notices", "GET /api/tools/audit", "GET /api/metrics/*", `${config.mcpPath} MCP Streamable HTTP`],
+        routes: ["GET /healthz", "GET /readyz", "GET /status", "GET /dashboard", "GET /api/notices", "GET /api/tools/audit", "GET /api/metrics/*", "POST /api/mssr/events (Bearer token)", `${config.mcpPath} MCP Streamable HTTP`],
       });
     } catch (error) {
       const candidateStatus = error && typeof error === "object" && "statusCode" in error
