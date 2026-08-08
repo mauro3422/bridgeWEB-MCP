@@ -1,3 +1,15 @@
+## 0.6.72 - 2026-08-08
+
+- Completed stale-schema `projectRoot` carryover across separate MCP server instances by scoping the loaded root to the observable host session plus `workflowKey`, while retaining the local anonymous-session fallback.
+- Extended the delegated-route regression so `project_context_load` and the following `skill_bootstrap` execute through different server instances and still resolve the exact loaded project.
+
+
+## 0.6.71 - 2026-08-08
+
+- Made project-context carryover resilient to stale ChatGPT connector schemas: after a unique `project_context_load`, direct or delegated MSSR route/bootstrap calls inherit that exact root when the caller cannot send `projectRoot`; ambiguous multi-root and post-restart cases still fail closed and require explicit scope.
+- Updated project-context guidance to describe the carryover contract instead of requiring an argument a stale host schema may not expose.
+
+
 ## 0.6.70 - 2026-08-08
 
 - Enforced persistent analysis-cache TTL/size bounds on the first cache write of each Bridge runtime, then retained the existing periodic prune cadence, preventing restarts from leaving multi-gigabyte stale cache indefinitely.

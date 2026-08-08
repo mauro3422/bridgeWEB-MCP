@@ -107,6 +107,7 @@ try {
     task: "Load the project that must own delegated MSSR routes.",
   });
 
+
   const staleTraceIds = [];
   for (let index = 0; index < 3; index += 1) {
     const stale = await planDelegatedRoute(`Historical interrupted delegated route ${index + 1}.`);
@@ -345,6 +346,45 @@ try {
   const legacyDispatchMetric = metrics.getRecentMetrics(20, "active").recent.find((row) =>
     row.tool === "bridge_tool_query" && row.operation_subject === "search_files" && row.trace_id === concurrentTraceB.traceId);
   assert.equal(legacyDispatchMetric?.trace_id, concurrentTraceB.traceId);
+
+
+  const carryoverWorkflowKey = "project-root-carryover-regression";
+  await call("project_context_load", {
+    projectRoot,
+    task: "Reload the project before verifying direct bootstrap project-root carryover.",
+    workflowKey: carryoverWorkflowKey,
+  });
+  const carryoverArgs = {
+    task: "Verify direct bootstrap inherits the uniquely loaded project root.",
+    intent,
+    caller: "chatgpt-web",
+    stage: "start",
+    sources: ["codex-local"],
+    maxSkills: 12,
+    maxContextChars: 6_000,
+    workflowKey: carryoverWorkflowKey,
+  };
+  let inheritedBootstrap;
+  if (sessionMode === "named") {
+    const [secondClientTransport, secondServerTransport] = InMemoryTransport.createLinkedPair();
+    const secondServer = createBridgeServer();
+    const secondClient = new Client({ name: "openai-mcp", version: "1.0.0" }, { capabilities: {} });
+    try {
+      await Promise.all([secondServer.connect(secondServerTransport), secondClient.connect(secondClientTransport)]);
+      const secondCall = async (name, args = {}) => payload(await secondClient.callTool({ name, arguments: args, _meta: requestMeta }));
+      inheritedBootstrap = await secondCall("skill_bootstrap", carryoverArgs);
+    } finally {
+      await secondClient.close().catch(() => {});
+      await secondServer.close().catch(() => {});
+    }
+  } else {
+    inheritedBootstrap = await call("skill_bootstrap", carryoverArgs);
+  }
+  assert.equal(
+    inheritedBootstrap.projectRoot,
+    path.resolve(projectRoot),
+    "A direct bootstrap without projectRoot must inherit the root loaded by project_context_load even when the next call reaches another server instance in the same named host session.",
+  );
 
   console.log(JSON.stringify({
     ok: true,

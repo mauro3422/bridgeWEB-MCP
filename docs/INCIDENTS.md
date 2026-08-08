@@ -1177,3 +1177,19 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Regresión:** `test-git-multi-repo-publication.mjs`, `test-image-persistence.mjs`, `test-image-file-import.mjs`, `test-system-hardening.mjs`, `test-mssr-trace-contract.mjs` y `test-selective-skill-context.mjs`, integrados en `test:regressions`. El gate completo verifica además 140 tools, routing y `TOOLS.md`.
 
 **Límites:** la transacción de publicación es segura y verificable por repositorio, no atómica entre repositorios. El host de ChatGPT sigue siendo dueño de refrescar su catálogo dedicado; la reachability por wrapper no se reporta como exposición directa.
+
+## 2026-08-08 — Un schema Web stale impedía reenviar `projectRoot` aunque el runtime ya lo soportaba
+
+**Estado:** Corregido completamente en Bridge 0.6.72; 0.6.71 cubrió el caso intra-instancia, pero la verificación live mostró que ChatGPT Web podía encadenar las dos llamadas por instancias MCP distintas. El refresco visual del catálogo dedicado continúa siendo propiedad del host.
+
+**Capa / owner:** continuidad de contexto de proyecto entre `project_context_load` y MSSR / `bridge-mcp`.
+
+**Síntoma observable:** `project_context_load` devolvía un `nextAction` que pedía reutilizar `projectRoot`, y el runtime/source de `skill_bootstrap` ya declaraba ese campo, pero una conversación ChatGPT Web abierta conservaba un schema dedicado anterior que no permitía enviarlo. El bootstrap seguía siendo invocable, pero perdía el ensamblado modular del proyecto salvo usar un wrapper o abrir un chat con catálogo renovado.
+
+**Causa demostrada:** el host puede cachear el catálogo dedicado durante la vida de una conversación. Bridge ya conservaba el proyecto cargado para atribución de trazas, pero no conservaba la ruta exacta para inyectarla en los argumentos efectivos de `skill_recommend`, `skill_route_plan` o `skill_bootstrap`.
+
+**Corrección:** Bridge conserva el root exacto observado por `project_context_load` en scope de sesión + `workflowKey`, además del fallback local para sesiones anónimas. Si una llamada MSSR posterior no declara `projectRoot`, lo inyecta antes de tracing, validación y dispatch, incluso si esa llamada llega a otra instancia MCP del mismo host session. Un argumento explícito siempre gana. El root se reemplaza sólo cuando ese mismo scope carga otro proyecto; múltiples roots anónimos no se adivinan. La documentación de `project_context_load` explica este fallback.
+
+**Regresión:** `test-delegated-mssr-route-project.mjs` ejecuta `project_context_load` y luego un `skill_bootstrap` directo sin `projectRoot`; exige que el resultado reporte exactamente el root cargado. La suite existente conserva además continuidad de wrappers, sesiones nombradas/anónimas y ambigüedad segura.
+
+**Límite:** Bridge no puede reemplazar ni refrescar por sí mismo el schema privado ya cacheado por ChatGPT Web. La corrección hace que ese drift no pierda el proyecto cuando existe un único root inequívoco; un chat nuevo sigue siendo la forma de obtener el schema dedicado actualizado.

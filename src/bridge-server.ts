@@ -37,6 +37,11 @@ const largeOutputExemptTools = new Set([
   "blender_review_bundle",
 ]);
 const noticeInspectionTools = new Set(["bridge_notice_status", "bridge_notice_drain"]);
+const mssrRouteTools = new Set([
+  "skill_recommend",
+  "skill_route_plan",
+  "skill_bootstrap",
+]);
 const mssrBootstrapTools = new Set([
   "project_context_load",
   "workflow_guide_recommend",
@@ -66,6 +71,7 @@ const mssrExemptTools = new Set([
   "bridge_notice_drain",
 ]);
 const sessionProjects = new Map<string, string>();
+const sessionProjectRoots = new Map<string, string>();
 const sessionTaskKeys = new Map<string, string>();
 const sessionWorkflowKeys = new Map<string, string>();
 const unroutedWarnings = new Map<string, number>();
@@ -280,6 +286,22 @@ function delegatedArgs(toolName: string, args: Record<string, unknown>): { toolN
   return { toolName, args };
 }
 
+function withInheritedProjectRoot(toolName: string, args: Record<string, unknown>, projectRoot?: string): Record<string, unknown> {
+  if (!projectRoot) return args;
+  const delegated = delegatedArgs(toolName, args);
+  if (!mssrRouteTools.has(delegated.toolName)) return args;
+  if (typeof delegated.args.projectRoot === "string" && delegated.args.projectRoot.trim()) return args;
+  if (delegated.toolName === toolName) return { ...args, projectRoot };
+  if ((toolName === "bridge_tool_query" || toolName === "bridge_tool_action")
+      && args.arguments && typeof args.arguments === "object" && !Array.isArray(args.arguments)) {
+    return {
+      ...args,
+      arguments: { ...(args.arguments as Record<string, unknown>), projectRoot },
+    };
+  }
+  return args;
+}
+
 function emittedTraceId(value: unknown): string | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
@@ -310,6 +332,11 @@ function taskKeyFromText(value: unknown): string | undefined {
   if (typeof value !== "string" || !value.trim()) return undefined;
   const normalized = value.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
   return `task_${createHash("sha256").update(normalized).digest("hex").slice(0, 16)}`;
+}
+
+function projectRootScopeKey(sessionKey: string | undefined, workflowKey: string | undefined): string | undefined {
+  if (!sessionKey) return undefined;
+  return `${sessionKey}:${workflowKey ?? ""}`;
 }
 
 function resolveProject(toolName: string, args: Record<string, unknown>, host: BridgeMetricProfile): string | undefined {
@@ -423,6 +450,7 @@ type BridgeServerSurface = {
 function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
   const modularToolRegistry = createDefaultToolRegistry();
   const pendingContextProjects = new Set<string>();
+  const pendingContextRoots = new Set<string>();
   let localTaskKey: string | undefined;
   let localWorkflowKey: string | undefined;
   const mssrTraceSession = createMssrTraceSessionCoordinator(modularToolRegistry.tools, {
@@ -466,8 +494,28 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
       (request.params.arguments ?? {}) as Record<string, unknown>,
       hostProfile,
     );
-    const effectiveCall = delegatedArgs(name, profiledArgs);
-    const observedProject = projectFromArgs(name, profiledArgs);
+    if (name === "project_context_load") {
+      const loadedRoot = typeof profiledArgs.projectRoot === "string" ? profiledArgs.projectRoot.trim() : "";
+      if (loadedRoot) {
+        pendingContextRoots.add(loadedRoot);
+        const scopeKey = projectRootScopeKey(hostProfile.sessionKey, normalizeWorkflowKey(profiledArgs.workflowKey));
+        if (scopeKey) {
+          sessionProjectRoots.delete(scopeKey);
+          sessionProjectRoots.set(scopeKey, loadedRoot);
+          while (sessionProjectRoots.size > maxScopedMetricEntries) {
+            const oldest = sessionProjectRoots.keys().next().value;
+            if (typeof oldest !== "string") break;
+            sessionProjectRoots.delete(oldest);
+          }
+        }
+      }
+    }
+    const rootScopeKey = projectRootScopeKey(hostProfile.sessionKey, normalizeWorkflowKey(profiledArgs.workflowKey));
+    const inheritedProjectRoot = (rootScopeKey ? sessionProjectRoots.get(rootScopeKey) : undefined)
+      ?? (pendingContextRoots.size === 1 ? [...pendingContextRoots][0] : undefined);
+    const scopedArgs = withInheritedProjectRoot(name, profiledArgs, inheritedProjectRoot);
+    const effectiveCall = delegatedArgs(name, scopedArgs);
+    const observedProject = projectFromArgs(name, scopedArgs);
     if (name === "project_context_load" && observedProject) pendingContextProjects.add(observedProject);
     if (name === "project_context_load") {
       const nextTaskKey = taskKeyFromText(profiledArgs.task);
@@ -528,11 +576,11 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
       && activeTraceBeforeCall.project !== "unknown"
       ? activeTraceBeforeCall.project
       : undefined;
-    const resolvedCallProject = resolveProject(name, profiledArgs, hostProfile);
+    const resolvedCallProject = resolveProject(name, scopedArgs, hostProfile);
     const project = startsNewRoute
       ? observedProject ?? pendingProject ?? resolvedCallProject
       : activeTraceProject ?? resolvedCallProject ?? pendingProject;
-    const prepared = mssrTraceSession.prepare(name, profiledArgs, {
+    const prepared = mssrTraceSession.prepare(name, scopedArgs, {
       caller: hostProfile.caller,
       sessionKey: hostProfile.sessionKey,
       project,
@@ -625,6 +673,7 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
       for (const notice of mssrTraceSession.observe(name, args, result)) emitBridgeNotice(notice);
       if (startsNewRoute && emittedTraceId(result)) {
         pendingContextProjects.clear();
+        pendingContextRoots.clear();
       }
       return complete(result);
     } catch (error) {
