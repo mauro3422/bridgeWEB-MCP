@@ -19,6 +19,28 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-08-08 — Studio cerrado degradaba rutas MSSR ajenas a Roblox
+
+**Estado:** Corregido, publicado y verificado en runtime vivo `0.6.73`.
+
+**Capa / owner:** discovery de providers y adaptación MSSR en `src/integrations/roblox-mcp-client.ts` y `src/tools/skill-catalog-tools.ts`.
+
+**Síntoma:** con Roblox Studio cerrado, `skill_route_plan` y `skill_bootstrap` incluían `sourceHealth.roblox.status=degraded` y un warning en tareas Git/código que no requerían Roblox.
+
+**Reproducción mínima:** conservar el catálogo last-known, cerrar Studio y planificar una ruta estructurada con `domains=[git,coding]`. Antes del fix la respuesta incluía salud/warnings Roblox; una ruta explícitamente Roblox y la ruta ajena producían la misma atención de provider.
+
+**Causa:** el discovery no bloqueante reutilizaba metadata cacheada intencionalmente, pero la clasificaba como fallo vivo `degraded`; además todas las rutas consultaban Roblox por defecto aunque un intent estructurado excluyera ese dominio.
+
+**Corrección aplicada:** la metadata last-known usada sólo para discovery se clasifica como `cached` sin warning global. Las rutas estructuradas no Roblox omiten esa fuente opcional; las rutas Roblox conservan el gate vivo y proyectan `catalog-degraded` hasta que Studio responda.
+
+**Regresión:** `test-v060-tools.mjs` exige `cached` sin warning, ausencia total de `sourceHealth.roblox` en una ruta Git/código y ausencia de warnings Roblox. `test-mssr-system-awareness.mjs` exige que `cached` siga siendo degradado dentro de una ruta Roblox. La suite completa pasó.
+
+**Persistencia:** Bridge `c5e15eb4477db496ee5b03f64858a7562ef8ee57`, publicado con HEAD, tracking y ref remota directa coincidentes. Reinicio HTTP `6a07b468-d44e-4359-b37b-5806f0cd5d25` confirmado; runtime `0.6.73` live/ready.
+
+**Seguimiento:** cerrado. Studio cerrado es normal fuera del dominio Roblox; dentro de Roblox debe seguir requiriéndose evidencia viva antes de ejecutar.
+
+---
+
 ## 2026-08-07 — Outcome MSSR exitoso aceptado con close/maintenance obsoleto
 
 **Estado:** Corregido, publicado y verificado en runtime vivo `0.6.67`.
