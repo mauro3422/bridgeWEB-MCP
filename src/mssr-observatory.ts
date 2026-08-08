@@ -3,6 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
+import {
+  MSSR_CHECKPOINT_TYPES,
+  MSSR_OUTCOME_DIMENSION_STATUSES,
+  MSSR_OUTCOME_EVIDENCE_KINDS,
+  type MssrCheckpointType,
+  type MssrOutcomeDimensionStatus,
+  type MssrOutcomeEvidenceKind,
+} from "@mauroprime/mssr";
 import { SERVER_NAME, SERVER_VERSION } from "./config.js";
 import { getTraceToolEvidence } from "./metrics.js";
 import { normalizeModelIdentifier, RUNTIME_BOOT_ID } from "./runtime-identity.js";
@@ -27,28 +35,17 @@ type SqliteModule = {
   DatabaseSync: new (filename: string) => DatabaseSync;
 };
 
-export const MSSR_CHECKPOINT_TYPES = [
-  "phase_completed",
-  "verification",
-  "persistence",
-  "progress",
-  "outcome",
-  "friction",
-  "context_used",
-  "replan",
-] as const;
+export {
+  MSSR_CHECKPOINT_TYPES,
+  MSSR_OUTCOME_DIMENSION_STATUSES,
+  MSSR_OUTCOME_EVIDENCE_KINDS,
+} from "@mauroprime/mssr";
 
-export const MSSR_OUTCOME_EVIDENCE_KINDS = [
-  "manifest",
-  "tests",
-  "runtime",
-  "user-confirmation",
-  "manual-review",
-  "mixed",
-  "other",
-] as const;
-
-export const MSSR_OUTCOME_DIMENSION_STATUSES = ["success", "degraded", "failed", "skipped", "pending"] as const;
+export type {
+  MssrCheckpointType,
+  MssrOutcomeDimensionStatus,
+  MssrOutcomeEvidenceKind,
+} from "@mauroprime/mssr";
 
 export const MSSR_CONTEXT_SOURCES = [
   "current-conversation",
@@ -61,10 +58,7 @@ export const MSSR_CONTEXT_SOURCES = [
   "other",
 ] as const;
 
-export type MssrCheckpointType = typeof MSSR_CHECKPOINT_TYPES[number];
 export type MssrContextSource = typeof MSSR_CONTEXT_SOURCES[number];
-export type MssrOutcomeEvidenceKind = typeof MSSR_OUTCOME_EVIDENCE_KINDS[number];
-export type MssrOutcomeDimensionStatus = typeof MSSR_OUTCOME_DIMENSION_STATUSES[number];
 export type MssrObservatoryScope = "active" | "all";
 
 const DELEGATED_QUERY_TOOL = "bridge_tool_query";

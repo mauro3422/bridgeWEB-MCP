@@ -1,4 +1,13 @@
 import { createHash } from "node:crypto";
+import {
+  hasFreshMaintenanceClose,
+  missingRequiredSkills,
+  reduceMssrCheckpointLifecycle,
+  reduceMssrRouteLifecycle,
+  reduceMssrSkillLoadLifecycle,
+  validateMssrCheckpointLifecycle,
+  type MssrTraceLifecycleState,
+} from "@mauroprime/mssr";
 import type { BridgeNoticeAction, BridgeNoticeInput } from "./notices.js";
 import { findPersistedMssrTraceCandidates, readPersistedMssrTraceState } from "./mssr-observatory.js";
 import { normalizeModelIdentifier } from "./runtime-identity.js";
@@ -36,6 +45,37 @@ type ActiveTraceState = {
   closureReminderVersion: number;
   progressLeaseUntil: number;
 };
+
+function portableLifecycle(state: ActiveTraceState): MssrTraceLifecycleState {
+  return {
+    stage: state.stage as MssrTraceLifecycleState["stage"],
+    requiredSkills: [...state.requiredSkills],
+    selectedSkills: [...state.selectedSkills],
+    loadedSkills: [...state.loadedSkills],
+    routeCount: state.routeCount,
+    closed: state.closed,
+    maintenanceRequired: state.maintenanceRequired,
+    lifecycleRevision: state.lifecycleRevision,
+    closeRevision: state.closeRevision,
+    maintenanceRevision: state.maintenanceRevision,
+  };
+}
+
+function applyPortableLifecycle(
+  state: ActiveTraceState,
+  lifecycle: MssrTraceLifecycleState,
+): void {
+  state.stage = lifecycle.stage;
+  state.requiredSkills = new Set(lifecycle.requiredSkills);
+  state.selectedSkills = new Set(lifecycle.selectedSkills);
+  state.loadedSkills = new Set(lifecycle.loadedSkills);
+  state.routeCount = lifecycle.routeCount;
+  state.closed = lifecycle.closed;
+  state.maintenanceRequired = lifecycle.maintenanceRequired;
+  state.lifecycleRevision = lifecycle.lifecycleRevision;
+  state.closeRevision = lifecycle.closeRevision;
+  state.maintenanceRevision = lifecycle.maintenanceRevision;
+}
 
 const ROUTE_TOOLS = new Set(["skill_recommend", "skill_route_plan", "skill_bootstrap"]);
 const TRACE_QUERY_TOOLS = new Set(["mssr_observatory_query"]);
@@ -93,54 +133,6 @@ function schemaPropertyExists(schema: ToolSchemaLike, propertyName: string): boo
   return Boolean(properties && Object.prototype.hasOwnProperty.call(properties, propertyName));
 }
 
-function routeSkills(value: unknown): Array<{ name: string; required: boolean }> {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
-    const record = asRecord(item);
-    if (!record || typeof record.name !== "string") return [];
-    return [{ name: record.name, required: record.required === true }];
-  });
-}
-
-function loadedSkillNames(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
-    const record = asRecord(item);
-    const skill = asRecord(record?.skill);
-    if (!record || record.loaded !== true || typeof skill?.name !== "string") return [];
-    return [skill.name];
-  });
-}
-
-function missingRequired(state: ActiveTraceState | null): string[] {
-  if (!state) return [];
-  return [...state.requiredSkills].filter((name) => !state.loadedSkills.has(name)).sort();
-}
-
-function routeRequiresMaintenance(record: JsonRecord): boolean {
-  const coverage = asRecord(record.coverage);
-  if (Array.isArray(coverage?.requiredPhases) && coverage.requiredPhases.includes("maintenance")) return true;
-  const phasePlan = Array.isArray(record.phasePlan) ? record.phasePlan : [];
-  return phasePlan.some((item) => {
-    const phase = asRecord(item);
-    return phase?.phase === "maintenance" && phase.required === true;
-  });
-}
-
-function maintenanceCompleted(args: JsonRecord): boolean {
-  return args.eventType === "phase_completed"
-    && args.stage === "close"
-    && args.status === "success"
-    && Array.isArray(args.completedPhases)
-    && args.completedPhases.includes("maintenance");
-}
-
-function hasFreshMaintenanceClose(state: ActiveTraceState): boolean {
-  return !state.maintenanceRequired
-    || (state.closeRevision === state.lifecycleRevision
-      && state.maintenanceRevision === state.lifecycleRevision);
-}
-
 function notice(
   severity: "info" | "warning" | "error",
   code: string,
@@ -190,7 +182,7 @@ function candidateDetails(candidates: ActiveTraceState[]): JsonRecord {
       caller: state.caller,
       sessionKey: state.sessionKey,
       project: state.project,
-      missingRequiredSkills: missingRequired(state),
+      missingRequiredSkills: missingRequiredSkills(portableLifecycle(state)),
       ageMs: Math.max(0, Date.now() - state.updatedAt),
     })),
   };
@@ -312,7 +304,7 @@ export function createMssrTraceSessionCoordinator(
           baseIdleMs: closureIdleMs,
           progressLeaseUntil: current.progressLeaseUntil > 0 ? new Date(current.progressLeaseUntil).toISOString() : null,
           activityVersion,
-          missingRequiredSkills: missingRequired(current),
+          missingRequiredSkills: missingRequiredSkills(portableLifecycle(current)),
           limitation: "Bridge observes MCP lifecycle, not whether ChatGPT rendered final text.",
         },
         `mssr-web-outcome-missing-after-idle:${current.traceId}:${activityVersion}`,
@@ -490,7 +482,7 @@ export function createMssrTraceSessionCoordinator(
 
   function boundaryNotice(toolName: string, stageOrEvent: string, state: ActiveTraceState | null): BridgeNoticeInput[] {
     if (!state || state.closed) return [];
-    const missing = missingRequired(state);
+    const missing = missingRequiredSkills(portableLifecycle(state));
     if (missing.length === 0) return [];
     return [notice(
       "warning",
@@ -679,8 +671,13 @@ export function createMssrTraceSessionCoordinator(
     if (toolName === "mssr_trace_record") {
       const eventType = typeof args.eventType === "string" ? args.eventType : "";
       if (TRACE_BOUNDARY_EVENTS.has(eventType)) notices.push(...boundaryNotice(toolName, eventType, state));
-      const missing = missingRequired(state);
-      if (eventType === "outcome" && args.status === "success" && state && !state.closed && missing.length > 0) {
+      const lifecycleViolations = validateMssrCheckpointLifecycle(
+        state ? portableLifecycle(state) : null,
+        args,
+      );
+      const lifecycleBlock = lifecycleViolations.find((item) => item.blocking);
+      if (state && lifecycleBlock?.code === "mssr-success-outcome-blocked-required-skills") {
+        const missing = lifecycleBlock.missingSkills ?? [];
         const blocked = {
           code: "mssr-success-outcome-blocked-required-skills",
           message: `No se puede cerrar con éxito la traza ${state.traceId}: faltan ${missing.length} skill(s) requerida(s).`,
@@ -701,7 +698,7 @@ export function createMssrTraceSessionCoordinator(
         ));
         return { args, notices, blocked };
       }
-      if (eventType === "outcome" && args.status === "success" && state && !state.closed && !hasFreshMaintenanceClose(state)) {
+      if (state && lifecycleBlock?.code === "mssr-success-outcome-blocked-stale-close") {
         const blocked = {
           code: "mssr-success-outcome-blocked-stale-close",
           message: `No se puede cerrar con éxito la traza ${state.traceId}: el último cierre con maintenance quedó stale después de trabajo o persistencia posterior.`,
@@ -757,18 +754,17 @@ export function createMssrTraceSessionCoordinator(
     if (ROUTE_TOOLS.has(toolName) && record && validTraceId(record.traceId)) {
       const traceId = String(record.traceId).trim();
       const previous = sharedTraces.get(traceId);
-      const skills = routeSkills(record.activeSkills);
       const now = Date.now();
       const stage = typeof record.stage === "string" ? record.stage : typeof args.stage === "string" ? args.stage : "start";
-      const previousRevision = previous?.lifecycleRevision ?? 0;
-      const lifecycleRevision = previous
-        ? (stage === "close" ? previousRevision : previousRevision + 1)
-        : 1;
+      const lifecycle = reduceMssrRouteLifecycle(
+        previous ? portableLifecycle(previous) : null,
+        { ...record, stage },
+      );
       const state: ActiveTraceState = {
         traceId,
         workflowKey: previous?.workflowKey
           ?? (normalizedText(record.workflowKey, 80) || normalizedText(args.workflowKey, 80) || "unscoped"),
-        stage,
+        stage: lifecycle.stage,
         taskHash: taskFingerprint(args.task),
         caller: normalizedCaller(args.caller ?? hostContext.caller),
         model: normalizeModelIdentifier(asRecord(record.agentProfile)?.model ?? args.model),
@@ -777,21 +773,15 @@ export function createMssrTraceSessionCoordinator(
           || "unknown",
         sessionKey: previous && previous.sessionKey !== "unknown" ? previous.sessionKey : hostContext.sessionKey,
         project: previous && previous.project !== "unknown" ? previous.project : hostContext.project,
-        requiredSkills: new Set([
-          ...(previous ? previous.requiredSkills : []),
-          ...skills.filter((skill) => skill.required).map((skill) => skill.name),
-        ]),
-        selectedSkills: new Set([
-          ...(previous ? previous.selectedSkills : []),
-          ...skills.map((skill) => skill.name),
-        ]),
-        loadedSkills: previous ? new Set(previous.loadedSkills) : new Set<string>(),
-        routeCount: previous ? previous.routeCount + 1 : 1,
-        closed: false,
-        maintenanceRequired: previous?.maintenanceRequired === true || routeRequiresMaintenance(record),
-        lifecycleRevision,
-        closeRevision: stage === "close" ? lifecycleRevision : previous?.closeRevision ?? 0,
-        maintenanceRevision: previous?.maintenanceRevision ?? 0,
+        requiredSkills: new Set(lifecycle.requiredSkills),
+        selectedSkills: new Set(lifecycle.selectedSkills),
+        loadedSkills: new Set(lifecycle.loadedSkills),
+        routeCount: lifecycle.routeCount,
+        closed: lifecycle.closed,
+        maintenanceRequired: lifecycle.maintenanceRequired,
+        lifecycleRevision: lifecycle.lifecycleRevision,
+        closeRevision: lifecycle.closeRevision,
+        maintenanceRevision: lifecycle.maintenanceRevision,
         updatedAt: now,
         lastRoutePlannedAt: now,
         lastToolCompletedAt: previous?.lastToolCompletedAt ?? null,
@@ -801,7 +791,6 @@ export function createMssrTraceSessionCoordinator(
         progressLeaseUntil: previous?.progressLeaseUntil ?? 0,
       };
       if (toolName === "skill_bootstrap") {
-        for (const name of loadedSkillNames(record.loaded)) state.loadedSkills.add(name);
         if (TRACE_BOUNDARY_STAGES.has(state.stage)) {
           notices.push(...boundaryNotice(toolName, state.stage, state));
         }
@@ -817,7 +806,8 @@ export function createMssrTraceSessionCoordinator(
       const state = sharedTraces.get(String(record.traceId));
       const name = typeof args.name === "string" ? args.name : "";
       if (state && name) {
-        state.loadedSkills.add(name);
+        const lifecycle = reduceMssrSkillLoadLifecycle(portableLifecycle(state), name);
+        applyPortableLifecycle(state, lifecycle);
         adopt(state);
       }
     }
@@ -830,18 +820,12 @@ export function createMssrTraceSessionCoordinator(
           state.progressLeaseUntil = Date.now() + leaseMs;
           state.updatedAt = Date.now();
         }
-        if (args.eventType === "persistence") {
-          state.lifecycleRevision += 1;
-        }
-        if (maintenanceCompleted(args) && state.closeRevision === state.lifecycleRevision) {
-          state.maintenanceRevision = state.lifecycleRevision;
-        }
+        const lifecycle = reduceMssrCheckpointLifecycle(portableLifecycle(state), args);
+        applyPortableLifecycle(state, lifecycle);
         if (args.eventType === "outcome") {
-          state.closed = true;
           state.progressLeaseUntil = 0;
           clearClosureTimer(state.traceId);
         }
-        if (typeof args.stage === "string") state.stage = args.stage;
         adopt(state);
         if (args.eventType !== "outcome") scheduleClosureReminder(state, toolName);
       }
@@ -872,10 +856,10 @@ export function createMssrTraceSessionCoordinator(
       lifecycleRevision: state?.lifecycleRevision ?? 0,
       closeRevision: state?.closeRevision ?? 0,
       maintenanceRevision: state?.maintenanceRevision ?? 0,
-      maintenanceCloseFresh: state ? hasFreshMaintenanceClose(state) : true,
+      maintenanceCloseFresh: state ? hasFreshMaintenanceClose(portableLifecycle(state)) : true,
       requiredSkills: state ? [...state.requiredSkills].sort() : [],
       loadedSkills: state ? [...state.loadedSkills].sort() : [],
-      missingRequiredSkills: missingRequired(state),
+      missingRequiredSkills: state ? missingRequiredSkills(portableLifecycle(state)) : [],
       progressLeaseUntil: state?.progressLeaseUntil ? new Date(state.progressLeaseUntil).toISOString() : null,
       progressLeaseRemainingMs: state ? Math.max(0, state.progressLeaseUntil - Date.now()) : 0,
       sharedOpenTraces: openSharedTraces().length,

@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { MSSR_TRACE_CONTRACT_VERSION } from "@mauroprime/mssr";
 
-export const MSSR_TRACE_CONTRACT_VERSION = "trace-contract-v1";
+export { MSSR_TRACE_CONTRACT_VERSION } from "@mauroprime/mssr";
 
 export type MssrObservabilityEpochState = {
   schemaVersion: 1;
