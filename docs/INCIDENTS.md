@@ -21,7 +21,7 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ## 2026-08-08 — OpenCode no aparecía en MSSR y Errores perdía cada letra `s`
 
-**Estado:** Corregido en fuente `0.6.74`; pendiente de readback del runtime vivo al registrar este incidente.
+**Estado:** Corregido, publicado y verificado en runtime vivo `0.6.74`.
 
 **Capa/owner:** transporte HTTP y proyección dashboard de `bridge-mcp`; contrato de host compartido en `@mauroprime/mssr`.
 
@@ -35,7 +35,7 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 **Regresión:** `scripts/test-mssr-http-telemetry.mjs` prueba proceso fresco, 401 sin token, aceptación/deduplicación autenticada, 0 outcomes antes del checkpoint explícito, superficie OpenCode, outcome explícito y HTML servido. `scripts/test-bridge-http.ps1` repite token y escaping contra runtime vivo.
 
-**Seguimiento:** publicar MSSR antes del Bridge, reiniciar `0.6.74` y ejecutar una ruta real desde OpenCode CLI hasta el dashboard.
+**Seguimiento:** MSSR y Bridge quedaron publicados; el runtime `affe8242-72df-4d61-8ef8-5d0864107436` pasó el smoke HTTP vivo. La ruta del adaptador OpenCode `mssr-opencode-e0fb7eef-bf3f-4250-aab4-ce23e10c3bb0` llegó al dashboard con caller `opencode-local`, verificación, persistencia y outcome `closed-success`. El proceso de modelo Terra no llegó a ejecutar el agente por credenciales externas (balance OpenCode y API key OpenAI), por lo que modelo y esfuerzo se conservan honestamente como no expuestos.
 
 ---
 
