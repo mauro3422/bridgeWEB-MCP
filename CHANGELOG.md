@@ -330,6 +330,13 @@
 
 # Changelog
 
+## 0.6.77 — 2026-08-08
+
+- Tighten `git_restore_file` input schema so callers cannot request the invalid
+  `staged=false` plus `worktree=false` combination that the handler already rejects.
+- Add regression coverage for the schema guard while preserving the normal
+  worktree restore default.
+
 ## 0.6.76 — 2026-08-08
 
 - Correlate OpenCode host identity with MSSR lifecycle profiles only through an

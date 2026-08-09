@@ -758,6 +758,8 @@ try {
   if (!branch.created) throw new Error('git branch creation failed');
   const compare = await call('git_compare_branches',{cwd:root,base:'main',head:'fixture-branch'});
   if (compare.diff.code !== 0 || compare.commits.code !== 0) throw new Error('git compare failed');
+  const restoreTool = registry.tools.find((tool) => tool.name === 'git_restore_file');
+  if (!restoreTool?.inputSchema?.not) throw new Error('git restore schema must reject staged=false + worktree=false');
   const restored = await call('git_restore_file',{cwd:root,path:'app.txt'});
   const restoredText = fs.readFileSync(path.join(root,'app.txt'),'utf8').replace(/\r\n/g,'\n');
   if (!restored.restored || restoredText !== 'original\n') throw new Error('git restore failed');
@@ -844,4 +846,3 @@ try {
   closeMetricsForTests();
   fs.rmSync(sandbox,{recursive:true,force:true});
 }
-
