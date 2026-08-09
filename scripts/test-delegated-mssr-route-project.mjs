@@ -348,6 +348,17 @@ try {
   assert.equal(legacyDispatchMetric?.trace_id, concurrentTraceB.traceId);
 
 
+  const missingCarryoverRoot = path.join(projectRoot, "missing-context-root");
+  await assert.rejects(
+    () => call("project_context_load", {
+      projectRoot: missingCarryoverRoot,
+      task: "This failed context load must not poison later project-root carryover.",
+      workflowKey: "failed-project-root-carryover-regression",
+    }),
+    /ENOENT|no such file or directory/i,
+  );
+
+
   const carryoverWorkflowKey = "project-root-carryover-regression";
   await call("project_context_load", {
     projectRoot,
@@ -415,3 +426,4 @@ if (sessionMode === "named") {
   );
   process.stdout.write(anonymous.stdout);
 }
+

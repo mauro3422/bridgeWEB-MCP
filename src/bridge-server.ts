@@ -494,29 +494,12 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
       (request.params.arguments ?? {}) as Record<string, unknown>,
       hostProfile,
     );
-    if (name === "project_context_load") {
-      const loadedRoot = typeof profiledArgs.projectRoot === "string" ? profiledArgs.projectRoot.trim() : "";
-      if (loadedRoot) {
-        pendingContextRoots.add(loadedRoot);
-        const scopeKey = projectRootScopeKey(hostProfile.sessionKey, normalizeWorkflowKey(profiledArgs.workflowKey));
-        if (scopeKey) {
-          sessionProjectRoots.delete(scopeKey);
-          sessionProjectRoots.set(scopeKey, loadedRoot);
-          while (sessionProjectRoots.size > maxScopedMetricEntries) {
-            const oldest = sessionProjectRoots.keys().next().value;
-            if (typeof oldest !== "string") break;
-            sessionProjectRoots.delete(oldest);
-          }
-        }
-      }
-    }
     const rootScopeKey = projectRootScopeKey(hostProfile.sessionKey, normalizeWorkflowKey(profiledArgs.workflowKey));
     const inheritedProjectRoot = (rootScopeKey ? sessionProjectRoots.get(rootScopeKey) : undefined)
       ?? (pendingContextRoots.size === 1 ? [...pendingContextRoots][0] : undefined);
     const scopedArgs = withInheritedProjectRoot(name, profiledArgs, inheritedProjectRoot);
     const effectiveCall = delegatedArgs(name, scopedArgs);
     const observedProject = projectFromArgs(name, scopedArgs);
-    if (name === "project_context_load" && observedProject) pendingContextProjects.add(observedProject);
     if (name === "project_context_load") {
       const nextTaskKey = taskKeyFromText(profiledArgs.task);
       const nextWorkflowKey = normalizeWorkflowKey(profiledArgs.workflowKey);
@@ -670,6 +653,23 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
       }
       if (!modularToolRegistry.has(name)) throw new Error(`Unknown tool: ${name}`);
       const result = await modularToolRegistry.call(name, args);
+      if (name === "project_context_load") {
+        const loadedRoot = typeof profiledArgs.projectRoot === "string" ? profiledArgs.projectRoot.trim() : "";
+        if (loadedRoot) {
+          pendingContextRoots.add(loadedRoot);
+          const scopeKey = projectRootScopeKey(hostProfile.sessionKey, normalizeWorkflowKey(profiledArgs.workflowKey));
+          if (scopeKey) {
+            sessionProjectRoots.delete(scopeKey);
+            sessionProjectRoots.set(scopeKey, loadedRoot);
+            while (sessionProjectRoots.size > maxScopedMetricEntries) {
+              const oldest = sessionProjectRoots.keys().next().value;
+              if (typeof oldest !== "string") break;
+              sessionProjectRoots.delete(oldest);
+            }
+          }
+        }
+        if (observedProject) pendingContextProjects.add(observedProject);
+      }
       for (const notice of mssrTraceSession.observe(name, args, result)) emitBridgeNotice(notice);
       if (startsNewRoute && emittedTraceId(result)) {
         pendingContextProjects.clear();
