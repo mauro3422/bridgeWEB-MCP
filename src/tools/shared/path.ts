@@ -146,11 +146,14 @@ export function assertPathAllowed(target: string, access: ToolPathAccess = "read
   const policy = getPathPolicy();
   if (!policy.enabled || access === "internal") return resolved;
 
-  const allowed = policy.allowedRoots.some((root) => {
+  const resolvedAllowed = policy.allowedRoots.some((root) =>
+    isWithin(normalizeForCompare(root), normalizeForCompare(resolved)),
+  );
+  const canonicalAllowed = policy.allowedRoots.some((root) => {
     const canonicalRoot = canonicalizePotentialPath(root);
-    return isWithin(normalizeForCompare(root), normalizeForCompare(resolved))
-      && isWithin(normalizeForCompare(canonicalRoot), normalizeForCompare(canonical));
+    return isWithin(normalizeForCompare(canonicalRoot), normalizeForCompare(canonical));
   });
+  const allowed = resolvedAllowed && canonicalAllowed;
   if (!allowed) {
     throw new Error(`Path is outside bridge-mcp allowed roots: ${resolved}. Allowed roots: ${policy.allowedRoots.join(", ")}`);
   }
