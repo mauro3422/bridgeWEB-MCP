@@ -11,6 +11,17 @@ const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", "coverage", 
 const DEFAULT_MAX_FILES = 1000;
 const DEFAULT_MAX_FILE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_MAX_TOTAL_BYTES = 25 * 1024 * 1024;
+const DEFAULT_MAX_SNAPSHOT_STORAGE_BYTES = 1024 * 1024 * 1024;
+
+function snapshotStorageLimitBytes() {
+  const raw = process.env.BRIDGE_MCP_SNAPSHOT_MAX_STORAGE_BYTES?.trim();
+  if (!raw) return DEFAULT_MAX_SNAPSHOT_STORAGE_BYTES;
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed < 1024 * 1024) {
+    throw new Error("BRIDGE_MCP_SNAPSHOT_MAX_STORAGE_BYTES must be an integer >= 1048576.");
+  }
+  return parsed;
+}
 
 type SnapshotFile = { path: string; bytes: number; sha256: string };
 type SnapshotManifest = {
@@ -139,6 +150,31 @@ async function gitSnapshot(root: string) {
   return { head: String(head.stdout ?? "").trim() || null, status: String(status.stdout ?? "").trim() || null };
 }
 
+async function snapshotStorageUsage() {
+  await fs.mkdir(SNAPSHOT_ROOT, { recursive: true });
+  let bytes = 0;
+  async function measure(current: string) {
+    const entries = await fs.readdir(current, { withFileTypes: true });
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) await measure(full);
+      else if (entry.isFile()) bytes += (await fs.stat(full)).size;
+    }
+  }
+  await measure(SNAPSHOT_ROOT);
+  return { bytes, limitBytes: snapshotStorageLimitBytes() };
+}
+
+let snapshotCreationTail: Promise<void> = Promise.resolve();
+async function serializeSnapshotCreation<T>(work: () => Promise<T>): Promise<T> {
+  const previous = snapshotCreationTail;
+  let release!: () => void;
+  snapshotCreationTail = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  try { return await work(); }
+  finally { release(); }
+}
+
 async function createWorkspaceSnapshot(projectRoot: string | undefined, maxFiles: number, maxFileBytes: number, maxTotalBytes: number, label: string | undefined) {
   const root = resolveToolPath(projectRoot ?? process.cwd(), { access: "read" });
   const stat = await fs.stat(root);
@@ -149,6 +185,11 @@ async function createWorkspaceSnapshot(projectRoot: string | undefined, maxFiles
   try {
     await fs.mkdir(contentDir, { recursive: true });
     const scan = await scanWorkspace(root, maxFiles, maxFileBytes, maxTotalBytes, true);
+    const storage = await snapshotStorageUsage();
+    const projectedBytes = storage.bytes + scan.totalBytes;
+    if (projectedBytes > storage.limitBytes) {
+      throw new Error(`Workspace snapshot storage quota exceeded: ${storage.bytes} bytes already stored + ${scan.totalBytes} bytes requested > ${storage.limitBytes} byte limit. Existing snapshots were preserved; inspect workspace_snapshot_list and prune only with an explicit reviewed plan, or raise BRIDGE_MCP_SNAPSHOT_MAX_STORAGE_BYTES when disk capacity justifies it.`);
+    }
     for (const file of scan.files) {
       const destination = snapshotContentPath(contentDir, file.path);
       await fs.mkdir(path.dirname(destination), { recursive: true });
@@ -267,7 +308,18 @@ async function listSnapshots(limit: number) {
     } catch { /* ignore invalid snapshot directories */ }
   }
   manifests.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return { snapshotRoot: SNAPSHOT_ROOT, count: manifests.length, snapshots: manifests.slice(0, limit) };
+  const storage = await snapshotStorageUsage();
+  return {
+    snapshotRoot: SNAPSHOT_ROOT,
+    count: manifests.length,
+    storage: {
+      bytes: storage.bytes,
+      limitBytes: storage.limitBytes,
+      remainingBytes: Math.max(0, storage.limitBytes - storage.bytes),
+      utilization: storage.limitBytes > 0 ? Math.round((storage.bytes / storage.limitBytes) * 10000) / 100 : 100,
+    },
+    snapshots: manifests.slice(0, limit),
+  };
 }
 
 export const workspaceToolModule: BridgeToolModule = {
@@ -279,7 +331,7 @@ export const workspaceToolModule: BridgeToolModule = {
     { name: "workspace_snapshot_list", description: "List recent workspace snapshots with roots, timestamps, sizes, and Git metadata.", inputSchema: { type: "object", properties: { limit: { type: "number", default: 20, minimum: 1, maximum: 200 } }, additionalProperties: false } },
   ],
   handlers: {
-    workspace_snapshot: async (args) => { const p = z.object({ projectRoot: z.string().optional(), label: z.string().max(200).optional(), maxFiles: z.number().int().min(1).max(5000).default(DEFAULT_MAX_FILES), maxFileBytes: z.number().int().min(1024).max(10 * 1024 * 1024).default(DEFAULT_MAX_FILE_BYTES), maxTotalBytes: z.number().int().min(1024).max(100 * 1024 * 1024).default(DEFAULT_MAX_TOTAL_BYTES) }).parse(args); return createWorkspaceSnapshot(p.projectRoot, p.maxFiles, p.maxFileBytes, p.maxTotalBytes, p.label); },
+    workspace_snapshot: async (args) => { const p = z.object({ projectRoot: z.string().optional(), label: z.string().max(200).optional(), maxFiles: z.number().int().min(1).max(5000).default(DEFAULT_MAX_FILES), maxFileBytes: z.number().int().min(1024).max(10 * 1024 * 1024).default(DEFAULT_MAX_FILE_BYTES), maxTotalBytes: z.number().int().min(1024).max(100 * 1024 * 1024).default(DEFAULT_MAX_TOTAL_BYTES) }).parse(args); return serializeSnapshotCreation(() => createWorkspaceSnapshot(p.projectRoot, p.maxFiles, p.maxFileBytes, p.maxTotalBytes, p.label)); },
     workspace_diff: async (args) => { const p = z.object({ snapshotId: z.string(), projectRoot: z.string().optional(), maxChanges: z.number().int().min(1).max(2000).default(200) }).parse(args); return workspaceDiff(p.snapshotId, p.projectRoot, p.maxChanges); },
     workspace_rollback: async (args) => { const p = z.object({ snapshotId: z.string(), confirmSnapshotId: z.string(), projectRoot: z.string().optional(), removeAddedFiles: z.boolean().default(false) }).parse(args); return rollbackWorkspace(p.snapshotId, p.confirmSnapshotId, p.projectRoot, p.removeAddedFiles); },
     workspace_snapshot_list: async (args) => listSnapshots(z.object({ limit: z.number().int().min(1).max(200).default(20) }).parse(args).limit),
