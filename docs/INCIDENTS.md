@@ -1290,3 +1290,21 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Regresión / verificación:** postflight con `remainingCandidateCount=0`, `protectedMissingCount=0`, 17 directorios reales y segunda selección con cero candidatos. El plan de poda tiene SHA-256 `F5BB3C9EE1AE39CC993C539920C0CC0A9B1B0577C0466BA189BAF0F1E3417A35`.
 
 **Seguimiento:** implementar y probar una política de retención automática antes de considerar cerrado el riesgo de recurrencia. La poda destructiva siempre debe partir de un plan persistido, validar que cada objetivo sea hijo directo del root de snapshots y proteger explícitamente los IDs retenidos.
+
+## 2026-08-11 — `git_multi_repo_publish` dejó validaciones Godot headless activas en Windows
+
+**Estado:** Abierto; publicación recuperada con workaround acotado, prevención pendiente.
+
+**Capa / owner:** runner de validaciones de `git_multi_repo_publish` y lifecycle de procesos hijo en MauroPrime Bridge.
+
+**Síntoma observable:** un preflight cuya validación invocaba `Godot.exe --headless` mediante el call operator `&` de PowerShell agotó el timeout y dejó varios procesos Godot headless activos. Las mismas suites ejecutadas directamente desde PowerShell terminaron en aproximadamente un segundo y pasaron.
+
+**Evidencia mínima:** la publicación de GodotAtlas falló sólo en la validación encapsulada; después del timeout se enumeraron procesos cuyo command line exacto era `Godot.exe --headless --path D:\Dev\GodotAtlas --script res://tests/test_atlas_(editor|services).gd`. Se detuvieron únicamente esos PIDs y la publicación posterior completó sus gates.
+
+**Causa:** No resuelta. La diferencia entre la ejecución encapsulada y la directa apunta al tratamiento del comando PowerShell o al cleanup del árbol de procesos al vencer el timeout; no demuestra un defecto en las suites Godot.
+
+**Corrección aplicada:** se reemplazaron las validaciones npm por `powershell -NoProfile -Command` con `Set-Location`, se ejecutaron las suites Godot directamente fuera del runner y se cerraron sólo los procesos headless identificados por command line. No se cambió todavía el runtime de Bridge.
+
+**Regresión pendiente:** agregar un fixture Windows con ruta de ejecutable que contenga espacios y call operator de PowerShell; forzar timeout y exigir que el proceso y todos sus hijos terminen. El caso nominal debe comprobar también exit code, stdout y ausencia de procesos huérfanos.
+
+**Seguimiento:** reproducir en el owner de `git_multi_repo_publish`, corregir quoting/lifecycle mínimo y publicar únicamente después del gate Windows. El catálogo directo stale observado en la misma tarea ya está cubierto por los incidentes de catálogo del host del 6 y 8 de agosto; no se duplica aquí.
