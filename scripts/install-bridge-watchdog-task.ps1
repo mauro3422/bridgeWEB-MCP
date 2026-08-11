@@ -4,15 +4,34 @@ param(
   [ValidateSet("Stdio", "Http")]
   [string]$WatchdogMode = "Stdio",
   [string]$TaskName = "BridgeMCP Watchdog",
-  [string]$ProjectRoot = "C:\dev\bridge-mcp",
+  [string]$ProjectRoot = "",
   [string]$WatchdogScript = "",
   [string]$StartupFileName = "BridgeMCP-Watchdog.cmd",
   [string]$HttpProfile = "bridge-local-http",
+  [string]$HttpProfileDir = "",
   [string]$HttpTunnelBaseUrl = "http://127.0.0.1:8081",
   [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+  $ProjectRoot = Split-Path -Parent $PSScriptRoot
+}
+$ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
+
+if ($WatchdogMode -eq "Http" -and [string]::IsNullOrWhiteSpace($HttpProfileDir)) {
+  $modernProfileDir = Join-Path $env:USERPROFILE ".config\tunnel-client"
+  $legacyProfileDir = Join-Path $env:APPDATA "tunnel-client"
+  if (Test-Path -LiteralPath (Join-Path $modernProfileDir "$HttpProfile.yaml")) {
+    $HttpProfileDir = $modernProfileDir
+  }
+  elseif (Test-Path -LiteralPath (Join-Path $legacyProfileDir "$HttpProfile.yaml")) {
+    $HttpProfileDir = $legacyProfileDir
+  }
+  else {
+    throw "Tunnel profile '$HttpProfile' was not found in the modern or legacy profile directories."
+  }
+}
 
 if ([string]::IsNullOrWhiteSpace($WatchdogScript)) {
   if ($WatchdogMode -eq "Http") {
@@ -29,7 +48,7 @@ if (-not (Test-Path -LiteralPath $WatchdogScript)) {
 
 function Get-WatchdogArgumentString {
   if ($WatchdogMode -eq "Http") {
-    return "-NoProfile -ExecutionPolicy Bypass -File `"$WatchdogScript`" -ProjectRoot `"$ProjectRoot`" -Profile `"$HttpProfile`" -TunnelBaseUrl `"$HttpTunnelBaseUrl`""
+    return "-NoProfile -ExecutionPolicy Bypass -File `"$WatchdogScript`" -ProjectRoot `"$ProjectRoot`" -Profile `"$HttpProfile`" -TunnelProfileDir `"$HttpProfileDir`" -TunnelBaseUrl `"$HttpTunnelBaseUrl`""
   }
 
   return "-NoProfile -ExecutionPolicy Bypass -File `"$WatchdogScript`" -ProjectRoot `"$ProjectRoot`""

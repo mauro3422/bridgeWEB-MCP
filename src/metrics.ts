@@ -640,7 +640,7 @@ export function getToolAuditMetrics(days = 30, scope: BridgeMetricsScope = "acti
   return { enabled: metricsEnabled, sqliteAvailable: true, scope, days: boundedDays, since, rows: mapped };
 }
 
-function getMetricsProfiles(database: DatabaseSync, scope: BridgeMetricsScope) {
+function getMetricsProfiles(database: DatabaseSync, scope: BridgeMetricsScope, agentProfileLimit = 50) {
   const filter = metricsFilter(scope);
   const surfaces = database.prepare(`
     SELECT COALESCE(caller, 'other') AS caller,
@@ -691,7 +691,8 @@ function getMetricsProfiles(database: DatabaseSync, scope: BridgeMetricsScope) {
       COALESCE(project, 'unknown'),
       COALESCE(session_key, 'unknown'), COALESCE(task_key, 'unknown')
     ORDER BY calls DESC, caller ASC, model ASC, reasoning_effort ASC, project ASC, session_key ASC, task_key ASC
-  `).all(...filter.params);
+    LIMIT ?
+  `).all(...filter.params, Math.max(1, Math.min(200, agentProfileLimit)));
   return { surfaces, agentProfiles };
 }
 
@@ -713,7 +714,7 @@ export function getMetricsSummary(limit = 50, scope: BridgeMetricsScope = "activ
     ORDER BY calls DESC, tool ASC
     LIMIT ?
   `).all(...filter.params, limit);
-  return { ...getMetricsStatus(), scope, summary: rows, ...getMetricsProfiles(sqlite, scope) };
+  return { ...getMetricsStatus(), scope, summary: rows, ...getMetricsProfiles(sqlite, scope, limit) };
 }
 
 export function getRecentMetrics(limit = 25, scope: BridgeMetricsScope = "active") {
@@ -784,7 +785,7 @@ export function getMetricsOverview(scope: BridgeMetricsScope = "active") {
     LIMIT 10
   `).all(...filter.params);
 
-  return { ...getMetricsStatus(), scope, totals, slowest, ...getMetricsProfiles(sqlite, scope) };
+  return { ...getMetricsStatus(), scope, totals, slowest, ...getMetricsProfiles(sqlite, scope, 20) };
 }
 
 export function getMetricsTimeline(limit = 500, scope: BridgeMetricsScope = "active") {

@@ -2,6 +2,7 @@ param(
   [string]$ProjectRoot = ".",
   [string]$Profile = "bridge-local-http",
   [string]$TunnelClient = ".\tools\tunnel-client\tunnel-client.exe",
+  [string]$TunnelProfileDir = "",
   [string]$BridgeHost = "127.0.0.1",
   [int]$BridgePort = 3001,
   [string]$McpPath = "/mcp",
@@ -9,6 +10,8 @@ param(
   [string]$RestartRequestFile = ".bridge-restart-request",
   [string]$RestartAckFile = ".bridge-restart-ack",
   [int]$CheckIntervalSeconds = 5,
+  [ValidateRange(2, 12)]
+  [int]$ConsecutiveFailureThreshold = 3,
   [int]$RestartDelaySeconds = 2,
   [int]$SessionIdleMs = 1800000,
   [int]$CapacityReclaimIdleMs = 15000,
@@ -225,7 +228,7 @@ function Start-BridgeHttp {
   $readyUrl = "http://$BridgeHost`:$BridgePort/readyz"
   if (Test-HttpText -Url $readyUrl -Expected "ready") {
     $status = Get-BridgeStatus -BaseUrl "http://$BridgeHost`:$BridgePort"
-    if (-not $status -or [string]$status.server.name -ne "bridge-mcp" -or [string]$status.server.version -ne $expectedServerVersion -or [int]$status.port -ne $BridgePort -or [string]$status.transport -ne "streamable-http") {
+    if (-not $status -or [string]$status.server.name -ne "bridge-mcp" -or [string]$status.server.version -ne $expectedServerVersion -or [int]$status.port -ne $BridgePort -or [string]$status.transport -ne "streamable-http-dual-era") {
       throw "Port $BridgePort reports ready but does not identify as the expected bridge-mcp service."
     }
 
@@ -306,7 +309,7 @@ function Start-TunnelClient {
   }
 
   if ($DryRun) {
-    Write-BridgeLog "Dry run: would start tunnel-client run --profile $Profile"
+    Write-BridgeLog "Dry run: would start tunnel-client run --profile $Profile --profile-dir $TunnelProfileDir"
     return $null
   }
 
@@ -316,11 +319,16 @@ function Start-TunnelClient {
 
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = $TunnelClient
-  $psi.Arguments = "run --profile $Profile"
+  $psi.Arguments = "run --profile `"$Profile`" --profile-dir `"$TunnelProfileDir`""
   $psi.WorkingDirectory = $ProjectRoot
   $psi.UseShellExecute = $false
   $psi.RedirectStandardOutput = $false
   $psi.RedirectStandardError = $false
+
+  $controlPlaneApiKey = [Environment]::GetEnvironmentVariable("CONTROL_PLANE_API_KEY", "User")
+  if (-not [string]::IsNullOrWhiteSpace($controlPlaneApiKey)) {
+    $psi.Environment["CONTROL_PLANE_API_KEY"] = $controlPlaneApiKey
+  }
 
   $process = [System.Diagnostics.Process]::Start($psi)
   Write-BridgeLog "Started tunnel-client profile=$Profile pid=$($process.Id)"
@@ -364,21 +372,41 @@ $ProjectRoot = (Get-Location).Path
 if (-not [System.IO.Path]::IsPathRooted($TunnelClient)) {
   $TunnelClient = Join-Path $ProjectRoot $TunnelClient
 }
+if ([string]::IsNullOrWhiteSpace($TunnelProfileDir)) {
+  $modernProfileDir = Join-Path $env:USERPROFILE ".config\tunnel-client"
+  $legacyProfileDir = Join-Path $env:APPDATA "tunnel-client"
+  $profileFileName = "$Profile.yaml"
+  if (Test-Path -LiteralPath (Join-Path $modernProfileDir $profileFileName)) {
+    $TunnelProfileDir = $modernProfileDir
+  }
+  elseif (Test-Path -LiteralPath (Join-Path $legacyProfileDir $profileFileName)) {
+    $TunnelProfileDir = $legacyProfileDir
+  }
+  else {
+    throw "Tunnel profile '$Profile' was not found in '$modernProfileDir' or '$legacyProfileDir'."
+  }
+}
+$TunnelProfileDir = [System.IO.Path]::GetFullPath($TunnelProfileDir)
+if (-not $NoTunnel -and -not (Test-Path -LiteralPath (Join-Path $TunnelProfileDir "$Profile.yaml"))) {
+  throw "Tunnel profile '$Profile' was not found in profile directory: $TunnelProfileDir"
+}
 $bridgeBaseUrl = "http://$BridgeHost`:$BridgePort"
 $expectedServerVersion = [string](Get-Content -LiteralPath (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json).version
-$bridgeCommandPattern = '(?i)(?:^|\s)"?(?:node|node\.exe)"?.*?[\\/]dist[\\/]http\.js(?:\s|$)'
+$bridgeCommandPattern = '(?i)(?:^|\s)"?(?:[^"\r\n]*[\\/])?node(?:\.exe)?"?\s+.*?(?:dist[\\/]http\.js|src[\\/]http\.ts)(?:\s|$)'
 $escapedProfile = [regex]::Escape($Profile)
 $tunnelCommandPattern = '(?i)tunnel-client(?:\.exe)?.*\brun\b.*--profile\s+.*' + $escapedProfile + '(?:\s|$)'
 
 Write-BridgeLog "ProjectRoot=$ProjectRoot"
 Write-BridgeLog "Bridge HTTP=$bridgeBaseUrl$McpPath"
-Write-BridgeLog "Tunnel profile=$Profile admin=$TunnelBaseUrl"
+Write-BridgeLog "Tunnel profile=$Profile profileDir=$TunnelProfileDir admin=$TunnelBaseUrl"
 Write-BridgeLog "Session limits: max=$MaxSessions idleMs=$SessionIdleMs reclaimIdleMs=$CapacityReclaimIdleMs anonymousTtlMs=$AnonymousTransportTtlMs cleanupMs=$CleanupIntervalMs maxBodyBytes=$MaxBodyBytes"
 Write-BridgeLog "Restart request file=$(Join-Path $ProjectRoot $RestartRequestFile)"
 
 $bridgeProcess = $null
 $tunnelProcess = $null
 $watchdogMutex = $null
+$bridgeReadinessFailures = 0
+$tunnelReadinessFailures = 0
 
 try {
   $watchdogMutex = Enter-BridgeWatchdogSingleton
@@ -396,6 +424,26 @@ try {
   do {
     $bridgeReady = Test-HttpText -Url "$bridgeBaseUrl/readyz" -Expected "ready"
     $tunnelReady = if ($NoTunnel) { $true } else { Test-HttpText -Url "$TunnelBaseUrl/readyz" -Expected "ready" }
+    if ($bridgeReady) { $bridgeReadinessFailures = 0 } else { $bridgeReadinessFailures += 1 }
+    if ($tunnelReady) { $tunnelReadinessFailures = 0 } else { $tunnelReadinessFailures += 1 }
+
+    $bridgeProcessAlive = $false
+    if ($bridgeProcess -and $bridgeProcess.Process) {
+      try {
+        $bridgeProcess.Process.Refresh()
+        $bridgeProcessAlive = -not $bridgeProcess.Process.HasExited
+      }
+      catch {}
+    }
+    $tunnelProcessAlive = $NoTunnel
+    if (-not $NoTunnel -and $tunnelProcess -and $tunnelProcess.Process) {
+      try {
+        $tunnelProcess.Process.Refresh()
+        $tunnelProcessAlive = -not $tunnelProcess.Process.HasExited
+      }
+      catch {}
+    }
+
     $request = Read-RestartRequest
 
     if ($request) {
@@ -417,24 +465,40 @@ try {
         $tunnelProcess = Start-TunnelClient
       }
 
+      $bridgeReadinessFailures = 0
+      $tunnelReadinessFailures = 0
       Write-RestartAck -Request $request -Action "restart-$mode"
     }
     elseif (-not $bridgeReady) {
-      Write-BridgeLog "Bridge HTTP not ready; restarting local bridge" "warn"
-      Stop-ProcessState -State $bridgeProcess -Name "bridge HTTP" -ForceExternal
-      Stop-PortOwner -Port $BridgePort -Name "bridge HTTP" -ExpectedCommandPattern $bridgeCommandPattern
-      Start-Sleep -Seconds $RestartDelaySeconds
-      $bridgeProcess = Start-BridgeHttp
-      Write-RestartAck -Request $null -Action "auto-restart-http-not-ready"
+      if (-not $bridgeProcessAlive -or $bridgeReadinessFailures -ge $ConsecutiveFailureThreshold) {
+        $bridgeRecoveryReason = if (-not $bridgeProcessAlive) { "process-exited" } else { "readiness-threshold" }
+        Write-BridgeLog "Bridge HTTP recovery triggered reason=$bridgeRecoveryReason readinessFailures=$bridgeReadinessFailures threshold=$ConsecutiveFailureThreshold" "warn"
+        Stop-ProcessState -State $bridgeProcess -Name "bridge HTTP" -ForceExternal
+        Stop-PortOwner -Port $BridgePort -Name "bridge HTTP" -ExpectedCommandPattern $bridgeCommandPattern
+        Start-Sleep -Seconds $RestartDelaySeconds
+        $bridgeProcess = Start-BridgeHttp
+        $bridgeReadinessFailures = 0
+        Write-RestartAck -Request $null -Action "auto-restart-http-$bridgeRecoveryReason"
+      }
+      else {
+        Write-BridgeLog "Bridge HTTP readiness probe failed ($bridgeReadinessFailures/$ConsecutiveFailureThreshold) while process is alive; deferring restart" "warn"
+      }
     }
     elseif (-not $tunnelReady) {
-      Write-BridgeLog "Tunnel not ready; restarting tunnel-client" "warn"
-      $tunnelPort = ([Uri]$TunnelBaseUrl).Port
-      Stop-ProcessState -State $tunnelProcess -Name "tunnel-client" -ForceExternal
-      Stop-PortOwner -Port $tunnelPort -Name "tunnel-client" -ExpectedCommandPattern $tunnelCommandPattern
-      Start-Sleep -Seconds $RestartDelaySeconds
-      $tunnelProcess = Start-TunnelClient
-      Write-RestartAck -Request $null -Action "auto-restart-tunnel-not-ready"
+      if (-not $tunnelProcessAlive -or $tunnelReadinessFailures -ge $ConsecutiveFailureThreshold) {
+        $tunnelRecoveryReason = if (-not $tunnelProcessAlive) { "process-exited" } else { "readiness-threshold" }
+        Write-BridgeLog "Tunnel recovery triggered reason=$tunnelRecoveryReason readinessFailures=$tunnelReadinessFailures threshold=$ConsecutiveFailureThreshold" "warn"
+        $tunnelPort = ([Uri]$TunnelBaseUrl).Port
+        Stop-ProcessState -State $tunnelProcess -Name "tunnel-client" -ForceExternal
+        Stop-PortOwner -Port $tunnelPort -Name "tunnel-client" -ExpectedCommandPattern $tunnelCommandPattern
+        Start-Sleep -Seconds $RestartDelaySeconds
+        $tunnelProcess = Start-TunnelClient
+        $tunnelReadinessFailures = 0
+        Write-RestartAck -Request $null -Action "auto-restart-tunnel-$tunnelRecoveryReason"
+      }
+      else {
+        Write-BridgeLog "Tunnel readiness probe failed ($tunnelReadinessFailures/$ConsecutiveFailureThreshold) while process is alive; deferring restart" "warn"
+      }
     }
 
     if ($Once) { break }

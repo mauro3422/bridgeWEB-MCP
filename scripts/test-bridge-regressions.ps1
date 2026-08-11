@@ -1,5 +1,5 @@
 param(
-  [string]$ProjectRoot = "C:\dev\bridge-mcp",
+  [string]$ProjectRoot = "D:\Dev\bridge-mcp",
   [string]$ExpectedTunnelAdminBaseUrl = "http://127.0.0.1:8081"
 )
 

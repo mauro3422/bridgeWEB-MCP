@@ -42,7 +42,7 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
         type: "object",
         properties: {
           traceId: { type: "string", pattern: "^[A-Za-z0-9._:-]{6,128}$" },
-          limit: { type: "number", minimum: 1, maximum: 2000, default: 500 },
+          limit: { type: "number", minimum: 1, maximum: 500, default: 100 },
         },
         required: ["traceId"],
         additionalProperties: false,
@@ -126,7 +126,7 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
     mssr_trace_evidence: (args) => {
       const parsed = z.object({
         traceId: z.string().regex(/^[A-Za-z0-9._:-]{6,128}$/),
-        limit: z.number().int().min(1).max(2000).default(500),
+        limit: z.number().int().min(1).max(500).default(100),
       }).parse(args);
       return getMssrTraceEvidence(parsed.traceId, parsed.limit);
     },

@@ -1,5 +1,5 @@
 param(
-  [string]$ProjectRoot = "C:\dev\bridge-mcp",
+  [string]$ProjectRoot = "D:\Dev\bridge-mcp",
   [int]$BridgePort = 3001,
   [int]$TunnelPort = 8081,
   [int[]]$DevPorts = @(3002, 3004, 8094),

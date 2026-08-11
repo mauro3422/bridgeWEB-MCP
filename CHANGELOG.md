@@ -1,3 +1,15 @@
+## Unreleased
+
+- Preserve the canonical privacy-bounded MSSR intent projection for both direct
+  ChatGPT Web routes and authenticated external telemetry instead of retaining
+  only `signals` and `ambiguity`.
+- Expose portable intent-dimension counts and thresholded review-only
+  maintenance candidates in the MSSR summary API. The analysis never stores
+  task text or rewrites skills/routing automatically.
+- Harden Bridge reliability after reproducing intermittent upstream `502` responses: the HTTP watchdog now debounces transient readiness failures and restarts immediately only when the managed process actually exits.
+- Run `bridge_verify_all` as a background job with `bridge_verify_status`, cap synchronous `work_once` calls at 45 seconds, bound metrics/MSSR evidence payloads, and make the `D:` watchdog/tunnel profile recovery path explicit and reproducible.
+
+
 ## 0.6.74 - 2026-08-08
 
 - Added a token-authenticated, 64 KiB-bounded `/api/mssr/events` receiver for

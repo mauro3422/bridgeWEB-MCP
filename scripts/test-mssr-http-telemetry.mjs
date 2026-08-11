@@ -63,7 +63,12 @@ try {
         caller: "opencode-local", stage: "start", classificationMode: "structured-semantic",
         workflowKey: "http-regression", agentProfile: { model: "unknown", reasoningEffort: "unknown" },
         contextUsed: false, contextCharacters: 0, workflows: [], activeSkills: [], deferredSkills: [],
-        loadOrder: [], deferredLoadOrder: [], signals: ["nominal"], ambiguity: "low",
+        loadOrder: [], deferredLoadOrder: [],
+        intent: {
+          domains: ["coding"], actions: ["analyze"], artifacts: ["code"],
+          needs: ["integrity-verification"], signals: ["nominal"], risk: "read-only", ambiguity: "low",
+        },
+        signals: ["nominal"], ambiguity: "low",
         requiredPhases: [], completedPhases: [], missingRequiredPhases: [],
       },
     },
@@ -80,11 +85,21 @@ try {
   });
   const accepted = await send();
   assert.equal(accepted.status, 202);
-  assert.equal((await accepted.json()).duplicate, false);
+  const acceptedBody = await accepted.json();
+  assert.equal(acceptedBody.duplicate, false);
+  const persistedRoute = (await fs.readFile(path.join(temp, "logs", "mssr-events.jsonl"), "utf8"))
+    .trim().split(/\r?\n/).map((line) => JSON.parse(line))
+    .find((event) => event.id === envelope.eventId);
+  assert.deepEqual(persistedRoute?.details?.intent, envelope.event.route.intent,
+    "Bridge must preserve the bounded structured intent projection");
   const beforeSummaryResponse = await fetch(`${base}/api/mssr/summary?scope=all`);
   const beforeOutcome = await beforeSummaryResponse.json();
   assert.equal(beforeSummaryResponse.status, 200, JSON.stringify(beforeOutcome));
   assert.ok(Array.isArray(beforeOutcome.surfaces), `summary missing surfaces: ${JSON.stringify(beforeOutcome)}`);
+  assert.equal(beforeOutcome.intentAnalysis?.intentDimensions?.domains?.coding, 1,
+    "summary must expose portable structured-intent dimensions");
+  assert.deepEqual(beforeOutcome.intentAnalysis?.maintenanceCandidates, [],
+    "nominal single-trace evidence must not create maintenance candidates");
   assert.equal(beforeOutcome.surfaces.find((item) => item.caller === "opencode-local")?.routedTraces, 1);
   assert.equal(beforeOutcome.surfaces.find((item) => item.caller === "opencode-local")?.outcomeTraces, 0, "outcome must not be inferred");
   const lifecycleOnlyProfile = beforeOutcome.agentProfiles.find((item) => item.caller === "opencode-local");

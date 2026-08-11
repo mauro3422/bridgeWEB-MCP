@@ -19,6 +19,45 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-08-10 — Un único fallo transitorio de readiness provocaba autorestart y 502 aguas arriba
+
+**Estado:** Corregido y verificado en runtime vivo.
+
+**Capa/owner:** watchdog HTTP/autorecovery de `bridge-mcp`, con endurecimiento adicional del transporte de trabajo y observabilidad.
+
+**Síntoma observable:** ChatGPT Web recibía `502 Bad Gateway` de forma intermitente aunque el Bridge local volvía a responder inmediatamente. El parseo estructurado de `bridge-events.jsonl` para el 8–10 de agosto no encontró respuestas internas `502` ni `Bad Gateway`; sí mostró una etapa con muchos reinicios y llamadas síncronas largas.
+
+**Reproducción mínima y evidencia causal:** durante un `bridge_verify_all` en background se hizo una consulta pequeña de schema. Esa consulta recibió un `502`; inmediatamente después `bridge_health` mostró un ack `auto-restart-http-not-ready` a `2026-08-10T19:52:17.6881537Z`. El túnel permaneció `live/ready`, demostrando que el corte coincidió con la destrucción/recreación del HTTP Bridge y no con el tamaño de esa respuesta.
+
+**Causa demostrada:** `start-bridge-http-watchdog.ps1` reiniciaba destructivamente el HTTP Bridge ante el primer `Test-HttpText /readyz` fallido. Bajo carga, una demora transitoria del probe de tres segundos era suficiente para matar un proceso todavía vivo y abrir una ventana de 502 en el control plane.
+
+**Contribuyentes corregidos:** `work_once` permitía requests síncronas de 77–120 s; `bridge_verify_all` retenía una sola request durante suites de ~100–160 s; `bridge_metrics_summary` no acotaba la cardinalidad de `agentProfiles`; `mssr_trace_evidence` podía devolver hasta 2000 eventos; después de la migración a `D:` el túnel dependía de un profile-dir legacy implícito y los launchers todavía conservaban rutas `C:\dev`.
+
+**Corrección:** el watchdog exige tres fallos consecutivos de readiness mientras el proceso siga vivo y sólo recupera inmediatamente cuando el proceso realmente murió; el ack distingue `process-exited` de `readiness-threshold`. `bridge_verify_all` ejecuta el gate como job background consultable con `bridge_verify_status`; `work_once` queda limitado a 45 s; métricas/evidencia se acotan; Startup y launchers usan `D:\Dev\bridge-mcp`; el túnel recibe `--profile-dir` explícito y la API key User se reinyecta al proceso hijo.
+
+**Regresión:** el mismo full gate que produjo el 502 se repitió durante `160803 ms`, incluyendo `98962 ms` de regresiones pesadas, mientras consultas MCP pequeñas siguieron respondiendo. Terminó `ok=true`, Bridge conservó PID `5640` y boot `caeae28b-837f-495c-a2ea-b5ea2bff1f87`, y no apareció un nuevo ack automático. Un restart controlado sólo del túnel cambió PID `23272 -> 13892`, arrancó desde `D:` con el profile-dir explícito y preservó el Bridge.
+
+**Seguimiento:** conservar el debounce como contrato del watchdog y tratar respuestas enormes o jobs largos como riesgos separados de transporte, no como explicación automática de futuros 502. El catálogo directo del host puede seguir detrás del runtime; los wrappers cubren esa diferencia hasta que el host refresque su catálogo.
+
+
+## 2026-08-09 — La proyección del Bridge descartaba dimensiones del intent MSSR
+
+**Estado:** Corregido y verificado en source; pendiente de publicación/restart del runtime vivo.
+
+**Capa/owner:** adaptador de observabilidad `bridge-mcp` y contrato portable de telemetría en `@mauroprime/mssr`.
+
+**Síntoma observable:** Codex/OpenCode podían clasificar `domains`, `actions`, `artifacts`, `needs`, `signals`, `risk` y `ambiguity`, pero el Bridge persistía solamente `signals` y `ambiguity`. Las rutas Web directas tenían la misma pérdida, impidiendo agregados confiables por dimensión.
+
+**Reproducción mínima:** emitir una ruta `mssr-telemetry-v1` con `route.intent` completo, ingerirla por `/api/mssr/events` y leer el JSONL aislado; antes de la corrección no existía `details.intent`.
+
+**Causa demostrada:** las funciones de proyección construían manualmente `details` con dos campos del intent aunque el router ya producía el objeto canónico completo.
+
+**Corrección:** MSSR incorpora un intent de telemetría aditivo y acotado más `analyzeMssrTelemetry`; Bridge conserva exclusivamente las siete dimensiones canónicas, omite `summary` y expone `intentAnalysis` con candidatos de revisión por señal recurrente o carga requerida faltante.
+
+**Regresión:** `scripts/test-telemetry-analysis.mjs`, `scripts/test-mssr-http-telemetry.mjs` y `scripts/test-v060-tools.mjs` validan privacidad, compatibilidad legacy, deduplicación, umbrales, persistencia externa y rutas Web directas.
+
+**Seguimiento:** publicar ambos repositorios y verificar el runtime vivo antes de considerar disponibles los nuevos campos en el dashboard/API de producción.
+
 ## 2026-08-08 — OpenCode no aparecía en MSSR y Errores perdía cada letra `s`
 
 **Estado:** Corregido, publicado y verificado en runtime vivo `0.6.74`.
@@ -1235,3 +1274,19 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Regresión:** `test-delegated-mssr-route-project.mjs` ejecuta `project_context_load` y luego un `skill_bootstrap` directo sin `projectRoot`; exige que el resultado reporte exactamente el root cargado. La suite existente conserva además continuidad de wrappers, sesiones nombradas/anónimas y ambigüedad segura.
 
 **Límite:** Bridge no puede reemplazar ni refrescar por sí mismo el schema privado ya cacheado por ChatGPT Web. La corrección hace que ese drift no pierda el proyecto cuando existe un único root inequívoco; un chat nuevo sigue siendo la forma de obtener el schema dedicado actualizado.
+
+## 2026-08-09 — Acumulación no acotada de snapshots agotó el disco del host
+
+**Estado:** Contenido redundante podado y runtime migrado; prevención automática pendiente.
+
+**Capa / owner:** persistencia local de `data/workspace-snapshots` y operación del MauroPrime Bridge.
+
+**Síntoma observable:** `C:` llegó a 0,08 GiB libres. `C:\Dev\bridge-mcp\data\workspace-snapshots` ocupaba 6,052 GiB y contenía 305 snapshots; aproximadamente 4,187 GiB correspondían a medios.
+
+**Causa demostrada:** los snapshots se acumulaban sin una retención efectiva. Las imágenes generadas de Codex (~18 MiB) y los paquetes locales de Codex/ChatGPT no explicaban el crecimiento principal.
+
+**Corrección:** se congeló un plan durable con hashes en `D:\Dev\_migration-manifests\bridge-snapshot-pruning-plan.json`; se conservaron el snapshot más reciente y el completo más reciente por cada uno de los 14 `sourceRoot`. Se eliminaron 288 candidatos exactos (5,690 GiB), sin fallos, y quedaron 17 snapshots protegidos (0,363 GiB). El repositorio y sus datos restantes se migraron con manifiesto SHA-256 idéntico a `D:\Dev\bridge-mcp`; `C:\Dev\bridge-mcp` quedó como junction de compatibilidad. El servicio HTTP se reinició desde `D:` y respondió `live` y `ready`.
+
+**Regresión / verificación:** postflight con `remainingCandidateCount=0`, `protectedMissingCount=0`, 17 directorios reales y segunda selección con cero candidatos. El plan de poda tiene SHA-256 `F5BB3C9EE1AE39CC993C539920C0CC0A9B1B0577C0466BA189BAF0F1E3417A35`.
+
+**Seguimiento:** implementar y probar una política de retención automática antes de considerar cerrado el riesgo de recurrencia. La poda destructiva siempre debe partir de un plan persistido, validar que cada objetivo sea hijo directo del root de snapshots y proteger explícitamente los IDs retenidos.

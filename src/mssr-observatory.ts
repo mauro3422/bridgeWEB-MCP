@@ -4,6 +4,7 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import {
+  analyzeMssrTelemetry,
   MSSR_CHECKPOINT_TYPES,
   MSSR_OUTCOME_DIMENSION_STATUSES,
   MSSR_OUTCOME_EVIDENCE_KINDS,
@@ -11,6 +12,7 @@ import {
   type MssrOutcomeDimensionStatus,
   type MssrOutcomeEvidenceKind,
   mssrTelemetryEnvelopeSchema,
+  structuredSkillIntentSchema,
   validateMssrCheckpointLifecycle,
   type MssrTelemetryEnvelope,
 } from "@mauroprime/mssr";
@@ -347,6 +349,7 @@ export function recordExternalMssrTelemetry(input: unknown): { event: MssrStored
         deferredSkills: route.deferredSkills,
         loadOrder: route.loadOrder,
         deferredLoadOrder: route.deferredLoadOrder,
+        intent: boundedRouteIntent(route.intent),
         signals: route.signals,
         ambiguity: route.ambiguity,
         requiredPhases: route.requiredPhases,
@@ -439,6 +442,13 @@ function routeSkills(value: unknown): Array<{ name: string; source?: string; req
   });
 }
 
+function boundedRouteIntent(value: unknown): JsonRecord | undefined {
+  const parsed = structuredSkillIntentSchema.safeParse(value);
+  if (!parsed.success) return undefined;
+  const { domains, actions, artifacts, needs, signals, risk, ambiguity } = parsed.data;
+  return { domains, actions, artifacts, needs, signals, risk, ambiguity };
+}
+
 export function recordMssrRoute(args: {
   traceId: string;
   action: "recommend" | "plan" | "bootstrap";
@@ -472,6 +482,7 @@ export function recordMssrRoute(args: {
       deferredSkills: routeSkills(args.route.deferredSkills),
       loadOrder: Array.isArray(args.route.loadOrder) ? args.route.loadOrder : [],
       deferredLoadOrder: Array.isArray(args.route.deferredLoadOrder) ? args.route.deferredLoadOrder : [],
+      intent: boundedRouteIntent(intent),
       signals: Array.isArray(intent.signals) ? intent.signals : [],
       ambiguity: typeof intent.ambiguity === "string" ? intent.ambiguity : undefined,
       requiredPhases: Array.isArray(coverage.requiredPhases) ? coverage.requiredPhases : [],
@@ -1061,6 +1072,81 @@ function observatoryStatus() {
   };
 }
 
+function portableIntentAnalysis(events: readonly MssrStoredEvent[]) {
+  const projected = events.flatMap<unknown>((event) => {
+    if (event.eventType === "route_planned") {
+      const profile = event.details.agentProfile && typeof event.details.agentProfile === "object"
+        ? event.details.agentProfile as JsonRecord
+        : {};
+      return [{
+        protocolVersion: "mssr-telemetry-v1",
+        eventId: `analysis:${event.id}`,
+        emittedAt: event.occurredAt,
+        source: "mauroprime-bridge",
+        traceId: event.traceId,
+        caller: ["codex-local", "opencode-local", "chatgpt-web", "other"].includes(event.caller ?? "") ? event.caller : "other",
+        event: {
+          kind: "route",
+          action: event.details.action === "bootstrap" ? "bootstrap" : "plan",
+          taskHash: typeof event.taskHash === "string" && /^[a-f0-9]{64}$/.test(event.taskHash)
+            ? event.taskHash
+            : "0".repeat(64),
+          route: {
+            caller: ["codex-local", "opencode-local", "chatgpt-web", "other"].includes(event.caller ?? "") ? event.caller : "other",
+            stage: event.stage,
+            classificationMode: event.classificationMode ?? "unknown",
+            workflowKey: typeof event.details.workflowKey === "string" ? event.details.workflowKey : null,
+            agentProfile: {
+              model: typeof profile.model === "string" ? profile.model : "unknown",
+              reasoningEffort: typeof profile.reasoningEffort === "string" ? profile.reasoningEffort : "unknown",
+            },
+            contextUsed: event.details.contextUsed === true,
+            contextCharacters: typeof event.details.contextCharacters === "number" ? event.details.contextCharacters : 0,
+            workflows: Array.isArray(event.details.workflows) ? event.details.workflows : [],
+            activeSkills: Array.isArray(event.details.activeSkills) ? event.details.activeSkills : [],
+            deferredSkills: Array.isArray(event.details.deferredSkills) ? event.details.deferredSkills : [],
+            loadOrder: Array.isArray(event.details.loadOrder) ? event.details.loadOrder : [],
+            deferredLoadOrder: Array.isArray(event.details.deferredLoadOrder) ? event.details.deferredLoadOrder : [],
+            intent: event.details.intent,
+            signals: Array.isArray(event.details.signals) ? event.details.signals : [],
+            ambiguity: typeof event.details.ambiguity === "string" ? event.details.ambiguity : undefined,
+            requiredPhases: Array.isArray(event.details.requiredPhases) ? event.details.requiredPhases : [],
+            completedPhases: Array.isArray(event.details.completedPhases) ? event.details.completedPhases : [],
+            missingRequiredPhases: Array.isArray(event.details.missingRequiredPhases) ? event.details.missingRequiredPhases : [],
+          },
+        },
+      }];
+    }
+    if (event.eventType === "skill_loaded" && event.skillName) {
+      return [{
+        protocolVersion: "mssr-telemetry-v1",
+        eventId: `analysis:${event.id}`,
+        emittedAt: event.occurredAt,
+        source: "mauroprime-bridge",
+        traceId: event.traceId,
+        caller: ["codex-local", "opencode-local", "chatgpt-web", "other"].includes(event.caller ?? "") ? event.caller : "other",
+        event: {
+          kind: "skill_load",
+          skillName: event.skillName,
+          source: typeof event.details.source === "string" ? event.details.source : undefined,
+          stage: event.stage,
+          required: event.required,
+          loaded: event.ok === true,
+          via: event.details.via === "skill_bootstrap" ? "skill_bootstrap" : "skill_load",
+        },
+      }];
+    }
+    return [];
+  });
+  const analysis = analyzeMssrTelemetry(projected);
+  return {
+    analyzedEvents: analysis.counters.validEvents,
+    invalidProjectionEvents: analysis.counters.invalidEvents,
+    intentDimensions: analysis.intentDimensions,
+    maintenanceCandidates: analysis.maintenanceCandidates,
+  };
+}
+
 function summary(days: number, scope: MssrObservatoryScope) {
   const database = getDb();
   const epoch = getMssrObservabilityEpoch();
@@ -1077,6 +1163,7 @@ function summary(days: number, scope: MssrObservatoryScope) {
   const events = scope === "active"
     ? decoded.filter((event) => event.details.observabilityEpoch === epoch.activeEpoch)
     : decoded;
+  const intentAnalysis = portableIntentAnalysis(events);
   const decodedToolCalls = database.prepare(`
     SELECT trace_id, started_at, ended_at, duration_ms, tool, operation_subject,
            observability_epoch, ok, caller, client_name, session_key,
@@ -1645,6 +1732,7 @@ function summary(days: number, scope: MssrObservatoryScope) {
       intentCorrectionRecoveryRate: rate(intentCorrectionRecoveredTraceIds.size, intentCorrectionTraceIds.size),
       userCorrections,
     },
+    intentAnalysis,
     contextAssembly,
     surfaces: surfaceBenchmarks,
     agentProfiles,

@@ -30,8 +30,10 @@ function envList(value: string | undefined): string[] {
 }
 
 function normalizeForCompare(value: string): string {
-  const resolved = path.resolve(value).replace(/[\\/]+$/, "");
-  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+  const resolved = path.resolve(value);
+  const volumeRoot = path.parse(resolved).root;
+  const normalized = resolved === volumeRoot ? resolved : resolved.replace(/[\\/]+$/, "");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 function isWithin(root: string, target: string): boolean {

@@ -1,7 +1,7 @@
 param(
-  [string]$ProjectRoot = "C:\dev\bridge-mcp",
+  [string]$ProjectRoot = "D:\Dev\bridge-mcp",
   [string]$Profile = "bridge-local",
-  [string]$TunnelClient = "C:\dev\bridge-mcp\tools\tunnel-client\tunnel-client.exe",
+  [string]$TunnelClient = "D:\Dev\bridge-mcp\tools\tunnel-client\tunnel-client.exe",
   [int]$RestartDelaySeconds = 5,
   [switch]$SkipDoctor
 )

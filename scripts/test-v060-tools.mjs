@@ -93,7 +93,7 @@ const { extractRobloxMcpImage, validateRobloxCaptureImage } = await import('../d
 const { clearBridgeNotices, drainBridgeNotices, emitBridgeNotice, getBridgeNoticeStatus, peekBridgeNoticeHistory } = await import('../dist/notices.js');
 const { closeMssrObservatoryForTests, getMssrTraceEvidence, queryMssrObservatory, recordMssrCheckpoint, recordMssrRoute } = await import('../dist/mssr-observatory.js');
 const { buildToolAudit } = await import('../dist/tool-audit.js');
-const { beginToolMetric, classifyToolAuditError, closeMetricsForTests, extractToolResultMetric, finishToolMetric, getRecentMetrics, getToolAuditMetrics } = await import('../dist/metrics.js');
+const { beginToolMetric, classifyToolAuditError, closeMetricsForTests, extractToolResultMetric, finishToolMetric, getMetricsSummary, getRecentMetrics, getToolAuditMetrics } = await import('../dist/metrics.js');
 const { RUNTIME_BOOT_ID, resolveMetricTaskKey, resolveMetricWorkflowKey } = await import('../dist/runtime-identity.js');
 const { createMssrTraceSessionCoordinator } = await import('../dist/mssr-trace-context.js');
 const registry = createDefaultToolRegistry();
@@ -163,11 +163,11 @@ try {
   if (drainedNotices.length !== 1 || getBridgeNoticeStatus().pendingCount !== 0) throw new Error('Bridge notice one-shot drain failed');
   if (!noticeHistory.some((item) => item.code === 'fixture-warning' && item.actions?.[0]?.toolName === 'terminal_list')) throw new Error('Bridge notice history did not retain actionable reminder after drain');
 
-  if (registry.tools.length !== 141) throw new Error(`expected 141 tools, got ${registry.tools.length}`);
+  if (registry.tools.length !== 142) throw new Error(`expected 142 tools, got ${registry.tools.length}`);
   const catalogComparison = await call('bridge_connector_catalog_compare', {
     exposedToolNames: ['skill_catalog', 'skill_recommend', 'skill_load', 'host_private_tool'],
   });
-  if (catalogComparison.runtime.count !== 141 || catalogComparison.mssr.runtime !== 11) throw new Error('connector catalog comparison runtime baseline failed');
+  if (catalogComparison.runtime.count !== 142 || catalogComparison.mssr.runtime !== 11) throw new Error('connector catalog comparison runtime baseline failed');
   if (catalogComparison.mssr.directCoveragePercent !== 27.27) throw new Error(`unexpected MSSR direct coverage: ${catalogComparison.mssr.directCoveragePercent}`);
   if (!catalogComparison.mssr.delegatedViaQuery.includes('skill_bootstrap') || !catalogComparison.mssr.delegatedViaAction.includes('mssr_trace_record')) throw new Error('connector catalog wrapper classification failed');
   if (!catalogComparison.connectorObservation.unrecognized.includes('host_private_tool') || catalogComparison.interpretation.wrapperReachabilityIsDirectExposure !== false) throw new Error('connector catalog boundary classification failed');
@@ -236,6 +236,14 @@ try {
   if (workOnceTool?.metadata?.role !== 'alias' || workOnceTool.metadata.aliasOf !== 'run_command' || workOnceTool.metadata.family !== 'process') throw new Error('tool alias metadata failed');
   const evidenceTool = registry.tools.find((tool) => tool.name === 'mssr_trace_evidence');
   if (!evidenceTool || !registry.riskSummary.readOnly.includes('mssr_trace_evidence') || evidenceTool.metadata?.lifecycle !== 'protected') throw new Error('mssr_trace_evidence metadata/risk failed');
+  if (workOnceTool?.inputSchema?.properties?.timeoutMs?.maximum !== 45000) throw new Error('work_once synchronous timeout cap regression');
+  if (evidenceTool.inputSchema?.properties?.limit?.default !== 100 || evidenceTool.inputSchema?.properties?.limit?.maximum !== 500) throw new Error('mssr_trace_evidence bounded limit regression');
+  const verifyStartTool = registry.tools.find((tool) => tool.name === 'bridge_verify_all');
+  const verifyStatusTool = registry.tools.find((tool) => tool.name === 'bridge_verify_status');
+  if (!verifyStartTool || !/background job/i.test(verifyStartTool.description || '')) throw new Error('bridge_verify_all must be background-backed');
+  if (!verifyStatusTool || !registry.riskSummary.readOnly.includes('bridge_verify_status')) throw new Error('bridge_verify_status read-only registration failed');
+  const watchdogSource = fs.readFileSync(path.join(process.cwd(), 'scripts', 'start-bridge-http-watchdog.ps1'), 'utf8');
+  if (!watchdogSource.includes('[int]$ConsecutiveFailureThreshold = 3') || !watchdogSource.includes('$bridgeReadinessFailures -ge $ConsecutiveFailureThreshold') || !watchdogSource.includes('while process is alive; deferring restart') || !watchdogSource.includes('process-exited')) throw new Error('watchdog transient-readiness debounce regression');
   if (!/^[0-9a-f-]{36}$/.test(RUNTIME_BOOT_ID)) throw new Error('runtime boot identity must be a UUID');
   const workflowCoordinatorA = createMssrTraceSessionCoordinator(registry.tools);
   const unscopedRouteArgs = {task:'Unscoped task A',caller:'chatgpt-web'};
@@ -372,7 +380,7 @@ try {
   const skillLoadSchema = await call('bridge_tool_schema', {toolName:'skill_load'});
   if (!skillLoadSchema.tool?.metadata?.usage?.recovery?.some((rule) => rule.code === 'mssr-orphan-skill-load' && rule.toolName === 'skill_bootstrap')) throw new Error('skill_load MSSR recovery metadata failed');
   const aliasAudit = await call('bridge_tool_audit', {view:'aliases',scope:'active',days:30,limit:20});
-  if (aliasAudit.summary?.registeredTools !== 141 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
+  if (aliasAudit.summary?.registeredTools !== 142 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
   const delegatedMetric = beginToolMetric('bridge_tool_query', {toolName:'bridge_tool_audit',arguments:{view:'all'}}, {caller:'chatgpt-web',sessionKey:'fixture-session',project:'fixture-project'});
   finishToolMetric(delegatedMetric, true, 128);
   const delegatedSnapshot = getToolAuditMetrics(30, 'active');
@@ -391,6 +399,12 @@ try {
   if (!recentProcess.some((row) => row.ok === 1 && row.result_ok === 1 && row.result_code === 0 && row.result_status === 'success')) throw new Error('successful child process metric projection missing');
   const processAudit = getToolAuditMetrics(30, 'active').rows.find((row) => row.tool === 'work_once');
   if (!processAudit || processAudit.errorCalls < 1 || !processAudit.errorCategories.some((entry) => entry.name === 'process-exit')) throw new Error('process result audit classification failed');
+  for (let i = 0; i < 12; i += 1) {
+    const cardinalityMetric = beginToolMetric('system_info', {}, {caller:'chatgpt-web',sessionKey:`fixture-cardinality-${i}`,project:`fixture-project-${i}`});
+    finishToolMetric(cardinalityMetric, true, 8);
+  }
+  const boundedSummary = getMetricsSummary(5, 'active');
+  if ((boundedSummary.agentProfiles?.length ?? 0) > 5) throw new Error('metrics agentProfiles cardinality exceeded requested limit');
 
   if (classifyToolAuditError('Expected 1 replacement(s), found 0.') !== 'patch-conflict') throw new Error('patch conflict classification failed');
   if (classifyToolAuditError('confirmToolName must exactly match target') !== 'permission-or-risk-mismatch') throw new Error('risk mismatch classification failed');
@@ -478,6 +492,9 @@ try {
   if (neutralDispatch.classification !== 'neutral' || neutralDispatch.delegatedTool !== 'mssr_trace_record' || !neutralDispatch.result?.recorded) throw new Error('neutral fallback dispatch failed');
   const traceResult = await call('mssr_observatory_query', {kind:'trace',traceId:structuredRoute.traceId,limit:30});
   if (!traceResult.trace.some((event) => event.eventType === 'route_planned') || !traceResult.trace.some((event) => event.eventType === 'skill_loaded' && event.ok === true) || !traceResult.trace.some((event) => event.eventType === 'verification')) throw new Error('MSSR observatory trace correlation failed');
+  const storedRouteIntent = traceResult.trace.find((event) => event.eventType === 'route_planned')?.details?.intent;
+  if (!storedRouteIntent || storedRouteIntent.domains?.[0] !== 'roblox' || storedRouteIntent.risk !== 'write') throw new Error('MSSR direct route lost bounded intent dimensions');
+  if (Object.hasOwn(storedRouteIntent, 'summary')) throw new Error('MSSR route telemetry must not persist intent summaries');
   const observatoryStatus = await call('mssr_observatory_query', {kind:'status'});
   if (!observatoryStatus.enabled || !observatoryStatus.privacy || observatoryStatus.privacy.rawPromptsStored !== false) throw new Error('MSSR observatory privacy/status failed');
 

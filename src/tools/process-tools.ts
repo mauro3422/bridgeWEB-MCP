@@ -8,6 +8,7 @@ import { appendBounded, assertCommandAllowed, fileExists, resolveToolPath, runSh
 
 const DONE_TTL_MS = 10 * 60_000;
 const MAX_RUN_MS = 24 * 60 * 60_000;
+const MAX_SYNC_WORK_MS = 45_000;
 const TRACE_ID_PATTERN = /^[A-Za-z0-9._:-]{6,128}$/;
 const TRACE_ID_INPUT_SCHEMA = { type: "string", pattern: "^[A-Za-z0-9._:-]{6,128}$" } as const;
 const optionalTraceId = z.string().regex(TRACE_ID_PATTERN).optional();
@@ -240,7 +241,7 @@ export const processToolModule: BridgeToolModule = {
     { name: "terminal_read", description: "Read buffered stdout/stderr from a persistent terminal session. Accepts optional traceId control metadata to preserve MSSR attribution through the session lifecycle.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, maxChars: { type: "number", default: 20000 }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId"], additionalProperties: false } },
     { name: "terminal_stop", description: "Stop and forget a persistent terminal session. Accepts optional traceId control metadata to preserve MSSR attribution through the session lifecycle.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId"], additionalProperties: false } },
     { name: "terminal_list", description: "List active persistent terminal sessions.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
-    { name: "work_once", description: "Alias of run_command for one short project action. Accepts optional traceId control metadata for explicit MSSR correlation across projects or processes.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["command"], additionalProperties: false } },
+    { name: "work_once", description: "Alias of run_command for one short project action. Keep synchronous work at or below 45 seconds; use work_begin/terminal_start for longer work so one MCP request is not held open. Accepts optional traceId control metadata for explicit MSSR correlation across projects or processes.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS, minimum: 1, maximum: MAX_SYNC_WORK_MS }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["command"], additionalProperties: false } },
     { name: "work_begin", description: "Alias of terminal_start for long-running project work. Accepts optional traceId control metadata for explicit MSSR correlation.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, name: { type: "string" }, logFile: { type: "string" }, timeoutMs: { type: "number", minimum: 1000, maximum: MAX_RUN_MS }, cleanupAfterMs: { type: "number", default: DONE_TTL_MS, minimum: 0, maximum: MAX_RUN_MS }, traceId: TRACE_ID_INPUT_SCHEMA }, additionalProperties: false } },
     { name: "work_peek", description: "Alias of terminal_read for inspecting project work output. Accepts optional traceId control metadata to preserve MSSR attribution.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, maxChars: { type: "number", default: 20000 }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId"], additionalProperties: false } },
     { name: "work_show", description: "Alias of terminal_list for listing project work. Accepts optional traceId control metadata to preserve MSSR attribution.", inputSchema: { type: "object", properties: { traceId: TRACE_ID_INPUT_SCHEMA }, additionalProperties: false } },
@@ -270,7 +271,7 @@ export const processToolModule: BridgeToolModule = {
     },
     terminal_list: () => terminalList(),
     work_once: async (args) => {
-      const parsed = z.object({ command: z.string().min(1), cwd: z.string().optional(), timeoutMs: z.number().positive().max(10 * 60_000).default(DEFAULT_TIMEOUT_MS), traceId: optionalTraceId }).parse(args);
+      const parsed = z.object({ command: z.string().min(1), cwd: z.string().optional(), timeoutMs: z.number().positive().max(MAX_SYNC_WORK_MS).default(DEFAULT_TIMEOUT_MS), traceId: optionalTraceId }).parse(args);
       return await runShellCommand(parsed.command, parsed.cwd, parsed.timeoutMs);
     },
     work_begin: async (args) => {
