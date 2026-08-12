@@ -261,6 +261,113 @@ def _transcribe(
     }
 
 
+def _window_indices_at(windows: list[dict[str, Any]], timestamp: float) -> list[int]:
+    return [
+        int(item.get("index", index))
+        for index, item in enumerate(windows)
+        if float(item.get("startSeconds", 0.0)) <= timestamp < float(item.get("endSeconds", 0.0))
+    ]
+
+
+def _overlap_indices(records: list[dict[str, Any]], start: float, end: float) -> list[int]:
+    return [
+        int(item.get("index", index))
+        for index, item in enumerate(records)
+        if float(item.get("endSeconds", item.get("timestampSeconds", 0.0))) >= start - 0.001
+        and float(item.get("startSeconds", item.get("timestampSeconds", 0.0))) <= end + 0.001
+    ]
+
+
+def _transcript_excerpt(transcription: dict[str, Any], indices: list[int], max_chars: int = 360) -> str:
+    segments = transcription.get("segments", []) if isinstance(transcription, dict) else []
+    by_index = {int(item.get("index", index)): item for index, item in enumerate(segments) if isinstance(item, dict)}
+    text = " ".join(str(by_index[index].get("text", "")).strip() for index in indices if index in by_index and str(by_index[index].get("text", "")).strip())
+    if len(text) <= max_chars:
+        return text
+    return text[: max(0, max_chars - 1)].rstrip() + "…"
+
+
+def _enrich_frame_records(
+    records: list[dict[str, Any]],
+    *,
+    audio_activity: dict[str, Any],
+    transcription: dict[str, Any],
+    visual_events: list[dict[str, Any]],
+) -> None:
+    raw_sound = list(audio_activity.get("rawSoundWindows", []))
+    raw_quiet = list(audio_activity.get("rawQuietWindows", []))
+    speech = list(audio_activity.get("speechWindows", []))
+    silence = list(audio_activity.get("silenceWindows", []))
+    transcript_segments = list(transcription.get("segments", []))
+    for record in records:
+        timestamp = float(record.get("timestampSeconds", 0.0))
+        transcript_indices = _overlap_indices(transcript_segments, timestamp, timestamp)
+        event_indices = _overlap_indices(visual_events, timestamp, timestamp)
+        record["context"] = {
+            "audio": {
+                "soundActive": bool(_window_indices_at(raw_sound, timestamp)),
+                "speechActive": bool(_window_indices_at(speech, timestamp)),
+                "rawSoundWindowIndices": _window_indices_at(raw_sound, timestamp),
+                "rawQuietWindowIndices": _window_indices_at(raw_quiet, timestamp),
+                "speechWindowIndices": _window_indices_at(speech, timestamp),
+                "silenceWindowIndices": _window_indices_at(silence, timestamp),
+            },
+            "transcription": {
+                "segmentIndices": transcript_indices,
+                "excerpt": _transcript_excerpt(transcription, transcript_indices),
+                "timestampPrecision": transcription.get("timestampPrecision"),
+                "wordTimestampsAvailable": bool(transcription.get("wordTimestampsAvailable", False)),
+            },
+            "visualEventIndices": event_indices,
+        }
+        record["eventIndices"] = sorted(set([*record.get("eventIndices", []), *event_indices]))
+
+
+def _enrich_visual_events(
+    events: list[dict[str, Any]],
+    *,
+    audio_activity: dict[str, Any],
+    transcription: dict[str, Any],
+) -> None:
+    speech = list(audio_activity.get("speechWindows", []))
+    raw_sound = list(audio_activity.get("rawSoundWindows", []))
+    transcript_segments = list(transcription.get("segments", []))
+    for event in events:
+        start = float(event.get("startSeconds", event.get("peakSeconds", 0.0)))
+        end = float(event.get("endSeconds", event.get("peakSeconds", start)))
+        transcript_indices = _overlap_indices(transcript_segments, start, end)
+        event["speechWindowIndices"] = _overlap_indices(speech, start, end)
+        event["rawSoundWindowIndices"] = _overlap_indices(raw_sound, start, end)
+        event["transcriptSegmentIndices"] = transcript_indices
+        event["transcriptExcerpt"] = _transcript_excerpt(transcription, transcript_indices)
+
+
+def _srt_timestamp(seconds: float) -> str:
+    milliseconds = max(0, int(round(seconds * 1000.0)))
+    hours, remainder = divmod(milliseconds, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    secs, millis = divmod(remainder, 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+
+def _write_srt(transcription: dict[str, Any], output_path: Path) -> str | None:
+    entries: list[str] = []
+    for segment in transcription.get("segments", []):
+        if not isinstance(segment, dict):
+            continue
+        text = str(segment.get("text", "")).strip()
+        if not text:
+            continue
+        start = float(segment.get("startSeconds", 0.0))
+        end = max(start + 0.05, float(segment.get("endSeconds", start + 0.05)))
+        entries.append(f"{len(entries) + 1}\n{_srt_timestamp(start)} --> {_srt_timestamp(end)}\n{text}\n")
+    if not entries:
+        return None
+    output_path.write_text("\n".join(entries), encoding="utf-8")
+    return str(output_path.resolve())
+
+
+
 
 
 def main() -> int:
@@ -276,8 +383,9 @@ def main() -> int:
     wav_path = output_dir / "audio_16k_mono.wav"
 
     segment_seconds = float(config.get("segmentSeconds", 10.0))
-    frame_interval = float(config.get("frameIntervalSeconds", 4.0))
-    max_frames = int(config.get("maxFrames", 30))
+    frame_interval = float(config.get("frameIntervalSeconds", 12.0))
+    max_frames = int(config.get("maxFrames", 12))
+    visual_analysis_fps = float(config.get("visualAnalysisFps", 10.0))
     transcribe = bool(config.get("transcribe", True))
     primary_language = str(config.get("primaryLanguage", "es-AR"))
     fallback_language_raw = config.get("fallbackLanguage", "en-US")
@@ -320,6 +428,7 @@ def main() -> int:
         float(video.get("durationSeconds", 0.0)),
         enabled=detect_visual_keyframes and bool(video.get("hasVideo")),
         jpeg_quality=jpeg_quality,
+        analysis_fps=visual_analysis_fps,
     )
 
     if alignment_mode == "speech-aware" and audio_ok and audio_duration > 0.0 and not audio_activity.get("speechWindows"):
@@ -365,6 +474,16 @@ def main() -> int:
             "transcript": "",
         }
 
+    visual_events = [item for item in visual_activity.get("events", []) if isinstance(item, dict)]
+    _enrich_visual_events(visual_events, audio_activity=audio_activity, transcription=transcription)
+    _enrich_frame_records(frames, audio_activity=audio_activity, transcription=transcription, visual_events=visual_events)
+    _enrich_frame_records(visual_keyframes, audio_activity=audio_activity, transcription=transcription, visual_events=visual_events)
+    visual_activity["events"] = visual_events
+    visual_activity["motionWindows"] = [item for item in visual_events if item.get("kind") == "view-motion"]
+    subtitle_path = _write_srt(transcription, output_dir / "transcript.srt")
+    transcription["subtitlePath"] = subtitle_path
+
+
     timeline: list[dict[str, Any]] = []
     if transcription["segments"]:
         for segment in transcription["segments"]:
@@ -380,6 +499,14 @@ def main() -> int:
                 "speechWindowIndices": segment.get("speechWindowIndices", []),
                 "frameIndices": nearest_record_indices(frames, start, end),
                 "visualKeyframeIndices": nearest_record_indices(visual_keyframes, start, end),
+                "visualEventIndices": _overlap_indices(visual_events, start, end),
+                "motionWindowIndices": [
+                    int(event["index"])
+                    for event in visual_events
+                    if event.get("kind") == "view-motion"
+                    and float(event.get("endSeconds", 0.0)) >= start - 0.001
+                    and float(event.get("startSeconds", 0.0)) <= end + 0.001
+                ],
             })
     elif frames:
         for index, frame in enumerate(frames):
@@ -395,10 +522,11 @@ def main() -> int:
                 "speechWindowIndices": [],
                 "frameIndices": [int(frame["index"])],
                 "visualKeyframeIndices": nearest_record_indices(visual_keyframes, start, max(start, next_time)),
+                "visualEventIndices": _overlap_indices(visual_events, start, max(start, next_time)),
             })
 
     review = {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "sourcePath": str(source),
         "durationSeconds": round(duration, 6),
         "video": video,
@@ -412,6 +540,7 @@ def main() -> int:
         },
         "frames": frames,
         "visualKeyframes": visual_keyframes,
+        "visualEvents": visual_events,
         "visualActivity": visual_activity,
         "transcription": transcription,
         "alignment": {

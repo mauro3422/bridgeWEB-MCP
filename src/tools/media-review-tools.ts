@@ -169,7 +169,7 @@ function evenlySpaced<T>(items: T[], limit: number): T[] {
 
 async function attachPreviewFrames(frames: Array<Record<string, unknown>>) {
   const attachments: Array<{ type: "image"; mimeType: string; data: string }> = [];
-  const attached: Array<{ path: string; timestampSeconds: number | null; bytes: number; sha256: string }> = [];
+  const attached: Array<{ path: string; timestampSeconds: number | null; bytes: number; sha256: string; kind: string | null; transcriptExcerpt: string; visualEventIndices: number[]; motion: unknown }> = [];
   for (const frame of evenlySpaced(frames, MAX_ATTACH_FRAMES)) {
     if (typeof frame.path !== "string") continue;
     const framePath = resolveToolPath(frame.path, { access: "read" });
@@ -178,11 +178,21 @@ async function attachPreviewFrames(frames: Array<Record<string, unknown>>) {
     if (!(bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)) continue;
     const digest = sha256(bytes);
     attachments.push({ type: "image", mimeType: "image/jpeg", data: bytes.toString("base64") });
+    const context = frame.context && typeof frame.context === "object" && !Array.isArray(frame.context) ? frame.context as Record<string, unknown> : {};
+    const transcription = context.transcription && typeof context.transcription === "object" && !Array.isArray(context.transcription)
+      ? context.transcription as Record<string, unknown>
+      : {};
     attached.push({
       path: framePath,
       timestampSeconds: typeof frame.timestampSeconds === "number" ? frame.timestampSeconds : null,
       bytes: bytes.length,
       sha256: digest,
+      kind: typeof frame.kind === "string" ? frame.kind : null,
+      transcriptExcerpt: typeof transcription.excerpt === "string" ? transcription.excerpt : "",
+      visualEventIndices: Array.isArray(context.visualEventIndices)
+        ? context.visualEventIndices.filter((item): item is number => typeof item === "number")
+        : [],
+      motion: frame.motion ?? null,
     });
   }
   return { attachments, attached };
@@ -195,6 +205,7 @@ async function ingestMediaReview(args: {
   segmentSeconds: number;
   frameIntervalSeconds: number;
   maxFrames: number;
+  visualAnalysisFps: number;
   transcribe: boolean;
   primaryLanguage: string;
   fallbackLanguage?: string;
@@ -254,6 +265,7 @@ async function ingestMediaReview(args: {
     segmentSeconds: args.segmentSeconds,
     frameIntervalSeconds: args.frameIntervalSeconds,
     maxFrames: args.maxFrames,
+    visualAnalysisFps: args.visualAnalysisFps,
     transcribe: args.transcribe,
     primaryLanguage: args.primaryLanguage,
     fallbackLanguage: args.fallbackLanguage ?? null,
@@ -324,7 +336,7 @@ export const mediaReviewToolModule: BridgeToolModule = {
   tools: [
     {
       name: "media_review_ingest",
-      description: "Ingest one local or ChatGPT-authorized audio/video source for narrated synchronized review. Uses an immutable working copy, extracts periodic frames plus visual content-change keyframes, detects speech/silence windows, optionally sends speech-aware bounded audio groups to Google Speech Recognition (es-AR by default, optional en-US fallback), and returns a time-aligned review.json. Google Speech through this provider is segment-timestamped, not word-timestamped. When transcribe=true, audio segments leave MauroPrime and are sent to Google; use transcribe=false for fully local analysis.",
+      description: "Ingest one local or ChatGPT-authorized audio/video source for narrated synchronized review. Uses an immutable working copy, automatically detects acoustic activity, speech/silence, adaptive visual changes and apparent 2D view motion, materializes only bounded representative JPEGs plus sparse coverage frames, correlates each representative/event with transcript and audio metadata, writes an SRT subtitle sidecar when text is recognized, and returns a time-aligned review.json. Google Speech through this provider is segment-timestamped, not word-timestamped. inverseViewDirectionHint is only a 2D viewport/camera-pan hint. When transcribe=true, audio segments leave MauroPrime and are sent to Google; use transcribe=false for fully local analysis.",
       inputSchema: {
         type: "object",
         $defs: {
@@ -345,8 +357,9 @@ export const mediaReviewToolModule: BridgeToolModule = {
           localPath: { type: "string", description: "Allowed local audio/video file path. Use this for Codex or files already present on MauroPrime." },
           outputDir: { type: "string", description: "Optional allowed local review directory. Defaults to .tmp/media-reviews/<review-id>." },
           segmentSeconds: { type: "number", minimum: 4, maximum: 30, default: 10, description: "Maximum ASR group duration. Speech-aware mode preserves finer voice/silence windows separately." },
-          frameIntervalSeconds: { type: "number", minimum: 1, maximum: 30, default: 4 },
-          maxFrames: { type: "integer", minimum: 1, maximum: 60, default: 30 },
+          frameIntervalSeconds: { type: "number", minimum: 1, maximum: 30, default: 12, description: "Sparse coverage-frame interval. Adaptive visual events are detected separately and are the primary review evidence." },
+          maxFrames: { type: "integer", minimum: 1, maximum: 60, default: 12, description: "Maximum sparse coverage frames; adaptive representative frames use a separate bounded event budget." },
+          visualAnalysisFps: { type: "number", minimum: 1, maximum: 20, default: 10, description: "Target reduced-resolution visual analysis cadence. Long videos are automatically bounded to at most about 6000 analysis samples." },
           transcribe: { type: "boolean", default: true, description: "When true, sends bounded speech-aware audio groups to Google Speech Recognition." },
           primaryLanguage: { type: "string", default: "es-AR" },
           fallbackLanguage: { type: "string", default: "en-US" },
@@ -374,8 +387,9 @@ export const mediaReviewToolModule: BridgeToolModule = {
         localPath: z.string().min(1).optional(),
         outputDir: z.string().optional(),
         segmentSeconds: z.number().min(4).max(30).default(10),
-        frameIntervalSeconds: z.number().min(1).max(30).default(4),
-        maxFrames: z.number().int().min(1).max(60).default(30),
+        frameIntervalSeconds: z.number().min(1).max(30).default(12),
+        maxFrames: z.number().int().min(1).max(60).default(12),
+        visualAnalysisFps: z.number().min(1).max(20).default(10),
         transcribe: z.boolean().default(true),
         primaryLanguage: z.string().min(2).max(32).default("es-AR"),
         fallbackLanguage: z.string().min(2).max(32).optional().default("en-US"),

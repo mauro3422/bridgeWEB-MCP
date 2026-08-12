@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -85,7 +86,7 @@ try {
   assert.equal(result.source.fileId, 'file_fixture_wav');
   assert.equal(result.source.sourceKind, 'chatgpt-file');
   assert.equal(result.source.originPath, null);
-  assert.equal(result.schemaVersion, 2);
+  assert.equal(result.schemaVersion, 3);
   assert.equal(result.alignment.mode, 'speech-aware');
   assert.equal(result.transcription.wordTimestampsAvailable, false);
   assert.equal(result.source.sha256, expectedSha256);
@@ -125,7 +126,7 @@ try {
   assert.equal(localResult.source.sourceKind, 'local-path');
   assert.equal(localResult.source.originPath, localSourcePath);
   assert.equal(localResult.source.fileId, null);
-  assert.equal(localResult.schemaVersion, 2);
+  assert.equal(localResult.schemaVersion, 3);
   assert.equal(localResult.audio.activity.available, true);
   assert.equal(localResult.audio.activity.speechWindows.length >= 1, true);
   assert.equal(localResult.audio.activity.analysisResolutionMs, 30);
@@ -139,6 +140,87 @@ try {
   assert.equal(localResult.transcription.wordTimestampsAvailable, false);
   assert.equal(fs.existsSync(localSourcePath), true);
   assert.equal(fs.existsSync(path.join(localOutputDir, 'source.wav')), false);
+
+  const syntheticVideoPath = path.join(projectRoot, 'adaptive-motion.mp4');
+  const syntheticScript = String.raw`
+import cv2
+import numpy as np
+import sys
+
+output = sys.argv[1]
+width, height, fps = 320, 180, 10
+rng = np.random.default_rng(12345)
+base = rng.integers(35, 220, size=(height, width, 3), dtype=np.uint8)
+cv2.rectangle(base, (40, 35), (130, 105), (245, 245, 245), 3)
+cv2.circle(base, (245, 95), 28, (10, 10, 10), 4)
+cv2.putText(base, 'MOTION TEST', (72, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (250, 250, 250), 2, cv2.LINE_AA)
+writer = cv2.VideoWriter(output, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
+if not writer.isOpened():
+    raise RuntimeError('synthetic mp4 writer unavailable')
+for i in range(40):
+    if i < 10:
+        shift = 0
+    elif i < 25:
+        shift = -(i - 9) * 2
+    else:
+        shift = -30
+    matrix = np.float32([[1, 0, shift], [0, 1, 0]])
+    frame = cv2.warpAffine(base, matrix, (width, height), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
+    if i >= 35:
+        frame = np.full((height, width, 3), (18, 90, 180), dtype=np.uint8)
+        cv2.putText(frame, 'SCENE B', (92, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2, cv2.LINE_AA)
+    writer.write(frame)
+writer.release()
+`;
+  const syntheticBuild = spawnSync('python', ['-c', syntheticScript, syntheticVideoPath], { encoding: 'utf8' });
+  assert.equal(syntheticBuild.status, 0, syntheticBuild.stderr || syntheticBuild.stdout || 'synthetic video generation failed');
+  assert.equal(fs.existsSync(syntheticVideoPath), true);
+
+  const syntheticResult = await registry.call('media_review_ingest', {
+    localPath: syntheticVideoPath,
+    outputDir: path.join(projectRoot, 'adaptive-motion-review'),
+    transcribe: false,
+    attachPreviewFrames: false,
+    keepAudio: false,
+    keepSource: false,
+    visualAnalysisFps: 10,
+    frameIntervalSeconds: 12,
+    maxFrames: 12,
+    timeoutMs: 120000,
+  });
+  assert.equal(syntheticResult.schemaVersion, 3);
+  assert.equal(syntheticResult.video.hasVideo, true);
+  assert.equal(syntheticResult.visualActivity.method, 'adaptive-content-motion');
+  assert.equal(syntheticResult.visualActivity.sampleCount >= 30, true);
+  assert.equal(syntheticResult.visualActivity.sampleCount <= syntheticResult.video.frameCount, true);
+  assert.equal(syntheticResult.visualActivity.motionWindows.length >= 1, true);
+  assert.equal(syntheticResult.visualEvents.some((event) => event.kind === 'view-motion'), true);
+  assert.equal(syntheticResult.visualEvents.some((event) => event.kind === 'scene-change' || event.kind === 'content-change'), true);
+  assert.equal(syntheticResult.visualKeyframes.length > 0, true);
+  assert.equal(syntheticResult.visualKeyframes.length < syntheticResult.video.frameCount, true);
+  assert.equal(syntheticResult.visualKeyframes.some((frame) => frame.context && frame.context.visualEventIndices.length > 0), true);
+  assert.equal(syntheticResult.visualActivity.motionWindows.some((window) => window.inverseViewDirectionHint !== 'still'), true);
+  assert.equal(syntheticResult.transcription.subtitlePath, null);
+  const subtitleRegressionPath = path.join(projectRoot, 'subtitle-regression.srt');
+  const subtitleScript = String.raw`
+import sys
+from pathlib import Path
+sys.path.insert(0, 'integrations/media')
+from review_media import _write_srt
+result = _write_srt({'segments': [
+    {'startSeconds': 1.25, 'endSeconds': 2.75, 'text': 'líneas y relación'},
+    {'startSeconds': 3.0, 'endSeconds': 4.1, 'text': 'giros raros'},
+]}, Path(sys.argv[1]))
+if not result:
+    raise RuntimeError('subtitle sidecar was not created')
+`;
+  const subtitleBuild = spawnSync('python', ['-c', subtitleScript, subtitleRegressionPath], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(subtitleBuild.status, 0, subtitleBuild.stderr || subtitleBuild.stdout || 'subtitle regression failed');
+  const subtitleText = fs.readFileSync(subtitleRegressionPath, 'utf8');
+  assert.match(subtitleText, /00:00:01,250 --> 00:00:02,750/);
+  assert.match(subtitleText, /líneas y relación/);
+  assert.match(subtitleText, /giros raros/);
+
 
   await assert.rejects(
     () => registry.call('media_review_ingest', {

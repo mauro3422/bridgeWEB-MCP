@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "name": "narrated-media-review",
   "title": "Narrated Media Review",
-  "description": "Convierte videos, audios o grabaciones narradas de trabajo en evidencia temporal multimodal: detecta voz/silencio y cambios visuales, alinea transcripción con frames/keyframes, correlaciona observaciones con el proyecto propietario, ejecuta cambios bajo sus reglas y repite el loop con verificación.",
+  "description": "Convierte videos, audios o grabaciones narradas de trabajo en evidencia temporal multimodal: detecta sonido/voz/silencio, cambios visuales y movimiento aparente de viewport, alinea transcripción con eventos/frames representativos, correlaciona observaciones con el proyecto propietario, ejecuta cambios bajo sus reglas y repite el loop con verificación.",
   "activation": {
     "keywords": [
       "video narrado",
@@ -26,6 +26,10 @@
     ],
     "negativeKeywords": [
       "transcribir solamente",
+      "transcribime este audio y nada más",
+      "solo transcripción",
+      "sólo transcripción",
+      "no relaciones la transcripción",
       "convertir formato solamente"
     ],
     "examples": [
