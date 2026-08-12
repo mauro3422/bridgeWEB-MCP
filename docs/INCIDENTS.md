@@ -21,7 +21,7 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ## 2026-08-12 — El host de ChatGPT omitió tools con `openai/fileParams` aunque el runtime las exponía
 
-**Estado:** Mitigado en source; pendiente de publicación y verificación del runtime `0.6.79`.
+**Estado:** Mitigado y verificado en runtime vivo; metadata operativa corregida para `0.6.80`.
 
 **Capa/owner:** frontera entre catálogo directo del host ChatGPT y runtime MCP de `bridge-mcp`; la mitigación local pertenece a `media_review_ingest`.
 
@@ -35,7 +35,9 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 **Regresión:** `test-media-review-ingest.mjs` cubre el camino fileParam, el nuevo camino `localPath`, rechazo de doble/ninguna fuente, preservación del archivo original y cleanup de la working copy. El caso real `D:\Grabaciones de pantall\Grabación de pantalla 2026-08-11 205859.mp4` produjo 102.133 s de timeline, 30 ventanas estabilizadas de voz, 31 silencios, 18 cambios visuales, 14 grupos ASR y 1219 caracteres reconocidos sin warnings.
 
-**Seguimiento:** verificar `0.6.79` en runtime vivo y conservar como límite de producto que Bridge no puede garantizar que una tool con file parameters sea seleccionada directamente por cada conversación. No crear un transporte Base64 paralelo cuando `localPath`, `files` o las tools binarias genéricas existentes ya resuelvan el movimiento de bytes.
+**Verificación runtime:** `0.6.79` procesó el MP4 real por `localPath` a través de `bridge_tool_action` en 15.514 s: source SHA-256 `305cec809f1b2e270784a1b02a316bcfd5d14140a912081d8aac164643184c5b`, 102.133333 s, actividad acústica a 30 ms, 223/224 ventanas crudas sonido/quietud, 30/31 ventanas estabilizadas voz/silencio, 14 grupos ASR, 27 frames periódicos, 18 keyframes visuales, previews adjuntos y cero warnings. `bridge_tool_schema` expuso correctamente `files | localPath`; esa lectura también reveló que `metadata.usage.prerequisites` había quedado stale de v1, por lo que se corrigió en el patch siguiente.
+
+**Seguimiento:** conservar como límite de producto que Bridge no puede garantizar que una tool con file parameters sea seleccionada directamente por cada conversación. No crear un transporte Base64 paralelo cuando `localPath`, `files` o las tools binarias genéricas existentes ya resuelvan el movimiento de bytes.
 
 ---
 

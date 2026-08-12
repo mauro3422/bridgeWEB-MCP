@@ -188,8 +188,10 @@ const toolUsageGuidance = new Map<string, BridgeToolUsageGuidance>([
     recovery: [{ code: "missing-capability", instruction: "Create or configure a Roblox Open Cloud API key with Assets Read/Write permission; never pass the secret as a tool argument." }],
   }],
   ["media_review_ingest", {
-    prerequisites: ["Use a ChatGPT-authorized file parameter. When transcribe=true, bounded audio segments are sent to Google Speech Recognition; use transcribe=false when external ASR is not intended."],
-    recovery: [{ code: "source-file-unavailable", instruction: "Retry with the original conversation attachment while its temporary authorized download URL is still valid." }],
+    prerequisites: ["Provide exactly one source: a ChatGPT-authorized files parameter or an allowed localPath already present on MauroPrime. When transcribe=true, bounded audio segments are sent to Google Speech Recognition; use transcribe=false when external ASR is not intended."],
+    recovery: [
+      { code: "source-file-unavailable", instruction: "For files, retry with the original conversation attachment while its temporary authorized download URL is still valid. For localPath, verify the exact allowed file path still exists and is readable." },
+    ],
   }],
   ["blender_focus_review", {
     prerequisites: ["Leave the intended detail selected in Edit Mode, select the target object, or place the 3D Cursor where the review should focus."],

@@ -2,6 +2,7 @@
 
 - Add `media_review_ingest`, a ChatGPT file-parameter workflow for bounded audio/video review: it validates authorized attachment bytes, extracts timestamped frames and local 16 kHz audio, can transcribe segment-by-segment with Google Speech Recognition (`es-AR` with fallback), and returns a synchronized transcript/frame timeline plus provenance. Offline regression coverage runs with `transcribe=false`; external ASR use is explicit in the tool contract.
 - Extend `media_review_ingest` into a reusable narrated-iteration primitive: accept either a ChatGPT-authorized `files` source or an allowed `localPath`, process an immutable working copy, detect 30 ms acoustic activity plus stabilized speech/silence windows, group speech-aware ASR segments, detect visual content-change keyframes, expose honest segment-level timestamp precision, and attach representative change frames. Add the global `narrated-media-review` workflow guide so project/domain skills remain owners of the actual edits instead of duplicating the media engine.
+- Correct `media_review_ingest` operational metadata after live `0.6.79` validation: prerequisites and recovery now describe both `files` and `localPath` instead of incorrectly requiring only a ChatGPT file parameter.
 
 - Preserve the canonical privacy-bounded MSSR intent projection for both direct
   ChatGPT Web routes and authenticated external telemetry instead of retaining
