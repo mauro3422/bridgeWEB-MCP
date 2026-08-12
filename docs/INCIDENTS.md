@@ -19,6 +19,27 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-08-12 — El host de ChatGPT omitió tools con `openai/fileParams` aunque el runtime las exponía
+
+**Estado:** Mitigado en source; pendiente de publicación y verificación del runtime `0.6.79`.
+
+**Capa/owner:** frontera entre catálogo directo del host ChatGPT y runtime MCP de `bridge-mcp`; la mitigación local pertenece a `media_review_ingest`.
+
+**Síntoma observable:** después de publicar y reiniciar `0.6.78`, `bridge_health` mostró 143 tools y `media_review_ingest` estaba presente con `_meta["openai/fileParams"]=["files"]`, pero el catálogo directo observable de la conversación conservó sólo 127/143. Entre las 16 ausentes estaban tanto `media_review_ingest` como la preexistente `image_asset_import_files`, por lo que el adjunto de video no podía cruzar por el mecanismo especial de file parameters aunque los wrappers siguieran viendo la tool runtime.
+
+**Reproducción mínima/evidencia:** `bridge_connector_catalog_compare` con las 127 tools observables reportó cobertura directa 88.81% y listó ambas tools de file parameters como `absentDirectly`. `bridge_tool_schema(media_review_ingest)` confirmó el schema runtime correcto. El wrapper `bridge_tool_action` no puede fabricar un `download_url/file_id` autorizado por ChatGPT, por lo que wrapper reachability no equivale a file-parameter transport.
+
+**Causa demostrada:** la selección/actualización del catálogo directo pertenece al host de ChatGPT y puede quedar detrás del runtime MCP después de un restart. Bridge no puede inspeccionar ni forzar esa selección. No hubo evidencia de un schema `openai/fileParams` incorrecto ni de una falla del procesador multimedia.
+
+**Mitigación aplicada:** `media_review_ingest` acepta exactamente una fuente `files` o `localPath`. `files` conserva el transporte autorizado cuando el host lo expone; `localPath` permite a ChatGPT vía Bridge, Codex y otros clientes procesar el mismo medio si ya existe en MauroPrime, sin Base64 ni fileParams. En ambos casos se crea una working copy verificada antes del análisis. `bridge_connector_catalog_compare` sigue siendo el diagnóstico de drift; reabrir el connector o iniciar un chat nuevo sigue siendo la recuperación para adjuntos que sólo existen en ChatGPT.
+
+**Regresión:** `test-media-review-ingest.mjs` cubre el camino fileParam, el nuevo camino `localPath`, rechazo de doble/ninguna fuente, preservación del archivo original y cleanup de la working copy. El caso real `D:\Grabaciones de pantall\Grabación de pantalla 2026-08-11 205859.mp4` produjo 102.133 s de timeline, 30 ventanas estabilizadas de voz, 31 silencios, 18 cambios visuales, 14 grupos ASR y 1219 caracteres reconocidos sin warnings.
+
+**Seguimiento:** verificar `0.6.79` en runtime vivo y conservar como límite de producto que Bridge no puede garantizar que una tool con file parameters sea seleccionada directamente por cada conversación. No crear un transporte Base64 paralelo cuando `localPath`, `files` o las tools binarias genéricas existentes ya resuelvan el movimiento de bytes.
+
+---
+
+
 ## 2026-08-10 — Un único fallo transitorio de readiness provocaba autorestart y 502 aguas arriba
 
 **Estado:** Corregido y verificado en runtime vivo.

@@ -126,6 +126,23 @@ async function downloadAuthorizedMedia(file: OpenAIFileInput): Promise<{ bytes: 
   return { bytes, measured };
 }
 
+async function readLocalMedia(localPathRaw: string): Promise<{ bytes: Buffer; measured: MediaContainer; resolvedPath: string }> {
+  const resolvedPath = resolveToolPath(localPathRaw, { access: "read" });
+  const stats = await fs.stat(resolvedPath).catch((error) => {
+    throw new Error(`[source-file-unavailable] Unable to read local media ${resolvedPath}: ${error instanceof Error ? error.message : String(error)}`);
+  });
+  if (!stats.isFile()) throw new Error(`[source-file-unavailable] Local media path is not a file: ${resolvedPath}`);
+  if (!stats.size) throw new Error(`[source-file-unavailable] Local media is empty: ${resolvedPath}`);
+  if (stats.size > MAX_MEDIA_BYTES) throw new Error(`Local media exceeds ${MAX_MEDIA_BYTES} bytes: ${resolvedPath}`);
+  const bytes = await fs.readFile(resolvedPath);
+  const afterStats = await fs.stat(resolvedPath);
+  if (bytes.length !== stats.size || afterStats.size !== stats.size || afterStats.mtimeMs !== stats.mtimeMs) {
+    throw new Error(`[expected-integrity-mismatch] Local media changed while it was being read: ${resolvedPath}`);
+  }
+  const measured = detectMediaContainer(bytes);
+  return { bytes, measured, resolvedPath };
+}
+
 function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
@@ -172,7 +189,8 @@ async function attachPreviewFrames(frames: Array<Record<string, unknown>>) {
 }
 
 async function ingestMediaReview(args: {
-  files: OpenAIFileInput[];
+  files?: OpenAIFileInput[];
+  localPath?: string;
   outputDir?: string;
   segmentSeconds: number;
   frameIntervalSeconds: number;
@@ -185,17 +203,47 @@ async function ingestMediaReview(args: {
   attachPreviewFrames: boolean;
   maxWorkers: number;
   jpegQuality: number;
+  alignmentMode: "speech-aware" | "fixed";
+  detectVisualKeyframes: boolean;
   timeoutMs: number;
 }) {
-  const file = args.files[0];
-  const downloaded = await downloadAuthorizedMedia(file);
-  const reviewId = `${new Date().toISOString().replace(/[:.]/g, "-")}_${safeId(file.file_id)}_${crypto.randomUUID().slice(0, 8)}`;
+  const file = args.files?.[0] ?? null;
+  const hasLocalPath = Boolean(args.localPath?.trim());
+  if (Boolean(file) === hasLocalPath) {
+    throw new Error("[schema-validation] Provide exactly one media source: files or localPath.");
+  }
+
+  const acquired = file
+    ? {
+        sourceKind: "chatgpt-file" as const,
+        ...(await downloadAuthorizedMedia(file)),
+        fileId: file.file_id,
+        fileName: file.file_name ?? null,
+        declaredMime: file.mime_type ?? null,
+        originPath: null as string | null,
+        identity: file.file_id,
+      }
+    : await (async () => {
+        const local = await readLocalMedia(args.localPath!);
+        return {
+          sourceKind: "local-path" as const,
+          bytes: local.bytes,
+          measured: local.measured,
+          fileId: null as string | null,
+          fileName: path.basename(local.resolvedPath),
+          declaredMime: null as string | null,
+          originPath: local.resolvedPath,
+          identity: path.basename(local.resolvedPath),
+        };
+      })();
+
+  const reviewId = `${new Date().toISOString().replace(/[:.]/g, "-")}_${safeId(acquired.identity)}_${crypto.randomUUID().slice(0, 8)}`;
   const outputDir = resolveToolPath(args.outputDir ?? path.join(process.cwd(), ".tmp", "media-reviews", reviewId), { access: "write" });
   await fs.mkdir(outputDir, { recursive: true });
 
-  const sourcePath = resolveToolPath(path.join(outputDir, `source${downloaded.measured.extension}`), { access: "write" });
-  await fs.writeFile(sourcePath, downloaded.bytes);
-  const sourceDigest = sha256(downloaded.bytes);
+  const sourcePath = resolveToolPath(path.join(outputDir, `source${acquired.measured.extension}`), { access: "write" });
+  await fs.writeFile(sourcePath, acquired.bytes);
+  const sourceDigest = sha256(acquired.bytes);
   const configPath = resolveToolPath(path.join(outputDir, "review-config.json"), { access: "write" });
   const reviewPath = resolveToolPath(path.join(outputDir, "review.json"), { access: "write" });
   const helperPath = resolveToolPath(path.join(process.cwd(), "integrations", "media", "review_media.py"), { access: "read" });
@@ -212,6 +260,8 @@ async function ingestMediaReview(args: {
     keepAudio: args.keepAudio,
     maxWorkers: args.maxWorkers,
     jpegQuality: args.jpegQuality,
+    alignmentMode: args.alignmentMode,
+    detectVisualKeyframes: args.detectVisualKeyframes,
     processTimeoutSeconds: Math.max(30, Math.floor(args.timeoutMs / 1000) - 10),
   };
   await fs.writeFile(configPath, JSON.stringify(helperConfig, null, 2), "utf8");
@@ -224,16 +274,20 @@ async function ingestMediaReview(args: {
     }
     const parsed = JSON.parse(await fs.readFile(reviewPath, "utf8")) as Record<string, unknown>;
     const frames = frameRecords(parsed.frames);
+    const visualKeyframes = frameRecords(parsed.visualKeyframes);
     const warnings = stringArray(parsed.warnings);
     const source = {
-      fileId: file.file_id,
-      fileName: file.file_name ?? null,
-      declaredMime: file.mime_type ?? null,
-      detectedContainer: downloaded.measured.kind,
-      canonicalMime: downloaded.measured.canonicalMime,
-      bytes: downloaded.bytes.length,
+      sourceKind: acquired.sourceKind,
+      fileId: acquired.fileId,
+      fileName: acquired.fileName,
+      declaredMime: acquired.declaredMime,
+      originPath: acquired.originPath,
+      detectedContainer: acquired.measured.kind,
+      canonicalMime: acquired.measured.canonicalMime,
+      bytes: acquired.bytes.length,
       sha256: sourceDigest,
       originalBytesPreserved: true,
+      workingCopyUsed: true,
       persistedSourcePath: args.keepSource ? sourcePath : null,
     };
     parsed.source = source;
@@ -246,7 +300,8 @@ async function ingestMediaReview(args: {
     parsed.warnings = warnings;
     await fs.writeFile(reviewPath, JSON.stringify(parsed, null, 2), "utf8");
 
-    const preview = args.attachPreviewFrames ? await attachPreviewFrames(frames) : { attachments: [], attached: [] };
+    const previewCandidates = visualKeyframes.length ? visualKeyframes : frames;
+    const preview = args.attachPreviewFrames ? await attachPreviewFrames(previewCandidates) : { attachments: [], attached: [] };
     if (!args.keepSource) await fs.rm(sourcePath, { force: true }).catch(() => undefined);
 
     return {
@@ -269,7 +324,7 @@ export const mediaReviewToolModule: BridgeToolModule = {
   tools: [
     {
       name: "media_review_ingest",
-      description: "Ingest one ChatGPT-authorized audio/video attachment for synchronized review. Downloads the temporary file with byte/signature/MIME guards, extracts timestamped JPEG frames and 16 kHz mono audio using local tooling, optionally sends bounded audio segments to Google Speech Recognition (es-AR by default, optional en-US fallback), and returns a transcript/frame timeline plus review.json provenance. When transcribe=true, audio segments leave MauroPrime and are sent to Google; use transcribe=false for fully local frame/audio inspection.",
+      description: "Ingest one local or ChatGPT-authorized audio/video source for narrated synchronized review. Uses an immutable working copy, extracts periodic frames plus visual content-change keyframes, detects speech/silence windows, optionally sends speech-aware bounded audio groups to Google Speech Recognition (es-AR by default, optional en-US fallback), and returns a time-aligned review.json. Google Speech through this provider is segment-timestamped, not word-timestamped. When transcribe=true, audio segments leave MauroPrime and are sent to Google; use transcribe=false for fully local analysis.",
       inputSchema: {
         type: "object",
         $defs: {
@@ -286,22 +341,25 @@ export const mediaReviewToolModule: BridgeToolModule = {
           },
         },
         properties: {
-          files: { type: "array", minItems: 1, maxItems: 1, items: { $ref: "#/$defs/OpenAIFile" } },
+          files: { type: "array", minItems: 1, maxItems: 1, items: { $ref: "#/$defs/OpenAIFile" }, description: "ChatGPT-authorized attachment source." },
+          localPath: { type: "string", description: "Allowed local audio/video file path. Use this for Codex or files already present on MauroPrime." },
           outputDir: { type: "string", description: "Optional allowed local review directory. Defaults to .tmp/media-reviews/<review-id>." },
-          segmentSeconds: { type: "number", minimum: 4, maximum: 30, default: 10 },
+          segmentSeconds: { type: "number", minimum: 4, maximum: 30, default: 10, description: "Maximum ASR group duration. Speech-aware mode preserves finer voice/silence windows separately." },
           frameIntervalSeconds: { type: "number", minimum: 1, maximum: 30, default: 4 },
           maxFrames: { type: "integer", minimum: 1, maximum: 60, default: 30 },
-          transcribe: { type: "boolean", default: true, description: "When true, sends audio segments to Google Speech Recognition." },
+          transcribe: { type: "boolean", default: true, description: "When true, sends bounded speech-aware audio groups to Google Speech Recognition." },
           primaryLanguage: { type: "string", default: "es-AR" },
           fallbackLanguage: { type: "string", default: "en-US" },
+          alignmentMode: { type: "string", enum: ["speech-aware", "fixed"], default: "speech-aware", description: "speech-aware uses detected voice activity as the audio clock; fixed preserves the legacy fixed-window ASR behavior." },
+          detectVisualKeyframes: { type: "boolean", default: true, description: "Detect review keyframes from visual content changes. These are not codec/GOP keyframes." },
           keepAudio: { type: "boolean", default: false },
           keepSource: { type: "boolean", default: false },
-          attachPreviewFrames: { type: "boolean", default: true, description: "Attach up to eight evenly spaced generated frames to the MCP result." },
+          attachPreviewFrames: { type: "boolean", default: true, description: "Attach up to eight representative visual-change frames, or periodic frames when no keyframes exist." },
           maxWorkers: { type: "integer", minimum: 1, maximum: 4, default: 3 },
           jpegQuality: { type: "integer", minimum: 55, maximum: 95, default: 86 },
           timeoutMs: { type: "integer", minimum: 30000, maximum: 600000, default: DEFAULT_TIMEOUT_MS },
         },
-        required: ["files"],
+        oneOf: [{ required: ["files"] }, { required: ["localPath"] }],
         additionalProperties: false,
       },
       _meta: {
@@ -312,7 +370,8 @@ export const mediaReviewToolModule: BridgeToolModule = {
   handlers: {
     media_review_ingest: async (raw) => {
       const parsed = z.object({
-        files: z.array(openAIFileSchema).length(1),
+        files: z.array(openAIFileSchema).length(1).optional(),
+        localPath: z.string().min(1).optional(),
         outputDir: z.string().optional(),
         segmentSeconds: z.number().min(4).max(30).default(10),
         frameIntervalSeconds: z.number().min(1).max(30).default(4),
@@ -320,12 +379,19 @@ export const mediaReviewToolModule: BridgeToolModule = {
         transcribe: z.boolean().default(true),
         primaryLanguage: z.string().min(2).max(32).default("es-AR"),
         fallbackLanguage: z.string().min(2).max(32).optional().default("en-US"),
+        alignmentMode: z.enum(["speech-aware", "fixed"]).default("speech-aware"),
+        detectVisualKeyframes: z.boolean().default(true),
         keepAudio: z.boolean().default(false),
         keepSource: z.boolean().default(false),
         attachPreviewFrames: z.boolean().default(true),
         maxWorkers: z.number().int().min(1).max(4).default(3),
         jpegQuality: z.number().int().min(55).max(95).default(86),
         timeoutMs: z.number().int().min(30000).max(600000).default(DEFAULT_TIMEOUT_MS),
+      }).superRefine((value, ctx) => {
+        const sourceCount = (value.files?.length ? 1 : 0) + (value.localPath?.trim() ? 1 : 0);
+        if (sourceCount !== 1) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Provide exactly one media source: files or localPath." });
+        }
       }).parse(raw);
       return await ingestMediaReview(parsed);
     },

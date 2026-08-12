@@ -14,6 +14,8 @@ import cv2
 import imageio_ffmpeg
 import speech_recognition as sr
 
+from timeline_analysis import analyze_audio_activity, build_asr_specs, extract_visual_keyframes, nearest_record_indices
+
 
 def _run(command: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
@@ -163,9 +165,30 @@ def _recognize_segment(
 
     for language in languages:
         try:
-            text = recognizer.recognize_google(audio, language=language).strip()
+            response = recognizer.recognize_google(audio, language=language, show_all=True)
+            text = ""
+            confidence = None
+            alternatives: list[dict[str, Any]] = []
+            if isinstance(response, dict):
+                raw_alternatives = response.get("alternative", [])
+                if isinstance(raw_alternatives, list):
+                    alternatives = [item for item in raw_alternatives if isinstance(item, dict)]
+                if alternatives:
+                    best = max(alternatives, key=lambda item: float(item.get("confidence", -1.0)))
+                    text = str(best.get("transcript", "")).strip()
+                    raw_confidence = best.get("confidence")
+                    confidence = float(raw_confidence) if isinstance(raw_confidence, (int, float)) else None
+            elif isinstance(response, str):
+                text = response.strip()
+
             if text:
-                return {"text": text, "language": language, "attempts": attempts}
+                return {
+                    "text": text,
+                    "language": language,
+                    "confidence": confidence,
+                    "alternatives": [str(item.get("transcript", "")).strip() for item in alternatives[:3] if str(item.get("transcript", "")).strip()],
+                    "attempts": attempts,
+                }
             attempts.append({"language": language, "error": "empty transcript"})
         except sr.UnknownValueError:
             attempts.append({"language": language, "error": "speech not understood"})
@@ -174,7 +197,7 @@ def _recognize_segment(
         except Exception as error:  # bounded diagnostic, segment continues
             attempts.append({"language": language, "error": f"{type(error).__name__}: {error}"})
 
-    return {"text": "", "language": None, "attempts": attempts}
+    return {"text": "", "language": None, "confidence": None, "alternatives": [], "attempts": attempts}
 
 
 def _transcribe(
@@ -184,18 +207,12 @@ def _transcribe(
     primary_language: str,
     fallback_language: str | None,
     max_workers: int,
+    audio_activity: dict[str, Any] | None,
+    alignment_mode: str,
 ) -> dict[str, Any]:
-    segment_count = max(1, int(math.ceil(duration / segment_seconds)))
-    specs: list[tuple[int, float, float]] = []
-    for index in range(segment_count):
-        start = index * segment_seconds
-        end = min(duration, start + segment_seconds)
-        if end <= start:
-            continue
-        specs.append((index, start, end))
-
+    specs, segmentation = build_asr_specs(duration, segment_seconds, audio_activity, alignment_mode)
     segments: list[dict[str, Any]] = []
-    worker_count = max(1, min(max_workers, len(specs), 4))
+    worker_count = max(1, min(max_workers, len(specs), 4)) if specs else 1
     with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
         pending = {
             executor.submit(
@@ -205,23 +222,26 @@ def _transcribe(
                 end - start,
                 primary_language,
                 fallback_language,
-            ): (index, start, end)
-            for index, start, end in specs
+            ): (index, start, end, speech_window_indices)
+            for index, start, end, speech_window_indices in specs
         }
         for future in concurrent.futures.as_completed(pending):
-            index, start, end = pending[future]
+            index, start, end, speech_window_indices = pending[future]
             try:
                 recognized = future.result()
             except Exception as error:
                 recognized = {
                     "text": "",
                     "language": None,
+                    "confidence": None,
+                    "alternatives": [],
                     "attempts": [{"language": primary_language, "error": f"{type(error).__name__}: {error}"}],
                 }
             segments.append({
                 "index": index,
                 "startSeconds": round(start, 3),
                 "endSeconds": round(end, 3),
+                "speechWindowIndices": speech_window_indices,
                 **recognized,
             })
 
@@ -233,24 +253,14 @@ def _transcribe(
         "primaryLanguage": primary_language,
         "fallbackLanguage": fallback_language,
         "segmentSeconds": segment_seconds,
+        "segmentation": segmentation,
+        "wordTimestampsAvailable": False,
+        "timestampPrecision": "speech-segment",
         "segments": segments,
         "transcript": transcript,
     }
 
 
-def _nearest_frame_indices(frames: list[dict[str, Any]], start: float, end: float) -> list[int]:
-    if not frames:
-        return []
-    inside = [
-        int(frame["index"])
-        for frame in frames
-        if start <= float(frame["timestampSeconds"]) <= end
-    ]
-    if inside:
-        return inside
-    middle = (start + end) * 0.5
-    nearest = min(frames, key=lambda frame: abs(float(frame["timestampSeconds"]) - middle))
-    return [int(nearest["index"])]
 
 
 def main() -> int:
@@ -276,6 +286,8 @@ def main() -> int:
     max_workers = int(config.get("maxWorkers", 3))
     process_timeout = float(config.get("processTimeoutSeconds", 120.0))
     jpeg_quality = max(55, min(int(config.get("jpegQuality", 86)), 95))
+    alignment_mode = str(config.get("alignmentMode", "speech-aware"))
+    detect_visual_keyframes = bool(config.get("detectVisualKeyframes", True))
 
     warnings: list[str] = []
     video, capture = _video_metadata(source)
@@ -283,17 +295,35 @@ def main() -> int:
     if capture is not None:
         frames = _extract_frames(capture, output_dir / "frames", float(video["durationSeconds"]), frame_interval, max_frames, jpeg_quality)
         if not frames:
-            warnings.append("video stream opened but no review frames were extracted")
+            warnings.append("video stream opened but no periodic review frames were extracted")
 
     audio_ok, audio_error = _extract_audio(source, wav_path, process_timeout)
     audio_duration = 0.0
+    audio_activity: dict[str, Any] = {
+        "method": "adaptive-rms",
+        "available": False,
+        "speechWindows": [],
+        "silenceWindows": [],
+    }
     if audio_ok:
         audio_duration = _wav_duration(wav_path)
+        audio_activity = analyze_audio_activity(wav_path)
     elif audio_error:
         warnings.append(f"audio extraction unavailable: {audio_error}")
 
     duration_candidates = [float(video.get("durationSeconds", 0.0)), audio_duration]
     duration = max(duration_candidates)
+
+    visual_keyframes, visual_activity = extract_visual_keyframes(
+        source,
+        output_dir / "visual-keyframes",
+        float(video.get("durationSeconds", 0.0)),
+        enabled=detect_visual_keyframes and bool(video.get("hasVideo")),
+        jpeg_quality=jpeg_quality,
+    )
+
+    if alignment_mode == "speech-aware" and audio_ok and audio_duration > 0.0 and not audio_activity.get("speechWindows"):
+        warnings.append("speech activity detector found no speech windows; ASR will use fixed-window fallback")
 
     if transcribe and audio_ok and audio_duration > 0.0:
         transcription = _transcribe(
@@ -303,6 +333,8 @@ def main() -> int:
             primary_language,
             fallback_language,
             max_workers,
+            audio_activity,
+            alignment_mode,
         )
         if not transcription["transcript"]:
             warnings.append("Google ASR returned no recognized text")
@@ -313,6 +345,9 @@ def main() -> int:
             "primaryLanguage": primary_language,
             "fallbackLanguage": fallback_language,
             "segmentSeconds": segment_seconds,
+            "segmentation": None,
+            "wordTimestampsAvailable": False,
+            "timestampPrecision": "speech-segment",
             "segments": [],
             "transcript": "",
         }
@@ -323,6 +358,9 @@ def main() -> int:
             "primaryLanguage": primary_language,
             "fallbackLanguage": fallback_language,
             "segmentSeconds": segment_seconds,
+            "segmentation": None,
+            "wordTimestampsAvailable": False,
+            "timestampPrecision": "speech-segment",
             "segments": [],
             "transcript": "",
         }
@@ -338,7 +376,10 @@ def main() -> int:
                 "endSeconds": end,
                 "text": segment.get("text", ""),
                 "language": segment.get("language"),
-                "frameIndices": _nearest_frame_indices(frames, start, end),
+                "confidence": segment.get("confidence"),
+                "speechWindowIndices": segment.get("speechWindowIndices", []),
+                "frameIndices": nearest_record_indices(frames, start, end),
+                "visualKeyframeIndices": nearest_record_indices(visual_keyframes, start, end),
             })
     elif frames:
         for index, frame in enumerate(frames):
@@ -350,11 +391,14 @@ def main() -> int:
                 "endSeconds": round(max(start, next_time), 3),
                 "text": "",
                 "language": None,
+                "confidence": None,
+                "speechWindowIndices": [],
                 "frameIndices": [int(frame["index"])],
+                "visualKeyframeIndices": nearest_record_indices(visual_keyframes, start, max(start, next_time)),
             })
 
     review = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "sourcePath": str(source),
         "durationSeconds": round(duration, 6),
         "video": video,
@@ -364,9 +408,19 @@ def main() -> int:
             "sampleRate": 16000 if audio_ok else None,
             "channels": 1 if audio_ok else None,
             "path": str(wav_path.resolve()) if audio_ok and keep_audio else None,
+            "activity": audio_activity,
         },
         "frames": frames,
+        "visualKeyframes": visual_keyframes,
+        "visualActivity": visual_activity,
         "transcription": transcription,
+        "alignment": {
+            "mode": alignment_mode,
+            "masterClock": "audio" if audio_ok else "video",
+            "wordTimestampsAvailable": False,
+            "timestampPrecision": "speech-segment" if transcription["enabled"] else "frame-window",
+            "note": "Transcript timestamps bound recognized speech segments; words inside a segment are not individually timestamped by this provider.",
+        },
         "timeline": timeline,
         "warnings": warnings,
     }

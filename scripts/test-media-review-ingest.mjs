@@ -5,7 +5,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 
-function makeWav({ seconds = 1, sampleRate = 16000 } = {}) {
+function makeWav({ seconds = 1, sampleRate = 16000, toneStart = 0, toneEnd = seconds } = {}) {
   const samples = Math.floor(seconds * sampleRate);
   const dataBytes = samples * 2;
   const buffer = Buffer.alloc(44 + dataBytes);
@@ -23,7 +23,9 @@ function makeWav({ seconds = 1, sampleRate = 16000 } = {}) {
   buffer.write('data', 36, 'ascii');
   buffer.writeUInt32LE(dataBytes, 40);
   for (let i = 0; i < samples; i += 1) {
-    const value = Math.round(Math.sin((2 * Math.PI * 440 * i) / sampleRate) * 2200);
+    const t = i / sampleRate;
+    const active = t >= toneStart && t < toneEnd;
+    const value = active ? Math.round(Math.sin((2 * Math.PI * 440 * i) / sampleRate) * 2200) : 0;
     buffer.writeInt16LE(value, 44 + i * 2);
   }
   return buffer;
@@ -81,6 +83,11 @@ try {
   });
 
   assert.equal(result.source.fileId, 'file_fixture_wav');
+  assert.equal(result.source.sourceKind, 'chatgpt-file');
+  assert.equal(result.source.originPath, null);
+  assert.equal(result.schemaVersion, 2);
+  assert.equal(result.alignment.mode, 'speech-aware');
+  assert.equal(result.transcription.wordTimestampsAvailable, false);
   assert.equal(result.source.sha256, expectedSha256);
   assert.equal(result.source.detectedContainer, 'wav');
   assert.equal(result.source.originalBytesPreserved, true);
@@ -100,6 +107,59 @@ try {
   assert.equal(manifest.source.sha256, expectedSha256);
   assert.equal(manifest.sourcePath, null);
   assert.equal(manifest.externalProcessing.audioSentExternally, false);
+
+  const activityBytes = makeWav({ seconds: 2.4, toneStart: 0.6, toneEnd: 1.8 });
+  const localSourcePath = path.join(projectRoot, 'local-activity.wav');
+  fs.writeFileSync(localSourcePath, activityBytes);
+  const localOutputDir = path.join(projectRoot, 'local-review');
+  const localResult = await registry.call('media_review_ingest', {
+    localPath: localSourcePath,
+    outputDir: localOutputDir,
+    transcribe: false,
+    attachPreviewFrames: false,
+    keepAudio: false,
+    keepSource: false,
+    alignmentMode: 'speech-aware',
+    timeoutMs: 120000,
+  });
+  assert.equal(localResult.source.sourceKind, 'local-path');
+  assert.equal(localResult.source.originPath, localSourcePath);
+  assert.equal(localResult.source.fileId, null);
+  assert.equal(localResult.schemaVersion, 2);
+  assert.equal(localResult.audio.activity.available, true);
+  assert.equal(localResult.audio.activity.speechWindows.length >= 1, true);
+  assert.equal(localResult.audio.activity.analysisResolutionMs, 30);
+  assert.equal(localResult.audio.activity.activityKind, 'acoustic-energy');
+  assert.equal(localResult.audio.activity.rawSoundWindows.length >= 1, true);
+  assert.equal(localResult.audio.activity.rawQuietWindows.length >= 1, true);
+  const speech = localResult.audio.activity.speechWindows[0];
+  assert.equal(speech.startSeconds >= 0.3 && speech.startSeconds <= 0.8, true);
+  assert.equal(speech.endSeconds >= 1.6 && speech.endSeconds <= 2.1, true);
+  assert.equal(localResult.alignment.masterClock, 'audio');
+  assert.equal(localResult.transcription.wordTimestampsAvailable, false);
+  assert.equal(fs.existsSync(localSourcePath), true);
+  assert.equal(fs.existsSync(path.join(localOutputDir, 'source.wav')), false);
+
+  await assert.rejects(
+    () => registry.call('media_review_ingest', {
+      files: [{
+        download_url: `http://127.0.0.1:${address.port}/source.wav`,
+        file_id: 'file_double_source',
+        mime_type: 'audio/wav',
+        file_name: 'source.wav',
+      }],
+      localPath: localSourcePath,
+      outputDir: path.join(projectRoot, 'double-source'),
+      transcribe: false,
+    }),
+    /exactly one media source/,
+  );
+
+  await assert.rejects(
+    () => registry.call('media_review_ingest', { transcribe: false }),
+    /exactly one media source/,
+  );
+
 
   await assert.rejects(
     () => registry.call('media_review_ingest', {

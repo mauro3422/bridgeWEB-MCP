@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "name": "narrated-media-review",
+  "title": "Narrated Media Review",
+  "description": "Convierte videos, audios o grabaciones narradas de trabajo en evidencia temporal multimodal: detecta voz/silencio y cambios visuales, alinea transcripción con frames/keyframes, correlaciona observaciones con el proyecto propietario, ejecuta cambios bajo sus reglas y repite el loop con verificación.",
+  "activation": {
+    "keywords": [
+      "video narrado",
+      "grabación de pantalla",
+      "audio",
+      "transcripción",
+      "timeline",
+      "speech",
+      "silence",
+      "keyframes",
+      "iteración visual",
+      "review"
+    ],
+    "phrases": [
+      "te paso un video explicándote",
+      "mirá este video y lo que voy diciendo",
+      "grabé la pantalla mientras te explico",
+      "relacioná lo que digo con lo que muestro",
+      "usá mi narración para corregir esto",
+      "revisemos esta iteración con video"
+    ],
+    "negativeKeywords": [
+      "transcribir solamente",
+      "convertir formato solamente"
+    ],
+    "examples": [
+      "El usuario graba Atlas y explica qué ramas se sienten mal posicionadas; correlacionar cada observación con la pantalla visible y luego trabajar en GodotAtlas.",
+      "El usuario graba Blender mientras señala defectos de un asset; alinear voz y vistas, después cargar el proyecto propietario y corregir el modelo.",
+      "El usuario dibuja una idea mientras la explica; extraer estados visuales y discurso para construir un brief temporal antes de implementar."
+    ]
+  },
+  "entrypoint": "GUIDE.md",
+  "phases": {
+    "acquire-source": "phases/acquire-source.md",
+    "ingest-align": "phases/ingest-align.md",
+    "inspect-evidence": "phases/inspect-evidence.md",
+    "resolve-owner": "phases/resolve-owner.md",
+    "execute-review": "phases/execute-review.md",
+    "iterate": "phases/iterate.md"
+  },
+  "recommendedTools": [
+    "project_context_load",
+    "skill_bootstrap",
+    "media_review_ingest",
+    "image_file_attach",
+    "workflow_guide_load",
+    "bridge_connector_catalog_compare"
+  ],
+  "scopeNotes": "Global guide available to all projects connected through Mauro's Bridge MCP."
+}
