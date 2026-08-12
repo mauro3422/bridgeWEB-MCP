@@ -26,11 +26,34 @@ try {
   );
   assert.equal(fs.readFileSync(target, 'utf8'), 'alpha\nbeta\ngamma\n');
 
+  await registry.call('edit_lines', { path: target, startLine: 2, endLine: 2, newContent: 'BETA', mode: 'replace' });
+  assert.equal(fs.readFileSync(target, 'utf8'), 'alpha\nBETA\ngamma\n', 'edit_lines must preserve exactly one existing LF terminator');
+  const targetLines = await registry.call('read_file_lines', { path: target });
+  assert.equal(targetLines.totalLines, 3, 'line tools must not expose the terminal newline as a phantom blank line');
+
+  await registry.call('edit_lines', { path: target, startLine: 2, endLine: 2, newContent: 'beta\n', mode: 'replace' });
+  assert.equal(fs.readFileSync(target, 'utf8'), 'alpha\nbeta\ngamma\n', 'a trailing terminator in replacement content must not add a blank logical line');
+
+  const noFinalNewline = path.join(sandbox, 'edit-no-final-newline.txt');
+  fs.writeFileSync(noFinalNewline, 'one\ntwo');
+  await registry.call('edit_lines', { path: noFinalNewline, startLine: 2, endLine: 2, newContent: 'TWO', mode: 'replace' });
+  assert.equal(fs.readFileSync(noFinalNewline, 'utf8'), 'one\nTWO', 'edit_lines must preserve absence of a final newline');
+
+  const crlfTarget = path.join(sandbox, 'edit-crlf.txt');
+  fs.writeFileSync(crlfTarget, 'one\r\ntwo\r\n');
+  await registry.call('edit_lines', { path: crlfTarget, startLine: 1, endLine: 1, newContent: 'ONE\r\n', mode: 'replace' });
+  assert.equal(fs.readFileSync(crlfTarget, 'utf8'), 'ONE\r\ntwo\r\n', 'edit_lines must preserve CRLF and one final terminator');
+
+  const intentionalBlank = path.join(sandbox, 'edit-intentional-blank.txt');
+  fs.writeFileSync(intentionalBlank, 'one\n\nthree\n');
+  await registry.call('edit_lines', { path: intentionalBlank, startLine: 3, endLine: 3, newContent: 'THREE', mode: 'replace' });
+  assert.equal(fs.readFileSync(intentionalBlank, 'utf8'), 'one\n\nTHREE\n', 'edit_lines must preserve intentional blank lines');
+
   await assert.rejects(
     () => registry.call('edit_lines', { path: target, startLine: 99, mode: 'delete' }),
     (error) => {
       assert.match(error.message, /^\[stale-file-state\]/);
-      assert.match(error.message, /"validLineRange":\{"start":1,"end":4\}/);
+      assert.match(error.message, /"validLineRange":\{"start":1,"end":3\}/);
       assert.match(error.message, /nearbyContext/);
       return true;
     },
@@ -74,6 +97,7 @@ try {
     cases: [
       'patch-conflict-diagnostics',
       'stale-line-range-diagnostics',
+      'edit-lines-eof-preservation',
       'terminal-alias-preflight',
       'catalog-fallback-details',
       'error-taxonomy',

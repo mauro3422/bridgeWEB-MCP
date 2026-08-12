@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { resolveToolPath } from "./shared/path.js";
+import { splitTextLines } from "./shared/text-files.js";
 
 const MAX_ANALYZE_BYTES = 512 * 1024;
 const MAX_FILE_LIST = 200;
@@ -52,7 +53,7 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
 }
 
 function splitLinesPreserveText(text: string): string[] {
-  return text.replace(/^\uFEFF/, "").split(/\r?\n/);
+  return splitTextLines(text);
 }
 
 function isBinaryPath(filePath: string): boolean {

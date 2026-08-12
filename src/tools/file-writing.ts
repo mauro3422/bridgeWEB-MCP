@@ -149,7 +149,7 @@ export const fileWritingToolModule: BridgeToolModule = {
     },
     {
       name: "edit_lines",
-      description: "Surgically edit a text file by line numbers. Supports replace, insert_before, insert_after, and delete with context and postflight verification. A stale range returns the current valid range, hash and nearby lines without guessing a mutation.",
+      description: "Surgically edit a text file by logical line numbers. Supports replace, insert_before, insert_after, and delete with context and postflight verification. Preserves the existing line-ending style and final-newline state; a terminal newline is not exposed as a phantom blank line. A stale range returns the current valid range, hash and nearby lines without guessing a mutation.",
       inputSchema: {
         type: "object",
         properties: {

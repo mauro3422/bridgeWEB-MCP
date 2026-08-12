@@ -39,7 +39,12 @@ export function preferredNewline(lineEnding: TextFileSnapshot["lineEnding"]): st
 }
 
 export function splitTextLines(text: string): string[] {
-  return text.replace(/^\uFEFF/, "").split(/\r?\n/);
+  const normalized = text.replace(/^\uFEFF/, "");
+  const lines = normalized.split(/\r?\n/);
+  if (lines.length > 1 && lines[lines.length - 1] === "" && /(?:\r\n|\n)$/.test(normalized)) {
+    lines.pop();
+  }
+  return lines;
 }
 
 export function isLikelyBinaryPath(filePath: string): boolean {

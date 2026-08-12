@@ -26,10 +26,9 @@ function formatSnippet(lines: string[], startLine: number, endLine: number) {
   return out;
 }
 
-function normalizeNewContent(content: string, newline: string): string[] {
+function normalizeNewContent(content: string): string[] {
   if (content.length === 0) return [];
-  const normalized = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  return normalized.split("\n").map((line) => line).join("\n").split("\n").map((line) => line);
+  return splitTextLines(content);
 }
 
 export function applyLineEdit(input: EditLinesInput) {
@@ -48,7 +47,7 @@ export function applyLineEdit(input: EditLinesInput) {
   if (endLine < startLine) throw new Error("endLine must be greater than or equal to startLine.");
   if (endLine > lines.length) endLine = lines.length;
 
-  const contentLines = normalizeNewContent(input.newContent ?? "", newline);
+  const contentLines = normalizeNewContent(input.newContent ?? "");
   const beforeContext = formatSnippet(lines, startLine - previewContext, Math.min(lines.length, (input.endLine ?? startLine) + previewContext));
   let updatedLines: string[];
   let affectedRange: { startLine: number; endLine: number | null };
