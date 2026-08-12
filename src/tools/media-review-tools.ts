@@ -306,9 +306,10 @@ async function ingestMediaReview(args: {
     parsed.sourcePath = args.keepSource ? sourcePath : null;
     parsed.reviewId = reviewId;
     parsed.reviewPath = reviewPath;
+    const transcription = parsed.transcription && typeof parsed.transcription === "object" ? parsed.transcription as Record<string, unknown> : {};
     parsed.externalProcessing = args.transcribe
-      ? { provider: "Google Speech Recognition", audioSentExternally: true }
-      : { provider: null, audioSentExternally: false };
+      ? { provider: "Google Speech Recognition", audioSentExternally: true, strategy: typeof transcription.strategy === "string" ? transcription.strategy : null }
+      : { provider: null, audioSentExternally: false, strategy: null };
     parsed.warnings = warnings;
     await fs.writeFile(reviewPath, JSON.stringify(parsed, null, 2), "utf8");
 
@@ -336,7 +337,7 @@ export const mediaReviewToolModule: BridgeToolModule = {
   tools: [
     {
       name: "media_review_ingest",
-      description: "Ingest one local or ChatGPT-authorized audio/video source for narrated synchronized review. Uses an immutable working copy, automatically detects acoustic activity, speech/silence, adaptive visual changes and apparent 2D view motion, materializes only bounded representative JPEGs plus sparse coverage frames, correlates each representative/event with transcript and audio metadata, writes an SRT subtitle sidecar when text is recognized, and returns a time-aligned review.json. Google Speech through this provider is segment-timestamped, not word-timestamped. inverseViewDirectionHint is only a 2D viewport/camera-pan hint. When transcribe=true, audio segments leave MauroPrime and are sent to Google; use transcribe=false for fully local analysis.",
+      description: "Ingest one local or ChatGPT-authorized audio/video source for narrated synchronized review. Uses an immutable working copy, automatically detects acoustic activity, speech/silence, adaptive visual changes and apparent 2D view motion, materializes only bounded representative JPEGs plus sparse coverage frames, and correlates each representative/event with transcript and audio metadata. When transcribe=true, it performs one full-audio Google recognition as the canonical text plus bounded speech-aware recognitions as temporal anchors, aligns the canonical text back onto those timestamped segments, preserves the raw segment recognitions, and writes an aligned SRT sidecar. Google Speech through this provider still does not expose word-level timestamps. inverseViewDirectionHint is only a 2D viewport/camera-pan hint. Audio leaves MauroPrime when transcribe=true; use transcribe=false for fully local analysis.",
       inputSchema: {
         type: "object",
         $defs: {
@@ -360,7 +361,7 @@ export const mediaReviewToolModule: BridgeToolModule = {
           frameIntervalSeconds: { type: "number", minimum: 1, maximum: 30, default: 12, description: "Sparse coverage-frame interval. Adaptive visual events are detected separately and are the primary review evidence." },
           maxFrames: { type: "integer", minimum: 1, maximum: 60, default: 12, description: "Maximum sparse coverage frames; adaptive representative frames use a separate bounded event budget." },
           visualAnalysisFps: { type: "number", minimum: 1, maximum: 20, default: 10, description: "Target reduced-resolution visual analysis cadence. Long videos are automatically bounded to at most about 6000 analysis samples." },
-          transcribe: { type: "boolean", default: true, description: "When true, sends bounded speech-aware audio groups to Google Speech Recognition." },
+          transcribe: { type: "boolean", default: true, description: "When true, sends the full audio once to Google for canonical recognition plus bounded speech-aware groups for timestamp anchors; falls back to segmented text if the full-audio recognition is unavailable." },
           primaryLanguage: { type: "string", default: "es-AR" },
           fallbackLanguage: { type: "string", default: "en-US" },
           alignmentMode: { type: "string", enum: ["speech-aware", "fixed"], default: "speech-aware", description: "speech-aware uses detected voice activity as the audio clock; fixed preserves the legacy fixed-window ASR behavior." },

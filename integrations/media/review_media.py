@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import concurrent.futures
+import difflib
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import wave
@@ -261,6 +263,163 @@ def _transcribe(
     }
 
 
+def _alignment_tokens(text: str) -> list[dict[str, str]]:
+    tokens: list[dict[str, str]] = []
+    for raw in text.split():
+        normalized = re.sub(r"[^\w]+", "", raw.casefold(), flags=re.UNICODE)
+        if normalized:
+            tokens.append({"raw": raw, "normalized": normalized})
+    return tokens
+
+
+def _align_canonical_transcript(canonical_text: str, segments: list[dict[str, Any]]) -> dict[str, Any]:
+    canonical_tokens = _alignment_tokens(canonical_text)
+    segmented_tokens: list[dict[str, Any]] = []
+    segment_ids: list[int] = []
+    for fallback_index, segment in enumerate(segments):
+        segment_id = int(segment.get("index", fallback_index))
+        segment_ids.append(segment_id)
+        for token in _alignment_tokens(str(segment.get("text", ""))):
+            segmented_tokens.append({**token, "segmentIndex": segment_id})
+
+    if not segments:
+        return {
+            "method": "sequence-token-alignment",
+            "tokenSequenceSimilarity": 0.0,
+            "canonicalWordCount": len(canonical_tokens),
+            "segmentedWordCount": len(segmented_tokens),
+            "alignedCanonicalWordCount": 0,
+            "assignmentCoverage": 0.0,
+        }
+
+    if not canonical_tokens or not segmented_tokens:
+        for segment in segments:
+            segment["alignedText"] = str(segment.get("text", "")).strip()
+        return {
+            "method": "sequence-token-alignment",
+            "tokenSequenceSimilarity": 0.0 if canonical_tokens else 1.0,
+            "canonicalWordCount": len(canonical_tokens),
+            "segmentedWordCount": len(segmented_tokens),
+            "alignedCanonicalWordCount": 0,
+            "assignmentCoverage": 0.0 if canonical_tokens else 1.0,
+        }
+
+    segmented_norm = [str(item["normalized"]) for item in segmented_tokens]
+    canonical_norm = [str(item["normalized"]) for item in canonical_tokens]
+    matcher = difflib.SequenceMatcher(None, segmented_norm, canonical_norm, autojunk=False)
+    assignments: list[int | None] = [None] * len(canonical_tokens)
+
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            for offset in range(j2 - j1):
+                assignments[j1 + offset] = int(segmented_tokens[i1 + offset]["segmentIndex"])
+            continue
+        if tag == "replace" and i2 > i1:
+            source_span = i2 - i1
+            target_span = max(1, j2 - j1)
+            for offset in range(j2 - j1):
+                relative = (offset + 0.5) / target_span
+                source_offset = min(source_span - 1, max(0, int(relative * source_span)))
+                assignments[j1 + offset] = int(segmented_tokens[i1 + source_offset]["segmentIndex"])
+            continue
+        if tag == "insert":
+            neighbor_segment = None
+            if i1 > 0:
+                neighbor_segment = int(segmented_tokens[i1 - 1]["segmentIndex"])
+            elif i1 < len(segmented_tokens):
+                neighbor_segment = int(segmented_tokens[i1]["segmentIndex"])
+            for canonical_index in range(j1, j2):
+                assignments[canonical_index] = neighbor_segment
+
+    previous_segment: int | None = None
+    for index, assigned in enumerate(assignments):
+        if assigned is not None:
+            previous_segment = assigned
+        elif previous_segment is not None:
+            assignments[index] = previous_segment
+    next_segment: int | None = None
+    for index in range(len(assignments) - 1, -1, -1):
+        assigned = assignments[index]
+        if assigned is not None:
+            next_segment = assigned
+        elif next_segment is not None:
+            assignments[index] = next_segment
+
+    default_segment = segment_ids[0]
+    buckets: dict[int, list[str]] = {segment_id: [] for segment_id in segment_ids}
+    for token, assigned in zip(canonical_tokens, assignments):
+        segment_id = assigned if assigned is not None else default_segment
+        buckets.setdefault(int(segment_id), []).append(str(token["raw"]))
+
+    for fallback_index, segment in enumerate(segments):
+        segment_id = int(segment.get("index", fallback_index))
+        segment["alignedText"] = " ".join(buckets.get(segment_id, [])).strip()
+
+    aligned_count = sum(len(words) for words in buckets.values())
+    canonical_count = len(canonical_tokens)
+    return {
+        "method": "sequence-token-alignment",
+        "tokenSequenceSimilarity": round(matcher.ratio(), 4),
+        "canonicalWordCount": canonical_count,
+        "segmentedWordCount": len(segmented_tokens),
+        "alignedCanonicalWordCount": aligned_count,
+        "assignmentCoverage": round(aligned_count / canonical_count, 4) if canonical_count else 1.0,
+    }
+
+
+def _transcribe_hybrid(
+    wav_path: Path,
+    duration: float,
+    segment_seconds: float,
+    primary_language: str,
+    fallback_language: str | None,
+    max_workers: int,
+    audio_activity: dict[str, Any] | None,
+    alignment_mode: str,
+) -> dict[str, Any]:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        segmented_future = executor.submit(
+            _transcribe,
+            wav_path,
+            duration,
+            segment_seconds,
+            primary_language,
+            fallback_language,
+            max_workers,
+            audio_activity,
+            alignment_mode,
+        )
+        full_future = executor.submit(
+            _recognize_segment,
+            wav_path,
+            0.0,
+            duration,
+            primary_language,
+            fallback_language,
+        )
+        segmented = segmented_future.result()
+        full_recognition = full_future.result()
+
+    segmented_transcript = str(segmented.get("transcript", "")).strip()
+    full_text = str(full_recognition.get("text", "")).strip()
+    canonical_text = full_text or segmented_transcript
+    canonical_source = "full-audio" if full_text else "segmented-fallback"
+    alignment = _align_canonical_transcript(canonical_text, list(segmented.get("segments", [])))
+
+    segmented["strategy"] = "full-audio+segment-align" if full_text else "segmented-fallback"
+    segmented["canonicalSource"] = canonical_source
+    segmented["canonicalTranscript"] = canonical_text
+    segmented["segmentedTranscript"] = segmented_transcript
+    segmented["fullAudioRecognition"] = {
+        "attempted": True,
+        **full_recognition,
+    }
+    segmented["segmentAlignment"] = alignment
+    segmented["transcript"] = canonical_text
+    return segmented
+
+
+
 def _window_indices_at(windows: list[dict[str, Any]], timestamp: float) -> list[int]:
     return [
         int(item.get("index", index))
@@ -278,10 +437,16 @@ def _overlap_indices(records: list[dict[str, Any]], start: float, end: float) ->
     ]
 
 
+def _segment_display_text(segment: dict[str, Any]) -> str:
+    aligned = str(segment.get("alignedText", "")).strip()
+    return aligned or str(segment.get("text", "")).strip()
+
+
+
 def _transcript_excerpt(transcription: dict[str, Any], indices: list[int], max_chars: int = 360) -> str:
     segments = transcription.get("segments", []) if isinstance(transcription, dict) else []
     by_index = {int(item.get("index", index)): item for index, item in enumerate(segments) if isinstance(item, dict)}
-    text = " ".join(str(by_index[index].get("text", "")).strip() for index in indices if index in by_index and str(by_index[index].get("text", "")).strip())
+    text = " ".join(_segment_display_text(by_index[index]) for index in indices if index in by_index and _segment_display_text(by_index[index]))
     if len(text) <= max_chars:
         return text
     return text[: max(0, max_chars - 1)].rstrip() + "…"
@@ -355,7 +520,7 @@ def _write_srt(transcription: dict[str, Any], output_path: Path) -> str | None:
     for segment in transcription.get("segments", []):
         if not isinstance(segment, dict):
             continue
-        text = str(segment.get("text", "")).strip()
+        text = _segment_display_text(segment)
         if not text:
             continue
         start = float(segment.get("startSeconds", 0.0))
@@ -435,7 +600,7 @@ def main() -> int:
         warnings.append("speech activity detector found no speech windows; ASR will use fixed-window fallback")
 
     if transcribe and audio_ok and audio_duration > 0.0:
-        transcription = _transcribe(
+        transcription = _transcribe_hybrid(
             wav_path,
             audio_duration,
             segment_seconds,
@@ -447,6 +612,8 @@ def main() -> int:
         )
         if not transcription["transcript"]:
             warnings.append("Google ASR returned no recognized text")
+        elif transcription.get("canonicalSource") == "segmented-fallback":
+            warnings.append("full-audio canonical ASR was unavailable; using segmented transcript fallback")
     elif transcribe:
         transcription = {
             "enabled": True,
@@ -455,6 +622,12 @@ def main() -> int:
             "fallbackLanguage": fallback_language,
             "segmentSeconds": segment_seconds,
             "segmentation": None,
+            "strategy": "unavailable",
+            "canonicalSource": None,
+            "canonicalTranscript": "",
+            "segmentedTranscript": "",
+            "fullAudioRecognition": {"attempted": False, "text": "", "language": None, "confidence": None, "alternatives": [], "attempts": []},
+            "segmentAlignment": None,
             "wordTimestampsAvailable": False,
             "timestampPrecision": "speech-segment",
             "segments": [],
@@ -468,6 +641,12 @@ def main() -> int:
             "fallbackLanguage": fallback_language,
             "segmentSeconds": segment_seconds,
             "segmentation": None,
+            "strategy": "disabled",
+            "canonicalSource": None,
+            "canonicalTranscript": "",
+            "segmentedTranscript": "",
+            "fullAudioRecognition": {"attempted": False, "text": "", "language": None, "confidence": None, "alternatives": [], "attempts": []},
+            "segmentAlignment": None,
             "wordTimestampsAvailable": False,
             "timestampPrecision": "speech-segment",
             "segments": [],
@@ -493,7 +672,8 @@ def main() -> int:
                 "index": int(segment["index"]),
                 "startSeconds": start,
                 "endSeconds": end,
-                "text": segment.get("text", ""),
+                "text": _segment_display_text(segment),
+                "rawSegmentText": str(segment.get("text", "")).strip(),
                 "language": segment.get("language"),
                 "confidence": segment.get("confidence"),
                 "speechWindowIndices": segment.get("speechWindowIndices", []),
@@ -526,7 +706,7 @@ def main() -> int:
             })
 
     review = {
-        "schemaVersion": 3,
+        "schemaVersion": 4,
         "sourcePath": str(source),
         "durationSeconds": round(duration, 6),
         "video": video,
@@ -546,9 +726,11 @@ def main() -> int:
         "alignment": {
             "mode": alignment_mode,
             "masterClock": "audio" if audio_ok else "video",
+            "canonicalSource": transcription.get("canonicalSource"),
+            "segmentAlignment": transcription.get("segmentAlignment"),
             "wordTimestampsAvailable": False,
             "timestampPrecision": "speech-segment" if transcription["enabled"] else "frame-window",
-            "note": "Transcript timestamps bound recognized speech segments; words inside a segment are not individually timestamped by this provider.",
+            "note": "The full-audio recognition is the canonical text when available; speech-aware segments remain the temporal anchors. Words inside a segment are not individually timestamped by this provider.",
         },
         "timeline": timeline,
         "warnings": warnings,

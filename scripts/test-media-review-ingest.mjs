@@ -86,7 +86,7 @@ try {
   assert.equal(result.source.fileId, 'file_fixture_wav');
   assert.equal(result.source.sourceKind, 'chatgpt-file');
   assert.equal(result.source.originPath, null);
-  assert.equal(result.schemaVersion, 3);
+  assert.equal(result.schemaVersion, 4);
   assert.equal(result.alignment.mode, 'speech-aware');
   assert.equal(result.transcription.wordTimestampsAvailable, false);
   assert.equal(result.source.sha256, expectedSha256);
@@ -126,7 +126,7 @@ try {
   assert.equal(localResult.source.sourceKind, 'local-path');
   assert.equal(localResult.source.originPath, localSourcePath);
   assert.equal(localResult.source.fileId, null);
-  assert.equal(localResult.schemaVersion, 3);
+  assert.equal(localResult.schemaVersion, 4);
   assert.equal(localResult.audio.activity.available, true);
   assert.equal(localResult.audio.activity.speechWindows.length >= 1, true);
   assert.equal(localResult.audio.activity.analysisResolutionMs, 30);
@@ -188,7 +188,7 @@ writer.release()
     maxFrames: 12,
     timeoutMs: 120000,
   });
-  assert.equal(syntheticResult.schemaVersion, 3);
+  assert.equal(syntheticResult.schemaVersion, 4);
   assert.equal(syntheticResult.video.hasVideo, true);
   assert.equal(syntheticResult.visualActivity.method, 'adaptive-content-motion');
   assert.equal(syntheticResult.visualActivity.sampleCount >= 30, true);
@@ -202,24 +202,38 @@ writer.release()
   assert.equal(syntheticResult.visualActivity.motionWindows.some((window) => window.inverseViewDirectionHint !== 'still'), true);
   assert.equal(syntheticResult.transcription.subtitlePath, null);
   const subtitleRegressionPath = path.join(projectRoot, 'subtitle-regression.srt');
-  const subtitleScript = String.raw`
+  const alignmentScript = String.raw`
+import json
 import sys
 from pathlib import Path
 sys.path.insert(0, 'integrations/media')
-from review_media import _write_srt
-result = _write_srt({'segments': [
-    {'startSeconds': 1.25, 'endSeconds': 2.75, 'text': 'líneas y relación'},
-    {'startSeconds': 3.0, 'endSeconds': 4.1, 'text': 'giros raros'},
-]}, Path(sys.argv[1]))
+from review_media import _align_canonical_transcript, _write_srt
+canonical = 'hola como verás un Script acá se bugea y ese Crash cerró el programa'
+segments = [
+    {'index': 0, 'startSeconds': 0.0, 'endSeconds': 3.0, 'text': 'hola como ves un escrito'},
+    {'index': 1, 'startSeconds': 3.0, 'endSeconds': 6.0, 'text': 'aca hay un bus'},
+    {'index': 2, 'startSeconds': 6.0, 'endSeconds': 9.0, 'text': 'ese crio se creo el programa'},
+]
+metrics = _align_canonical_transcript(canonical, segments)
+joined = ' '.join(segment['alignedText'] for segment in segments)
+if joined != canonical or metrics['assignmentCoverage'] != 1.0:
+    raise RuntimeError(f'alignment mismatch: {joined!r} {metrics!r}')
+result = _write_srt({'segments': segments}, Path(sys.argv[1]))
 if not result:
     raise RuntimeError('subtitle sidecar was not created')
+print(json.dumps({'metrics': metrics}))
 `;
-  const subtitleBuild = spawnSync('python', ['-c', subtitleScript, subtitleRegressionPath], { cwd: process.cwd(), encoding: 'utf8' });
-  assert.equal(subtitleBuild.status, 0, subtitleBuild.stderr || subtitleBuild.stdout || 'subtitle regression failed');
+  const alignmentBuild = spawnSync('python', ['-c', alignmentScript, subtitleRegressionPath], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(alignmentBuild.status, 0, alignmentBuild.stderr || alignmentBuild.stdout || 'canonical alignment regression failed');
+  const alignmentResult = JSON.parse(alignmentBuild.stdout.trim());
+  assert.equal(alignmentResult.metrics.assignmentCoverage, 1);
+  assert.equal(alignmentResult.metrics.canonicalWordCount, 14);
   const subtitleText = fs.readFileSync(subtitleRegressionPath, 'utf8');
-  assert.match(subtitleText, /00:00:01,250 --> 00:00:02,750/);
-  assert.match(subtitleText, /líneas y relación/);
-  assert.match(subtitleText, /giros raros/);
+  assert.match(subtitleText, /00:00:00,000 --> 00:00:03,000/);
+  assert.match(subtitleText, /hola como verás un Script/);
+  assert.match(subtitleText, /acá se bugea y/);
+  assert.match(subtitleText, /ese Crash cerró el programa/);
+  assert.doesNotMatch(subtitleText, /un escrito/);
 
 
   await assert.rejects(
