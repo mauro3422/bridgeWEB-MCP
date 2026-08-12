@@ -12,6 +12,7 @@ import { gitToolModule } from "./tools/git-tools.js";
 import { gitPublicationToolModule } from "./tools/git-publication-tools.js";
 import { godotToolModule } from "./tools/godot-tools.js";
 import { imageToolModule } from "./tools/image-tools.js";
+import { mediaReviewToolModule } from "./tools/media-review-tools.js";
 import { metricsToolModule } from "./tools/metrics-tools.js";
 import { mssrObservatoryToolModule } from "./tools/mssr-observatory-tools.js";
 import { noticeToolModule } from "./tools/notice-tools.js";
@@ -55,6 +56,7 @@ const destructiveToolNames = new Set([
   "bridge_request_restart", "bridge_verify_all", "workflow_guide_create", "bridge_tool_action", "roblox_mcp_action", "roblox_studio_window_capture_save", "roblox_screen_capture_save", "roblox_photo_capture_job", "roblox_place_save",
   "roblox_asset_upload",
   "image_asset_save", "image_asset_import_files", "image_character_views_prepare", "image_reference_pack_prepare",
+  "media_review_ingest",
   "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_finish", "binary_upload_abort",
   "blender_open", "blender_viewport_screenshot", "blender_focus_review", "blender_review_bundle", "blender_execute_code", "blender_batch_script", "blender_store_reference_image", "blender_install_reference_pack", "blender_setup_character_references",
   "godot_mcp_action", "godot_screen_capture_save",
@@ -184,6 +186,10 @@ const toolUsageGuidance = new Map<string, BridgeToolUsageGuidance>([
     prerequisites: ["Configure ROBLOX_OPEN_CLOUD_API_KEY with Assets Read/Write permission for the exact creator.", "Verify local file hashes and repeat the exact creator id before upload."],
     preflightTools: ["binary_file_info", "roblox_mcp_status"],
     recovery: [{ code: "missing-capability", instruction: "Create or configure a Roblox Open Cloud API key with Assets Read/Write permission; never pass the secret as a tool argument." }],
+  }],
+  ["media_review_ingest", {
+    prerequisites: ["Use a ChatGPT-authorized file parameter. When transcribe=true, bounded audio segments are sent to Google Speech Recognition; use transcribe=false when external ASR is not intended."],
+    recovery: [{ code: "source-file-unavailable", instruction: "Retry with the original conversation attachment while its temporary authorized download URL is still valid." }],
   }],
   ["blender_focus_review", {
     prerequisites: ["Leave the intended detail selected in Edit Mode, select the target object, or place the 3D Cursor where the review should focus."],
@@ -446,6 +452,7 @@ const defaultToolModules: readonly BridgeToolModule[] = [
   robloxPhotoCaptureToolModule,
   binaryFileToolModule,
   imageToolModule,
+  mediaReviewToolModule,
   processToolModule,
   gitToolModule,
   gitPublicationToolModule,
