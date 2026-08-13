@@ -143,7 +143,7 @@ if (explicitlySkippedName) {
   assert.ok(skippedFeedback?.reasonCounts?.["irrelevant-domain"] >= 1);
 }
 
-record({
+const outcomeRecord = record({
   traceId: first.traceId,
   eventType: "outcome",
   caller: "chatgpt-web",
@@ -152,12 +152,24 @@ record({
   stage: "implement",
   primarySkill: required[0].name,
   status: "partial",
-  summary: "Close trace to verify ephemeral memory purge.",
+  summary: "Close trace to verify ephemeral memory purge and durable digest distillation.",
 });
+assert.equal(outcomeRecord.learningDigest?.recorded, true, "outcome must persist one strict learning digest before purge");
+assert.equal(outcomeRecord.learningDigest?.workingMemoryPurged, true);
 trace = evidence({ traceId: first.traceId, limit: 200 });
 assert.equal(trace.workingMemory, null, "working memory must be purged after outcome");
 assert.equal(trace.lifecycle.status, "closed-partial");
-
+assert.ok(trace.learningDigest, "trace evidence must expose the durable learning digest");
+const serializedDigest = JSON.stringify(trace.learningDigest);
+assert.equal(serializedDigest.includes("Host-gated selection is under verification."), false, "workingSummary must never be copied into durable learning");
+assert.equal(serializedDigest.includes("Skipped optional skills stay outside procedural context."), true, "evidence-backed supported findings may survive distillation");
+assert.equal(trace.learningDigest.findings[0]?.evidenceRef, "bootstrap selection");
+assert.equal(trace.learningDigest.semanticSignature.startsWith("stage=implement|"), true, "durable priors must anchor to the first structured task signature, not a later close-stage route");
+const learningSummary = summary({ kind: "benchmark", scope: "all", days: 1, limit: 100 });
+assert.equal(learningSummary.intentAnalysis.learning.mode, "observe-only");
+assert.equal(learningSummary.intentAnalysis.learning.routingInfluence, false);
+assert.ok(learningSummary.intentAnalysis.learning.digestCount >= 1);
+assert.ok(learningSummary.intentAnalysis.learning.skillPriors.some((item) => item.semanticSignature.includes("d=agent-orchestration,coding,skill-system")));
 const closeTrace = await bootstrap({
   task: "Close a repeated-friction MSSR maintenance task.",
   intent: {

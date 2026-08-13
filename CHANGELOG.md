@@ -1,5 +1,11 @@
 ## Unreleased
 
+## 0.6.85 - 2026-08-13
+
+- Add strict outcome-time `learning-digest-v1` distillation: after recording an outcome, Bridge persists only canonical semantic routing/context selections, stage-to-skill transitions, final outcome metadata, and evidence-backed supported/rejected findings, then always purges ephemeral trace RAM. `workingSummary`, active hypotheses, raw prompts/transcripts, secrets, and private reasoning are excluded.
+- Preserve bounded skill and project context-module decisions so historical analysis can learn which modules were actually selected or skipped without storing procedural/project text.
+- Add exact-signature historical priors for skill activation/acceptance, stage transitions, and context modules with a minimum-evidence gate. The learning surface is explicitly `observe-only` (`routingInfluence:false`): it collects empirical rates plus advisory `prefer` / `neutral` / `deprioritize` / `insufficient-evidence` labels but does not affect routing, scores, context loading, or permissions.
+- Surface durable learning digests in trace evidence and add a dashboard table for contextual priors. Extend Bridge learning-loop and external telemetry regressions for digest projection, RAM purge ordering, and strict optional-field persistence.
 - Add MSSR host-gated skill selection for ChatGPT Web: keep deterministic recommendations separate from host `accepted`/`skipped` decisions and actual procedural context loading; required roots remain workflow obligations, optional root candidates load only after acceptance, and their transitive dependency closure follows that root decision instead of becoming an independent pre-acceptance obligation.
 - Persist privacy-bounded `skill_decision` telemetry with contextual reason codes and canonical semantic task signatures, surface accepted-vs-skipped evidence in the MSSR dashboard, and accept the same event through authenticated external telemetry.
 - Add RAM-only per-trace working metadata for bounded continuation (`workingSummary`, hypotheses, decisions/evidence and `nextGate`), purge it on outcome/restart, and keep it out of observatory SQLite.

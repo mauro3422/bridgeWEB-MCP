@@ -261,6 +261,11 @@ export const dashboardMarkup = `
         <div class="table-wrap"><table><thead><tr><th>Skill</th><th>Aceptadas</th><th>Skips</th><th>Aceptación</th><th>Motivos</th><th>Firmas</th></tr></thead><tbody id="mssr-selection-feedback"><tr><td colspan="6" class="muted">Cargando decisiones del host…</td></tr></tbody></table></div>
       </article>
 
+      <article class="card span-12">
+        <div class="card-header"><div><div class="card-kicker">Aprendizaje histórico · observe-only</div><h2 class="card-title">Priors contextuales por firma semántica</h2><p class="card-description">Se calculan desde <code>learning_digest</code> al cerrar trazas. Por ahora sólo recolectan métricas/probabilidades empíricas: <strong>no influyen</strong> en routing, scores, permisos ni carga de contexto. <code>insufficient-evidence</code> indica que todavía no alcanzó el umbral mínimo.</p></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Skill</th><th>Evidencia</th><th>Aceptación</th><th>Activación</th><th>Éxito cargada</th><th>Prior</th><th>Firma</th></tr></thead><tbody id="mssr-learning-priors"><tr><td colspan="7" class="muted">Cargando learning digests…</td></tr></tbody></table></div>
+      </article>
+
       <article class="card span-6">
         <div class="card-header"><div><div class="card-kicker">Uso individual del sistema</div><h2 class="card-title">Activación MSSR por identidad observada</h2><p class="card-description">Une lifecycle MSSR con metadata host sólo cuando comparten exactamente un traceId. Si no existe evidencia host, se conserva el perfil del lifecycle.</p></div></div>
         <div class="table-wrap">

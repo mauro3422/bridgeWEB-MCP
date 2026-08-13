@@ -7,7 +7,7 @@ El objetivo es tener un puente local controlado por nosotros para operar filesys
 ## Estado actual
 
 ```text
-bridge-mcp v0.6.21
+bridge-mcp v0.6.85
 Mode: HTTP production-candidate
 Project root: C:\dev\bridge-mcp
 Bridge MCP: http://127.0.0.1:3001/mcp
@@ -531,11 +531,13 @@ devuelven la ruta accionable, nombres, razón corta, obligatoriedad, orden y
 warnings. `responseMode=debug` conserva scores, planes de fase y metadata completa.
 El contenido procedural entra mediante `skill_bootstrap` o `skill_load`. Bootstrap usa `contentMode=selective` por defecto y planifica globalmente el presupuesto. Para `caller=chatgpt-web`, además separa tres estados observables: **recommended**, **accepted/skipped** y **loaded**. Los roots requeridos siguen siendo obligaciones; sólo los roots opcionales reciben una decisión del host. Si un root opcional es `accepted`, su cierre transitivo de dependencias se materializa junto con él; si es `skipped`, las dependencias que existen únicamente por ese root permanecen fuera del contexto. Un `skipped` conserva un motivo acotado (`irrelevant-domain`, `redundant`, `deferred-phase`, `context-budget`, etc.) y no se registra como fallo de carga. El modo `auto` queda disponible para callers compatibles que no implementan gate explícito.
 
-Bridge puede conservar durante una traza abierta working metadata acotada —resumen resuelto, hipótesis, decisiones/evidencia y próximo gate— únicamente en RAM. `mssr_trace_working_update` no escribe esa memoria en SQLite; se purga en outcome o al reiniciar el Bridge. Nunca debe contener prompts crudos, transcripts, secretos ni chain-of-thought privado. La evidencia durable sigue siendo route/load/decision/checkpoints/outcomes y referencias explícitas promovidas al owner correcto.
+Bridge puede conservar durante una traza abierta working metadata acotada —resumen resuelto, hipótesis, decisiones/evidencia y próximo gate— únicamente en RAM. `mssr_trace_working_update` no escribe esa memoria en SQLite. En un `outcome`, Bridge primero intenta destilar un `learning-digest-v1` estricto y luego purga siempre la RAM; un fallo del destilado no retiene la memoria efímera ni bloquea un outcome verdadero. Nunca se copian al digest `workingSummary`, hipótesis activas, prompts crudos, transcripts, secretos, decisiones arbitrarias de scratchpad ni chain-of-thought privado.
+
+El digest durable conserva sólo consecuencias estructuradas reutilizables: firma semántica canónica, skills recomendadas/cargadas/accepted-skipped, transiciones de stage a skill, decisiones de módulos de contexto de skill/proyecto, metadata final del outcome y únicamente hallazgos que terminaron `supported` o `rejected` con `evidenceRef`. Esto permite analizar continuidad y aprendizaje operativo sin convertir SQLite en un scratchpad histórico.
 
 El coordinador de cierre expone un preflight con `closureDue`, `canCloseSuccess`, skills/fases faltantes y `nextRequiredAction`. Un idle puede producir un aviso `stale-open`/candidato a cierre, pero no demuestra que ChatGPT haya terminado ni autoriza `success`. Para recuperación stateless, una traza vieja puede seguir abierta y ser reanudada con `traceId` explícito mientras deja de competir automáticamente con una ruta fresca después de la ventana de auto-recovery.
 
-En el dashboard, `skill_route_plan` significa **recomendada**, la tabla de decisión del host muestra **accepted/skipped por skill y firma semántica**, y cada evento de carga significa **contexto procedural entregado**. La tasa de aceptación es contextual: un skip no penaliza globalmente una skill. El observatorio agrupa decisiones por firma canónica de `stage + domains + actions + artifacts + needs + signals`, de modo que la evidencia futura pueda sugerir revisiones sin reescribir routing automáticamente.
+En el dashboard, `skill_route_plan` significa **recomendada**, la tabla de decisión del host muestra **accepted/skipped por skill y firma semántica**, y cada evento de carga significa **contexto procedural entregado**. El observatorio agrega los learning digests por firma exacta para producir priors de skill, transición y contexto con umbral mínimo de evidencia. Esos priors sólo dicen `prefer`, `neutral`, `deprioritize` o `insufficient-evidence`: son evidencia asesora y todavía no modifican automáticamente scores, routing, permisos ni directivas de proyecto.
 
 El discovery no bloqueante puede reutilizar metadata Roblox `cached` sin tratarla como una degradación global. Las rutas estructuradas que no incluyen el dominio `roblox` omiten esa fuente opcional; una ruta Roblox sí exige catálogo vivo antes de cargar o ejecutar capacidades de Studio.
 

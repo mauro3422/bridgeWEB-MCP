@@ -6,7 +6,7 @@ import {
   MSSR_OUTCOME_DIMENSION_STATUSES,
   MSSR_OUTCOME_EVIDENCE_KINDS,
   getMssrTraceEvidence,
-  purgeMssrTraceWorkingMemory,
+  finalizeMssrOutcomeLearning,
   queryMssrObservatory,
   readPersistedMssrTraceState,
   recordMssrCheckpoint,
@@ -96,7 +96,7 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
     },
     {
       name: "mssr_trace_record",
-      description: "Record one bounded MSSR trace checkpoint after a phase, progress heartbeat, verification, persistence, outcome, friction, context retrieval, or replan. A progress checkpoint renews Web trace liveness without completing a phase. Outcome dimensions may describe mixed subsystem results while one primary skill and overall status remain authoritative. Bridge injects the active trace from the current session or a unique compatible process-shared lease; provide traceId explicitly after restart, for cross-process resume, or when multiple candidates exist. Store only structured metadata and short redacted evidence, never a raw prompt or transcript.",
+      description: "Record one bounded MSSR trace checkpoint after a phase, progress heartbeat, verification, persistence, outcome, friction, context retrieval, or replan. A progress checkpoint renews Web trace liveness without completing a phase. A final outcome automatically attempts strict learning-digest distillation from structured observable evidence and then always purges ephemeral trace working memory; workingSummary, active hypotheses, raw prompts/transcripts and private reasoning are excluded from durable learning. Outcome dimensions may describe mixed subsystem results while one primary skill and overall status remain authoritative. Bridge injects the active trace from the current session or a unique compatible process-shared lease; provide traceId explicitly after restart, for cross-process resume, or when multiple candidates exist.",
       inputSchema: {
         type: "object",
         properties: {
@@ -239,14 +239,20 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
         throw new Error("leaseMs is allowed only for eventType=progress.");
       }
       const event = recordMssrCheckpoint(parsed);
-      if (parsed.eventType === "outcome") purgeMssrTraceWorkingMemory(parsed.traceId);
+      const learning = parsed.eventType === "outcome" ? finalizeMssrOutcomeLearning(parsed.traceId) : null;
       return {
         recorded: true,
         traceId: event.traceId,
         eventId: event.id,
         eventType: event.eventType,
         occurredAt: event.occurredAt,
-        privacy: "No raw prompt or transcript stored.",
+        learningDigest: learning ? {
+          recorded: Boolean(learning.digestEvent),
+          eventId: learning.digestEvent?.id ?? null,
+          warning: learning.warning ?? null,
+          workingMemoryPurged: learning.purged,
+        } : null,
+        privacy: "No raw prompt or transcript stored; outcome learning keeps only the strict durable digest and purges ephemeral working memory.",
       };
     },
     mssr_observatory_epoch_start: (args) => {

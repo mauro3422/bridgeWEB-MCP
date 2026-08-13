@@ -6,21 +6,21 @@ Local MCP bridge for MauroPrime. The goal is to let ChatGPT operate MauroPrime t
 
 ```txt
 Project root: C:\dev\bridge-mcp
-Server: bridge-mcp v0.6.0
+Server: bridge-mcp v0.6.85
 Mode: HTTP production-candidate
 Bridge MCP: http://127.0.0.1:3001/mcp
 Bridge status: http://127.0.0.1:3001/status
 Tunnel admin: http://127.0.0.1:8081
 Tunnel profile: bridge-local-http
 Rollback profile: stdio through scripts/start-bridge-watchdog.ps1
-Tools exposed: 68
+Tools exposed: 144
 ```
 
 Do not commit keys, tunnel secrets, `node_modules`, `dist`, logs, SQLite metrics, sandbox files, or tunnel-client binaries.
 
 ## Known-good checks
 
-Known-good checks for v0.6.0:
+Known-good checks for v0.6.85:
 
 ```txt
 bridge_self_check -> ok true
@@ -29,7 +29,7 @@ npm run check -> OK
 npm run build -> OK
 scripts/test-bridge-http.ps1 -> OK
 scripts/test-bridge-regressions.ps1 -> OK
-http://127.0.0.1:3001/status -> bridge-mcp v0.6.0
+http://127.0.0.1:3001/status -> bridge-mcp v0.6.85
 http://127.0.0.1:8081/healthz -> live
 http://127.0.0.1:8081/readyz -> ready
 git -> ## main...origin/main
@@ -374,14 +374,33 @@ Completed in the current unreleased cycle:
 ChatGPT Web host-gated optional skill selection: recommended -> accepted/skipped -> loaded
 privacy-bounded skill_decision telemetry grouped by semantic task signature
 RAM-only per-trace working metadata with outcome/restart purge
+strict outcome-time learning_digest distillation before RAM purge
+learning digest excludes workingSummary/active hypotheses and keeps only evidence-backed structured consequences
+exact-signature skill, stage-transition and skill/project-context priors with a minimum evidence threshold
+dashboard tables for accepted/skipped decisions plus historical priors
 explicit closure preflight with closureDue and nextRequiredAction
 stale-open traces remain resumable by explicit traceId but stop competing in loose auto-recovery
 persisted maintenance phase reconstruction matches the portable MSSR reducer
-dashboard table for accepted/skipped decisions and reason-code pressure
-focused Bridge regressions plus authenticated external skill_decision ingest
+focused Bridge regressions plus authenticated external skill_decision/learning-digest compatibility
 ```
 
-Next MSSR learning work should use this evidence rather than immediately changing scores. Require repeated contextual evidence, preserve an exploration floor for new/rare skills, and emit reviewable routing/fixture proposals before any deterministic contract mutation. Vector similarity may help retrieve nearby historical signatures later, but remains secondary to canonical intent, fixtures and explicit review.
+Next MSSR learning work should feed only eligible priors back as a bounded secondary ranking signal, preserve an exploration floor for new/rare skills, add decay/staleness and replay evaluation, and emit reviewable routing/fixture proposals before any deterministic contract mutation. Vector similarity may help retrieve nearby historical signatures later, but remains secondary to canonical intent, fixtures and explicit review.
+
+### MSSR first-party core skill package
+
+Next architecture phase:
+
+```txt
+move the canonical source of MSSR-owned operational skills into the MSSR package
+first audit/strengthen mssr-agent-routing, shared-skill-governance, skill-routing-maintainer, skill-maintenance-loop and on-demand mssr-observability-maintenance
+"first-party core" does not mean "load on every task"; activation/workflow requirements remain explicit
+Codex: install/mount the packaged core skills into native discovery without maintaining copied editable sources
+OpenCode: consume the same packaged core through its MSSR adapter
+ChatGPT Web: Bridge discovers the MSSR package directly instead of depending on Mauro's Codex-home copy
+keep Mauro/user/project/plugin skills as separate external provider catalogs
+reserve first-party names or surface shadowing as an explicit conflict
+add cross-host conformance tests for version, routing metadata, dependency closure, maintenance and learning-digest behavior
+```
 
 ### Next implementation work
 

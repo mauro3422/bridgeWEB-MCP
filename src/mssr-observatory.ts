@@ -5,13 +5,18 @@ import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import {
   analyzeMssrTelemetry,
+  createMssrLearningDigest,
   getMssrTraceClosureState,
+  mssrLearningDigestSchema,
+  mssrSemanticSignature,
   MSSR_CHECKPOINT_TYPES,
   MSSR_OUTCOME_DIMENSION_STATUSES,
   MSSR_OUTCOME_EVIDENCE_KINDS,
   mssrSkillDecisionSchema,
   mssrTraceWorkingMemorySchema,
   type MssrCheckpointType,
+  type MssrLearningContextSelection,
+  type MssrLearningDigest,
   type MssrOutcomeDimensionStatus,
   type MssrOutcomeEvidenceKind,
   type MssrSkillDecisionRecord,
@@ -176,6 +181,226 @@ export function readMssrTraceWorkingMemory(traceId: string): MssrTraceWorkingMem
 
 export function purgeMssrTraceWorkingMemory(traceId: string): boolean {
   return ephemeralTraceWorkingMemory.delete(traceId);
+}
+
+function learningContextReason(value: unknown): MssrLearningContextSelection["reasonCode"] {
+  if (value === "selected" || value === "required" || value === "dependency" || value === "intent-mismatch" || value === "budget-exceeded" || value === "ambiguous" || value === "host-policy") return value;
+  if (value === "exclusive-group-tie" || value === "ambiguous-exclusive-group") return "ambiguous";
+  return "other";
+}
+
+function readMssrStoredTraceEvents(traceId: string, limit = 2_000): MssrStoredEvent[] {
+  const database = getDb();
+  if (!database || !validTraceId(traceId)) return [];
+  return database.prepare(`
+    SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
+           skill_name, required, ok, task_hash, details_json
+    FROM mssr_events
+    WHERE trace_id = ?
+    ORDER BY occurred_at ASC
+    LIMIT ?
+  `).all(traceId, Math.max(1, Math.min(2_000, Math.trunc(limit)))).map(decodeRow);
+}
+
+export function recordMssrProjectContextSelection(args: {
+  traceId: string;
+  caller?: string;
+  stage?: string;
+  projectName: string;
+  decisions: Array<Record<string, unknown>>;
+}): MssrStoredEvent {
+  const decisions = args.decisions.slice(0, 96).flatMap((item) => {
+    const id = typeof item.id === "string" ? redactText(item.id, 160) : "";
+    if (!id) return [];
+    return [{
+      id,
+      selected: item.selected === true,
+      reason: typeof item.reason === "string" ? redactText(item.reason, 80) : "other",
+    }];
+  });
+  return recordMssrEvent({
+    traceId: args.traceId,
+    eventType: "project_context_selection",
+    caller: args.caller,
+    stage: args.stage,
+    ok: true,
+    details: {
+      projectName: redactText(args.projectName, 160),
+      decisions,
+    },
+  });
+}
+
+export function recordMssrLearningDigest(args: {
+  traceId: string;
+  caller?: string;
+  digest: MssrLearningDigest;
+}): MssrStoredEvent {
+  const digest = mssrLearningDigestSchema.parse(args.digest);
+  const durableDigest = JSON.parse(JSON.stringify(digest)) as MssrLearningDigest;
+  return recordMssrEvent({
+    traceId: args.traceId,
+    eventType: "learning_digest",
+    caller: args.caller,
+    stage: digest.finalStage,
+    ok: true,
+    details: { digest: durableDigest },
+  });
+}
+
+/**
+ * Distill durable operational learning from observable trace evidence plus the
+ * final evidence-backed subset of ephemeral working memory. The raw
+ * workingSummary, active hypotheses and arbitrary working decisions never enter
+ * this artifact.
+ */
+export function distillMssrLearningDigest(traceId: string): MssrStoredEvent | null {
+  const events = readMssrStoredTraceEvents(traceId);
+  const routes = events.filter((event) => event.eventType === "route_planned");
+  const outcomeEvent = [...events].reverse().find((event) => event.eventType === "outcome");
+  const latestRoute = routes.at(-1);
+  const baseRoute = routes.find((event) => event.details.intent && typeof event.details.intent === "object") ?? routes[0];
+  if (!latestRoute || !baseRoute || !outcomeEvent) return null;
+
+  const recommendedSkills = new Set<string>();
+  for (const route of routes) {
+    for (const item of Array.isArray(route.details.activeSkills) ? route.details.activeSkills : []) {
+      if (item && typeof item === "object" && typeof (item as JsonRecord).name === "string") recommendedSkills.add(String((item as JsonRecord).name));
+    }
+  }
+  const loadedSkills = [...new Set(events
+    .filter((event) => event.eventType === "skill_loaded" && event.ok === true && event.skillName)
+    .map((event) => String(event.skillName)))].sort();
+
+  const decisionByKey = new Map<string, MssrSkillDecisionRecord>();
+  for (const event of events.filter((item) => item.eventType === "skill_decision" && item.skillName)) {
+    const parsed = mssrSkillDecisionSchema.safeParse({
+      skillName: event.skillName,
+      decision: event.details.decision,
+      reasonCode: event.details.reasonCode,
+      reasonSummary: typeof event.details.reasonSummary === "string" && event.details.reasonSummary.trim() ? event.details.reasonSummary : undefined,
+      stage: event.stage,
+    });
+    if (parsed.success) decisionByKey.set(`${parsed.data.stage ?? "start"}|${parsed.data.skillName}`, parsed.data);
+  }
+
+  const transitions = new Map<string, { fromStage: MssrLearningDigest["finalStage"]; toStage: MssrLearningDigest["finalStage"]; skillName: string }>();
+  for (let index = 1; index < routes.length; index += 1) {
+    const previous = routes[index - 1];
+    const current = routes[index];
+    if (!previous.stage || !current.stage || previous.stage === current.stage) continue;
+    for (const item of Array.isArray(current.details.activeSkills) ? current.details.activeSkills : []) {
+      if (!item || typeof item !== "object" || typeof (item as JsonRecord).name !== "string") continue;
+      const transition = {
+        fromStage: previous.stage as MssrLearningDigest["finalStage"],
+        toStage: current.stage as MssrLearningDigest["finalStage"],
+        skillName: String((item as JsonRecord).name),
+      };
+      transitions.set(`${transition.fromStage}->${transition.toStage}|${transition.skillName}`, transition);
+    }
+  }
+
+  const contextSelections = new Map<string, MssrLearningContextSelection>();
+  for (const event of events.filter((item) => item.eventType === "skill_loaded" && item.skillName)) {
+    const decisions = Array.isArray(event.details.moduleDecisions) ? event.details.moduleDecisions : [];
+    if (decisions.length > 0) {
+      for (const item of decisions.slice(0, 96)) {
+        if (!item || typeof item !== "object") continue;
+        const value = item as JsonRecord;
+        if (typeof value.id !== "string" || !value.id.trim()) continue;
+        const selection: MssrLearningContextSelection = {
+          scope: "skill",
+          owner: String(event.skillName),
+          module: value.id.trim(),
+          selected: value.selected === true,
+          reasonCode: learningContextReason(value.reason),
+        };
+        contextSelections.set(`skill|${selection.owner}|${selection.module}`, selection);
+      }
+    } else {
+      for (const module of Array.isArray(event.details.selectedModules) ? event.details.selectedModules : []) {
+        if (typeof module !== "string" || !module.trim()) continue;
+        const selection: MssrLearningContextSelection = { scope: "skill", owner: String(event.skillName), module: module.trim(), selected: true, reasonCode: "selected" };
+        contextSelections.set(`skill|${selection.owner}|${selection.module}`, selection);
+      }
+    }
+  }
+  for (const event of events.filter((item) => item.eventType === "project_context_selection")) {
+    const owner = typeof event.details.projectName === "string" && event.details.projectName.trim() ? event.details.projectName.trim() : "project";
+    for (const item of Array.isArray(event.details.decisions) ? event.details.decisions : []) {
+      if (!item || typeof item !== "object") continue;
+      const value = item as JsonRecord;
+      if (typeof value.id !== "string" || !value.id.trim()) continue;
+      const selection: MssrLearningContextSelection = {
+        scope: "project",
+        owner,
+        module: value.id.trim(),
+        selected: value.selected === true,
+        reasonCode: learningContextReason(value.reason),
+      };
+      contextSelections.set(`project|${selection.owner}|${selection.module}`, selection);
+    }
+  }
+
+  const workingMemory = readMssrTraceWorkingMemory(traceId);
+  const findings = (workingMemory?.hypotheses ?? []).flatMap((hypothesis) => {
+    if ((hypothesis.status !== "supported" && hypothesis.status !== "rejected") || !hypothesis.evidenceRef) return [];
+    return [{
+      summary: redactText(hypothesis.summary, 220),
+      status: hypothesis.status,
+      evidenceRef: redactText(hypothesis.evidenceRef, 240),
+      signals: [] as string[],
+    }];
+  }).slice(0, 12);
+
+  const allSignals = [...new Set(events.flatMap((event) => Array.isArray(event.details.signals)
+    ? event.details.signals.filter((value): value is string => typeof value === "string")
+    : []))];
+  const signals = allSignals.some((value) => value !== "nominal") ? allSignals.filter((value) => value !== "nominal") : allSignals;
+  const latestVerification = [...events].reverse().find((event) => event.eventType === "verification");
+  const latestPersistence = [...events].reverse().find((event) => event.eventType === "persistence");
+  const status = ["success", "partial", "failed", "skipped"].includes(String(outcomeEvent.details.status))
+    ? String(outcomeEvent.details.status) as MssrLearningDigest["outcome"]["status"]
+    : "partial";
+  const digest = createMssrLearningDigest({
+    semanticSignature: mssrSemanticSignature({ stage: baseRoute.stage ?? "start", intent: baseRoute.details.intent }),
+    finalStage: (latestRoute.stage ?? "start") as MssrLearningDigest["finalStage"],
+    signals: signals as MssrLearningDigest["signals"],
+    recommendedSkills: [...recommendedSkills].sort(),
+    loadedSkills,
+    skillDecisions: [...decisionByKey.values()],
+    skillTransitions: [...transitions.values()],
+    contextSelections: [...contextSelections.values()],
+    findings: findings as MssrLearningDigest["findings"],
+    outcome: {
+      status,
+      accepted: typeof outcomeEvent.details.accepted === "boolean" ? outcomeEvent.details.accepted : undefined,
+      score: typeof outcomeEvent.details.score === "number" ? outcomeEvent.details.score : undefined,
+      primarySkill: typeof outcomeEvent.details.primarySkill === "string" ? outcomeEvent.details.primarySkill : outcomeEvent.skillName,
+      supportingSkills: Array.isArray(outcomeEvent.details.supportingSkills) ? outcomeEvent.details.supportingSkills.filter((value): value is string => typeof value === "string") : [],
+      verificationPassed: typeof outcomeEvent.details.verificationPassed === "boolean"
+        ? outcomeEvent.details.verificationPassed
+        : latestVerification?.details.verificationPassed === true || latestVerification?.ok === true,
+      persisted: typeof outcomeEvent.details.persisted === "boolean"
+        ? outcomeEvent.details.persisted
+        : latestPersistence?.details.persisted === true || latestPersistence?.ok === true,
+      userCorrections: typeof outcomeEvent.details.userCorrections === "number" ? outcomeEvent.details.userCorrections : 0,
+    },
+  });
+  return recordMssrLearningDigest({ traceId, caller: outcomeEvent.caller, digest });
+}
+
+/** Outcome retention boundary: attempt learning distillation, then always purge RAM. */
+export function finalizeMssrOutcomeLearning(traceId: string): { digestEvent: MssrStoredEvent | null; warning?: string; purged: boolean } {
+  let digestEvent: MssrStoredEvent | null = null;
+  let warning: string | undefined;
+  try {
+    digestEvent = distillMssrLearningDigest(traceId);
+  } catch (error) {
+    warning = redactText(error instanceof Error ? error.message : String(error), 300);
+  }
+  const purged = purgeMssrTraceWorkingMemory(traceId);
+  return { digestEvent, warning, purged };
 }
 
 function ensureDirs(): void {
@@ -426,6 +651,14 @@ export function recordExternalMssrTelemetry(input: unknown): { event: MssrStored
     }) };
   }
 
+  if (envelope.event.kind === "learning_digest") {
+    return { duplicate: false, event: recordMssrLearningDigest({
+      traceId: envelope.traceId,
+      caller: envelope.caller,
+      digest: envelope.event.digest,
+    }) };
+  }
+
   const checkpoint = envelope.event.checkpoint;
   const persisted = readPersistedMssrTraceState(envelope.traceId);
   const violations = validateMssrCheckpointLifecycle(persisted ? {
@@ -453,7 +686,7 @@ export function recordExternalMssrTelemetry(input: unknown): { event: MssrStored
     externalSource: envelope.source,
     emittedAt: envelope.emittedAt,
   });
-  if (checkpoint.eventType === "outcome") purgeMssrTraceWorkingMemory(envelope.traceId);
+  if (checkpoint.eventType === "outcome") finalizeMssrOutcomeLearning(envelope.traceId);
   return { event: stored, duplicate: false };
 }
 
@@ -555,6 +788,7 @@ export function recordMssrSkillLoad(args: {
   fullSkillChars?: number;
   estimatedCharsSaved?: number;
   selectedModules?: string[];
+  moduleDecisions?: Array<Record<string, unknown>>;
   manifestStatus?: string;
   budgetExceeded?: boolean;
   skipped?: boolean;
@@ -583,6 +817,15 @@ export function recordMssrSkillLoad(args: {
       fullSkillChars: args.fullSkillChars,
       estimatedCharsSaved: args.estimatedCharsSaved,
       selectedModules: args.selectedModules?.slice(0, 24),
+      moduleDecisions: args.moduleDecisions?.slice(0, 96).flatMap((item) => {
+        const id = typeof item.id === "string" ? redactText(item.id, 160) : "";
+        if (!id) return [];
+        return [{
+          id,
+          selected: item.selected === true,
+          reason: typeof item.reason === "string" ? redactText(item.reason, 80) : "other",
+        }];
+      }),
       manifestStatus: args.manifestStatus,
       budgetExceeded: args.budgetExceeded,
       skipped: args.skipped,
@@ -1242,6 +1485,19 @@ function portableIntentAnalysis(events: readonly MssrStoredEvent[]) {
         event: { kind: "skill_decision", decision: parsedDecision.data },
       }];
     }
+    if (event.eventType === "learning_digest") {
+      const parsedDigest = mssrLearningDigestSchema.safeParse(event.details.digest);
+      if (!parsedDigest.success) return [];
+      return [{
+        protocolVersion: "mssr-telemetry-v1",
+        eventId: `analysis:${event.id}`,
+        emittedAt: event.occurredAt,
+        source: "mauroprime-bridge",
+        traceId: event.traceId,
+        caller: ["codex-local", "opencode-local", "chatgpt-web", "other"].includes(event.caller ?? "") ? event.caller : "other",
+        event: { kind: "learning_digest", digest: parsedDigest.data },
+      }];
+    }
     return [];
   });
   const analysis = analyzeMssrTelemetry(projected);
@@ -1251,6 +1507,7 @@ function portableIntentAnalysis(events: readonly MssrStoredEvent[]) {
     intentDimensions: analysis.intentDimensions,
     selectionFeedback: analysis.selectionFeedback,
     maintenanceCandidates: analysis.maintenanceCandidates,
+    learning: analysis.learning,
   };
 }
 
@@ -1934,6 +2191,7 @@ export function getMssrTraceEvidence(traceId: string, limit = 500) {
   const latest = (type: string) => [...events].reverse().find((event) => event.eventType === type) ?? null;
   const latestRoute = latest("route_planned");
   const latestOutcome = latest("outcome");
+  const latestLearningDigest = latest("learning_digest");
   const latestVerification = latest("verification");
   const latestPersistence = latest("persistence");
   const latestReminder = [...events].reverse().find((event) => event.eventType.includes("reminder") || event.eventType.includes("idle")) ?? null;
@@ -1994,6 +2252,7 @@ export function getMssrTraceEvidence(traceId: string, limit = 500) {
       idleReminder: latestReminder,
     },
     workingMemory,
+    learningDigest: latestLearningDigest?.details.digest ?? null,
     runtime: {
       currentBootId: RUNTIME_BOOT_ID,
       eventRuntimeBootIds,
@@ -2015,6 +2274,7 @@ export function getMssrTraceEvidence(traceId: string, limit = 500) {
       privateReasoningStored: false,
       gitOutputsStored: false,
       ephemeralWorkingMemory: "RAM-only while the trace is open; purged on outcome or Bridge restart and never written to observatory SQLite.",
+      durableLearningDigest: "On outcome, Bridge may persist only the strict learning-digest schema: semantic signature, observable skill/context selections, transitions, outcome metadata, and evidence-backed supported/rejected findings. workingSummary and active hypotheses are excluded.",
       note: "Commit hashes, snapshot ids, restart ids and remote-ref checks are retained only when explicitly written as bounded evidenceRef values.",
     },
   };

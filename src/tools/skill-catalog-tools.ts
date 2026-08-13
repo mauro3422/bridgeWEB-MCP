@@ -48,6 +48,7 @@ import {
 import {
   hashMssrTask,
   recordMssrEvent,
+  recordMssrProjectContextSelection,
   recordMssrRoute,
   recordMssrSkillDecision,
   recordMssrSkillLoad,
@@ -1041,6 +1042,15 @@ export const skillCatalogToolModule: BridgeToolModule = {
         : null;
       const observedRoute = { ...route, agentProfile: profile, workflowKey: workflowKey ?? null, projectRoot };
       recordMssrRoute({ traceId, action: "bootstrap", task, route: observedRoute as unknown as Record<string, unknown> });
+      if (projectRoot && projectContextAssembly?.decisions.length) {
+        recordMssrProjectContextSelection({
+          traceId,
+          caller,
+          stage: route.stage,
+          projectName: path.basename(projectRoot),
+          decisions: projectContextAssembly.decisions,
+        });
+      }
       const activeByName = new Map(route.activeSkills.map((skill) => [skill.name, skill]));
       const selectionMode = z.enum(["auto", "host-gated"])
         .catch(caller === "chatgpt-web" ? "host-gated" : "auto")
@@ -1153,6 +1163,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
           fullSkillChars: contextInfo.fullSkillChars,
           estimatedCharsSaved: contextInfo.estimatedCharsSaved,
           selectedModules: contextInfo.selectedModules,
+          moduleDecisions: contextInfo.moduleDecisions as Array<Record<string, unknown>>,
           manifestStatus: contextInfo.manifestStatus,
           ambiguousGroups: contextInfo.ambiguousGroups,
           budgetExceeded: contextInfo.budgetExceeded,

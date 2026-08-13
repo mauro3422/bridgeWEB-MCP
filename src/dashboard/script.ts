@@ -357,6 +357,29 @@ function renderSkillSelectionFeedback(inputRows) {
     }).join('');
 }
 
+function renderMssrLearningPriors(learning) {
+  const target = byId('mssr-learning-priors');
+  if (!target) return;
+  const rows = learning && Array.isArray(learning.skillPriors) ? learning.skillPriors : [];
+  if (!rows.length) {
+    target.innerHTML = '<tr><td colspan="7" class="muted">Todavía no hay learning digests suficientes para mostrar priors.</td></tr>';
+    return;
+  }
+  target.innerHTML = rows
+    .slice()
+    .sort((a, b) => Number(b.eligible || 0) - Number(a.eligible || 0) || Number(b.evidenceCount || 0) - Number(a.evidenceCount || 0) || String(a.skillName || '').localeCompare(String(b.skillName || '')))
+    .slice(0, 40)
+    .map((row) => '<tr>' +
+      '<td><code>' + esc(row.skillName || '—') + '</code></td>' +
+      '<td>' + num(row.evidenceCount) + (row.eligible ? '' : ' <span class="muted">/ ' + num(learning.minEvidence) + '</span>') + '</td>' +
+      '<td>' + pct(row.acceptanceRate === null || row.acceptanceRate === undefined ? null : Number(row.acceptanceRate) * 100) + '</td>' +
+      '<td>' + pct(row.activationRate === null || row.activationRate === undefined ? null : Number(row.activationRate) * 100) + '</td>' +
+      '<td>' + pct(row.successRateWhenLoaded === null || row.successRateWhenLoaded === undefined ? null : Number(row.successRateWhenLoaded) * 100) + '</td>' +
+      '<td><code>' + esc(row.recommendation || '—') + '</code></td>' +
+      '<td class="recent-detail" title="' + esc(row.semanticSignature || '') + '"><code>' + esc(String(row.semanticSignature || '').slice(0, 110)) + (String(row.semanticSignature || '').length > 110 ? '…' : '') + '</code></td>' +
+    '</tr>').join('');
+}
+
 
 function profileIdentity(row) {
   const agent = row.hostAgent && row.hostAgent !== 'unknown'
@@ -768,6 +791,7 @@ function updateMssr(mssr) {
   renderMssrAgentProfiles(mssr.agentProfiles || []);
   renderMssrEffortComparison(mssr.reasoningEffortComparison || []);
   renderSkillSelectionFeedback(mssr.intentAnalysis && mssr.intentAnalysis.selectionFeedback ? mssr.intentAnalysis.selectionFeedback : []);
+  renderMssrLearningPriors(mssr.intentAnalysis && mssr.intentAnalysis.learning ? mssr.intentAnalysis.learning : null);
   renderSkillCounts('mssr-selected-skills', mssr.top && mssr.top.selectedSkills ? mssr.top.selectedSkills : [], 'Sin skills seleccionadas en la época activa.');
   renderSkillCounts('mssr-loaded-skills', mssr.top && mssr.top.loadedSkills ? mssr.top.loadedSkills : [], 'Sin skills cargadas en la época activa.');
   renderSkillOutcomes(mssr.top && mssr.top.skillOutcomes ? mssr.top.skillOutcomes : []);
