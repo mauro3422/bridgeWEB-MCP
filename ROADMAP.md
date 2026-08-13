@@ -392,6 +392,10 @@ Source `0.6.89` integrates Bridge as an adapter for the portable MSSR Context Me
 
 This is response delivery, not a new durable inbox. Runtime publication/restart and cross-host lifecycle parity remain separate verification gates.
 
+### MSSR Context Plane durable delivery (ack tombstone semantics)
+
+Source `0.6.90` packages MSSR core `0.2.12` and wires Bridge onto the durable project context plane under `.bridge/mssr-context-inbox.json`. `skill_route_plan`/`skill_bootstrap` select and redeliver pending messages until `mssr_context_ack` records an explicit receipt. Bridge then suppresses identical acknowledged evidence on its delivery surface (same id, kind, and evidence identity including revision), allowing reappearance only when revision or content changes. Bridge remains the delivery/retention adapter, never the message-semantics owner. Http tunnel live publication and cross-host parity for Bridge/ChatGPT Web remain separate verification gates.
+
 ### Project knowledge and change-history governance
 
 Completed in source 0.6.86:

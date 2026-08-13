@@ -1,7 +1,7 @@
 # Bridge project state
 
 ## Current release
-Bridge `0.6.89` is published and live. It adapts portable MSSR Context Messages v1 in `skill_route_plan` and `skill_bootstrap`; MSSR remains the semantic owner while Bridge validates, delegates selection and piggybacks selected messages without executing actions or persistence proposals. Controlled full restart `50c28186-54b4-47fe-9f96-39232d7285be` was acknowledged on 2026-08-13. Live readback proved version `0.6.89`, tunnel `live/ready`, no pending restart, 146 tools, and Context Messages v1 schemas on both route/bootstrap tools.
+Bridge `0.6.90` is closed in the working tree and pending publication/restart. It packages MSSR core `0.2.12` and delivers the durable project context plane: `skill_route_plan` and `skill_bootstrap` select messages from `.bridge/mssr-context-inbox.json`, redeliver pending messages until `mssr_context_ack` records an explicit receipt, then suppress identical acknowledged evidence on the Bridge delivery surface (`filterAcknowledgedContextMessages` in `src/mssr-context-plane.ts`). Reappearance requires changed revision or content. Runtime version `0.6.90` readback, tunnel health, and catalog count are pending until a controlled restart.
 
 ## Current MSSR learning state
 

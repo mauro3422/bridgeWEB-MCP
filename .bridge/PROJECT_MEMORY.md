@@ -11,3 +11,7 @@ Every substantive release should have one versioned `changelogs/X.Y.Z.md` summar
 ## Debug history strategy
 
 When MSSR intent indicates debugging, recovery, history-recovery, repeated friction, conflicting evidence, or comparable non-nominal history needs, load only `changelogs/INDEX.md` and the current release note first. Load `changelogs/LEGACY.md` or another historical release only when the index/current evidence points to a specific older regression window.
+
+## MSSR Context Plane ack tombstone semantics
+
+`mssr_context_ack` records durable delivery receipts in `.bridge/mssr-context-inbox.json`. Ack suppresses identical evidence during delivery: a message whose id, kind, and evidence identity (revision included) match an acknowledged receipt is not redelivered. Evidence reappears only when its revision or content changes. The canonical fix for re-selection suppression belongs in MSSR core (`enqueue`/`select`, shipped in packaged core 0.2.12); while the core lacks it, Bridge enforces the contract on its delivery surface because the host adapter owns inbox/piggyback delivery and local retention. Bridge must never extend ack suppression beyond identical evidence, and selection never counts as delivery.

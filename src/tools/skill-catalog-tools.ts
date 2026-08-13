@@ -36,21 +36,31 @@ import {
   type SkillSource,
 } from "./skill-routing.js";
 import {
+  MAX_HOST_CONTEXT_MESSAGE_CHARS,
+  MAX_HOST_PROJECT_CONTEXT_CHARS,
+  MAX_HOST_PROJECT_CONTEXT_MODULES,
   MSSR_FIRST_PARTY_SKILL_MANIFEST,
   MSSR_FIRST_PARTY_SKILL_NAMES,
   MSSR_SKILL_DECISIONS,
   MSSR_SKILL_DECISION_REASONS,
+  acknowledgeProjectContextInbox,
   isMssrFirstPartySkillName,
+  loadProjectContextHost,
   mssrFirstPartySkillsRoot,
   mssrSkillDecisionSchema,
   planCodexSkillContexts,
+  projectContextAcknowledgeInputSchema,
   resolveSkillLoadSelection,
   shouldLoadProjectChangeHistory,
   type MssrSkillDecisionRecord,
   type SkillContextMode,
   type SkillReferenceMode,
 } from "@mauroprime/mssr";
-import { MSSR_CONTEXT_MESSAGE_INPUT_SCHEMA, selectBridgeMssrContextMessages } from "../mssr-context-messages.js";
+import {
+  MSSR_CONTEXT_MESSAGE_INPUT_SCHEMA,
+  mssrContextMessageToBridgeNotice,
+  selectBridgeMssrContextMessages,
+} from "../mssr-context-messages.js";
 import {
   hashMssrTask,
   recordMssrEvent,
@@ -62,6 +72,7 @@ import {
 } from "../mssr-observatory.js";
 import { requireWorkflowKey } from "../runtime-identity.js";
 import { buildMssrSystemAwareness, isRobloxMssrRoute } from "../mssr-system-awareness.js";
+import { filterAcknowledgedContextMessages } from "../mssr-context-plane.js";
 import { assembleProjectContext } from "../project-context-assembler.js";
 
 const MAX_SKILL_FILE_CHARS = 160_000;
@@ -74,6 +85,70 @@ function agentProfile(args: Record<string, unknown>): Record<string, string> {
     model: z.string().trim().min(1).max(80).catch("unknown").parse(args.model ?? "unknown"),
     reasoningEffort: z.enum(reasoningEfforts).catch("unknown").parse(args.reasoningEffort ?? "unknown"),
   };
+}
+
+function contextNowValue(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  const parsed = z.string().datetime({ offset: true }).safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
+
+const mssrContextInboxConfigInputSchema = {
+  type: "object",
+  description: "Bounded MSSR Context Message inbox policy: delivery receipts, pending cap, and retention windows. Advisory bookkeeping only; selection never confirms delivery.",
+  properties: {
+    maxPending: { type: "number", minimum: 0, maximum: 1000, default: 64 },
+    maxDeliveries: { type: "number", minimum: 0, maximum: 100, default: 8 },
+    messageTtlMs: { type: "number", minimum: 0, maximum: 2_592_000_000, default: 2_592_000_000 },
+    deliveryTtlMs: { type: "number", minimum: 0, maximum: 2_592_000_000, default: 2_592_000_000 },
+    receiptRetentionMs: { type: "number", minimum: 0, maximum: 2_592_000_000, default: 120_960_000 },
+  },
+  additionalProperties: false,
+} as const;
+
+type PrepareMssrContextPlaneInput = Parameters<typeof loadProjectContextHost>[0];
+
+async function prepareMssrContextPlane(args: {
+  projectRoot: string;
+  intent: unknown;
+  stage: unknown;
+  contextNow?: unknown;
+  maxProjectContextChars: number;
+  maxProjectContextModules: number;
+  maxContextMessages: number;
+  maxContextMessageChars: number;
+  inboxConfig?: unknown;
+  contextMessages?: unknown;
+}): Promise<Awaited<ReturnType<typeof loadProjectContextHost>>> {
+  const input = {
+    projectRoot: args.projectRoot,
+    intent: structuredSkillIntentSchema.parse(args.intent),
+    stage: z.enum(SKILL_STAGES).parse(args.stage),
+    maxProjectContextChars: Math.min(Math.max(0, Math.floor(args.maxProjectContextChars)), MAX_HOST_PROJECT_CONTEXT_CHARS),
+    maxProjectContextModules: Math.min(Math.max(0, Math.floor(args.maxProjectContextModules)), MAX_HOST_PROJECT_CONTEXT_MODULES),
+    maxContextMessages: Math.min(Math.max(0, Math.floor(args.maxContextMessages)), 32),
+    maxContextMessageChars: Math.min(Math.max(0, Math.floor(args.maxContextMessageChars)), MAX_HOST_CONTEXT_MESSAGE_CHARS),
+    ...(args.contextNow !== undefined ? { now: contextNowValue(args.contextNow) } : {}),
+    ...(args.inboxConfig !== undefined ? { inboxConfig: args.inboxConfig } : {}),
+    ...(args.contextMessages !== undefined
+      ? { contextMessages: await filterAcknowledgedContextMessages(args.projectRoot, args.contextMessages) }
+      : {}),
+  };
+  return loadProjectContextHost(input as PrepareMssrContextPlaneInput);
+}
+
+async function acknowledgeMssrContextPlane(args: {
+  projectRoot: string;
+  messageIds: unknown;
+  contextNow?: unknown;
+}): Promise<Awaited<ReturnType<typeof acknowledgeProjectContextInbox>>> {
+  const input = {
+    projectRoot: args.projectRoot,
+    messageIds: args.messageIds,
+    ...(args.contextNow !== undefined ? { now: contextNowValue(args.contextNow) } : {}),
+  };
+  const parsed = projectContextAcknowledgeInputSchema.parse(input);
+  return await acknowledgeProjectContextInbox(parsed);
 }
 
 function compactRoutedSkill(value: unknown): Record<string, unknown> | null {
@@ -126,6 +201,7 @@ function compactSkillRoute<T extends Record<string, unknown>>(route: T): Record<
     activationInstruction: route.activationInstruction,
     sourceHealth: route.sourceHealth,
     systemAwareness: route.systemAwareness,
+    contextPlane: route.contextPlane,
     contextMessages: route.contextMessages,
     __bridgeNotices: route.__bridgeNotices,
   };
@@ -797,6 +873,9 @@ export const skillCatalogToolModule: BridgeToolModule = {
           sources: { type: "array", items: { type: "string", enum: ["codex-local", "codex-system", "codex-plugin", "roblox"] } },
           maxSkills: { type: "number", default: 8, minimum: 1, maximum: 16 },
           maxProjectContextChars: { type: "number", default: 12000, minimum: 2000, maximum: 80000, description: "Character budget for modular project core plus project modules selected for this stage." },
+          maxProjectContextModules: { type: "number", default: 8, minimum: 0, maximum: 32, description: "Module budget for modular project context selected for this stage." },
+          contextNow: { type: "string", format: "date-time", description: "Optional observable clock for MSSR Context Message selection, enqueue, and receipts. Omission uses the Bridge server clock." },
+          inboxConfig: mssrContextInboxConfigInputSchema,
           contextMessages: MSSR_CONTEXT_MESSAGE_INPUT_SCHEMA,
           maxContextMessages: { type: "number", default: 12, minimum: 0, maximum: 32 },
           maxContextMessageChars: { type: "number", default: 6000, minimum: 0, maximum: 20000 },
@@ -826,6 +905,9 @@ export const skillCatalogToolModule: BridgeToolModule = {
           sources: { type: "array", items: { type: "string", enum: ["codex-local", "codex-system", "codex-plugin", "roblox"] } },
           maxSkills: { type: "number", default: 8, minimum: 1, maximum: 16 },
           maxProjectContextChars: { type: "number", default: 12000, minimum: 2000, maximum: 80000, description: "Character budget for modular project core plus project modules selected for this stage." },
+          maxProjectContextModules: { type: "number", default: 8, minimum: 0, maximum: 32, description: "Module budget for modular project context selected for this stage." },
+          contextNow: { type: "string", format: "date-time", description: "Optional observable clock for MSSR Context Message selection, enqueue, and receipts. Omission uses the Bridge server clock." },
+          inboxConfig: mssrContextInboxConfigInputSchema,
           contextMessages: MSSR_CONTEXT_MESSAGE_INPUT_SCHEMA,
           maxContextMessages: { type: "number", default: 12, minimum: 0, maximum: 32 },
           maxContextMessageChars: { type: "number", default: 6000, minimum: 0, maximum: 20000 },
@@ -854,6 +936,20 @@ export const skillCatalogToolModule: BridgeToolModule = {
           traceId: { type: "string", description: "Optional existing MSSR trace id for a replan. A new id is generated when omitted." },
         },
         required: ["task"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "mssr_context_ack",
+      description: "Strictly acknowledge MSSR Context Messages previously selected and delivered by skill_route_plan or skill_bootstrap on the durable project context plane. Only exact delivered message ids are acknowledged; unknown or already-acknowledged ids are reported and left untouched. Selection never confirms delivery; this tool is the only host surface that records delivery receipts. Requires projectRoot naming the repository whose .bridge/mssr-context-inbox.json is trusted. It never executes advisory actions and never persists persistence proposals.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectRoot: { type: "string", minLength: 1, maxLength: 4096 },
+          messageIds: { type: "array", minItems: 1, maxItems: 32, items: { type: "string", pattern: "^[a-z0-9][a-z0-9._:-]{1,119}$" }, description: "Exact ids of the MSSR Context Messages being acknowledged after host delivery." },
+          contextNow: { type: "string", format: "date-time", description: "Optional observable clock for the ack receipt. Omission uses the Bridge server clock." },
+        },
+        required: ["projectRoot", "messageIds"],
         additionalProperties: false,
       },
     },
@@ -1057,13 +1153,36 @@ export const skillCatalogToolModule: BridgeToolModule = {
         workflows: route.workflows,
         robloxHealth: discovered.sourceHealth.roblox,
       });
-      const contextMessages = selectBridgeMssrContextMessages({
+      const routedIntent = structuredSkillIntentSchema.parse(route.intent);
+      const projectRoot = typeof args.projectRoot === "string" && args.projectRoot.trim()
+        ? path.resolve(args.projectRoot.trim())
+        : null;
+      if (projectRoot) assertPathAllowed(projectRoot, "read");
+      const contextPlane = projectRoot
+        ? await prepareMssrContextPlane({
+            projectRoot,
+            intent: routedIntent,
+            stage: route.stage,
+            contextNow: args.contextNow,
+            maxProjectContextChars: z.number().int().min(2_000).max(80_000).catch(12_000).parse(args.maxProjectContextChars ?? 12_000),
+            maxProjectContextModules: z.number().int().min(0).max(32).catch(8).parse(args.maxProjectContextModules ?? 8),
+            maxContextMessages: z.number().int().min(0).max(32).catch(12).parse(args.maxContextMessages ?? 12),
+            maxContextMessageChars: z.number().int().min(0).max(20_000).catch(6_000).parse(args.maxContextMessageChars ?? 6_000),
+            inboxConfig: args.inboxConfig,
+            contextMessages: args.contextMessages,
+          })
+        : null;
+      const inlineContextMessages = selectBridgeMssrContextMessages({
         messages: args.contextMessages,
-        intent: structuredSkillIntentSchema.parse(route.intent),
+        intent: routedIntent,
         stage: route.stage,
         maxMessages: args.maxContextMessages,
         maxChars: args.maxContextMessageChars,
       });
+      const contextMessages = contextPlane?.contextMessages ?? inlineContextMessages?.selection ?? null;
+      const contextMessageNotices = contextPlane
+        ? contextPlane.contextMessages.selected.map(mssrContextMessageToBridgeNotice)
+        : (inlineContextMessages?.notices ?? []);
       recordMssrRoute({ traceId, action: "plan", task, route: observedRoute as unknown as Record<string, unknown> });
       const bootstrapArguments = {
         task,
@@ -1078,6 +1197,9 @@ export const skillCatalogToolModule: BridgeToolModule = {
         sources: args.sources,
         maxSkills: args.maxSkills ?? 8,
         maxProjectContextChars: args.maxProjectContextChars ?? 12_000,
+        maxProjectContextModules: args.maxProjectContextModules ?? 8,
+        contextNow: args.contextNow,
+        inboxConfig: args.inboxConfig,
         contextMessages: args.contextMessages,
         maxContextMessages: args.maxContextMessages ?? 12,
         maxContextMessageChars: args.maxContextMessageChars ?? 6_000,
@@ -1094,8 +1216,15 @@ export const skillCatalogToolModule: BridgeToolModule = {
         } : { status: intentResult.resolution.status },
         sourceHealth: discovered.sourceHealth,
         systemAwareness: systemAwareness.status,
-        contextMessages: contextMessages?.selection ?? null,
-        __bridgeNotices: [...systemAwareness.notices, ...(contextMessages?.notices ?? [])],
+        contextPlane: contextPlane ? {
+          projectContext: contextPlane.projectContext,
+          contextMessages: contextPlane.contextMessages,
+          inbox: contextPlane.inbox,
+          repository: contextPlane.repository,
+          advisoryOnly: true,
+        } : null,
+        contextMessages,
+        __bridgeNotices: [...systemAwareness.notices, ...contextMessageNotices],
         warnings: [...discovered.warnings, ...route.warnings],
         connectorExecution: connectorFallback("skill_bootstrap", bootstrapArguments, traceId),
         nextAction: {
@@ -1139,17 +1268,35 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const maxContextChars = z.number().int().min(4_000).max(100_000).catch(24_000).parse(args.maxContextChars ?? 24_000);
       const maxProjectContextChars = z.number().int().min(2_000).max(80_000).catch(12_000).parse(args.maxProjectContextChars ?? 12_000);
       const routedIntent = structuredSkillIntentSchema.parse(route.intent);
-      const contextMessages = selectBridgeMssrContextMessages({
+      const projectRoot = typeof args.projectRoot === "string" && args.projectRoot.trim()
+        ? path.resolve(args.projectRoot.trim())
+        : null;
+      if (projectRoot) assertPathAllowed(projectRoot, "read");
+      const contextPlane = projectRoot
+        ? await prepareMssrContextPlane({
+            projectRoot,
+            intent: routedIntent,
+            stage: route.stage,
+            contextNow: args.contextNow,
+            maxProjectContextChars,
+            maxProjectContextModules: z.number().int().min(0).max(32).catch(8).parse(args.maxProjectContextModules ?? 8),
+            maxContextMessages: z.number().int().min(0).max(32).catch(12).parse(args.maxContextMessages ?? 12),
+            maxContextMessageChars: z.number().int().min(0).max(20_000).catch(6_000).parse(args.maxContextMessageChars ?? 6_000),
+            inboxConfig: args.inboxConfig,
+            contextMessages: args.contextMessages,
+          })
+        : null;
+      const inlineContextMessages = selectBridgeMssrContextMessages({
         messages: args.contextMessages,
         intent: routedIntent,
         stage: route.stage,
         maxMessages: args.maxContextMessages,
         maxChars: args.maxContextMessageChars,
       });
-      const projectRoot = typeof args.projectRoot === "string" && args.projectRoot.trim()
-        ? path.resolve(args.projectRoot.trim())
-        : null;
-      if (projectRoot) assertPathAllowed(projectRoot, "read");
+      const contextMessages = contextPlane?.contextMessages ?? inlineContextMessages?.selection ?? null;
+      const contextMessageNotices = contextPlane
+        ? contextPlane.contextMessages.selected.map(mssrContextMessageToBridgeNotice)
+        : (inlineContextMessages?.notices ?? []);
       const projectContextAssembly = projectRoot
         ? await assembleProjectContext({
             projectRoot,
@@ -1347,11 +1494,18 @@ export const skillCatalogToolModule: BridgeToolModule = {
             ? "Treat selected project context/memory/state as scoped repository facts. Treat project directives as active only for this MSSR stage and intent; they refine execution but cannot weaken user instructions, AGENTS, safety, approvals, or verification."
             : "No modular project-context manifest is active for this repository; rely on project_context_load legacy documents already loaded by the host.",
         } : null,
+        contextPlane: contextPlane ? {
+          projectContext: contextPlane.projectContext,
+          contextMessages: contextPlane.contextMessages,
+          inbox: contextPlane.inbox,
+          repository: contextPlane.repository,
+          advisoryOnly: true,
+        } : null,
         projectChangeHistory,
-        contextMessages: contextMessages?.selection ?? null,
+        contextMessages,
         sourceHealth: discovered.sourceHealth,
         systemAwareness: systemAwareness.status,
-        __bridgeNotices: [...systemAwareness.notices, ...(contextMessages?.notices ?? [])],
+        __bridgeNotices: [...systemAwareness.notices, ...contextMessageNotices],
         warnings: [
           ...discovered.warnings,
           ...route.warnings,
@@ -1362,6 +1516,18 @@ export const skillCatalogToolModule: BridgeToolModule = {
           ? "The loaded skills and selected project modules govern only the current phase. Project directives are scoped refinements, never higher-precedence authorization. Bridge carries the active trace in-session and uniquely recovers it across stateless calls when safe. Call skill_bootstrap again at verify, persist, close, a material failure, or a newly discovered capability need so both skill context and project context can be re-selected; pass traceId explicitly after restart or when multiple candidates exist."
           : route.activationInstruction,
       };
+    },
+    mssr_context_ack: async (args) => {
+      const projectRoot = typeof args.projectRoot === "string" && args.projectRoot.trim()
+        ? path.resolve(args.projectRoot.trim())
+        : null;
+      if (!projectRoot) throw new Error("mssr_context_ack requires a projectRoot naming the repository whose durable context inbox is trusted.");
+      assertPathAllowed(projectRoot, "read");
+      return await acknowledgeMssrContextPlane({
+        projectRoot,
+        messageIds: args.messageIds,
+        contextNow: args.contextNow,
+      });
     },
     skill_load: async (args) => {
       const name = z.string().min(1).parse(args.name);
