@@ -36,8 +36,12 @@ import {
   type SkillSource,
 } from "./skill-routing.js";
 import {
+  MSSR_FIRST_PARTY_SKILL_MANIFEST,
+  MSSR_FIRST_PARTY_SKILL_NAMES,
   MSSR_SKILL_DECISIONS,
   MSSR_SKILL_DECISION_REASONS,
+  isMssrFirstPartySkillName,
+  mssrFirstPartySkillsRoot,
   mssrSkillDecisionSchema,
   planCodexSkillContexts,
   resolveSkillLoadSelection,
@@ -299,6 +303,80 @@ async function discoverCodexSkills(): Promise<{ skills: SkillEntry[]; warnings: 
   return { skills: [...normal.skills, ...plugins.skills], warnings: [...normal.warnings, ...plugins.warnings] };
 }
 
+type MssrFirstPartySkillDiscovery = {
+  skills: SkillEntry[];
+  warnings: string[];
+  root: string;
+};
+
+/**
+ * Reads only the package-declared MSSR skill paths. This intentionally does not
+ * use Bridge's broad allowed-root policy: an installed package may resolve
+ * outside the Bridge workspace, but every realpath remains constrained to the
+ * exact root returned by MSSR's own package API.
+ */
+async function discoverMssrFirstPartySkills(): Promise<MssrFirstPartySkillDiscovery> {
+  const root = mssrFirstPartySkillsRoot();
+  const warnings: string[] = [];
+  let canonicalRoot: string;
+  try {
+    canonicalRoot = await fs.realpath(root);
+  } catch (error) {
+    return {
+      skills: [],
+      warnings: [`MSSR first-party skills root unavailable: ${root}: ${error instanceof Error ? error.message : String(error)}`],
+      root,
+    };
+  }
+
+  const skills: SkillEntry[] = [];
+  for (const { name } of MSSR_FIRST_PARTY_SKILL_MANIFEST.skills) {
+    if (!MSSR_FIRST_PARTY_SKILL_NAMES.has(name) || !isMssrFirstPartySkillName(name)) {
+      warnings.push(`MSSR first-party manifest rejected an unreserved skill name: ${name}`);
+      continue;
+    }
+    const candidate = path.join(root, name, "SKILL.md");
+    let location: string;
+    try {
+      location = await fs.realpath(candidate);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      warnings.push(code === "ENOENT"
+        ? `MSSR first-party skill is missing from its package root: ${name}`
+        : `MSSR first-party skill is unreadable (${name}): ${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
+    if (!isWithinRoot(canonicalRoot, location)) {
+      warnings.push(`MSSR first-party skill resolves outside its package root: ${name}`);
+      continue;
+    }
+    const skill = await readSkillEntry(location, "mssr-first-party", "MSSR first-party package");
+    if (!skill || skill.name !== name || !isMssrFirstPartySkillName(skill.name)) {
+      warnings.push(`MSSR first-party skill metadata does not match its reserved manifest entry: ${name}`);
+      continue;
+    }
+    skills.push(skill);
+  }
+  return { skills, warnings, root: canonicalRoot };
+}
+
+type LocalSkillDiscovery = {
+  skills: SkillEntry[];
+  warnings: string[];
+  codex: Awaited<ReturnType<typeof discoverCodexSkills>>;
+  mssr: MssrFirstPartySkillDiscovery;
+};
+
+async function discoverLocalSkills(): Promise<LocalSkillDiscovery> {
+  const [mssr, codex] = await Promise.all([discoverMssrFirstPartySkills(), discoverCodexSkills()]);
+  return {
+    skills: [...mssr.skills, ...codex.skills],
+    warnings: [...mssr.warnings, ...codex.warnings],
+    codex,
+    mssr,
+  };
+}
+
 function parseRobloxSkills(tool: RobloxMcpTool | undefined): SkillEntry[] {
   const description = tool?.description ?? "";
   const regex = /<skill>\s*<name>([\s\S]*?)<\/name>\s*<source>([\s\S]*?)<\/source>\s*<description>([\s\S]*?)<\/description>\s*<\/skill>/gi;
@@ -315,6 +393,13 @@ function parseRobloxSkills(tool: RobloxMcpTool | undefined): SkillEntry[] {
 }
 
 type SkillSourceHealth = {
+  mssr: {
+    status: "healthy" | "degraded";
+    skillCount: number;
+    manifestSkillCount: number;
+    warningCount: number;
+    root: string;
+  };
   codex: {
     status: "healthy" | "degraded";
     skillCount: number;
@@ -359,14 +444,21 @@ async function discoverRobloxSkills(): Promise<{ skills: SkillEntry[]; health: R
 
 async function discoverAllSkills(includeRoblox = true): Promise<{ skills: SkillEntry[]; warnings: string[]; sourceHealth: SkillSourceHealth }> {
   const warnings: string[] = [];
-  const codex = await discoverCodexSkills();
-  warnings.push(...codex.warnings);
+  const local = await discoverLocalSkills();
+  warnings.push(...local.warnings);
   let roblox: SkillEntry[] = [];
   const sourceHealth: SkillSourceHealth = {
+    mssr: {
+      status: local.mssr.warnings.length > 0 ? "degraded" : "healthy",
+      skillCount: local.mssr.skills.length,
+      manifestSkillCount: MSSR_FIRST_PARTY_SKILL_MANIFEST.skills.length,
+      warningCount: local.mssr.warnings.length,
+      root: local.mssr.root,
+    },
     codex: {
-      status: codex.warnings.length > 0 ? "degraded" : "healthy",
-      skillCount: codex.skills.length,
-      warningCount: codex.warnings.length,
+      status: local.codex.warnings.length > 0 ? "degraded" : "healthy",
+      skillCount: local.codex.skills.length,
+      warningCount: local.codex.warnings.length,
     },
   };
   if (includeRoblox) {
@@ -388,7 +480,7 @@ async function discoverAllSkills(includeRoblox = true): Promise<{ skills: SkillE
       };
     }
   }
-  return { skills: [...codex.skills, ...roblox], warnings, sourceHealth };
+  return { skills: [...local.skills, ...roblox], warnings, sourceHealth };
 }
 
 function normalize(value: string): string {
@@ -476,7 +568,7 @@ function skillScore(task: string, skill: SkillEntry): { score: number; reasons: 
 }
 
 export async function findExistingSkillCoverage(task: string, maxResults = 5) {
-  const discovered = await discoverCodexSkills();
+  const discovered = await discoverLocalSkills();
   const ranked = canonicalizeSkillEntries(discovered.skills).entries
     .map((skill) => ({ ...skill, ...skillScore(task, skill) }))
     .filter((skill) => skill.score >= 12)
@@ -492,7 +584,7 @@ export async function findExistingSkillCoverage(task: string, maxResults = 5) {
 
 function sourceFilter(value: unknown): SkillSource[] | null {
   if (!Array.isArray(value) || value.length === 0) return null;
-  const allowed = new Set<SkillSource>(["codex-local", "codex-system", "codex-plugin", "roblox"]);
+  const allowed = new Set<SkillSource>(["mssr-first-party", "codex-local", "codex-system", "codex-plugin", "roblox"]);
   return value.filter((item): item is SkillSource => typeof item === "string" && allowed.has(item as SkillSource));
 }
 
@@ -630,12 +722,12 @@ export const skillCatalogToolModule: BridgeToolModule = {
   tools: [
     {
       name: "skill_catalog",
-      description: "List the unified skill catalog available to Mauro's workflow: local/system/plugin Codex SKILL.md files plus the Roblox-authored skills exposed by Roblox Studio MCP. Returns per-source health and warns when a requested live source is degraded. Use when the user asks what skills exist, when resuming a specialized workflow, or when you need to discover whether a reusable procedure applies.",
+      description: "List the unified skill catalog available to Mauro's workflow: bundled MSSR first-party skills, local/system/plugin Codex SKILL.md files, plus Roblox-authored skills exposed by Roblox Studio MCP. Returns per-source health and warns when a requested live source is degraded. Use when the user asks what skills exist, when resuming a specialized workflow, or when you need to discover whether a reusable procedure applies.",
       inputSchema: {
         type: "object",
         properties: {
           query: { type: "string", description: "Optional name/description filter." },
-          sources: { type: "array", items: { type: "string", enum: ["codex-local", "codex-system", "codex-plugin", "roblox"] } },
+          sources: { type: "array", items: { type: "string", enum: ["mssr-first-party", "codex-local", "codex-system", "codex-plugin", "roblox"] } },
           maxResults: { type: "number", default: 100, minimum: 1, maximum: 600 },
         },
         additionalProperties: false,
@@ -759,7 +851,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
     },
     {
       name: "skill_load",
-      description: "Load one skill as active guidance and record the load in the MSSR trace. Pass the traceId returned by routing whenever available. For Codex skills this reads the exact SKILL.md; for Roblox-authored skills this invokes the live Roblox Studio MCP skill tool.",
+      description: "Load one skill as active guidance and record the load in the MSSR trace. Pass the traceId returned by routing whenever available. In auto mode, reserved MSSR first-party names resolve to their bundled package source before external Codex catalogs; filesystem skills read the exact SKILL.md, while Roblox-authored skills invoke the live Roblox Studio MCP skill tool.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1251,9 +1343,9 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const required = args.required === true;
       const traceId = resolveMssrTraceId(args.traceId);
       if (source !== "roblox") {
-        const discoveredCodex = await discoverCodexSkills();
-        const codex = canonicalizeSkillEntries(discoveredCodex.skills).entries;
-        const entry = codex.find((skill) => skill.name === name);
+        const discoveredLocal = await discoverLocalSkills();
+        const local = canonicalizeSkillEntries(discoveredLocal.skills).entries;
+        const entry = local.find((skill) => skill.name === name);
         if (entry) {
           try {
             const result = await loadCodexSkill(entry);

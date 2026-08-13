@@ -1,7 +1,7 @@
 # Bridge project state
 
 ## Current release
-Bridge release `0.6.87` is prepared with 146 registered runtime tools. It measures the substantive MSSR-call denominator separately from route/bootstrap hooks and diagnostics, exposes routed/unrouted chain coverage without storing raw arguments, and records optional-skill decisions only when the host supplied an explicit decision/reason. Typecheck, build, focused MSSR coverage/learning regressions, the full regression suite, routing validation, generated-tool documentation and the cross-repository source maintenance gate pass. Persistence/publication readback and live restart verification remain pending; no runtime restart or publication was performed.
+Bridge release `0.6.88` is prepared with 146 registered runtime tools. It discovers the five packaged MSSR first-party skills directly through the portable manifest/root API, includes `mssr-first-party` in catalog health and schemas, and lets auto load select the packaged reserved skill ahead of divergent local/system/plugin catalogs while preserving that shadow as an explicit routing-audit error. Typecheck, build, the isolated package-discovery conformance regression, routing validation, MSSR learning-loop regression, and generated-tool documentation checks pass. Full regression rerun, persistence/publication readback, and live restart verification remain pending; no runtime restart or publication was performed.
 
 ## Current MSSR learning state
 

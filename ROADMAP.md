@@ -417,12 +417,12 @@ Next architecture phase:
 move the canonical source of MSSR-owned operational skills into the MSSR package
 first audit/strengthen mssr-agent-routing, shared-skill-governance, skill-routing-maintainer, skill-maintenance-loop and on-demand mssr-observability-maintenance
 "first-party core" does not mean "load on every task"; activation/workflow requirements remain explicit
-Codex: install/mount the packaged core skills into native discovery without maintaining copied editable sources
-OpenCode: consume the same packaged core through its MSSR adapter
-ChatGPT Web: Bridge discovers the MSSR package directly instead of depending on Mauro's Codex-home copy
+- [ ] Codex: install/mount the packaged core skills into native discovery without maintaining copied editable sources
+- [ ] OpenCode: consume the same packaged core through its MSSR adapter
+- [x] ChatGPT Web: Bridge discovers the MSSR package directly instead of depending on Mauro's Codex-home copy
 keep Mauro/user/project/plugin skills as separate external provider catalogs
-reserve first-party names or surface shadowing as an explicit conflict
-add cross-host conformance tests for version, routing metadata, dependency closure, maintenance and learning-digest behavior
+- [x] Reserve first-party names or surface shadowing as an explicit conflict in Bridge routing/audit.
+- [ ] Add cross-host conformance tests for version, routing metadata, dependency closure, maintenance and learning-digest behavior.
 ```
 
 ### Next implementation work

@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { assembleCodexSkillContext, planCodexSkillContexts } from "@mauroprime/mssr";
+import { assembleCodexSkillContext, mssrFirstPartySkillsRoot, planCodexSkillContexts } from "@mauroprime/mssr";
 import { structuredSkillIntentSchema } from "@mauroprime/mssr";
 
-const skillsRoot = "C:\\Dev\\mauroprime-skills\\skills";
+const firstPartySkillsRoot = mssrFirstPartySkillsRoot();
+const customSkillsRoot = "D:\\Dev\\mauroprime-skills\\skills";
 const intent = structuredSkillIntentSchema.parse({
   domains: ["skill-system", "agent-orchestration", "coding"],
   actions: ["edit", "maintain", "verify"],
@@ -17,6 +18,7 @@ const intent = structuredSkillIntentSchema.parse({
 });
 
 function skill(name) {
+  const skillsRoot = name === "mssr-agent-routing" ? firstPartySkillsRoot : customSkillsRoot;
   return {
     name,
     description: `Fixture ${name}`,
