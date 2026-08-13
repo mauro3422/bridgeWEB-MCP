@@ -1,7 +1,7 @@
 # Bridge project state
 
 ## Current release
-Bridge release `0.6.88` is prepared with 146 registered runtime tools. It discovers the five packaged MSSR first-party skills directly through the portable manifest/root API, includes `mssr-first-party` in catalog health and schemas, and lets auto load select the packaged reserved skill ahead of divergent local/system/plugin catalogs while preserving that shadow as an explicit routing-audit error. Typecheck, build, the isolated package-discovery conformance regression, routing validation, MSSR learning-loop regression, and generated-tool documentation checks pass. Full regression rerun, persistence/publication readback, and live restart verification remain pending; no runtime restart or publication was performed.
+Bridge release `0.6.88` is published and live with 146 registered runtime tools. It discovers the five packaged MSSR first-party skills directly through the portable manifest/root API, includes `mssr-first-party` in catalog health and schemas, and lets auto load select the packaged reserved skill ahead of divergent local/system/plugin catalogs while preserving that shadow as an explicit routing-audit error. A controlled full restart completed on 2026-08-13; health/readiness, version readback, the five-entry first-party catalog, full regressions, routing validation, generated-tool documentation, watchdog/metrics checks, strict Git cleanliness, and direct remote SHA verification all passed.
 
 ## Current MSSR learning state
 
