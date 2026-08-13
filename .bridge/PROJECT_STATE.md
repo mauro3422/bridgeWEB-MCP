@@ -1,7 +1,7 @@
 # Bridge project state
 
 ## Current release
-Bridge source release `0.6.89` adapts portable MSSR Context Messages v1 in `skill_route_plan` and `skill_bootstrap`. MSSR remains the semantic owner: Bridge validates the portable batch, asks MSSR to select against normalized intent/stage and bounded budgets, returns the complete selection evidence, and piggybacks only selected messages through the existing per-response notice delivery. It preserves canonical owner, provenance, freshness, evidence, continuation receipts, dedupe, and advisory actions as data; it does not execute those actions or persist proposals. The source gates are passing, but `0.6.89` is not yet published, restarted, or proven live. The currently running Bridge remains the previously verified `0.6.88` runtime with 146 tools.
+Bridge `0.6.89` is published and live. It adapts portable MSSR Context Messages v1 in `skill_route_plan` and `skill_bootstrap`; MSSR remains the semantic owner while Bridge validates, delegates selection and piggybacks selected messages without executing actions or persistence proposals. Controlled full restart `50c28186-54b4-47fe-9f96-39232d7285be` was acknowledged on 2026-08-13. Live readback proved version `0.6.89`, tunnel `live/ready`, no pending restart, 146 tools, and Context Messages v1 schemas on both route/bootstrap tools.
 
 ## Current MSSR learning state
 
