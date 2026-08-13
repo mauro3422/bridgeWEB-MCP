@@ -92,6 +92,24 @@ try {
     .find((event) => event.id === envelope.eventId);
   assert.deepEqual(persistedRoute?.details?.intent, envelope.event.route.intent,
     "Bridge must preserve the bounded structured intent projection");
+  const decisionEnvelope = {
+    ...envelope,
+    eventId: `mssr-ext-http-decision-${Date.now()}`,
+    emittedAt: new Date(Date.now() + 1).toISOString(),
+    event: { kind: "skill_decision", decision: {
+      skillName: "external-optional-skill",
+      decision: "skipped",
+      reasonCode: "irrelevant-domain",
+      reasonSummary: "Not useful for this semantic route.",
+      stage: "start",
+    } },
+  };
+  const decisionResponse = await fetch(`${base}/api/mssr/events`, {
+    method: "POST",
+    headers: { "authorization": `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify(decisionEnvelope),
+  });
+  assert.equal(decisionResponse.status, 202, await decisionResponse.text());
   const beforeSummaryResponse = await fetch(`${base}/api/mssr/summary?scope=all`);
   const beforeOutcome = await beforeSummaryResponse.json();
   assert.equal(beforeSummaryResponse.status, 200, JSON.stringify(beforeOutcome));
@@ -100,6 +118,10 @@ try {
     "summary must expose portable structured-intent dimensions");
   assert.deepEqual(beforeOutcome.intentAnalysis?.maintenanceCandidates, [],
     "nominal single-trace evidence must not create maintenance candidates");
+  const externalFeedback = beforeOutcome.intentAnalysis?.selectionFeedback?.find((item) => item.skillName === "external-optional-skill");
+  assert.equal(externalFeedback?.skipped, 1, "HTTP-ingested skip must reach selection feedback analysis");
+  assert.equal(externalFeedback?.reasonCounts?.["irrelevant-domain"], 1);
+  assert.ok(externalFeedback?.signatures?.some((item) => item.signature.includes("d=coding")), "decision feedback must retain the route semantic signature");
   assert.equal(beforeOutcome.surfaces.find((item) => item.caller === "opencode-local")?.routedTraces, 1);
   assert.equal(beforeOutcome.surfaces.find((item) => item.caller === "opencode-local")?.outcomeTraces, 0, "outcome must not be inferred");
   const lifecycleOnlyProfile = beforeOutcome.agentProfiles.find((item) => item.caller === "opencode-local");

@@ -256,6 +256,11 @@ export const dashboardMarkup = `
         <div id="mssr-loaded-skills" class="tool-list"><div class="empty-state">Cargando activaciones…</div></div>
       </article>
 
+      <article class="card span-12">
+        <div class="card-header"><div><div class="card-kicker">Decisión del host</div><h2 class="card-title">Aceptadas vs. descartadas por skill</h2><p class="card-description">Mide candidatas opcionales después del routing. Un <code>skipped</code> es feedback contextual para esa firma semántica, no una penalización global ni un fallo de carga.</p></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Skill</th><th>Aceptadas</th><th>Skips</th><th>Aceptación</th><th>Motivos</th><th>Firmas</th></tr></thead><tbody id="mssr-selection-feedback"><tr><td colspan="6" class="muted">Cargando decisiones del host…</td></tr></tbody></table></div>
+      </article>
+
       <article class="card span-6">
         <div class="card-header"><div><div class="card-kicker">Uso individual del sistema</div><h2 class="card-title">Activación MSSR por identidad observada</h2><p class="card-description">Une lifecycle MSSR con metadata host sólo cuando comparten exactamente un traceId. Si no existe evidencia host, se conserva el perfil del lifecycle.</p></div></div>
         <div class="table-wrap">

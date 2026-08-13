@@ -1,6 +1,6 @@
 {
   "name": "bridge-mcp",
-  "version": "0.6.83",
+  "version": "0.6.84",
   "description": "Kairos/KChat local MCP bridge for MauroPrime and future laptop agents.",
   "type": "module",
   "bin": {
@@ -16,7 +16,8 @@
     "check": "tsc --noEmit",
     "smoke:http": "powershell -NoProfile -File .\\scripts\\test-bridge-http.ps1",
     "test:mcp-dual-era": "npm run build && node scripts/test-mcp-dual-era.mjs",
-    "test:regressions": "powershell -NoProfile -File .\\scripts\\test-bridge-regressions.ps1 && node scripts/test-v060-tools.mjs && node scripts/test-workspace-snapshot-storage-quota.mjs && node scripts/test-godot-tools.mjs && node scripts/test-whiteboard-tools.mjs && node scripts/test-image-file-import.mjs && node scripts/test-media-review-ingest.mjs && node scripts/test-image-persistence.mjs && node scripts/test-git-multi-repo-publication.mjs && node scripts/test-system-hardening.mjs && node scripts/test-path-policy-cross-root-junction.mjs && node scripts/test-mssr-trace-contract.mjs && node scripts/test-mssr-http-telemetry.mjs && node scripts/test-delegated-mssr-route-project.mjs && node scripts/test-selective-skill-context.mjs && node scripts/test-mssr-system-awareness.mjs && node scripts/test-mssr-intent-normalization.mjs && node scripts/test-project-context-modules.mjs && node scripts/test-project-context-update.mjs && node scripts/test-blender-viewport-capture.mjs && node scripts/test-blender-session-coordination.mjs",
+    "test:mssr-learning-loop": "npm run build && node scripts/test-mssr-learning-loop.mjs",
+    "test:regressions": "powershell -NoProfile -File .\\scripts\\test-bridge-regressions.ps1 && node scripts/test-v060-tools.mjs && node scripts/test-workspace-snapshot-storage-quota.mjs && node scripts/test-godot-tools.mjs && node scripts/test-whiteboard-tools.mjs && node scripts/test-image-file-import.mjs && node scripts/test-media-review-ingest.mjs && node scripts/test-image-persistence.mjs && node scripts/test-git-multi-repo-publication.mjs && node scripts/test-system-hardening.mjs && node scripts/test-path-policy-cross-root-junction.mjs && node scripts/test-mssr-trace-contract.mjs && node scripts/test-mssr-http-telemetry.mjs && node scripts/test-mssr-learning-loop.mjs && node scripts/test-delegated-mssr-route-project.mjs && node scripts/test-selective-skill-context.mjs && node scripts/test-mssr-system-awareness.mjs && node scripts/test-mssr-intent-normalization.mjs && node scripts/test-project-context-modules.mjs && node scripts/test-project-context-update.mjs && node scripts/test-blender-viewport-capture.mjs && node scripts/test-blender-session-coordination.mjs",
     "test:workspace-snapshot-storage": "npm run build && node scripts/test-workspace-snapshot-storage-quota.mjs",
     "test:mssr-http-telemetry": "npm run build && node scripts/test-mssr-http-telemetry.mjs",
     "test:image-file-import": "npm run build && node scripts/test-image-file-import.mjs",

@@ -99,6 +99,7 @@ async function compareConnectorCatalog(exposedToolNames: string[]) {
     "mssr_observatory_query",
     "mssr_trace_evidence",
     "mssr_trace_record",
+    "mssr_trace_working_update",
     "mssr_observatory_epoch_start",
   ];
   const mssrDirect = mssrCore.filter((name) => recognized.includes(name));

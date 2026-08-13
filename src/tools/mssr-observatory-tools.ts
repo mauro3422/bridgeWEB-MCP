@@ -1,4 +1,4 @@
-import { SKILL_PHASES, SKILL_SIGNALS, SKILL_STAGES } from "@mauroprime/mssr";
+import { SKILL_PHASES, SKILL_SIGNALS, SKILL_STAGES, mssrTraceWorkingMemorySchema } from "@mauroprime/mssr";
 import { z } from "zod";
 import {
   MSSR_CHECKPOINT_TYPES,
@@ -6,8 +6,11 @@ import {
   MSSR_OUTCOME_DIMENSION_STATUSES,
   MSSR_OUTCOME_EVIDENCE_KINDS,
   getMssrTraceEvidence,
+  purgeMssrTraceWorkingMemory,
   queryMssrObservatory,
+  readPersistedMssrTraceState,
   recordMssrCheckpoint,
+  updateMssrTraceWorkingMemory,
 } from "../mssr-observatory.js";
 import type { BridgeToolModule } from "./types.js";
 import { startMssrObservabilityEpoch } from "../mssr-observability-epoch.js";
@@ -45,6 +48,49 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
           limit: { type: "number", minimum: 1, maximum: 500, default: 100 },
         },
         required: ["traceId"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "mssr_trace_working_update",
+      description: "Store bounded ephemeral working metadata for one open MSSR trace. This RAM-only state may summarize hypotheses, decisions, evidence and the next gate for continuation, and is purged on outcome or Bridge restart. Never store raw prompts, transcripts, secrets, or private chain-of-thought.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          traceId: { type: "string", pattern: "^[A-Za-z0-9._:-]{6,128}$" },
+          workingMemory: {
+            type: "object",
+            properties: {
+              retention: { type: "string", enum: ["until-outcome"], default: "until-outcome" },
+              workingSummary: { type: "string", minLength: 1, maxLength: 1200 },
+              hypotheses: {
+                type: "array", maxItems: 8, items: {
+                  type: "object",
+                  properties: {
+                    summary: { type: "string", minLength: 1, maxLength: 300 },
+                    status: { type: "string", enum: ["active", "supported", "rejected"] },
+                    evidenceRef: { type: "string", minLength: 1, maxLength: 240 },
+                  },
+                  required: ["summary", "status"], additionalProperties: false,
+                },
+              },
+              decisions: {
+                type: "array", maxItems: 16, items: {
+                  type: "object",
+                  properties: {
+                    subject: { type: "string", minLength: 1, maxLength: 120 },
+                    decision: { type: "string", minLength: 1, maxLength: 240 },
+                    reason: { type: "string", minLength: 1, maxLength: 300 },
+                  },
+                  required: ["subject", "decision"], additionalProperties: false,
+                },
+              },
+              nextGate: { type: "string", minLength: 1, maxLength: 300 },
+            },
+            additionalProperties: false,
+          },
+        },
+        required: ["traceId", "workingMemory"],
         additionalProperties: false,
       },
     },
@@ -130,6 +176,24 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
       }).parse(args);
       return getMssrTraceEvidence(parsed.traceId, parsed.limit);
     },
+    mssr_trace_working_update: (args) => {
+      const parsed = z.object({
+        traceId: z.string().regex(/^[A-Za-z0-9._:-]{6,128}$/),
+        workingMemory: mssrTraceWorkingMemorySchema,
+      }).parse(args);
+      const state = readPersistedMssrTraceState(parsed.traceId);
+      if (!state) throw new Error(`MSSR trace not found: ${parsed.traceId}`);
+      if (state.closed) throw new Error(`MSSR trace is already closed: ${parsed.traceId}`);
+      const workingMemory = updateMssrTraceWorkingMemory(parsed.traceId, parsed.workingMemory);
+      return {
+        updated: true,
+        traceId: parsed.traceId,
+        retention: workingMemory.retention,
+        workingMemory,
+        durableTelemetryWritten: false,
+        privacy: "RAM-only until outcome or Bridge restart; no raw prompt, transcript, secret, or private chain-of-thought.",
+      };
+    },
     mssr_trace_record: (args) => {
       const parsed = z.object({
         traceId: z.string().regex(/^[A-Za-z0-9._:-]{6,128}$/),
@@ -175,6 +239,7 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
         throw new Error("leaseMs is allowed only for eventType=progress.");
       }
       const event = recordMssrCheckpoint(parsed);
+      if (parsed.eventType === "outcome") purgeMssrTraceWorkingMemory(parsed.traceId);
       return {
         recorded: true,
         traceId: event.traceId,

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  getMssrTraceClosureState,
   hasFreshMaintenanceClose,
   missingRequiredSkills,
   reduceMssrCheckpointLifecycle,
@@ -9,7 +10,7 @@ import {
   type MssrTraceLifecycleState,
 } from "@mauroprime/mssr";
 import type { BridgeNoticeAction, BridgeNoticeInput } from "./notices.js";
-import { findPersistedMssrTraceCandidates, readPersistedMssrTraceState } from "./mssr-observatory.js";
+import { findPersistedMssrTraceCandidates, purgeMssrTraceWorkingMemory, readPersistedMssrTraceState } from "./mssr-observatory.js";
 import { normalizeModelIdentifier } from "./runtime-identity.js";
 
 type JsonRecord = Record<string, unknown>;
@@ -31,6 +32,8 @@ type ActiveTraceState = {
   requiredSkills: Set<string>;
   selectedSkills: Set<string>;
   loadedSkills: Set<string>;
+  requiredPhases: Set<MssrTraceLifecycleState["requiredPhases"][number]>;
+  completedPhases: Set<MssrTraceLifecycleState["completedPhases"][number]>;
   routeCount: number;
   closed: boolean;
   maintenanceRequired: boolean;
@@ -52,6 +55,8 @@ function portableLifecycle(state: ActiveTraceState): MssrTraceLifecycleState {
     requiredSkills: [...state.requiredSkills],
     selectedSkills: [...state.selectedSkills],
     loadedSkills: [...state.loadedSkills],
+    requiredPhases: [...state.requiredPhases],
+    completedPhases: [...state.completedPhases],
     routeCount: state.routeCount,
     closed: state.closed,
     maintenanceRequired: state.maintenanceRequired,
@@ -69,6 +74,8 @@ function applyPortableLifecycle(
   state.requiredSkills = new Set(lifecycle.requiredSkills);
   state.selectedSkills = new Set(lifecycle.selectedSkills);
   state.loadedSkills = new Set(lifecycle.loadedSkills);
+  state.requiredPhases = new Set(lifecycle.requiredPhases);
+  state.completedPhases = new Set(lifecycle.completedPhases);
   state.routeCount = lifecycle.routeCount;
   state.closed = lifecycle.closed;
   state.maintenanceRequired = lifecycle.maintenanceRequired;
@@ -94,6 +101,10 @@ const CLOSURE_ACTIVITY_EXEMPT_TOOLS = new Set([
 const TRACE_BOUNDARY_STAGES = new Set(["verify", "persist", "close"]);
 const TRACE_BOUNDARY_EVENTS = new Set(["verification", "persistence", "outcome"]);
 const TRACE_LEASE_MS = Math.max(60_000, Number(process.env.BRIDGE_MCP_MSSR_TRACE_LEASE_MS) || 2 * 60 * 60 * 1_000);
+const TRACE_AUTO_RECOVERY_MS = Math.min(
+  TRACE_LEASE_MS,
+  Math.max(5 * 60_000, Number(process.env.BRIDGE_MCP_MSSR_AUTO_RECOVERY_MS) || 30 * 60_000),
+);
 const CLOSED_TRACE_RETENTION_MS = Math.min(TRACE_LEASE_MS, 15 * 60 * 1_000);
 const EXACT_HOST_ROUTE_DOMINANCE_MS = Math.max(15_000, Number(process.env.BRIDGE_MCP_MSSR_EXACT_ROUTE_DOMINANCE_MS) || 90_000);
 const MAX_SHARED_TRACES = 128;
@@ -172,6 +183,17 @@ function openSharedTraces(): ActiveTraceState[] {
   return [...sharedTraces.values()].filter((state) => !state.closed);
 }
 
+function autoRecoverySharedTraces(): ActiveTraceState[] {
+  const now = Date.now();
+  return openSharedTraces().filter((state) => {
+    if (now - state.lastRoutePlannedAt > TRACE_AUTO_RECOVERY_MS) return false;
+    const idleReminderConsumed = state.closureReminderVersion > 0
+      && state.closureReminderVersion >= state.toolActivityVersion
+      && state.progressLeaseUntil <= now;
+    return !idleReminderConsumed;
+  });
+}
+
 function candidateDetails(candidates: ActiveTraceState[]): JsonRecord {
   return {
     candidateCount: candidates.length,
@@ -219,9 +241,14 @@ export type MssrTraceSessionSnapshot = {
   requiredSkills: string[];
   loadedSkills: string[];
   missingRequiredSkills: string[];
+  requiredPhases: string[];
+  completedPhases: string[];
+  closure: ReturnType<typeof getMssrTraceClosureState> | null;
+  staleForAutoRecovery: boolean;
   progressLeaseUntil: string | null;
   progressLeaseRemainingMs: number;
   sharedOpenTraces: number;
+  autoRecoveryOpenTraces: number;
 };
 
 export type MssrClosureReminder = {
@@ -287,11 +314,12 @@ export function createMssrTraceSessionCoordinator(
       if (current.toolActivityVersion !== activityVersion || current.closureReminderVersion >= activityVersion) return;
       current.closureReminderVersion = activityVersion;
       current.updatedAt = Date.now();
+      const closePreflight = getMssrTraceClosureState(portableLifecycle(current));
       const reminderNotice = notice(
         "warning",
         "mssr-web-outcome-missing-after-idle",
         "mssr-trace-context",
-        `La traza Web ${current.traceId} usó herramientas y quedó ${reminderDelayMs} ms sin outcome observable. Si la tarea terminó, registra el cierre MSSR y devuelve el resultado; si sigue activa, registra un checkpoint progress con lease acotado o comunica un bloqueo concreto.`,
+        `La traza Web ${current.traceId} quedó ${reminderDelayMs} ms sin outcome observable. El idle no prueba que la tarea haya terminado: si realmente está cerrando, sigue '${closePreflight.nextRequiredAction}'; si continúa activa, registra progress/lease o evidencia del bloqueo.`,
         {
           traceId: current.traceId,
           caller: current.caller,
@@ -304,15 +332,16 @@ export function createMssrTraceSessionCoordinator(
           baseIdleMs: closureIdleMs,
           progressLeaseUntil: current.progressLeaseUntil > 0 ? new Date(current.progressLeaseUntil).toISOString() : null,
           activityVersion,
-          missingRequiredSkills: missingRequiredSkills(portableLifecycle(current)),
-          limitation: "Bridge observes MCP lifecycle, not whether ChatGPT rendered final text.",
+          closureDueCandidate: true,
+          closePreflight,
+          limitation: "Bridge observa lifecycle MCP; silencio no demuestra finalización ni autoriza success.",
         },
         `mssr-web-outcome-missing-after-idle:${current.traceId}:${activityVersion}`,
         [{
           label: "Revisar evidencia de cierre",
           toolName: "mssr_trace_evidence",
           arguments: { traceId: current.traceId },
-          instruction: "Inspecciona la evidencia correlacionada y, sólo si la tarea realmente terminó, registra verification/persistence/outcome con datos observables en esta misma traza.",
+          instruction: `Inspecciona la evidencia y, sólo si la tarea realmente terminó, continúa el gate '${closePreflight.nextRequiredAction}' en esta misma traza.`,
         }],
       );
       options.onClosureReminder?.({
@@ -351,6 +380,8 @@ export function createMssrTraceSessionCoordinator(
       requiredSkills: new Set(persisted.requiredSkills),
       selectedSkills: new Set(persisted.selectedSkills),
       loadedSkills: new Set(persisted.loadedSkills),
+      requiredPhases: new Set(persisted.requiredPhases as MssrTraceLifecycleState["requiredPhases"]),
+      completedPhases: new Set(persisted.completedPhases as MssrTraceLifecycleState["completedPhases"]),
       lastRoutePlannedAt: persisted.updatedAt,
       lastToolCompletedAt: null,
       lastToolName: null,
@@ -364,21 +395,23 @@ export function createMssrTraceSessionCoordinator(
   function dominantExactHostCandidate(candidates: ActiveTraceState[]): ActiveTraceState[] {
     if (candidates.length <= 1
       || hostContext.sessionKey === "unknown"
-      || hostContext.project === "unknown") return candidates;
+      || hostContext.project === "unknown") return dominantFreshRouteCandidate(candidates);
     const exact = candidates.filter((state) => state.sessionKey === hostContext.sessionKey
       && state.project === hostContext.project
       && (hostContext.caller === "other" || state.caller === hostContext.caller));
-    if (exact.length === 1) return exact;
     if (exact.length === 0) return dominantFreshRouteCandidate(candidates);
-    const now = Date.now();
-    const freshRoutes = exact.filter((state) => now - state.lastRoutePlannedAt <= EXACT_HOST_ROUTE_DOMINANCE_MS);
-    return freshRoutes.length === 1 ? freshRoutes : exact;
+    return dominantFreshRouteCandidate(exact);
   }
 
   function dominantFreshRouteCandidate(candidates: ActiveTraceState[]): ActiveTraceState[] {
     if (candidates.length <= 1) return candidates;
+    const ordered = [...candidates].sort((left, right) => right.lastRoutePlannedAt - left.lastRoutePlannedAt);
+    const [newest, second] = ordered;
+    if (newest && second && newest.lastRoutePlannedAt - second.lastRoutePlannedAt >= EXACT_HOST_ROUTE_DOMINANCE_MS) {
+      return [newest];
+    }
     const now = Date.now();
-    const freshRoutes = candidates.filter((state) => now - state.lastRoutePlannedAt <= EXACT_HOST_ROUTE_DOMINANCE_MS);
+    const freshRoutes = ordered.filter((state) => now - state.lastRoutePlannedAt <= EXACT_HOST_ROUTE_DOMINANCE_MS);
     return freshRoutes.length === 1 ? freshRoutes : candidates;
   }
 
@@ -429,7 +462,7 @@ export function createMssrTraceSessionCoordinator(
       const sessionMatches = restorePersistedCandidates(findPersistedMssrTraceCandidates({
         caller: hostContext.caller,
         sessionKey: hostContext.sessionKey,
-        maxAgeMs: TRACE_LEASE_MS,
+        maxAgeMs: TRACE_AUTO_RECOVERY_MS,
         limit: 16,
       }));
       if (sessionMatches.length > 0) {
@@ -440,7 +473,7 @@ export function createMssrTraceSessionCoordinator(
       const projectMatches = restorePersistedCandidates(findPersistedMssrTraceCandidates({
         caller: hostContext.caller,
         project: hostContext.project,
-        maxAgeMs: TRACE_LEASE_MS,
+        maxAgeMs: TRACE_AUTO_RECOVERY_MS,
         limit: 16,
       }));
       if (projectMatches.length > 0) {
@@ -449,7 +482,7 @@ export function createMssrTraceSessionCoordinator(
     }
     const callerMatches = restorePersistedCandidates(findPersistedMssrTraceCandidates({
       caller: hostContext.caller,
-      maxAgeMs: TRACE_LEASE_MS,
+      maxAgeMs: TRACE_AUTO_RECOVERY_MS,
       limit: 16,
     }));
     return {
@@ -482,22 +515,49 @@ export function createMssrTraceSessionCoordinator(
 
   function boundaryNotice(toolName: string, stageOrEvent: string, state: ActiveTraceState | null): BridgeNoticeInput[] {
     if (!state || state.closed) return [];
-    const missing = missingRequiredSkills(portableLifecycle(state));
-    if (missing.length === 0) return [];
-    return [notice(
-      "warning",
-      "mssr-required-skill-not-loaded",
-      toolName,
-      `La traza ${state.traceId} llegó a ${stageOrEvent} sin cargar ${missing.length} skill(s) requerida(s).`,
-      { traceId: state.traceId, stage: state.stage, boundary: stageOrEvent, missingSkills: missing },
-      `mssr-required-skill-not-loaded:${state.traceId}:${stageOrEvent}:${missing.join(",")}`,
-      missing.slice(0, 4).map((name) => ({
-        label: `Cargar ${name}`,
-        toolName: "skill_load",
-        arguments: { name, traceId: state.traceId, stage: state.stage, required: true },
-        instruction: "Carga esta skill sobre la traza activa antes de cruzar el límite de fase.",
-      })),
-    )];
+    const lifecycle = portableLifecycle(state);
+    const output: BridgeNoticeInput[] = [];
+    const missing = missingRequiredSkills(lifecycle);
+    if (missing.length > 0) {
+      output.push(notice(
+        "warning",
+        "mssr-required-skill-not-loaded",
+        toolName,
+        `La traza ${state.traceId} llegó a ${stageOrEvent} sin cargar ${missing.length} skill(s) requerida(s).`,
+        { traceId: state.traceId, stage: state.stage, boundary: stageOrEvent, missingSkills: missing },
+        `mssr-required-skill-not-loaded:${state.traceId}:${stageOrEvent}:${missing.join(",")}`,
+        missing.slice(0, 4).map((name) => ({
+          label: `Cargar ${name}`,
+          toolName: "skill_load",
+          arguments: { name, traceId: state.traceId, stage: state.stage, required: true },
+          instruction: "Carga esta skill requerida sobre la traza activa antes de cruzar el límite de fase.",
+        })),
+      ));
+    }
+
+    const closure = getMssrTraceClosureState(lifecycle);
+    if (closure.closureDue && !closure.canCloseSuccess) {
+      output.push(notice(
+        "warning",
+        "mssr-trace-closure-due",
+        toolName,
+        `La traza ${state.traceId} está en cierre y todavía requiere '${closure.nextRequiredAction}' antes de un outcome success.`,
+        {
+          traceId: state.traceId,
+          stage: state.stage,
+          boundary: stageOrEvent,
+          ...closure,
+        },
+        `mssr-trace-closure-due:${state.traceId}:${state.lifecycleRevision}:${closure.nextRequiredAction}`,
+        [{
+          label: "Revisar cierre MSSR",
+          toolName: "mssr_trace_evidence",
+          arguments: { traceId: state.traceId },
+          instruction: `Continúa la misma traza y completa el gate '${closure.nextRequiredAction}'. No registres success hasta que canCloseSuccess=true.`,
+        }],
+      ));
+    }
+    return output;
   }
 
   function findRouteContinuation(toolName: string, args: JsonRecord, notices: BridgeNoticeInput[]): ActiveTraceState | null {
@@ -510,7 +570,7 @@ export function createMssrTraceSessionCoordinator(
   }
 
   function findToolCandidate(toolName: string, args: JsonRecord, notices: BridgeNoticeInput[]): ActiveTraceState | null {
-    let resolution = scopedCandidateResolution(openSharedTraces());
+    let resolution = scopedCandidateResolution(autoRecoverySharedTraces());
     if (resolution.candidates.length === 0) resolution = persistedCandidateResolution();
     const traces = resolution.candidates;
     if (resolution.relaxedHostScope && traces.length > 1) {
@@ -637,7 +697,7 @@ export function createMssrTraceSessionCoordinator(
             ? [{
                 label: "Cargar fase con skill_bootstrap",
                 toolName: "skill_bootstrap",
-                instruction: "Usa la tarea, intent y traceId correctos para cargar automáticamente todas las skills de la fase; si existen varias trazas, inspecciónalas primero.",
+                instruction: "Usa la tarea, intent y traceId correctos. En ChatGPT Web, skill_bootstrap debe mantener las opcionales como candidatas hasta accepted; las requeridas sí son obligaciones. Si existen varias trazas, inspecciónalas primero.",
               }, {
                 label: "Inspeccionar trazas MSSR",
                 toolName: "mssr_observatory_query",
@@ -776,6 +836,8 @@ export function createMssrTraceSessionCoordinator(
         requiredSkills: new Set(lifecycle.requiredSkills),
         selectedSkills: new Set(lifecycle.selectedSkills),
         loadedSkills: new Set(lifecycle.loadedSkills),
+        requiredPhases: new Set(lifecycle.requiredPhases),
+        completedPhases: new Set(lifecycle.completedPhases),
         routeCount: lifecycle.routeCount,
         closed: lifecycle.closed,
         maintenanceRequired: lifecycle.maintenanceRequired,
@@ -825,6 +887,7 @@ export function createMssrTraceSessionCoordinator(
         if (args.eventType === "outcome") {
           state.progressLeaseUntil = 0;
           clearClosureTimer(state.traceId);
+          purgeMssrTraceWorkingMemory(state.traceId);
         }
         adopt(state);
         if (args.eventType !== "outcome") scheduleClosureReminder(state, toolName);
@@ -860,9 +923,14 @@ export function createMssrTraceSessionCoordinator(
       requiredSkills: state ? [...state.requiredSkills].sort() : [],
       loadedSkills: state ? [...state.loadedSkills].sort() : [],
       missingRequiredSkills: state ? missingRequiredSkills(portableLifecycle(state)) : [],
+      requiredPhases: state ? [...state.requiredPhases].sort() : [],
+      completedPhases: state ? [...state.completedPhases].sort() : [],
+      closure: state ? getMssrTraceClosureState(portableLifecycle(state)) : null,
+      staleForAutoRecovery: state ? !autoRecoverySharedTraces().some((candidate) => candidate.traceId === state.traceId) : false,
       progressLeaseUntil: state?.progressLeaseUntil ? new Date(state.progressLeaseUntil).toISOString() : null,
       progressLeaseRemainingMs: state ? Math.max(0, state.progressLeaseUntil - Date.now()) : 0,
       sharedOpenTraces: openSharedTraces().length,
+      autoRecoveryOpenTraces: autoRecoverySharedTraces().length,
     };
   }
 
@@ -874,7 +942,7 @@ export function createMssrTraceSessionCoordinator(
     };
     let state = localState(true);
     if (!state || state.closed) {
-      let resolution = scopedCandidateResolution(openSharedTraces());
+      let resolution = scopedCandidateResolution(autoRecoverySharedTraces());
       if (resolution.candidates.length === 0) resolution = persistedCandidateResolution();
       if (resolution.candidates.length === 1) {
         state = adopt(resolution.candidates[0]);

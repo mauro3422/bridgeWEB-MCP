@@ -366,6 +366,23 @@ TOOLS.md generated from the runtime registry
 regressions and live HTTP verification expanded for the full surface
 ```
 
+### MSSR learning-loop host integration
+
+Completed in the current unreleased cycle:
+
+```txt
+ChatGPT Web host-gated optional skill selection: recommended -> accepted/skipped -> loaded
+privacy-bounded skill_decision telemetry grouped by semantic task signature
+RAM-only per-trace working metadata with outcome/restart purge
+explicit closure preflight with closureDue and nextRequiredAction
+stale-open traces remain resumable by explicit traceId but stop competing in loose auto-recovery
+persisted maintenance phase reconstruction matches the portable MSSR reducer
+dashboard table for accepted/skipped decisions and reason-code pressure
+focused Bridge regressions plus authenticated external skill_decision ingest
+```
+
+Next MSSR learning work should use this evidence rather than immediately changing scores. Require repeated contextual evidence, preserve an exploration floor for new/rare skills, and emit reviewable routing/fixture proposals before any deterministic contract mutation. Vector similarity may help retrieve nearby historical signatures later, but remains secondary to canonical intent, fixtures and explicit review.
+
 ### Next implementation work
 
 ```txt

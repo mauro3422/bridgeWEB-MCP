@@ -5,12 +5,18 @@ import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import {
   analyzeMssrTelemetry,
+  getMssrTraceClosureState,
   MSSR_CHECKPOINT_TYPES,
   MSSR_OUTCOME_DIMENSION_STATUSES,
   MSSR_OUTCOME_EVIDENCE_KINDS,
+  mssrSkillDecisionSchema,
+  mssrTraceWorkingMemorySchema,
   type MssrCheckpointType,
   type MssrOutcomeDimensionStatus,
   type MssrOutcomeEvidenceKind,
+  type MssrSkillDecisionRecord,
+  type MssrTraceLifecycleState,
+  type MssrTraceWorkingMemory,
   mssrTelemetryEnvelopeSchema,
   structuredSkillIntentSchema,
   validateMssrCheckpointLifecycle,
@@ -135,6 +141,8 @@ export type PersistedMssrTraceState = {
   requiredSkills: string[];
   selectedSkills: string[];
   loadedSkills: string[];
+  requiredPhases: string[];
+  completedPhases: string[];
   routeCount: number;
   closed: boolean;
   maintenanceRequired: boolean;
@@ -153,6 +161,22 @@ const jsonlPath = path.resolve(process.env.BRIDGE_MCP_MSSR_EVENTS_JSONL || path.
 
 let db: DatabaseSync | null | undefined;
 let insertEvent: StatementSync | null = null;
+const ephemeralTraceWorkingMemory = new Map<string, MssrTraceWorkingMemory>();
+
+export function updateMssrTraceWorkingMemory(traceId: string, input: unknown): MssrTraceWorkingMemory {
+  if (!validTraceId(traceId)) throw new Error("Invalid MSSR traceId for working memory.");
+  const parsed = mssrTraceWorkingMemorySchema.parse(input);
+  ephemeralTraceWorkingMemory.set(traceId, parsed);
+  return parsed;
+}
+
+export function readMssrTraceWorkingMemory(traceId: string): MssrTraceWorkingMemory | null {
+  return ephemeralTraceWorkingMemory.get(traceId) ?? null;
+}
+
+export function purgeMssrTraceWorkingMemory(traceId: string): boolean {
+  return ephemeralTraceWorkingMemory.delete(traceId);
+}
 
 function ensureDirs(): void {
   fs.mkdirSync(metricsDir, { recursive: true });
@@ -382,6 +406,26 @@ export function recordExternalMssrTelemetry(input: unknown): { event: MssrStored
     }) };
   }
 
+  if (envelope.event.kind === "skill_decision") {
+    const decision = envelope.event.decision;
+    return { duplicate: false, event: recordMssrEvent({
+      eventId: envelope.eventId,
+      traceId: envelope.traceId,
+      eventType: "skill_decision",
+      caller: envelope.caller,
+      stage: decision.stage,
+      skillName: decision.skillName,
+      ok: true,
+      details: {
+        decision: decision.decision,
+        reasonCode: decision.reasonCode,
+        reasonSummary: decision.reasonSummary ? redactText(decision.reasonSummary, 240) : undefined,
+        externalSource: envelope.source,
+        emittedAt: envelope.emittedAt,
+      },
+    }) };
+  }
+
   const checkpoint = envelope.event.checkpoint;
   const persisted = readPersistedMssrTraceState(envelope.traceId);
   const violations = validateMssrCheckpointLifecycle(persisted ? {
@@ -389,6 +433,8 @@ export function recordExternalMssrTelemetry(input: unknown): { event: MssrStored
     requiredSkills: persisted.requiredSkills,
     selectedSkills: persisted.selectedSkills,
     loadedSkills: persisted.loadedSkills,
+    requiredPhases: persisted.requiredPhases as never,
+    completedPhases: persisted.completedPhases as never,
     routeCount: persisted.routeCount,
     closed: persisted.closed,
     maintenanceRequired: persisted.maintenanceRequired,
@@ -407,6 +453,7 @@ export function recordExternalMssrTelemetry(input: unknown): { event: MssrStored
     externalSource: envelope.source,
     emittedAt: envelope.emittedAt,
   });
+  if (checkpoint.eventType === "outcome") purgeMssrTraceWorkingMemory(envelope.traceId);
   return { event: stored, duplicate: false };
 }
 
@@ -553,6 +600,27 @@ export function recordMssrSkillLoad(args: {
   });
 }
 
+export function recordMssrSkillDecision(args: {
+  traceId: string;
+  caller?: string;
+  decision: MssrSkillDecisionRecord;
+}): MssrStoredEvent {
+  const decision = mssrSkillDecisionSchema.parse(args.decision);
+  return recordMssrEvent({
+    traceId: args.traceId,
+    eventType: "skill_decision",
+    caller: args.caller,
+    stage: decision.stage,
+    skillName: decision.skillName,
+    ok: true,
+    details: {
+      decision: decision.decision,
+      reasonCode: decision.reasonCode,
+      reasonSummary: decision.reasonSummary ? redactText(decision.reasonSummary, 240) : undefined,
+    },
+  });
+}
+
 export function recordMssrCheckpoint(args: {
   eventId?: string;
   traceId: string;
@@ -678,6 +746,8 @@ export function readPersistedMssrTraceState(traceId: string): PersistedMssrTrace
   const latestRoute = routes[routes.length - 1];
   const requiredSkills = new Set<string>();
   const selectedSkills = new Set<string>();
+  const requiredPhases = new Set<string>();
+  const completedPhases = new Set<string>();
   for (const route of routes) {
     const active = Array.isArray(route.details.activeSkills) ? route.details.activeSkills : [];
     for (const item of active) {
@@ -686,12 +756,27 @@ export function readPersistedMssrTraceState(traceId: string): PersistedMssrTrace
       selectedSkills.add(name);
       if ((item as JsonRecord).required === true) requiredSkills.add(name);
     }
+    for (const phase of Array.isArray(route.details.requiredPhases) ? route.details.requiredPhases : []) {
+      if (typeof phase === "string") requiredPhases.add(phase);
+    }
+    for (const phase of Array.isArray(route.details.completedPhases) ? route.details.completedPhases : []) {
+      if (typeof phase === "string") completedPhases.add(phase);
+    }
   }
   let maintenanceRequired = false;
   let lifecycleRevision = 0;
   let closeRevision = 0;
   let maintenanceRevision = 0;
   for (const event of events) {
+    for (const phase of Array.isArray(event.details.completedPhases) ? event.details.completedPhases : []) {
+      if (typeof phase === "string") completedPhases.add(phase);
+    }
+    if (event.eventType === "verification" && (event.ok === true || event.details.verificationPassed === true)) {
+      completedPhases.add("verification");
+    }
+    if (event.eventType === "persistence" && (event.ok === true || event.details.persisted === true)) {
+      completedPhases.add("persistence");
+    }
     if (event.eventType === "route_planned") {
       const requiredPhases = Array.isArray(event.details.requiredPhases) ? event.details.requiredPhases : [];
       if (requiredPhases.includes("maintenance")) maintenanceRequired = true;
@@ -706,7 +791,7 @@ export function readPersistedMssrTraceState(traceId: string): PersistedMssrTrace
     }
     if (event.eventType === "phase_completed"
       && event.stage === "close"
-      && event.ok === true
+      && event.ok !== false
       && Array.isArray(event.details.completedPhases)
       && event.details.completedPhases.includes("maintenance")
       && closeRevision === lifecycleRevision) {
@@ -748,6 +833,8 @@ export function readPersistedMssrTraceState(traceId: string): PersistedMssrTrace
     requiredSkills: [...requiredSkills].sort(),
     selectedSkills: [...selectedSkills].sort(),
     loadedSkills: [...loadedSkills].sort(),
+    requiredPhases: [...requiredPhases].sort(),
+    completedPhases: [...completedPhases].sort(),
     routeCount: routes.length,
     closed: Boolean(latestOutcome && Date.parse(latestOutcome.occurredAt) >= Date.parse(latestRoute.occurredAt)),
     maintenanceRequired,
@@ -1136,6 +1223,25 @@ function portableIntentAnalysis(events: readonly MssrStoredEvent[]) {
         },
       }];
     }
+    if (event.eventType === "skill_decision" && event.skillName) {
+      const parsedDecision = mssrSkillDecisionSchema.safeParse({
+        skillName: event.skillName,
+        decision: event.details.decision,
+        reasonCode: event.details.reasonCode,
+        reasonSummary: typeof event.details.reasonSummary === "string" && event.details.reasonSummary.trim() ? event.details.reasonSummary : undefined,
+        stage: event.stage,
+      });
+      if (!parsedDecision.success) return [];
+      return [{
+        protocolVersion: "mssr-telemetry-v1",
+        eventId: `analysis:${event.id}`,
+        emittedAt: event.occurredAt,
+        source: "mauroprime-bridge",
+        traceId: event.traceId,
+        caller: ["codex-local", "opencode-local", "chatgpt-web", "other"].includes(event.caller ?? "") ? event.caller : "other",
+        event: { kind: "skill_decision", decision: parsedDecision.data },
+      }];
+    }
     return [];
   });
   const analysis = analyzeMssrTelemetry(projected);
@@ -1143,6 +1249,7 @@ function portableIntentAnalysis(events: readonly MssrStoredEvent[]) {
     analyzedEvents: analysis.counters.validEvents,
     invalidProjectionEvents: analysis.counters.invalidEvents,
     intentDimensions: analysis.intentDimensions,
+    selectionFeedback: analysis.selectionFeedback,
     maintenanceCandidates: analysis.maintenanceCandidates,
   };
 }
@@ -1807,6 +1914,22 @@ export function getMssrTraceEvidence(traceId: string, limit = 500) {
       `).all(traceId, boundedLimit).map(decodeRow)
     : [];
   const state = readPersistedMssrTraceState(traceId);
+  const portableState: MssrTraceLifecycleState | null = state ? {
+    stage: state.stage as MssrTraceLifecycleState["stage"],
+    requiredSkills: state.requiredSkills,
+    selectedSkills: state.selectedSkills,
+    loadedSkills: state.loadedSkills,
+    requiredPhases: state.requiredPhases as MssrTraceLifecycleState["requiredPhases"],
+    completedPhases: state.completedPhases as MssrTraceLifecycleState["completedPhases"],
+    routeCount: state.routeCount,
+    closed: state.closed,
+    maintenanceRequired: state.maintenanceRequired,
+    lifecycleRevision: state.lifecycleRevision,
+    closeRevision: state.closeRevision,
+    maintenanceRevision: state.maintenanceRevision,
+  } : null;
+  const closure = portableState ? getMssrTraceClosureState(portableState) : null;
+  const workingMemory = state?.closed ? null : readMssrTraceWorkingMemory(traceId);
   const toolEvidence = getTraceToolEvidence(traceId, boundedLimit);
   const latest = (type: string) => [...events].reverse().find((event) => event.eventType === type) ?? null;
   const latestRoute = latest("route_planned");
@@ -1862,11 +1985,15 @@ export function getMssrTraceEvidence(traceId: string, limit = 500) {
       selectedSkills: state?.selectedSkills ?? [],
       loadedSkills: state?.loadedSkills ?? [],
       missingRequiredSkills,
+      requiredPhases: state?.requiredPhases ?? [],
+      completedPhases: state?.completedPhases ?? [],
+      closure,
       verification: latestVerification,
       persistence: latestPersistence,
       outcome: latestOutcome,
       idleReminder: latestReminder,
     },
+    workingMemory,
     runtime: {
       currentBootId: RUNTIME_BOOT_ID,
       eventRuntimeBootIds,
@@ -1887,6 +2014,7 @@ export function getMssrTraceEvidence(traceId: string, limit = 500) {
       transcriptsStored: false,
       privateReasoningStored: false,
       gitOutputsStored: false,
+      ephemeralWorkingMemory: "RAM-only while the trace is open; purged on outcome or Bridge restart and never written to observatory SQLite.",
       note: "Commit hashes, snapshot ids, restart ids and remote-ref checks are retained only when explicitly written as bounded evidenceRef values.",
     },
   };

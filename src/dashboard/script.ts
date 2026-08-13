@@ -328,6 +328,35 @@ function renderSkillOutcomes(inputRows) {
     '<td class="recent-detail">' + num(row.success) + ' ok · ' + num(row.partial) + ' parcial · ' + num(row.failed) + ' fallo</td>' +
   '</tr>').join('');
 }
+function renderSkillSelectionFeedback(inputRows) {
+  const target = byId('mssr-selection-feedback');
+  if (!target) return;
+  const rows = Array.isArray(inputRows) ? inputRows : [];
+  if (!rows.length) {
+    target.innerHTML = '<tr><td colspan="6" class="muted">Todavía no hay decisiones host-gated observables en este scope.</td></tr>';
+    return;
+  }
+  target.innerHTML = rows
+    .slice()
+    .sort((a, b) => Number(b.total || 0) - Number(a.total || 0) || String(a.skillName || '').localeCompare(String(b.skillName || '')))
+    .slice(0, 30)
+    .map((row) => {
+      const reasons = Object.entries(row.reasonCounts || {})
+        .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0) || String(a[0]).localeCompare(String(b[0])))
+        .slice(0, 3)
+        .map(([reason, count]) => esc(reason) + ' (' + num(count) + ')')
+        .join(' · ') || '—';
+      return '<tr>' +
+        '<td><code title="' + esc(row.skillName || '') + '">' + esc(row.skillName || '—') + '</code></td>' +
+        '<td>' + num(row.accepted) + '</td>' +
+        '<td>' + num(row.skipped) + '</td>' +
+        '<td>' + pct(row.acceptanceRate === null || row.acceptanceRate === undefined ? null : Number(row.acceptanceRate) * 100) + '</td>' +
+        '<td class="recent-detail">' + reasons + '</td>' +
+        '<td title="Firmas semánticas observadas">' + num((row.signatures || []).length) + '</td>' +
+      '</tr>';
+    }).join('');
+}
+
 
 function profileIdentity(row) {
   const agent = row.hostAgent && row.hostAgent !== 'unknown'
@@ -738,6 +767,7 @@ function updateMssr(mssr) {
   renderMssrContextAssembly(mssr.contextAssembly || {});
   renderMssrAgentProfiles(mssr.agentProfiles || []);
   renderMssrEffortComparison(mssr.reasoningEffortComparison || []);
+  renderSkillSelectionFeedback(mssr.intentAnalysis && mssr.intentAnalysis.selectionFeedback ? mssr.intentAnalysis.selectionFeedback : []);
   renderSkillCounts('mssr-selected-skills', mssr.top && mssr.top.selectedSkills ? mssr.top.selectedSkills : [], 'Sin skills seleccionadas en la época activa.');
   renderSkillCounts('mssr-loaded-skills', mssr.top && mssr.top.loadedSkills ? mssr.top.loadedSkills : [], 'Sin skills cargadas en la época activa.');
   renderSkillOutcomes(mssr.top && mssr.top.skillOutcomes ? mssr.top.skillOutcomes : []);

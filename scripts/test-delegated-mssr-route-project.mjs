@@ -168,6 +168,7 @@ try {
       sources: ["codex-local"],
       maxSkills: 12,
       maxContextChars: 6_000,
+      selectionMode: "auto", // This regression targets the selective budget planner; host-gated behavior is covered separately.
       traceId: route.traceId,
     },
   });

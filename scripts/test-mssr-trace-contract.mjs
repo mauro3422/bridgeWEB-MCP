@@ -906,7 +906,7 @@ try {
     stage: 'implement',
     activeSkills: [],
   });
-  traceContext.ageSharedMssrTraceForTests('trace-cross-project-stale-001', 120_000);
+  traceContext.ageSharedMssrTraceForTests('trace-cross-project-stale-001', 31 * 60_000);
 
   const freshSameSessionOwner = traceContext.createMssrTraceSessionCoordinator(schemas);
   freshSameSessionOwner.resolveMetricContext({
@@ -925,6 +925,9 @@ try {
   });
 
   const crossProjectResolver = traceContext.createMssrTraceSessionCoordinator(schemas);
+  const staleWindowSnapshot = crossProjectResolver.snapshot();
+  assert.equal(staleWindowSnapshot.sharedOpenTraces, 2, 'A stale trace must remain open and explicitly resumable until its normal lease/outcome closes it.');
+  assert.equal(staleWindowSnapshot.autoRecoveryOpenTraces, 1, 'A trace older than the auto-recovery window must stop competing with the fresh trace.');
   const crossProjectTool = crossProjectResolver.prepare('trace-domain-tool', { payload: 'fixture' }, {
     caller: 'chatgpt-web',
     sessionKey: 'session-cross-project-continuity',
@@ -978,7 +981,7 @@ try {
   assert.equal(reminders[0].notice.code, 'mssr-web-outcome-missing-after-idle');
   assert.equal(reminders[0].notice.actions?.[0]?.toolName, 'mssr_trace_evidence');
   assert.equal(reminders[0].notice.actions?.[0]?.arguments?.traceId, 'trace-watchdog-web-001');
-  assert.deepEqual(reminders[0].notice.details.missingRequiredSkills, []);
+  assert.deepEqual(reminders[0].notice.details.closePreflight.missingRequiredSkills, []);
 
   watchdog.observe('trace-domain-tool', watchdogTool.args, { ok: true });
   watchdog.observe('mssr_trace_record', {
