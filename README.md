@@ -7,7 +7,7 @@ El objetivo es tener un puente local controlado por nosotros para operar filesys
 ## Estado actual
 
 ```text
-bridge-mcp v0.6.85
+bridge-mcp v0.6.86
 Mode: HTTP production-candidate
 Project root: C:\dev\bridge-mcp
 Bridge MCP: http://127.0.0.1:3001/mcp
@@ -98,11 +98,15 @@ Para trabajo sustancial en un repositorio, ChatGPT debe llamar una vez a `projec
 
 `AGENTS.md` sigue siendo la entrada nativa para Codex. En ChatGPT web, la carga ocurre por instrucciones MCP y `project_context_load`; las guias aplicables se detectan con `workflow_guide_recommend` y se incorporan con `workflow_guide_load`.
 
+Cuando existe `.bridge/project-context.json`, el core se carga primero y los módulos de contexto/memoria/estado/directivas se seleccionan por intent y stage. `project_context_audit` detecta repos modulares, legacy, inválidos o no inicializados sin mutarlos. `project_change_consistency` compara Git, versión, `changelogs/<version>.md`, `changelogs/INDEX.md` y el impacto declarado sobre PROJECT_CONTEXT/MEMORY/STATE; en `persist` puede bloquear publicación si quedó deuda, pero nunca inventa memoria automáticamente.
+
+Para debugging/recovery MSSR puede cargar selectivamente sólo `changelogs/INDEX.md` y el changelog de la versión actual. `changelogs/LEGACY.md` queda fuera del contexto normal y se consulta únicamente para una regresión histórica concreta.
+
 Las guias globales viven en `integrations/workflow-guides/`. Las guias del proyecto tienen prioridad sobre una global con el mismo nombre.
 
 ## Tools expuestas
 
-El runtime de la release 0.6.84 expone 144 tools.
+El runtime vivo de la release 0.6.86 expone 146 tools; `bridge_self_check` confirma typecheck/build, catálogo y tunnel `live/ready` sobre esa versión.
 
 `blender_review_bundle` genera en una sola llamada vistas ortográficas múltiples, una hoja de contacto adjunta al resultado MCP y un manifiesto con geometría, materiales, colecciones, visibilidad, rig, acciones, diagnósticos, hashes y confirmación de restauración de la escena.
 
@@ -537,7 +541,7 @@ El digest durable conserva sólo consecuencias estructuradas reutilizables: firm
 
 El coordinador de cierre expone un preflight con `closureDue`, `canCloseSuccess`, skills/fases faltantes y `nextRequiredAction`. Un idle puede producir un aviso `stale-open`/candidato a cierre, pero no demuestra que ChatGPT haya terminado ni autoriza `success`. Para recuperación stateless, una traza vieja puede seguir abierta y ser reanudada con `traceId` explícito mientras deja de competir automáticamente con una ruta fresca después de la ventana de auto-recovery.
 
-En el dashboard, `skill_route_plan` significa **recomendada**, la tabla de decisión del host muestra **accepted/skipped por skill y firma semántica**, y cada evento de carga significa **contexto procedural entregado**. El observatorio agrega los learning digests por firma exacta para producir priors de skill, transición y contexto con umbral mínimo de evidencia. Esos priors sólo dicen `prefer`, `neutral`, `deprioritize` o `insufficient-evidence`: son evidencia asesora y todavía no modifican automáticamente scores, routing, permisos ni directivas de proyecto.
+En el dashboard, `skill_route_plan` significa **recomendada**, la tabla de decisión del host muestra **accepted/skipped por skill y firma semántica**, y cada evento de carga significa **contexto procedural entregado**. El observatorio agrega los learning digests por firma exacta para producir tasas empíricas/priores de skill, transición y contexto con umbral mínimo de evidencia. El learning permanece explícitamente `observe-only` con `routingInfluence=false`: `minEvidence` sólo habilita análisis, no activación. Antes de cualquier influencia futura deben pasar colección representativa, auditoría del dataset, replay/holdout, calibración y shadow evaluation. Sólo después una configuración versionada podría habilitar un peso histórico secundario y reversible; required skills, invariantes, permisos y routing determinista siguen siendo autoridad.
 
 El discovery no bloqueante puede reutilizar metadata Roblox `cached` sin tratarla como una degradación global. Las rutas estructuradas que no incluyen el dominio `roblox` omiten esa fuente opcional; una ruta Roblox sí exige catálogo vivo antes de cargar o ejecutar capacidades de Studio.
 

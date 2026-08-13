@@ -42,6 +42,17 @@ try {
     "Unrelated Roblox state.",
     "",
   ].join("\n"), "utf8");
+
+  const legacyPreflight = await assembleProjectContext({
+    projectRoot: root,
+    stage: "start",
+    maxContextChars: 12_000,
+  });
+  assert.equal(legacyPreflight.mode, "legacy");
+  assert.equal(legacyPreflight.manifestStatus, "missing");
+  assert.match(legacyPreflight.warning ?? "", /legacy full-document fallback/);
+  assert.match(legacyPreflight.warning ?? "", /PROJECT_CONTEXT\.md/);
+
   await fs.writeFile(path.join(bridgeDir, "project-context.json"), JSON.stringify({
     schemaVersion: 1,
     core: [
@@ -152,6 +163,43 @@ try {
   assert.equal(loaded.documents.some((item) => item.id === "implementation-state"), true);
   assert.deepEqual(loaded.projectDirectives.map((item) => item.id), ["write-safety"]);
   assert.equal(loaded.documents.some((item) => item.id === "roblox-state"), false);
+  assert.equal(loaded.projectChangeHistory.selected, false);
+
+  const changelogDir = path.join(root, "changelogs");
+  await fs.mkdir(changelogDir, { recursive: true });
+  await fs.writeFile(path.join(root, "package.json"), JSON.stringify({ name: "fixture", version: "1.0.0" }, null, 2), "utf8");
+  await fs.writeFile(path.join(changelogDir, "INDEX.md"), "# Changelog index\n\n- [1.0.0](1.0.0.md) — current debugging baseline.\n", "utf8");
+  await fs.writeFile(path.join(changelogDir, "1.0.0.md"), [
+    "# 1.0.0 — 2026-08-13",
+    "",
+    "## Contract",
+    "",
+    "- Summary: Current debugging baseline.",
+    "- Areas: project-context, debugging",
+    "- PROJECT_CONTEXT: reviewed-none",
+    "- PROJECT_MEMORY: reviewed-none",
+    "- PROJECT_STATE: reviewed-none",
+    "",
+  ].join("\n"), "utf8");
+  const debugLoaded = await workflowGuideToolModule.handlers.project_context_load({
+    projectRoot: root,
+    task: "Debug a regression and recover the last known good behavior.",
+    intent: {
+      domains: ["coding"],
+      actions: ["debug"],
+      artifacts: ["code"],
+      needs: ["history-recovery"],
+      signals: ["error-observed"],
+      risk: "read-only",
+      ambiguity: "low",
+    },
+    stage: "implement",
+    includeGuides: false,
+  });
+  assert.equal(debugLoaded.projectChangeHistory.selected, true);
+  assert.deepEqual(debugLoaded.projectChangeHistory.loaded, ["index", "1.0.0"]);
+  assert.equal(debugLoaded.documents.some((item) => item.kind === "project-changelog-index"), true);
+  assert.equal(debugLoaded.documents.some((item) => item.kind === "project-changelog-current"), true);
 
   console.log("project context module tests passed");
 } finally {

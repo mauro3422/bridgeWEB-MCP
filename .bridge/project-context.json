@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "core": [
+    {
+      "id": "bridge-architecture-core",
+      "kind": "context",
+      "description": "Bridge architecture and canonical ownership needed for substantial work.",
+      "source": {
+        "path": ".bridge/PROJECT_CONTEXT.md",
+        "sections": ["## Architecture", "## Canonical ownership"]
+      },
+      "maxChars": 5000
+    },
+    {
+      "id": "bridge-current-release",
+      "kind": "state",
+      "description": "Current Bridge release and deployment state.",
+      "source": {
+        "path": ".bridge/PROJECT_STATE.md",
+        "sections": ["## Current release"]
+      },
+      "maxChars": 2500
+    }
+  ],
+  "modules": [
+    {
+      "id": "bridge-learning-boundary",
+      "kind": "memory",
+      "description": "Observe-only MSSR learning boundary and activation constraint.",
+      "source": {
+        "path": ".bridge/PROJECT_MEMORY.md",
+        "sections": ["## MSSR learning boundary"]
+      },
+      "domains": ["skill-system", "agent-orchestration"],
+      "actions": ["analyze", "maintain", "review", "debug"],
+      "priority": 40,
+      "maxChars": 3000
+    },
+    {
+      "id": "bridge-change-memory-consistency",
+      "kind": "memory",
+      "description": "Project-memory/changelog consistency decision for maintenance and publication.",
+      "source": {
+        "path": ".bridge/PROJECT_MEMORY.md",
+        "sections": ["## Change and memory consistency"]
+      },
+      "actions": ["maintain", "version", "publish", "verify", "document"],
+      "needs": ["integrity-verification", "version-control"],
+      "priority": 60,
+      "maxChars": 3500
+    },
+    {
+      "id": "bridge-debug-history-strategy",
+      "kind": "memory",
+      "description": "Selective versioned changelog strategy for debugging/recovery.",
+      "source": {
+        "path": ".bridge/PROJECT_MEMORY.md",
+        "sections": ["## Debug history strategy"]
+      },
+      "actions": ["debug", "recover", "analyze"],
+      "needs": ["history-recovery"],
+      "signals": ["error-observed", "conflicting-evidence", "repeated-friction", "recovery-needed"],
+      "priority": 70,
+      "maxChars": 3500
+    },
+    {
+      "id": "bridge-learning-current-state",
+      "kind": "state",
+      "description": "Current observe-only learning deployment state.",
+      "source": {
+        "path": ".bridge/PROJECT_STATE.md",
+        "sections": ["## Current MSSR learning state"]
+      },
+      "domains": ["skill-system", "agent-orchestration"],
+      "actions": ["analyze", "review", "maintain"],
+      "priority": 35,
+      "maxChars": 2500
+    },
+    {
+      "id": "bridge-project-knowledge-migration",
+      "kind": "state",
+      "description": "Current workspace project-knowledge migration status.",
+      "source": {
+        "path": ".bridge/PROJECT_STATE.md",
+        "sections": ["## Project knowledge migration"]
+      },
+      "actions": ["maintain", "review", "document"],
+      "artifacts": ["project", "repository"],
+      "priority": 25,
+      "maxChars": 2500
+    }
+  ]
+}

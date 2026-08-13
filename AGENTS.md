@@ -206,9 +206,11 @@ Mauro usa este bridge como “mini-Codex” local. Priorizar estabilidad sobre f
 ## Context loading and reusable workflow guides
 
 - `AGENTS.md` is the Codex-facing repository instruction file.
-- ChatGPT web receives repository context through the Bridge MCP tool `project_context_load`; keep durable project information in `.bridge/PROJECT_CONTEXT.md` and mutable progress in `.bridge/PROJECT_STATE.md`.
+- ChatGPT web receives repository context through the Bridge MCP tool `project_context_load`; keep stable facts in `.bridge/PROJECT_CONTEXT.md`, durable decisions/lessons in `.bridge/PROJECT_MEMORY.md`, and mutable progress in `.bridge/PROJECT_STATE.md`. A managed repo with durable PROJECT_* documents should use `.bridge/project-context.json` so selection is modular instead of permanent legacy full-document loading.
 - Reusable procedures live in `integrations/workflow-guides/<name>/` globally or `<project>/.bridge/workflow-guides/<name>/` per project.
 - When adding or changing a tool, update its description, schema, annotations, regression coverage, generated `TOOLS.md`, server version, and `tools/list` verification.
+- Every substantive release uses `changelogs/X.Y.Z.md` plus `changelogs/INDEX.md`. The version file must summarize the change and declare `PROJECT_CONTEXT`, `PROJECT_MEMORY`, and `PROJECT_STATE` impact as `updated`, `reviewed-none`, or `pending`; `pending` is not publishable.
+- Before persistence/publication, run the read-only `project_change_consistency` gate. Use `scope=staged` for the final commit gate when other tasks may share the working tree, so unrelated parallel edits are not attributed to this release. A clean build does not substitute for reviewing whether project knowledge and the current version changelog reflect the change. The gate may block persistence but must never invent or auto-write project memory.
 - Keep MCP server instructions concise. Put detailed procedures in workflow guides and load them only when relevant.
 - Never claim a file, process, scene, build, or remote update exists until a tool result verifies it.
 

@@ -10,6 +10,7 @@ import {
   SKILL_RISKS,
   SKILL_SIGNALS,
   SKILL_STAGES,
+  shouldLoadProjectChangeHistory,
   structuredSkillIntentSchema,
   type SkillStage,
   type StructuredSkillIntent,
@@ -231,6 +232,48 @@ async function loadProjectContext(args: {
     }
   }
 
+  const changeHistorySelection = shouldLoadProjectChangeHistory({ intent: args.intent, stage: args.stage });
+  const projectChangeHistory: {
+    selected: boolean;
+    reasons: string[];
+    indexPath: string | null;
+    currentVersion: string | null;
+    currentVersionPath: string | null;
+    loaded: string[];
+  } = {
+    selected: changeHistorySelection.load,
+    reasons: changeHistorySelection.reasons,
+    indexPath: null,
+    currentVersion: null,
+    currentVersionPath: null,
+    loaded: [],
+  };
+  if (changeHistorySelection.load) {
+    const indexPath = path.join(projectRoot, "changelogs", "INDEX.md");
+    if (await pathExists(indexPath)) {
+      await addDocument("project-changelog-index", indexPath);
+      projectChangeHistory.indexPath = indexPath;
+      projectChangeHistory.loaded.push("index");
+    }
+    const packagePath = path.join(projectRoot, "package.json");
+    if (await pathExists(packagePath)) {
+      try {
+        const pkg = JSON.parse(await fs.readFile(packagePath, "utf8"));
+        if (typeof pkg?.version === "string") {
+          projectChangeHistory.currentVersion = pkg.version;
+          const versionPath = path.join(projectRoot, "changelogs", `${pkg.version}.md`);
+          projectChangeHistory.currentVersionPath = versionPath;
+          if (await pathExists(versionPath)) {
+            await addDocument("project-changelog-current", versionPath);
+            projectChangeHistory.loaded.push(pkg.version);
+          }
+        }
+      } catch {
+        // Invalid package metadata is reported by project/release verification; history loading stays best-effort.
+      }
+    }
+  }
+
   const discovery = args.includeGuides
     ? await discoverGuides(projectRoot)
     : { guides: [], warnings: [] } satisfies GuideDiscoveryResult;
@@ -270,6 +313,7 @@ async function loadProjectContext(args: {
     documents,
     projectDirectives: projectContextAssembly?.directives ?? [],
     projectContextAssembly,
+    projectChangeHistory,
     guides,
     guideWarnings: discovery.warnings,
     contextWarnings: projectContextAssembly?.warning ? [projectContextAssembly.warning] : [],

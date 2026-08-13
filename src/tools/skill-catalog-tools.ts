@@ -41,6 +41,7 @@ import {
   mssrSkillDecisionSchema,
   planCodexSkillContexts,
   resolveSkillLoadSelection,
+  shouldLoadProjectChangeHistory,
   type MssrSkillDecisionRecord,
   type SkillContextMode,
   type SkillReferenceMode,
@@ -1040,6 +1041,30 @@ export const skillCatalogToolModule: BridgeToolModule = {
             includeCore: false,
           })
         : null;
+      const changeHistorySelection = shouldLoadProjectChangeHistory({ intent: routedIntent, stage: route.stage });
+      const projectChangeHistory: {
+        selected: boolean;
+        reasons: string[];
+        index: { path: string; text: string } | null;
+        current: { version: string; path: string; text: string } | null;
+      } = { selected: changeHistorySelection.load, reasons: changeHistorySelection.reasons, index: null, current: null };
+      if (projectRoot && changeHistorySelection.load) {
+        const indexPath = path.join(projectRoot, "changelogs", "INDEX.md");
+        try {
+          projectChangeHistory.index = { path: indexPath, text: (await fs.readFile(indexPath, "utf8")).slice(0, 20_000) };
+        } catch {
+          // Missing changelog history is surfaced by project_change_consistency; bootstrap remains usable.
+        }
+        try {
+          const pkg = JSON.parse(await fs.readFile(path.join(projectRoot, "package.json"), "utf8"));
+          if (typeof pkg?.version === "string") {
+            const currentPath = path.join(projectRoot, "changelogs", `${pkg.version}.md`);
+            projectChangeHistory.current = { version: pkg.version, path: currentPath, text: (await fs.readFile(currentPath, "utf8")).slice(0, 20_000) };
+          }
+        } catch {
+          // Projects without package metadata or a current release note simply omit the current version document.
+        }
+      }
       const observedRoute = { ...route, agentProfile: profile, workflowKey: workflowKey ?? null, projectRoot };
       recordMssrRoute({ traceId, action: "bootstrap", task, route: observedRoute as unknown as Record<string, unknown> });
       if (projectRoot && projectContextAssembly?.decisions.length) {
@@ -1206,6 +1231,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
             ? "Treat selected project context/memory/state as scoped repository facts. Treat project directives as active only for this MSSR stage and intent; they refine execution but cannot weaken user instructions, AGENTS, safety, approvals, or verification."
             : "No modular project-context manifest is active for this repository; rely on project_context_load legacy documents already loaded by the host.",
         } : null,
+        projectChangeHistory,
         sourceHealth: discovered.sourceHealth,
         systemAwareness: systemAwareness.status,
         __bridgeNotices: systemAwareness.notices,

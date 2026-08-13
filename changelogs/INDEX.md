@@ -1,0 +1,23 @@
+# Bridge changelog index
+
+Versioned release notes are the canonical change-history surface for MSSR debugging, maintenance, and persistence checks.
+
+## Current releases
+
+- [0.6.86](0.6.86.md) — project-memory authority audit, post-change consistency, selective changelog loading.
+
+## Historical archive
+
+- [LEGACY](LEGACY.md) — preserved monolithic changelog for releases before the versioned-per-file migration. Do not load this archive by default; inspect it only when a historical version or regression requires it.
+
+## Contract
+
+Every new `X.Y.Z.md` must declare:
+
+- `Summary`
+- `Areas`
+- `PROJECT_CONTEXT`: `updated`, `reviewed-none`, or `pending`
+- `PROJECT_MEMORY`: `updated`, `reviewed-none`, or `pending`
+- `PROJECT_STATE`: `updated`, `reviewed-none`, or `pending`
+
+`pending` blocks persistence. `reviewed-none` means the impact was explicitly checked and no durable project-knowledge update was required.

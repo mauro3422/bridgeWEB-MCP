@@ -6,21 +6,21 @@ Local MCP bridge for MauroPrime. The goal is to let ChatGPT operate MauroPrime t
 
 ```txt
 Project root: C:\dev\bridge-mcp
-Server: bridge-mcp v0.6.85
+Server: bridge-mcp v0.6.86
 Mode: HTTP production-candidate
 Bridge MCP: http://127.0.0.1:3001/mcp
 Bridge status: http://127.0.0.1:3001/status
 Tunnel admin: http://127.0.0.1:8081
 Tunnel profile: bridge-local-http
 Rollback profile: stdio through scripts/start-bridge-watchdog.ps1
-Tools exposed: 144
+Runtime tools: 146 (live on 0.6.86)
 ```
 
 Do not commit keys, tunnel secrets, `node_modules`, `dist`, logs, SQLite metrics, sandbox files, or tunnel-client binaries.
 
 ## Known-good checks
 
-Known-good checks for v0.6.85:
+Known-good checks for live v0.6.86:
 
 ```txt
 bridge_self_check -> ok true
@@ -384,7 +384,30 @@ persisted maintenance phase reconstruction matches the portable MSSR reducer
 focused Bridge regressions plus authenticated external skill_decision/learning-digest compatibility
 ```
 
-Next MSSR learning work should feed only eligible priors back as a bounded secondary ranking signal, preserve an exploration floor for new/rare skills, add decay/staleness and replay evaluation, and emit reviewable routing/fixture proposals before any deterministic contract mutation. Vector similarity may help retrieve nearby historical signatures later, but remains secondary to canonical intent, fixtures and explicit review.
+Next MSSR learning work is **data collection and validation, not feedback activation**. Keep `routingInfluence=false` while strict digests accumulate. Then audit dataset quality, run historical replay/holdout, calibrate confidence/decay/staleness, and run a future shadow decision model on new traces. Only if those gates show repeatable benefit should a separately reviewed/versioned feature flag allow a bounded secondary historical contribution with exploration and instant rollback. Vector similarity may later retrieve nearby evidence, but remains secondary and must be evaluated independently.
+
+### Project knowledge and change-history governance
+
+Completed in source 0.6.86:
+
+```txt
+project_context_audit: read-only workspace classification of modular / legacy / invalid / empty / not-initialized project authorities
+project_change_consistency: Git + package version + changelogs/<version>.md + INDEX + PROJECT_* impact gate
+versioned changelog contract: updated / reviewed-none / pending for PROJECT_CONTEXT, PROJECT_MEMORY and PROJECT_STATE
+selective debugging history: load changelogs/INDEX.md + current release only when MSSR intent requires history/recovery
+Bridge and MSSR now own real modular .bridge PROJECT_CONTEXT / PROJECT_MEMORY / PROJECT_STATE authorities
+legacy changelog preserved under changelogs/LEGACY.md; no automatic full-history injection
+no audit, telemetry or learning process auto-writes durable project memory
+```
+
+Still pending:
+
+```txt
+migrate active legacy projects only after reading their real repository evidence
+extend the same authority/change-consistency contract to Codex/OpenCode/native MSSR hosts
+add long-term staleness/receipt semantics if working-tree evidence proves insufficient after publication
+use project_change_consistency as an explicit persistence/publication gate in first-party MSSR maintenance workflows
+```
 
 ### MSSR first-party core skill package
 

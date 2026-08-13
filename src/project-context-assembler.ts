@@ -148,6 +148,17 @@ export async function assembleProjectContext(args: {
   const projectRoot = path.resolve(args.projectRoot);
   const manifestPath = path.join(projectRoot, MANIFEST_PATH);
   if (!(await pathExists(manifestPath))) {
+    const bridgeDir = path.dirname(manifestPath);
+    const hasBridgeAuthority = await pathExists(bridgeDir);
+    const legacyFiles = ["PROJECT_CONTEXT.md", "PROJECT_MEMORY.md", "PROJECT_STATE.md"];
+    const existingLegacyFiles = hasBridgeAuthority
+      ? (await Promise.all(legacyFiles.map(async (name) => (await pathExists(path.join(bridgeDir, name))) ? name : null))).filter((name): name is string => Boolean(name))
+      : [];
+    const warning = hasBridgeAuthority
+      ? existingLegacyFiles.length > 0
+        ? `Project context is using legacy full-document fallback because .bridge/project-context.json is missing. Existing authorities: ${existingLegacyFiles.join(", ")}. Register stable sections deliberately before relying on modular retrieval.`
+        : "Project has a .bridge authority directory but no project-context manifest or PROJECT_CONTEXT/PROJECT_MEMORY/PROJECT_STATE documents. Initialize durable project knowledge deliberately when this repository needs cross-session state; do not invent empty memory automatically."
+      : undefined;
     return {
       mode: "legacy",
       manifestStatus: "missing",
@@ -163,6 +174,7 @@ export async function assembleProjectContext(args: {
       requiredBudgetExceeded: false,
       optionalContextOmitted: false,
       ambiguousGroups: [],
+      ...(warning ? { warning } : {}),
     };
   }
 
