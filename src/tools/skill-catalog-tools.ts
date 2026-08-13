@@ -50,6 +50,7 @@ import {
   type SkillContextMode,
   type SkillReferenceMode,
 } from "@mauroprime/mssr";
+import { MSSR_CONTEXT_MESSAGE_INPUT_SCHEMA, selectBridgeMssrContextMessages } from "../mssr-context-messages.js";
 import {
   hashMssrTask,
   recordMssrEvent,
@@ -125,6 +126,7 @@ function compactSkillRoute<T extends Record<string, unknown>>(route: T): Record<
     activationInstruction: route.activationInstruction,
     sourceHealth: route.sourceHealth,
     systemAwareness: route.systemAwareness,
+    contextMessages: route.contextMessages,
     __bridgeNotices: route.__bridgeNotices,
   };
 }
@@ -779,7 +781,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
     },
     {
       name: "skill_route_plan",
-      description: "Plan skill activation before substantial specialized work. The agent should first infer a compact structured intent from the user's request, including explicit semantic signals, even when the wording is incomplete, then call this tool. Use signal nominal only when no error, warning, uncertainty, friction, recovery need, capability gap, or reusable pattern is present. It deterministically applies routing metadata, dependencies, exclusions, workflow phases, source precedence, and completed-phase coverage. For Roblox routes, the response also includes a short-lived systemAwareness snapshot of Bridge, Roblox MCP catalog, connected Studios, active target and Edit/Play mode, with deduplicated notices only for actionable states. It does not expose or require chain-of-thought.",
+      description: "Plan skill activation before substantial specialized work. The agent should first infer a compact structured intent from the user's request, including explicit semantic signals, even when the wording is incomplete, then call this tool. Use signal nominal only when no error, warning, uncertainty, friction, recovery need, capability gap, or reusable pattern is present. It deterministically applies routing metadata, dependencies, exclusions, workflow phases, source precedence, and completed-phase coverage. Optional MSSR Context Messages v1 are strict provider/host evidence selected by portable MSSR against the normalized intent and stage; Bridge returns the complete selection and piggybacks selected messages as advisory notices without executing actions or persisting proposals. For Roblox routes, the response also includes a short-lived systemAwareness snapshot of Bridge, Roblox MCP catalog, connected Studios, active target and Edit/Play mode, with deduplicated notices only for actionable states. It does not expose or require chain-of-thought.",
       inputSchema: {
         type: "object",
         properties: {
@@ -795,6 +797,9 @@ export const skillCatalogToolModule: BridgeToolModule = {
           sources: { type: "array", items: { type: "string", enum: ["codex-local", "codex-system", "codex-plugin", "roblox"] } },
           maxSkills: { type: "number", default: 8, minimum: 1, maximum: 16 },
           maxProjectContextChars: { type: "number", default: 12000, minimum: 2000, maximum: 80000, description: "Character budget for modular project core plus project modules selected for this stage." },
+          contextMessages: MSSR_CONTEXT_MESSAGE_INPUT_SCHEMA,
+          maxContextMessages: { type: "number", default: 12, minimum: 0, maximum: 32 },
+          maxContextMessageChars: { type: "number", default: 6000, minimum: 0, maximum: 20000 },
           responseMode: { type: "string", enum: routeResponseModes, default: "compact", description: "compact returns the actionable phase route; debug includes full scores, metadata and phase diagnostics." },
           workflowKey: { type: "string", pattern: "^[a-z0-9][a-z0-9._-]{1,79}$", description: "Optional stable workflow id shared by related traces, for example mauroprime-system-loop. It is local observability metadata, not a ChatGPT conversation id." },
           traceId: { type: "string", description: "Optional existing MSSR trace id for a replan. A new id is generated when omitted." },
@@ -805,7 +810,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
     },
     {
       name: "skill_bootstrap",
-      description: "Load the current phase of a structured MSSR route. It globally plans selective Codex skill context from context-modules.json manifests and, when projectRoot is supplied, also re-selects project context/memory/state/directive modules from .bridge/project-context.json for the same stage and structured intent without duplicating the already-loaded project core. Required skill cores are reserved first; optional procedural context remains budgeted. Projects without a modular manifest keep the observable legacy project-context fallback loaded by project_context_load. The response reports skill-context savings plus scoped project-context decisions. Deferred skills and project modules remain metadata-only.",
+      description: "Load the current phase of a structured MSSR route. It globally plans selective Codex skill context from context-modules.json manifests and, when projectRoot is supplied, also re-selects project context/memory/state/directive modules from .bridge/project-context.json for the same stage and structured intent without duplicating the already-loaded project core. Optional MSSR Context Messages v1 are validated and selected by portable MSSR, returned as complete advisory evidence, and piggybacked only when selected; Bridge never executes their advisory actions or persists their proposals. Required skill cores are reserved first; optional procedural context remains budgeted. Projects without a modular manifest keep the observable legacy project-context fallback loaded by project_context_load. The response reports skill-context savings plus scoped project-context decisions. Deferred skills and project modules remain metadata-only.",
       inputSchema: {
         type: "object",
         properties: {
@@ -821,6 +826,9 @@ export const skillCatalogToolModule: BridgeToolModule = {
           sources: { type: "array", items: { type: "string", enum: ["codex-local", "codex-system", "codex-plugin", "roblox"] } },
           maxSkills: { type: "number", default: 8, minimum: 1, maximum: 16 },
           maxProjectContextChars: { type: "number", default: 12000, minimum: 2000, maximum: 80000, description: "Character budget for modular project core plus project modules selected for this stage." },
+          contextMessages: MSSR_CONTEXT_MESSAGE_INPUT_SCHEMA,
+          maxContextMessages: { type: "number", default: 12, minimum: 0, maximum: 32 },
+          maxContextMessageChars: { type: "number", default: 6000, minimum: 0, maximum: 20000 },
           contentMode: { type: "string", enum: ["selective", "full"], default: "selective", description: "Use selective to assemble manifest-guided core/modules. Use full only for explicit diagnosis, compatibility comparison, or recovery." },
           includeReferences: { type: "string", enum: ["auto", "none"], default: "auto", description: "Auto selects matching manifest modules. None loads only the declared core while preserving routing." },
           maxContextChars: { type: "number", default: 24000, minimum: 4000, maximum: 100000, description: "Global character budget for assembled Codex skill context. Required cores are never silently truncated; budget overflow is reported." },
@@ -1049,6 +1057,13 @@ export const skillCatalogToolModule: BridgeToolModule = {
         workflows: route.workflows,
         robloxHealth: discovered.sourceHealth.roblox,
       });
+      const contextMessages = selectBridgeMssrContextMessages({
+        messages: args.contextMessages,
+        intent: structuredSkillIntentSchema.parse(route.intent),
+        stage: route.stage,
+        maxMessages: args.maxContextMessages,
+        maxChars: args.maxContextMessageChars,
+      });
       recordMssrRoute({ traceId, action: "plan", task, route: observedRoute as unknown as Record<string, unknown> });
       const bootstrapArguments = {
         task,
@@ -1063,6 +1078,9 @@ export const skillCatalogToolModule: BridgeToolModule = {
         sources: args.sources,
         maxSkills: args.maxSkills ?? 8,
         maxProjectContextChars: args.maxProjectContextChars ?? 12_000,
+        contextMessages: args.contextMessages,
+        maxContextMessages: args.maxContextMessages ?? 12,
+        maxContextMessageChars: args.maxContextMessageChars ?? 6_000,
         selectionMode: (args.caller ?? "other") === "chatgpt-web" ? "host-gated" : "auto",
         traceId,
         workflowKey,
@@ -1076,7 +1094,8 @@ export const skillCatalogToolModule: BridgeToolModule = {
         } : { status: intentResult.resolution.status },
         sourceHealth: discovered.sourceHealth,
         systemAwareness: systemAwareness.status,
-        __bridgeNotices: systemAwareness.notices,
+        contextMessages: contextMessages?.selection ?? null,
+        __bridgeNotices: [...systemAwareness.notices, ...(contextMessages?.notices ?? [])],
         warnings: [...discovered.warnings, ...route.warnings],
         connectorExecution: connectorFallback("skill_bootstrap", bootstrapArguments, traceId),
         nextAction: {
@@ -1120,6 +1139,13 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const maxContextChars = z.number().int().min(4_000).max(100_000).catch(24_000).parse(args.maxContextChars ?? 24_000);
       const maxProjectContextChars = z.number().int().min(2_000).max(80_000).catch(12_000).parse(args.maxProjectContextChars ?? 12_000);
       const routedIntent = structuredSkillIntentSchema.parse(route.intent);
+      const contextMessages = selectBridgeMssrContextMessages({
+        messages: args.contextMessages,
+        intent: routedIntent,
+        stage: route.stage,
+        maxMessages: args.maxContextMessages,
+        maxChars: args.maxContextMessageChars,
+      });
       const projectRoot = typeof args.projectRoot === "string" && args.projectRoot.trim()
         ? path.resolve(args.projectRoot.trim())
         : null;
@@ -1322,9 +1348,10 @@ export const skillCatalogToolModule: BridgeToolModule = {
             : "No modular project-context manifest is active for this repository; rely on project_context_load legacy documents already loaded by the host.",
         } : null,
         projectChangeHistory,
+        contextMessages: contextMessages?.selection ?? null,
         sourceHealth: discovered.sourceHealth,
         systemAwareness: systemAwareness.status,
-        __bridgeNotices: systemAwareness.notices,
+        __bridgeNotices: [...systemAwareness.notices, ...(contextMessages?.notices ?? [])],
         warnings: [
           ...discovered.warnings,
           ...route.warnings,

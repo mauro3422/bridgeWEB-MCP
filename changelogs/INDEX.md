@@ -4,6 +4,7 @@ Versioned release notes are the canonical change-history surface for MSSR debugg
 
 ## Current releases
 
+- [0.6.89](0.6.89.md) - Bridge delivery adapter for portable MSSR Context Messages v1.
 - [0.6.88](0.6.88.md) - packaged MSSR first-party skill discovery, reserved precedence, and Bridge conformance coverage.
 - [0.6.87](0.6.87.md) - substantive MSSR routing coverage and explicit optional-skill decision telemetry.
 - [0.6.86](0.6.86.md) — project-memory authority audit, post-change consistency, selective changelog loading.

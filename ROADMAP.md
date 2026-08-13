@@ -386,6 +386,12 @@ focused Bridge regressions plus authenticated external skill_decision/learning-d
 
 Next MSSR learning work is **data collection and validation, not feedback activation**. Keep `routingInfluence=false` while strict digests accumulate. Then audit dataset quality, run historical replay/holdout, calibrate confidence/decay/staleness, and run a future shadow decision model on new traces. Only if those gates show repeatable benefit should a separately reviewed/versioned feature flag allow a bounded secondary historical contribution with exploration and instant rollback. Vector similarity may later retrieve nearby evidence, but remains secondary and must be evaluated independently.
 
+### MSSR Context Messages host delivery
+
+Source `0.6.89` integrates Bridge as an adapter for the portable MSSR Context Messages v1 contract. `skill_route_plan` and `skill_bootstrap` accept bounded provider/host-supplied messages, use MSSR's strict schema and selector with normalized intent/stage, return the full selection/decision evidence, and piggyback only selected messages through the existing response notice channel. Bridge preserves provenance, canonical ownership, freshness, evidence, continuation receipts and review-required persistence proposals without executing advisory actions or performing writes.
+
+This is response delivery, not a new durable inbox. Runtime publication/restart and cross-host lifecycle parity remain separate verification gates.
+
 ### Project knowledge and change-history governance
 
 Completed in source 0.6.86:

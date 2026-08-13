@@ -1,7 +1,7 @@
 # Bridge project state
 
 ## Current release
-Bridge release `0.6.88` is published and live with 146 registered runtime tools. It discovers the five packaged MSSR first-party skills directly through the portable manifest/root API, includes `mssr-first-party` in catalog health and schemas, and lets auto load select the packaged reserved skill ahead of divergent local/system/plugin catalogs while preserving that shadow as an explicit routing-audit error. A controlled full restart completed on 2026-08-13; health/readiness, version readback, the five-entry first-party catalog, full regressions, routing validation, generated-tool documentation, watchdog/metrics checks, strict Git cleanliness, and direct remote SHA verification all passed.
+Bridge source release `0.6.89` adapts portable MSSR Context Messages v1 in `skill_route_plan` and `skill_bootstrap`. MSSR remains the semantic owner: Bridge validates the portable batch, asks MSSR to select against normalized intent/stage and bounded budgets, returns the complete selection evidence, and piggybacks only selected messages through the existing per-response notice delivery. It preserves canonical owner, provenance, freshness, evidence, continuation receipts, dedupe, and advisory actions as data; it does not execute those actions or persist proposals. The source gates are passing, but `0.6.89` is not yet published, restarted, or proven live. The currently running Bridge remains the previously verified `0.6.88` runtime with 146 tools.
 
 ## Current MSSR learning state
 
