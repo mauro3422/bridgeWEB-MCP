@@ -735,7 +735,11 @@ export function createMssrTraceSessionCoordinator(
         state ? portableLifecycle(state) : null,
         args,
       );
-      const lifecycleBlock = lifecycleViolations.find((item) => item.blocking);
+      // A stale maintenance close can coexist with the generic close violation
+      // after resume/persistence. Prefer the actionable, more specific repair
+      // over the first portable-contract item.
+      const lifecycleBlock = lifecycleViolations.find((item) => item.code === "mssr-success-outcome-blocked-stale-close")
+        ?? lifecycleViolations.find((item) => item.blocking);
       if (state && lifecycleBlock?.code === "mssr-success-outcome-blocked-required-skills") {
         const missing = lifecycleBlock.missingSkills ?? [];
         const blocked = {

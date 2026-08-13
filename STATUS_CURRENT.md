@@ -57,7 +57,7 @@ npm run docs:tools:check
 For MSSR portable changes:
 
 ```powershell
-cd C:\Dev\mssr
+cd D:\Dev\mssr
 npm run verify
 ```
 

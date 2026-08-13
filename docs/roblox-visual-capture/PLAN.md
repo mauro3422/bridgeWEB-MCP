@@ -2,7 +2,7 @@
 
 **Estado:** implementación activa  
 **Fecha:** 2026-07-23  
-**Ámbitos:** `C:\Dev\bridge-mcp`, `D:\Dev\MyceliumFront`, skill `roblox-photo-rig-capture`
+**Ámbitos:** `D:\Dev\bridge-mcp`, `D:\Dev\MyceliumFront`, skill `roblox-photo-rig-capture`
 
 ## 1. Objetivo
 

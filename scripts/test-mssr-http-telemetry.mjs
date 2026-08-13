@@ -181,6 +181,23 @@ try {
   assert.equal(observed.host_parent_session_key, "9".repeat(64), "only the host-provided parent-session hash is persisted");
   assert.equal(observed.error, null, "host error text must never be stored");
 
+  const closeRoute = {
+    ...envelope,
+    eventId: `mssr-ext-http-close-${Date.now()}`,
+    emittedAt: new Date(Date.now() + 2).toISOString(),
+    event: { kind: "route", action: "plan", taskHash: envelope.event.taskHash, route: {
+      ...envelope.event.route,
+      stage: "close",
+      completedPhases: ["discovery", "verification", "persistence"],
+    } },
+  };
+  const closeRouteResponse = await fetch(`${base}/api/mssr/events`, {
+    method: "POST",
+    headers: { "authorization": `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify(closeRoute),
+  });
+  assert.equal(closeRouteResponse.status, 202, await closeRouteResponse.text());
+
   const outcome = {
     ...envelope,
     eventId: `mssr-ext-http-outcome-${Date.now()}`,

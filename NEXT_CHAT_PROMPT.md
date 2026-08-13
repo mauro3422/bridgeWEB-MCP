@@ -7,7 +7,7 @@ This file used to contain a pasted startup prompt with copied version numbers, t
 A new ChatGPT or Codex session should not trust copied runtime facts from this document. Instead:
 
 1. connect to `BrigdeMCP-WEB`;
-2. call `project_context_load` for `C:\Dev\bridge-mcp` with the resolved task;
+2. call `project_context_load` for `D:\Dev\bridge-mcp` with the resolved task;
 3. use structured MSSR intent through `skill_route_plan` or `skill_bootstrap`;
 4. call `bridge_health(check="all")` for the live server version, tunnel state, module list and tool count;
 5. inspect `git status` and the relevant source before mutation;

@@ -20,7 +20,7 @@ src/
     └── shared/               reusable internal primitives
 ```
 
-`src/tool-registry.ts` is the composition root for tool modules. `src/tools/skill-routing.ts` is deliberately a compatibility adapter that re-exports `@mauroprime/mssr`; the portable routing engine belongs to `C:\Dev\mssr`.
+`src/tool-registry.ts` is the composition root for tool modules. `src/tools/skill-routing.ts` is deliberately a compatibility adapter that re-exports `@mauroprime/mssr`; the portable routing engine belongs to `D:\Dev\mssr`.
 
 ## Executable support
 

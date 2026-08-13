@@ -8,6 +8,7 @@ import { normalizeModelIdentifier, RUNTIME_BOOT_ID, RUNTIME_STARTED_AT } from ".
 
 type JsonRecord = Record<string, unknown>;
 export type BridgeMetricsScope = "active" | "all";
+export type MssrRoutingStatus = "traced" | "unrouted" | "bootstrap" | "exempt";
 
 export type ToolAuditMetricRow = {
   tool: string;
@@ -49,7 +50,7 @@ export type BridgeMetricProfile = {
   messageKey?: string;
   callKey?: string;
   projectKey?: string;
-  routingStatus?: "traced" | "unrouted" | "bootstrap" | "exempt";
+  routingStatus?: MssrRoutingStatus;
 };
 type StatementSync = {
   run: (...args: unknown[]) => unknown;
@@ -90,7 +91,7 @@ export type BridgeMetricStart = {
   messageKey: string;
   callKey: string;
   projectKey: string;
-  routingStatus: "traced" | "unrouted" | "bootstrap" | "exempt";
+  routingStatus: MssrRoutingStatus;
   mssrEligible: boolean;
 };
 
@@ -114,6 +115,59 @@ const logsDir = path.resolve(process.env.BRIDGE_MCP_LOG_DIR || path.join(process
 const sqlitePath = path.resolve(process.env.BRIDGE_MCP_METRICS_SQLITE || path.join(metricsDir, "bridge-metrics.sqlite"));
 const OPERATIONAL_METRIC_WHERE = "tool NOT LIKE '__test_%' AND tool <> 'metrics_regression'";
 const jsonlPath = path.resolve(process.env.BRIDGE_MCP_EVENTS_JSONL || path.join(logsDir, "bridge-events.jsonl"));
+
+// These names are intentionally narrow: they identify lifecycle preparation and
+// diagnostics, not every read-only tool. Coverage must still include substantive
+// inspection such as search_files, while never treating telemetry inspection as
+// a missing MSSR route.
+export const MSSR_BOOTSTRAP_TOOL_NAMES = new Set([
+  "project_context_load",
+  "workflow_guide_recommend",
+  "workflow_guide_load",
+  "skill_catalog",
+  "skill_recommend",
+  "skill_route_audit",
+  "skill_route_vocabulary",
+  "skill_route_plan",
+  "skill_bootstrap",
+  "skill_load",
+  "mssr_trace_record",
+  "mssr_trace_working_update",
+]);
+export const MSSR_DIAGNOSTIC_TOOL_NAMES = new Set([
+  "system_info",
+  "tunnel_health",
+  "bridge_health",
+  "bridge_connector_catalog_compare",
+  "bridge_self_check",
+  "bridge_restart_status",
+  "bridge_verify_status",
+  "bridge_metrics_status",
+  "bridge_metrics_summary",
+  "bridge_metrics_recent",
+  "bridge_metrics_query",
+  "bridge_visualization_catalog",
+  "bridge_visualize_metrics",
+  "bridge_tool_schema",
+  "bridge_tool_audit",
+  "mssr_observatory_query",
+  "mssr_trace_evidence",
+  "bridge_notice_status",
+  "bridge_notice_drain",
+]);
+
+function normalizedMssrToolName(tool: string): string {
+  return tool.trim().toLowerCase().replace(/^(?:mssr_)+/, "");
+}
+
+export function classifyMssrRoutingStatus(tool: string, traceId?: string | null): MssrRoutingStatus {
+  const raw = tool.trim().toLowerCase();
+  const normalized = normalizedMssrToolName(tool);
+  if (MSSR_DIAGNOSTIC_TOOL_NAMES.has(raw) || MSSR_DIAGNOSTIC_TOOL_NAMES.has(normalized)) return "exempt";
+  if (MSSR_BOOTSTRAP_TOOL_NAMES.has(raw) || MSSR_BOOTSTRAP_TOOL_NAMES.has(normalized)
+    || /^(?:skill_)?(?:route_plan|bootstrap|recommend)$/.test(normalized)) return "bootstrap";
+  return traceId ? "traced" : "unrouted";
+}
 
 let db: DatabaseSync | null | undefined;
 let insertToolCall: StatementSync | null = null;
@@ -310,7 +364,7 @@ function operationSubject(tool: string, args: unknown): string | undefined {
 export function beginToolMetric(tool: string, args: unknown, profile: BridgeMetricProfile = {}): BridgeMetricStart {
   const now = Date.now();
   const epoch = getMssrObservabilityEpoch();
-  const routingStatus = profile.routingStatus ?? (profile.traceId ? "traced" : "unrouted");
+  const routingStatus = profile.routingStatus ?? classifyMssrRoutingStatus(tool, profile.traceId);
   const inputKeys = args && typeof args === "object" && !Array.isArray(args)
     ? Object.keys(args as Record<string, unknown>).sort().join(",")
     : "";
@@ -640,6 +694,107 @@ export function getToolAuditMetrics(days = 30, scope: BridgeMetricsScope = "acti
   return { enabled: metricsEnabled, sqliteAvailable: true, scope, days: boundedDays, since, rows: mapped };
 }
 
+type RoutingCoverage = {
+  exempt_calls: number;
+  bootstrap_calls: number;
+  substantive_chains: number;
+  routed_chains: number;
+  unrouted_chains: number;
+  chains_without_route_hook: number;
+  mssr_routed_chain_coverage: number | null;
+};
+
+function metricProfileKey(row: JsonRecord, detailed: boolean): string {
+  const text = (name: string, fallback = "unknown") => typeof row[name] === "string" && row[name]
+    ? String(row[name])
+    : fallback;
+  if (!detailed) return text("caller", "other");
+  return [
+    text("caller", "other"), text("model"), text("reasoning_effort"), text("host_agent"), text("host_variant"),
+    text("project"), text("session_key"), text("task_key"),
+  ].join("\u0000");
+}
+
+function routingCoverage(rows: JsonRecord[], detailed: boolean): Map<string, RoutingCoverage> {
+  const coverage = new Map<string, RoutingCoverage>();
+  const chains = new Map<string, Map<string, { hasSubstantiveCall: boolean; hasRouteHook: boolean }>>();
+  for (const row of rows) {
+    const profileKey = metricProfileKey(row, detailed);
+    const current = coverage.get(profileKey) ?? {
+      exempt_calls: 0,
+      bootstrap_calls: 0,
+      substantive_chains: 0,
+      routed_chains: 0,
+      unrouted_chains: 0,
+      chains_without_route_hook: 0,
+      mssr_routed_chain_coverage: null,
+    };
+    const status = typeof row.routing_status === "string"
+      ? row.routing_status
+      : typeof row.trace_id === "string" && row.trace_id ? "traced" : "unrouted";
+    if (status === "exempt") current.exempt_calls += 1;
+    if (status === "bootstrap") current.bootstrap_calls += 1;
+    coverage.set(profileKey, current);
+    if (Number(row.mssr_eligible) !== 1) continue;
+
+    const traceId = typeof row.trace_id === "string" && row.trace_id ? row.trace_id : undefined;
+    const chainScope = traceId
+      ? `trace:${traceId}`
+      : ["unrouted", row.caller ?? "other", row.session_key ?? "unknown", row.task_key ?? "unknown", row.project ?? "unknown", row.workflow_key ?? "unscoped"].join("\u0000");
+    const profileChains = chains.get(profileKey) ?? new Map();
+    const chain = profileChains.get(chainScope) ?? { hasSubstantiveCall: false, hasRouteHook: false };
+    chain.hasSubstantiveCall = true;
+    profileChains.set(chainScope, chain);
+    chains.set(profileKey, profileChains);
+  }
+  // Route/bootstrap/hook calls are excluded from the substantive denominator,
+  // so inspect them in a second pass and attach their evidence to the same
+  // trace or bounded anonymous scope.
+  for (const row of rows) {
+    const profileKey = metricProfileKey(row, detailed);
+    const status = typeof row.routing_status === "string" ? row.routing_status : "";
+    if (status !== "bootstrap") continue;
+    const traceId = typeof row.trace_id === "string" && row.trace_id ? row.trace_id : undefined;
+    const chainScope = traceId
+      ? `trace:${traceId}`
+      : ["unrouted", row.caller ?? "other", row.session_key ?? "unknown", row.task_key ?? "unknown", row.project ?? "unknown", row.workflow_key ?? "unscoped"].join("\u0000");
+    const chain = chains.get(profileKey)?.get(chainScope);
+    if (chain) chain.hasRouteHook = true;
+  }
+  for (const [profileKey, profileChains] of chains) {
+    const current = coverage.get(profileKey);
+    if (!current) continue;
+    for (const chain of profileChains.values()) {
+      if (!chain.hasSubstantiveCall) continue;
+      current.substantive_chains += 1;
+      if (chain.hasRouteHook) current.routed_chains += 1;
+      else {
+        current.unrouted_chains += 1;
+        current.chains_without_route_hook += 1;
+      }
+    }
+    current.mssr_routed_chain_coverage = current.substantive_chains > 0
+      ? Math.round((100 * current.routed_chains / current.substantive_chains) * 100) / 100
+      : null;
+  }
+  return coverage;
+}
+
+function withRoutingCoverage(rows: JsonRecord[], coverage: Map<string, RoutingCoverage>, detailed: boolean): JsonRecord[] {
+  return rows.map((row) => ({
+    ...row,
+    ...(coverage.get(metricProfileKey(row, detailed)) ?? {
+      exempt_calls: 0,
+      bootstrap_calls: 0,
+      substantive_chains: 0,
+      routed_chains: 0,
+      unrouted_chains: 0,
+      chains_without_route_hook: 0,
+      mssr_routed_chain_coverage: null,
+    }),
+  }));
+}
+
 function getMetricsProfiles(database: DatabaseSync, scope: BridgeMetricsScope, agentProfileLimit = 50) {
   const filter = metricsFilter(scope);
   const surfaces = database.prepare(`
@@ -693,7 +848,16 @@ function getMetricsProfiles(database: DatabaseSync, scope: BridgeMetricsScope, a
     ORDER BY calls DESC, caller ASC, model ASC, reasoning_effort ASC, project ASC, session_key ASC, task_key ASC
     LIMIT ?
   `).all(...filter.params, Math.max(1, Math.min(200, agentProfileLimit)));
-  return { surfaces, agentProfiles };
+  const routingRows = database.prepare(`
+    SELECT caller, model, reasoning_effort, host_agent, host_variant, project, session_key, task_key, workflow_key,
+      trace_id, routing_status, mssr_eligible
+    FROM tool_calls
+    WHERE ${filter.where}
+  `).all(...filter.params);
+  return {
+    surfaces: withRoutingCoverage(surfaces, routingCoverage(routingRows, false), false),
+    agentProfiles: withRoutingCoverage(agentProfiles, routingCoverage(routingRows, true), true),
+  };
 }
 
 export function getMetricsSummary(limit = 50, scope: BridgeMetricsScope = "active") {

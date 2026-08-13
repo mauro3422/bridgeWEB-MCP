@@ -80,9 +80,10 @@ const firstLoaded = new Set(first.loaded.filter((item) => item.loaded).map((item
 for (const skill of required) assert.equal(firstLoaded.has(skill.name), true, `required ${skill.name} must load`);
 for (const skill of optionalRoots) {
   assert.equal(firstLoaded.has(skill.name), false, `undecided optional root ${skill.name} must remain out of context`);
-  const decision = first.selection.decisions.find((item) => item.skillName === skill.name);
-  assert.equal(decision?.decision, "skipped");
-  assert.equal(decision?.reasonCode, "not-evaluated");
+  assert.equal(first.selection.decisions.some((item) => item.skillName === skill.name), false,
+    `undecided optional root ${skill.name} must not fabricate a skipped decision`);
+  assert.ok(first.selection.pendingCandidates.some((item) => item.skill === skill.name && item.decisionState === "absent"),
+    `undecided optional root ${skill.name} must remain visibly pending`);
 }
 for (const skill of dependencyOnlyOptional) {
   assert.equal(firstLoaded.has(skill.name), false, `dependency-only optional ${skill.name} must remain out of context until its root is accepted`);
@@ -136,7 +137,7 @@ const selectionSummary = summary({ kind: "benchmark", scope: "all", days: 1, lim
 const feedback = selectionSummary.intentAnalysis.selectionFeedback.find((item) => item.skillName === acceptedName);
 assert.ok(feedback, "accepted/skipped feedback must reach observatory analysis");
 assert.ok(feedback.accepted >= 1);
-assert.ok(feedback.skipped >= 1);
+assert.equal(feedback.skipped, 0, "an absent host decision must not be recorded as skipped/not-evaluated feedback");
 assert.ok(feedback.signatures.some((item) => item.signature.includes("d=agent-orchestration,coding,skill-system")));
 if (explicitlySkippedName) {
   const skippedFeedback = selectionSummary.intentAnalysis.selectionFeedback.find((item) => item.skillName === explicitlySkippedName);

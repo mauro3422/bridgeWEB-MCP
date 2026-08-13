@@ -1,7 +1,7 @@
 # Bridge project state
 
 ## Current release
-Bridge release `0.6.86` is live with 146 registered runtime tools. `bridge_self_check` confirms server 0.6.86, typecheck/build, tool catalog and tunnel `live/ready`; the complete `npm run test:regressions` suite and MSSR 0.2.6 `npm run verify` pass. Final staged consistency, commit/push readback and strict post-publication verification remain the persistence gates.
+Bridge release `0.6.87` is prepared with 146 registered runtime tools. It measures the substantive MSSR-call denominator separately from route/bootstrap hooks and diagnostics, exposes routed/unrouted chain coverage without storing raw arguments, and records optional-skill decisions only when the host supplied an explicit decision/reason. Typecheck, build, focused MSSR coverage/learning regressions, the full regression suite, routing validation, generated-tool documentation and the cross-repository source maintenance gate pass. Persistence/publication readback and live restart verification remain pending; no runtime restart or publication was performed.
 
 ## Current MSSR learning state
 

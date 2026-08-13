@@ -209,8 +209,8 @@ function renderAgentProfiles(inputRows) {
     '<td><code>' + esc(exposed(row.project, 'proyecto primario no expuesto')) + '</code><div class="recent-detail">' +
       esc(row.related_project && row.related_project !== 'none' ? 'relacionados: ' + row.related_project : 'sin repositorio auxiliar') + '</div></td>' +
     '<td>' + num(row.calls) + '</td>' +
-    '<td title="' + esc(num(row.traced_calls) + ' / ' + num(row.eligible_calls) + ' tools elegibles') + '">' +
-      pct(row.mssr_trace_coverage) + '<div class="recent-detail">' + num(row.untraced_calls) + ' sin traza</div></td>' +
+    '<td title="' + esc(num(row.routed_chains) + ' / ' + num(row.substantive_chains) + ' cadenas sustantivas con route/bootstrap/hook; ' + num(row.traced_calls) + ' / ' + num(row.eligible_calls) + ' llamadas con traza') + '">' +
+      pct(row.mssr_routed_chain_coverage) + '<div class="recent-detail">' + num(row.unrouted_chains) + ' sin route/hook · ' + num(row.exempt_calls) + ' exentas</div></td>' +
     '<td>' + num(row.error_calls) + '</td>' +
     '<td>' + ms(row.avg_duration_ms) + '</td>' +
   '</tr>').join('');

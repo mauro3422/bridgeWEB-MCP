@@ -1103,13 +1103,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
 
       const decisions: MssrSkillDecisionRecord[] = [];
       if (selectionMode === "host-gated") {
-        for (const match of route.activeSkills.filter((skill) => skill.selectedAsRoot === true && skill.required !== true)) {
-          const decision = suppliedDecisionBySkill.get(match.name) ?? mssrSkillDecisionSchema.parse({
-            skillName: match.name,
-            decision: "skipped",
-            reasonCode: "not-evaluated",
-            stage: route.stage,
-          });
+        for (const decision of suppliedDecisionBySkill.values()) {
           decisions.push(decision);
           recordMssrSkillDecision({ traceId, caller, decision });
         }
@@ -1123,8 +1117,11 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const loadSelection = resolveSkillLoadSelection(route, selectionMode, decisions);
       const eligibleLoadOrder = [...loadSelection.eligibleLoadOrder];
       const skippedCandidates = route.activeSkills
-        .filter((match) => match.selectedAsRoot === true && match.required !== true && selectionMode === "host-gated" && !eligibleLoadOrder.includes(match.name))
+        .filter((match) => match.selectedAsRoot === true && match.required !== true && decisionBySkill.get(match.name)?.decision === "skipped")
         .map((match) => ({ skill: match.name, ...(decisionBySkill.get(match.name) ?? {}) }));
+      const pendingCandidates = route.activeSkills
+        .filter((match) => match.selectedAsRoot === true && match.required !== true && selectionMode === "host-gated" && !decisionBySkill.has(match.name))
+        .map((match) => ({ skill: match.name, decisionState: "absent" as const }));
       const loaded: Array<Record<string, unknown>> = [];
       const codexMatches = eligibleLoadOrder.flatMap((name, routeIndex) => {
         const match = activeByName.get(name);
@@ -1213,8 +1210,9 @@ export const skillCatalogToolModule: BridgeToolModule = {
           ...loadSelection,
           decisions,
           skippedCandidates,
+          pendingCandidates,
           policy: selectionMode === "host-gated"
-            ? "Required roots are obligations; optional root procedural context and its dependency closure are materialized only after accepted decisions."
+            ? "Required roots are obligations; optional roots without a host decision remain pending, while only explicit accepted/skipped decisions are recorded as telemetry."
             : "Compatibility mode: the complete routed dependency closure may load without an explicit host decision.",
         },
         contextAssembly: {

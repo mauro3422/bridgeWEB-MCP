@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { mssrHostCallEnvelopeSchema } from "@mauroprime/mssr";
 import { recordExternalMssrTelemetry, resolveExternalMssrRouteTrace } from "./mssr-observatory.js";
-import { beginToolMetric, finishToolMetric, hasObservedToolCall, resolveObservedSessionTrace } from "./metrics.js";
+import { beginToolMetric, classifyMssrRoutingStatus, finishToolMetric, hasObservedToolCall, resolveObservedSessionTrace } from "./metrics.js";
 
 const DEFAULT_TOKEN_PATH = path.resolve(process.cwd(), "data", "mssr-ingest.token");
 
@@ -49,7 +49,7 @@ export function ingestMssrTelemetry(payload: unknown) {
         privacy: "No raw prompt, transcript, arguments, output, error text, secret, or private reasoning stored.",
       };
     }
-    const bootstrap = envelope.tool.name.startsWith("mssr_");
+    const bootstrap = classifyMssrRoutingStatus(envelope.tool.name) === "bootstrap";
     const correlatedTrace = envelope.traceId
       ?? (bootstrap ? resolveExternalMssrRouteTrace(envelope.tool.startedAt, envelope.tool.endedAt, envelope.caller) : undefined)
       ?? resolveObservedSessionTrace(envelope.host.sessionKey);
@@ -67,7 +67,7 @@ export function ingestMssrTelemetry(payload: unknown) {
       messageKey: envelope.host.messageKey,
       callKey: envelope.host.callKey,
       projectKey: envelope.host.projectKey,
-      routingStatus: bootstrap ? "bootstrap" : correlatedTrace ? "traced" : "unrouted",
+      routingStatus: classifyMssrRoutingStatus(envelope.tool.name, correlatedTrace),
     });
     metric.id = envelope.eventId;
     metric.startedAtIso = envelope.tool.startedAt;

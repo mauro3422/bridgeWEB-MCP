@@ -7,7 +7,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { SERVER_NAME, SERVER_VERSION } from "./config.js";
-import { beginToolMetric, classifyToolAuditError, extractToolResultMetric, finishToolMetric, type BridgeMetricProfile } from "./metrics.js";
+import { beginToolMetric, classifyMssrRoutingStatus, classifyToolAuditError, extractToolResultMetric, finishToolMetric, type BridgeMetricProfile } from "./metrics.js";
 import {
   drainBridgeNotices,
   emitBridgeNotice,
@@ -41,34 +41,6 @@ const mssrRouteTools = new Set([
   "skill_recommend",
   "skill_route_plan",
   "skill_bootstrap",
-]);
-const mssrBootstrapTools = new Set([
-  "project_context_load",
-  "workflow_guide_recommend",
-  "workflow_guide_load",
-  "skill_catalog",
-  "skill_recommend",
-  "skill_route_audit",
-  "skill_route_vocabulary",
-  "skill_route_plan",
-  "skill_bootstrap",
-]);
-const mssrExemptTools = new Set([
-  "system_info",
-  "tunnel_health",
-  "bridge_health",
-  "bridge_self_check",
-  "bridge_restart_status",
-  "bridge_metrics_status",
-  "bridge_metrics_summary",
-  "bridge_metrics_recent",
-  "bridge_metrics_query",
-  "bridge_visualization_catalog",
-  "bridge_visualize_metrics",
-  "mssr_observatory_query",
-  "mssr_trace_evidence",
-  "bridge_notice_status",
-  "bridge_notice_drain",
 ]);
 const sessionProjects = new Map<string, string>();
 const sessionProjectRoots = new Map<string, string>();
@@ -360,9 +332,7 @@ function routingStatus(
   args: Record<string, unknown>,
 ): NonNullable<BridgeMetricProfile["routingStatus"]> {
   const effective = delegatedArgs(toolName, args).toolName;
-  if (mssrBootstrapTools.has(effective)) return "bootstrap";
-  if (mssrExemptTools.has(effective)) return "exempt";
-  return traceId ? "traced" : "unrouted";
+  return classifyMssrRoutingStatus(effective, traceId);
 }
 
 function metricProfile(

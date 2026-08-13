@@ -15,7 +15,7 @@ Cada incidente debe incluir:
 - prueba de regresión;
 - seguimiento pendiente.
 
-Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/skills pertenecen a `C:\Dev\mssr\docs\skill-routing\INCIDENTS.md`; los defectos exclusivos de un proyecto pertenecen a su `.bridge/PROJECT_STATE.md`, `docs/INCIDENTS.md` o `BUGS.md`.
+Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/skills pertenecen a `D:\Dev\mssr\docs\skill-routing\INCIDENTS.md`; los defectos exclusivos de un proyecto pertenecen a su `.bridge/PROJECT_STATE.md`, `docs/INCIDENTS.md` o `BUGS.md`.
 
 ---
 
