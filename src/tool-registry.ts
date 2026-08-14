@@ -59,7 +59,7 @@ const destructiveToolNames = new Set([
   "media_review_ingest",
   "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_finish", "binary_upload_abort",
   "blender_open", "blender_viewport_screenshot", "blender_focus_review", "blender_review_bundle", "blender_execute_code", "blender_batch_script", "blender_store_reference_image", "blender_install_reference_pack", "blender_setup_character_references",
-  "godot_mcp_action", "godot_screen_capture_save",
+  "godot_mcp_action", "godot_scene_create", "godot_screen_capture_save",
 ]);
 
 const aliasTargets = new Map<string, string>([
@@ -176,6 +176,16 @@ const toolUsageGuidance = new Map<string, BridgeToolUsageGuidance>([
     prerequisites: ["Inspect the live tool schema and connected project identity. This dedicated action does not require a separate user confirmation for each Godot operation."],
     preflightTools: ["godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list"],
     recovery: [{ code: "provider-unavailable", toolName: "godot_mcp_status", instruction: "Start the full local Godot provider, connect the intended project, and retry the exact action." }],
+  }],
+  ["godot_scene_open", {
+    prerequisites: ["Reuse the already-connected intended Godot editor. Use native scene opening instead of Ctrl+O, mouse clicks, SendKeys, or launching another editor."],
+    preflightTools: ["godot_mcp_status", "godot_mcp_instance_list"],
+    recovery: [{ code: "provider-unavailable", toolName: "godot_mcp_status", instruction: "Recover/connect the intended Godot editor first; do not fall back to UI automation for scene opening." }],
+  }],
+  ["godot_scene_create", {
+    prerequisites: ["Reuse the already-connected intended Godot editor and provide an explicit res:// destination plus root node type. The tool persists and reads back the scene before reporting success."],
+    preflightTools: ["godot_mcp_status", "godot_mcp_instance_list"],
+    recovery: [{ code: "provider-unavailable", toolName: "godot_mcp_status", instruction: "Recover/connect the intended Godot editor before creating the scene; do not launch a duplicate editor implicitly." }],
   }],
   ["godot_screen_capture_save", {
     prerequisites: ["Verify a runtime instance is connected before requesting a capture."],

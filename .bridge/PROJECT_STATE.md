@@ -1,7 +1,7 @@
 # Bridge project state
 
 ## Current release
-Bridge `0.6.90` is closed in the working tree and pending publication/restart. It packages MSSR core `0.2.12` and delivers the durable project context plane: `skill_route_plan` and `skill_bootstrap` select messages from `.bridge/mssr-context-inbox.json`, redeliver pending messages until `mssr_context_ack` records an explicit receipt, then suppress identical acknowledged evidence on the Bridge delivery surface (`filterAcknowledgedContextMessages` in `src/mssr-context-plane.ts`). Reappearance requires changed revision or content. Runtime version `0.6.90` readback, tunnel health, and catalog count are pending until a controlled restart.
+Bridge `0.6.91` is live after a controlled HTTP-surface restart. The runtime reports version `0.6.91`, 149 tools, and dedicated schemas for `godot_scene_open` and `godot_scene_create`. The tools use native provider/editor operations, verify persistence/editor readback, require the already-connected intended editor, and explicitly avoid Ctrl+O, clicks, SendKeys, or implicit duplicate-editor launch. Bridge packages MSSR core `0.2.14`, and the runtime skill catalog discovers the user-owned `godot-scene-authoring` skill. Focused tests and the full Bridge regression suite pass. A GodotAtlas smoke call correctly failed closed because the currently open `Godot Atlas Demo` project does not enable `addons/godot_mcp` and the provider reports `connected=false`; no UI fallback was attempted. The remaining GodotAtlas-specific operational step is to connect/enable the MCP plugin in that project before using the new native scene tools there.
 
 ## Current MSSR learning state
 

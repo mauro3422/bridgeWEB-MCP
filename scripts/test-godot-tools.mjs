@@ -13,10 +13,13 @@ await fs.mkdir(tempRoot, { recursive: true });
 
 const advertisedTools = [
   { name: 'read_scene', description: 'Read a Godot scene.', inputSchema: { type: 'object' } },
+  { name: 'scene_tree_dump', description: 'Read the active edited scene.', inputSchema: { type: 'object' } },
   { name: 'take_screenshot', description: 'Capture the game viewport.', inputSchema: { type: 'object' } },
   { name: 'create_scene', description: 'Create a scene.', inputSchema: { type: 'object' } },
+  { name: 'open_in_godot', description: 'Open a resource in the connected Godot editor.', inputSchema: { type: 'object' } },
 ];
 const observedCalls = [];
+let activeScenePath = 'res://main.tscn';
 
 const server = http.createServer(async (req, res) => {
   res.setHeader('content-type', 'application/json');
@@ -45,9 +48,14 @@ const server = http.createServer(async (req, res) => {
         runtime_instance_id: 'runtime-test',
       };
     } else if (body.name === 'read_scene') {
-      payload = { scene_path: 'res://main.tscn', root: { name: 'Root', type: 'Node3D', children: [] } };
+      payload = { scene_path: body.args.scene_path, root: { name: 'Root', type: 'Node3D', children: [] } };
+    } else if (body.name === 'scene_tree_dump') {
+      payload = { ok: true, scene_path: activeScenePath, tree: 'Root (Node3D)' };
     } else if (body.name === 'create_scene') {
       payload = { created: true, scene_path: body.args.scene_path, node_count: 1 };
+    } else if (body.name === 'open_in_godot') {
+      activeScenePath = body.args.path;
+      payload = { ok: true, message: `Opened ${body.args.path}` };
     } else if (body.name === 'take_screenshot') {
       await fs.writeFile(capturePath, png);
       payload = { absolute_path: capturePath, width: 1, height: 1 };
@@ -79,11 +87,11 @@ try {
   assert.equal(status.status.tool_mode, 'full');
 
   const catalog = await registry.call('godot_mcp_tool_list', { port, includeSchemas: false });
-  assert.deepEqual(catalog.tools.map((tool) => tool.name).sort(), ['create_scene', 'read_scene', 'take_screenshot']);
-  assert.equal(catalog.providerCount, 3);
-  assert.equal(catalog.toolCount, 3);
-  assert.equal(catalog.readOnlyCount, 2);
-  assert.equal(catalog.actionCount, 1);
+  assert.deepEqual(catalog.tools.map((tool) => tool.name).sort(), ['create_scene', 'open_in_godot', 'read_scene', 'scene_tree_dump', 'take_screenshot']);
+  assert.equal(catalog.providerCount, 5);
+  assert.equal(catalog.toolCount, 5);
+  assert.equal(catalog.readOnlyCount, 3);
+  assert.equal(catalog.actionCount, 2);
   assert.equal(catalog.tools.find((tool) => tool.name === 'create_scene').classification, 'action');
 
   const instances = await registry.call('godot_mcp_instance_list', { port });
@@ -127,6 +135,67 @@ try {
   assert.equal(created.result.scene_path, 'res://created-by-action.tscn');
   const createCall = observedCalls.find((call) => call.name === 'create_scene');
   assert.equal(createCall.args.root_type, 'Node3D');
+
+  const openedScenes = await registry.call('godot_scene_open', {
+    port,
+    scenePaths: ['res://fixtures/a.tscn', 'res://fixtures/b.tscn'],
+    activeScenePath: 'res://fixtures/a.tscn',
+  });
+  assert.equal(openedScenes.uiAutomation, false);
+  assert.equal(openedScenes.verified, true);
+  assert.equal(openedScenes.opened.length, 2);
+  assert.equal(openedScenes.activeScenePath, 'res://fixtures/a.tscn');
+  assert.equal(openedScenes.opened[0].readback.scenePath, 'res://fixtures/a.tscn');
+  assert.equal(activeScenePath, 'res://fixtures/a.tscn');
+  assert(observedCalls.some((call) => call.name === 'open_in_godot' && call.args.path === 'res://fixtures/b.tscn'));
+  assert(observedCalls.some((call) => call.name === 'scene_tree_dump'));
+
+  await assert.rejects(
+    registry.call('godot_scene_open', { port, scenePaths: ['C:/wrong.tscn'] }),
+    /must start with res:\/\//,
+  );
+  await assert.rejects(
+    registry.call('godot_scene_open', { port, scenePaths: ['res://not-a-scene.txt'] }),
+    /must end in \.tscn or \.scn/,
+  );
+  await assert.rejects(
+    registry.call('godot_scene_open', {
+      port,
+      scenePaths: ['res://fixtures/a.tscn'],
+      activeScenePath: 'res://fixtures/b.tscn',
+    }),
+    /must also appear in scenePaths/,
+  );
+
+  const dedicatedCreated = await registry.call('godot_scene_create', {
+    port,
+    scenePath: 'res://fixtures/dedicated-created.tscn',
+    rootNodeType: 'Node3D',
+    rootNodeName: 'DedicatedCreated',
+    nodes: [{ name: 'Child', type: 'Node' }],
+    openInEditor: true,
+  });
+  assert.equal(dedicatedCreated.created, true);
+  assert.equal(dedicatedCreated.verified, true);
+  assert.equal(dedicatedCreated.uiAutomation, false);
+  assert.equal(dedicatedCreated.openedInEditor, true);
+  assert.equal(dedicatedCreated.activeScenePath, 'res://fixtures/dedicated-created.tscn');
+  const dedicatedCreateCall = observedCalls.filter((call) => call.name === 'create_scene').at(-1);
+  assert.equal(dedicatedCreateCall.args.scene_path, 'res://fixtures/dedicated-created.tscn');
+  assert.equal(dedicatedCreateCall.args.root_node_type, 'Node3D');
+  assert.equal(dedicatedCreateCall.args.root_node_name, 'DedicatedCreated');
+  assert.deepEqual(dedicatedCreateCall.args.nodes, [{ name: 'Child', type: 'Node' }]);
+
+  const noOpenCreateCallsBefore = observedCalls.filter((call) => call.name === 'open_in_godot').length;
+  const dedicatedCreatedWithoutOpen = await registry.call('godot_scene_create', {
+    port,
+    scenePath: 'res://fixtures/persist-only.tscn',
+    rootNodeType: 'Node2D',
+    openInEditor: false,
+  });
+  assert.equal(dedicatedCreatedWithoutOpen.verified, true);
+  assert.equal(dedicatedCreatedWithoutOpen.openedInEditor, false);
+  assert.equal(observedCalls.filter((call) => call.name === 'open_in_godot').length, noOpenCreateCallsBefore);
 
   const capture = await registry.call('godot_screen_capture_save', {
     port,

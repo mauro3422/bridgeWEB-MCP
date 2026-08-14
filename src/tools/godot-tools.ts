@@ -192,6 +192,74 @@ async function actionQuery(toolName: string, args: Record<string, unknown>, port
   };
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function normalizeScenePath(value: string): string {
+  const scenePath = value.trim().replace(/\\/g, "/");
+  if (!scenePath.startsWith("res://")) throw new Error(`Godot scene path must start with res://: ${value}`);
+  if (scenePath.slice("res://".length).split("/").includes("..")) throw new Error(`Godot scene path may not escape the project: ${value}`);
+  const lower = scenePath.toLowerCase();
+  if (!lower.endsWith(".tscn") && !lower.endsWith(".scn")) throw new Error(`Godot scene path must end in .tscn or .scn: ${value}`);
+  return scenePath;
+}
+
+function assertProviderResult(toolName: string, value: unknown): Record<string, unknown> {
+  const result = asRecord(value);
+  if (result.ok === false || (typeof result.error === "string" && result.error.trim())) {
+    throw new Error(`Godot provider ${toolName} failed: ${String(result.error ?? "unknown error")}`);
+  }
+  return result;
+}
+
+function sceneReadbackSummary(value: unknown): Record<string, unknown> {
+  const result = assertProviderResult("read_scene", value);
+  const root = asRecord(result.root);
+  return {
+    scenePath: result.scene_path,
+    rootName: root.name,
+    rootType: root.type,
+    childCount: Array.isArray(root.children) ? root.children.length : undefined,
+  };
+}
+
+async function requireConnectedEditor(port: number) {
+  const status = await getStatus(port);
+  const detail = asRecord(status.status);
+  if (!detail.connected) throw new Error(`No connected Godot editor is available at ${status.endpoint}. Reuse/connect the intended editor before scene operations.`);
+  if (!detail.editor_instance_id) throw new Error("Godot provider is connected but did not report an editor instance id.");
+  return { status, detail };
+}
+
+async function verifyActiveScene(scenePath: string, port: number, timeoutMs: number): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + Math.min(timeoutMs, 4000);
+  let last: Record<string, unknown> = {};
+  do {
+    const response = await safeQuery("scene_tree_dump", {}, port, timeoutMs);
+    last = assertProviderResult("scene_tree_dump", response.result);
+    if (last.scene_path === scenePath) return last;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  } while (Date.now() < deadline);
+  throw new Error(`Godot editor did not confirm '${scenePath}' as the active edited scene; last scene was '${String(last.scene_path ?? "unknown")}'.`);
+}
+
+async function openSceneNative(scenePath: string, port: number, timeoutMs: number) {
+  const readResponse = await safeQuery("read_scene", { scene_path: scenePath }, port, timeoutMs);
+  const readback = sceneReadbackSummary(readResponse.result);
+  const openResponse = await actionQuery("open_in_godot", { path: scenePath }, port, timeoutMs);
+  const openResult = assertProviderResult("open_in_godot", openResponse.result);
+  const active = await verifyActiveScene(scenePath, port, timeoutMs);
+  return {
+    scenePath,
+    opened: true,
+    verifiedActive: true,
+    readback,
+    providerMessage: openResult.message,
+    activeRootName: typeof active.tree === "string" ? String(active.tree).split(/\r?\n/, 1)[0] : undefined,
+  };
+}
+
 export const godotToolModule: BridgeToolModule = {
   name: "godot",
   tools: [
@@ -253,6 +321,40 @@ export const godotToolModule: BridgeToolModule = {
           timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS, minimum: 1000, maximum: 120000 },
         },
         required: ["toolName"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "godot_scene_open",
+      description: "Open one or more existing Godot .tscn/.scn scenes in the already-connected editor using Godot's native editor API, never Ctrl+O/click automation. Each scene is read back before opening and confirmed as the active edited scene immediately after opening. Optionally choose which opened scene remains active at the end.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          scenePaths: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 24, description: "Existing res:// .tscn/.scn scene paths to open in order." },
+          activeScenePath: { type: "string", description: "Optional opened scene that should remain active after the batch. Must also appear in scenePaths." },
+          port: { type: "number", default: DEFAULT_GODOT_HTTP_PORT, minimum: 1024, maximum: 65535 },
+          timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS, minimum: 1000, maximum: 120000 },
+        },
+        required: ["scenePaths"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "godot_scene_create",
+      description: "Create and persist a Godot .tscn/.scn scene through the connected native Godot provider, read the saved scene back, and optionally open it in the same editor without UI automation. Supports a root node, optional nested child node specs, and an optional root script.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          scenePath: { type: "string", description: "Destination res:// path ending in .tscn or .scn." },
+          rootNodeType: { type: "string", description: "Godot root node class, e.g. Node, Node2D, Node3D, Control." },
+          rootNodeName: { type: "string", description: "Optional root node name. Omit to derive it from the filename." },
+          nodes: { type: "array", items: { type: "object", additionalProperties: true }, description: "Optional nested child node specs accepted by the provider create_scene tool." },
+          attachScript: { type: "string", description: "Optional res:// script path to attach to the root node." },
+          openInEditor: { type: "boolean", default: true, description: "Open and verify the created scene in the already-connected editor after persistence." },
+          port: { type: "number", default: DEFAULT_GODOT_HTTP_PORT, minimum: 1024, maximum: 65535 },
+          timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS, minimum: 1000, maximum: 120000 },
+        },
+        required: ["scenePath", "rootNodeType"],
         additionalProperties: false,
       },
     },
@@ -325,6 +427,83 @@ export const godotToolModule: BridgeToolModule = {
         timeoutMs: z.number().int().min(1000).max(120000).default(DEFAULT_TIMEOUT_MS),
       }).parse(raw);
       return await actionQuery(parsed.toolName, parsed.arguments, parsed.port, parsed.timeoutMs);
+    },
+    godot_scene_open: async (raw) => {
+      const parsed = z.object({
+        scenePaths: z.array(z.string().min(1)).min(1).max(24),
+        activeScenePath: z.string().min(1).optional(),
+        port: z.number().int().min(1024).max(65535).default(DEFAULT_GODOT_HTTP_PORT),
+        timeoutMs: z.number().int().min(1000).max(120000).default(DEFAULT_TIMEOUT_MS),
+      }).parse(raw);
+      const scenePaths = parsed.scenePaths.map(normalizeScenePath);
+      if (new Set(scenePaths).size !== scenePaths.length) throw new Error("scenePaths must not contain duplicates.");
+      const activeScenePath = parsed.activeScenePath ? normalizeScenePath(parsed.activeScenePath) : scenePaths.at(-1)!;
+      if (!scenePaths.includes(activeScenePath)) throw new Error("activeScenePath must also appear in scenePaths.");
+      const { status, detail } = await requireConnectedEditor(parsed.port);
+      const opened = [];
+      for (const scenePath of scenePaths) opened.push(await openSceneNative(scenePath, parsed.port, parsed.timeoutMs));
+      if (scenePaths.at(-1) !== activeScenePath) await openSceneNative(activeScenePath, parsed.port, parsed.timeoutMs);
+      const finalActive = await verifyActiveScene(activeScenePath, parsed.port, parsed.timeoutMs);
+      return {
+        endpoint: status.endpoint,
+        projectPath: detail.project_path,
+        projectId: detail.project_id,
+        projectName: detail.project_name,
+        editorInstanceId: detail.editor_instance_id,
+        opened,
+        activeScenePath: finalActive.scene_path,
+        verified: finalActive.scene_path === activeScenePath,
+        uiAutomation: false,
+        nativeProviderOperation: "open_in_godot",
+      };
+    },
+    godot_scene_create: async (raw) => {
+      const parsed = z.object({
+        scenePath: z.string().min(1),
+        rootNodeType: z.string().min(1),
+        rootNodeName: z.string().min(1).optional(),
+        nodes: z.array(z.record(z.string(), z.unknown())).optional(),
+        attachScript: z.string().min(1).optional(),
+        openInEditor: z.boolean().default(true),
+        port: z.number().int().min(1024).max(65535).default(DEFAULT_GODOT_HTTP_PORT),
+        timeoutMs: z.number().int().min(1000).max(120000).default(DEFAULT_TIMEOUT_MS),
+      }).parse(raw);
+      const scenePath = normalizeScenePath(parsed.scenePath);
+      const { status, detail } = await requireConnectedEditor(parsed.port);
+      const providerArgs: Record<string, unknown> = {
+        scene_path: scenePath,
+        root_node_type: parsed.rootNodeType,
+      };
+      if (parsed.rootNodeName) providerArgs.root_node_name = parsed.rootNodeName;
+      if (parsed.nodes) providerArgs.nodes = parsed.nodes;
+      if (parsed.attachScript) providerArgs.attach_script = parsed.attachScript;
+      const createResponse = await actionQuery("create_scene", providerArgs, parsed.port, parsed.timeoutMs);
+      const createResult = assertProviderResult("create_scene", createResponse.result);
+      const readResponse = await safeQuery("read_scene", { scene_path: scenePath }, parsed.port, parsed.timeoutMs);
+      const readback = sceneReadbackSummary(readResponse.result);
+      let openedInEditor = false;
+      let activeScenePath: unknown = undefined;
+      if (parsed.openInEditor) {
+        const opened = await openSceneNative(scenePath, parsed.port, parsed.timeoutMs);
+        openedInEditor = opened.verifiedActive;
+        activeScenePath = scenePath;
+      }
+      return {
+        endpoint: status.endpoint,
+        projectPath: detail.project_path,
+        projectId: detail.project_id,
+        projectName: detail.project_name,
+        editorInstanceId: detail.editor_instance_id,
+        scenePath,
+        created: createResult.created ?? true,
+        providerResult: createResult,
+        readback,
+        openedInEditor,
+        activeScenePath,
+        verified: readback.scenePath === scenePath && (!parsed.openInEditor || openedInEditor),
+        uiAutomation: false,
+        nativeProviderOperations: parsed.openInEditor ? ["create_scene", "read_scene", "open_in_godot", "scene_tree_dump"] : ["create_scene", "read_scene"],
+      };
     },
     godot_screen_capture_save: async (raw) => {
       const parsed = z.object({

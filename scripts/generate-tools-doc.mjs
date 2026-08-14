@@ -16,6 +16,7 @@ const groupRules = [
   ["Ejecucion / terminal", ["run_command", "terminal_start", "terminal_write", "terminal_read", "terminal_stop", "terminal_list"]],
   ["Blender", ["blender_status", "blender_open", "blender_scene_info", "blender_viewport_screenshot", "blender_focus_review", "blender_review_bundle", "blender_execute_code", "blender_batch_script", "blender_store_reference_image", "blender_validate_reference_pack", "blender_install_reference_pack", "blender_setup_character_references", "blender_character_loop_status"]],
   ["Tablet Whiteboard", ["whiteboard_capture_pc_view", "whiteboard_latest_capture", "whiteboard_capture_list"]],
+  ["Godot", ["godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list", "godot_mcp_query", "godot_mcp_action", "godot_scene_open", "godot_scene_create", "godot_screen_capture_save"]],
   ["Git", ["git_status", "git_set_remote", "git_commit_all", "git_push_current_branch"]],
   ["Bridge ops", ["tunnel_health", "bridge_self_check", "bridge_verify_all", "bridge_request_restart", "bridge_restart_status"]],
   ["Metricas / visualizaciones", ["bridge_metrics_status", "bridge_metrics_summary", "bridge_metrics_recent", "bridge_tool_audit", "bridge_visualization_catalog", "bridge_visualize_metrics"]],
