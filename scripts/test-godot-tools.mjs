@@ -38,14 +38,20 @@ const server = http.createServer(async (req, res) => {
     observedCalls.push(body);
     let payload;
     if (body.name === 'get_godot_status') {
+      const targetPath = body.target?.projectPath ?? 'C:/Dev/godot-test/';
+      const selected = targetPath.includes('other')
+        ? { project_path: 'C:/Dev/other/', project_id: 'fedcba9876543210', project_name: 'Other Godot', editor_instance_id: 'editor-other' }
+        : { project_path: 'C:/Dev/godot-test/', project_id: '0123456789abcdef', project_name: 'Godot Test', editor_instance_id: 'editor-test' };
       payload = {
         connected: true,
         tool_mode: 'full',
-        project_path: 'C:/Dev/godot-test/',
-        project_id: '0123456789abcdef',
-        project_name: 'Godot Test',
-        editor_instance_id: 'editor-test',
+        ...selected,
         runtime_instance_id: 'runtime-test',
+        editor_count: 2,
+        instances: [
+          { project_path: 'C:/Dev/godot-test/', project_id: '0123456789abcdef', project_name: 'Godot Test', editor_instance_id: 'editor-test', connected_at: '2026-08-14T00:00:00.000Z' },
+          { project_path: 'C:/Dev/other/', project_id: 'fedcba9876543210', project_name: 'Other Godot', editor_instance_id: 'editor-other', connected_at: '2026-08-14T00:00:01.000Z' },
+        ],
       };
     } else if (body.name === 'read_scene') {
       payload = { scene_path: body.args.scene_path, root: { name: 'Root', type: 'Node3D', children: [] } };
@@ -95,9 +101,11 @@ try {
   assert.equal(catalog.tools.find((tool) => tool.name === 'create_scene').classification, 'action');
 
   const instances = await registry.call('godot_mcp_instance_list', { port });
+  assert.equal(instances.instances.length, 2);
   assert.equal(instances.instances[0].editorInstanceId, 'editor-test');
   assert.equal(instances.instances[0].runtimeConnected, true);
   assert.equal(instances.instances[0].mode, 'full');
+  assert.equal(instances.instances[1].editorInstanceId, 'editor-other');
 
   const scene = await registry.call('godot_mcp_query', {
     port,
@@ -136,8 +144,14 @@ try {
   const createCall = observedCalls.find((call) => call.name === 'create_scene');
   assert.equal(createCall.args.root_type, 'Node3D');
 
+  await assert.rejects(
+    registry.call('godot_scene_open', { port, scenePaths: ['res://fixtures/a.tscn'] }),
+    /Multiple Godot editors are connected/,
+  );
+
   const openedScenes = await registry.call('godot_scene_open', {
     port,
+    projectPath: 'C:/Dev/godot-test/',
     scenePaths: ['res://fixtures/a.tscn', 'res://fixtures/b.tscn'],
     activeScenePath: 'res://fixtures/a.tscn',
   });
@@ -169,6 +183,7 @@ try {
 
   const dedicatedCreated = await registry.call('godot_scene_create', {
     port,
+    projectPath: 'C:/Dev/godot-test/',
     scenePath: 'res://fixtures/dedicated-created.tscn',
     rootNodeType: 'Node3D',
     rootNodeName: 'DedicatedCreated',
@@ -189,6 +204,7 @@ try {
   const noOpenCreateCallsBefore = observedCalls.filter((call) => call.name === 'open_in_godot').length;
   const dedicatedCreatedWithoutOpen = await registry.call('godot_scene_create', {
     port,
+    projectPath: 'C:/Dev/godot-test/',
     scenePath: 'res://fixtures/persist-only.tscn',
     rootNodeType: 'Node2D',
     openInEditor: false,

@@ -9,6 +9,33 @@ const DEFAULT_GODOT_HTTP_PORT = 6506;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 
+type GodotEditorTarget = {
+  projectPath?: string;
+  projectId?: string;
+  editorInstanceId?: string;
+};
+
+const targetSchemaProperties = {
+  projectPath: { type: "string", description: "Optional connected Godot project path used to target one editor when multiple projects are open." },
+  projectId: { type: "string", description: "Optional stable Godot project id used to target one connected editor." },
+  editorInstanceId: { type: "string", description: "Optional exact connected Godot editor instance id." },
+} as const;
+
+const targetZodFields = {
+  projectPath: z.string().min(1).optional(),
+  projectId: z.string().min(1).optional(),
+  editorInstanceId: z.string().min(1).optional(),
+};
+
+function editorTarget(value: GodotEditorTarget): GodotEditorTarget | undefined {
+  const target = {
+    ...(value.projectPath ? { projectPath: value.projectPath } : {}),
+    ...(value.projectId ? { projectId: value.projectId } : {}),
+    ...(value.editorInstanceId ? { editorInstanceId: value.editorInstanceId } : {}),
+  };
+  return Object.keys(target).length ? target : undefined;
+}
+
 export const GODOT_READ_ONLY_TOOL_NAMES = new Set([
   "list_dir",
   "read_file",
@@ -90,12 +117,18 @@ async function providerGet(pathname: string, port: number) {
   return await requestJson({ port, method: "GET", pathname });
 }
 
-async function providerTool(name: string, args: Record<string, unknown>, port: number, timeoutMs = DEFAULT_TIMEOUT_MS) {
+async function providerTool(
+  name: string,
+  args: Record<string, unknown>,
+  port: number,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  target?: GodotEditorTarget,
+) {
   return await requestJson({
     port,
     method: "POST",
     pathname: "/tool",
-    body: { name, args },
+    body: target ? { name, args, target } : { name, args },
     timeoutMs,
   });
 }
@@ -108,9 +141,9 @@ function parseMcpText(result: Record<string, unknown>): unknown {
   try { return JSON.parse(text); } catch { return text; }
 }
 
-async function getStatus(port: number) {
+async function getStatus(port: number, target?: GodotEditorTarget) {
   const health = await providerGet("/health", port);
-  const status = await providerTool("get_godot_status", {}, port);
+  const status = await providerTool("get_godot_status", {}, port, DEFAULT_TIMEOUT_MS, target);
   return {
     available: true,
     endpoint: `http://127.0.0.1:${port}`,
@@ -162,14 +195,14 @@ async function getCatalog(port: number, query?: string, includeSchemas = true) {
   };
 }
 
-async function safeQuery(toolName: string, args: Record<string, unknown>, port: number, timeoutMs: number) {
+async function safeQuery(toolName: string, args: Record<string, unknown>, port: number, timeoutMs: number, target?: GodotEditorTarget) {
   if (!GODOT_READ_ONLY_TOOL_NAMES.has(toolName)) {
     throw new Error(`Godot tool '${toolName}' is not classified read-only; use godot_mcp_action.`);
   }
   const catalog = await getCatalog(port, toolName, true);
   const exact = catalog.tools.find((tool) => tool.name === toolName);
   if (!exact) throw new Error(`Godot tool '${toolName}' is not exposed by the current live provider catalog.`);
-  const response = await providerTool(toolName, args, port, timeoutMs);
+  const response = await providerTool(toolName, args, port, timeoutMs, target);
   return {
     toolName,
     classification: "read-only",
@@ -177,14 +210,14 @@ async function safeQuery(toolName: string, args: Record<string, unknown>, port: 
   };
 }
 
-async function actionQuery(toolName: string, args: Record<string, unknown>, port: number, timeoutMs: number) {
+async function actionQuery(toolName: string, args: Record<string, unknown>, port: number, timeoutMs: number, target?: GodotEditorTarget) {
   if (GODOT_READ_ONLY_TOOL_NAMES.has(toolName)) {
     throw new Error(`Godot tool '${toolName}' is classified read-only; use godot_mcp_query.`);
   }
   const catalog = await getCatalog(port, toolName, true);
   const exact = catalog.tools.find((tool) => tool.name === toolName);
   if (!exact) throw new Error(`Godot tool '${toolName}' is not exposed by the current live provider catalog.`);
-  const response = await providerTool(toolName, args, port, timeoutMs);
+  const response = await providerTool(toolName, args, port, timeoutMs, target);
   return {
     toolName,
     classification: "action",
@@ -224,19 +257,23 @@ function sceneReadbackSummary(value: unknown): Record<string, unknown> {
   };
 }
 
-async function requireConnectedEditor(port: number) {
-  const status = await getStatus(port);
+async function requireConnectedEditor(port: number, target?: GodotEditorTarget) {
+  const status = await getStatus(port, target);
   const detail = asRecord(status.status);
-  if (!detail.connected) throw new Error(`No connected Godot editor is available at ${status.endpoint}. Reuse/connect the intended editor before scene operations.`);
+  const instances = Array.isArray(detail.instances) ? detail.instances.map(asRecord) : [];
+  if (!detail.connected) throw new Error(`No connected Godot editor matches the requested target at ${status.endpoint}. Reuse/connect the intended editor before scene operations.`);
+  if (!target && instances.length > 1) {
+    throw new Error(`Multiple Godot editors are connected (${instances.length}). Specify projectPath, projectId, or editorInstanceId so Bridge cannot mutate the wrong project.`);
+  }
   if (!detail.editor_instance_id) throw new Error("Godot provider is connected but did not report an editor instance id.");
   return { status, detail };
 }
 
-async function verifyActiveScene(scenePath: string, port: number, timeoutMs: number): Promise<Record<string, unknown>> {
+async function verifyActiveScene(scenePath: string, port: number, timeoutMs: number, target?: GodotEditorTarget): Promise<Record<string, unknown>> {
   const deadline = Date.now() + Math.min(timeoutMs, 4000);
   let last: Record<string, unknown> = {};
   do {
-    const response = await safeQuery("scene_tree_dump", {}, port, timeoutMs);
+    const response = await safeQuery("scene_tree_dump", {}, port, timeoutMs, target);
     last = assertProviderResult("scene_tree_dump", response.result);
     if (last.scene_path === scenePath) return last;
     await new Promise((resolve) => setTimeout(resolve, 80));
@@ -244,12 +281,12 @@ async function verifyActiveScene(scenePath: string, port: number, timeoutMs: num
   throw new Error(`Godot editor did not confirm '${scenePath}' as the active edited scene; last scene was '${String(last.scene_path ?? "unknown")}'.`);
 }
 
-async function openSceneNative(scenePath: string, port: number, timeoutMs: number) {
-  const readResponse = await safeQuery("read_scene", { scene_path: scenePath }, port, timeoutMs);
+async function openSceneNative(scenePath: string, port: number, timeoutMs: number, target?: GodotEditorTarget) {
+  const readResponse = await safeQuery("read_scene", { scene_path: scenePath }, port, timeoutMs, target);
   const readback = sceneReadbackSummary(readResponse.result);
-  const openResponse = await actionQuery("open_in_godot", { path: scenePath }, port, timeoutMs);
+  const openResponse = await actionQuery("open_in_godot", { path: scenePath }, port, timeoutMs, target);
   const openResult = assertProviderResult("open_in_godot", openResponse.result);
-  const active = await verifyActiveScene(scenePath, port, timeoutMs);
+  const active = await verifyActiveScene(scenePath, port, timeoutMs, target);
   return {
     scenePath,
     opened: true,
@@ -332,6 +369,7 @@ export const godotToolModule: BridgeToolModule = {
         properties: {
           scenePaths: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 24, description: "Existing res:// .tscn/.scn scene paths to open in order." },
           activeScenePath: { type: "string", description: "Optional opened scene that should remain active after the batch. Must also appear in scenePaths." },
+          ...targetSchemaProperties,
           port: { type: "number", default: DEFAULT_GODOT_HTTP_PORT, minimum: 1024, maximum: 65535 },
           timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS, minimum: 1000, maximum: 120000 },
         },
@@ -351,6 +389,7 @@ export const godotToolModule: BridgeToolModule = {
           nodes: { type: "array", items: { type: "object", additionalProperties: true }, description: "Optional nested child node specs accepted by the provider create_scene tool." },
           attachScript: { type: "string", description: "Optional res:// script path to attach to the root node." },
           openInEditor: { type: "boolean", default: true, description: "Open and verify the created scene in the already-connected editor after persistence." },
+          ...targetSchemaProperties,
           port: { type: "number", default: DEFAULT_GODOT_HTTP_PORT, minimum: 1024, maximum: 65535 },
           timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS, minimum: 1000, maximum: 120000 },
         },
@@ -396,19 +435,21 @@ export const godotToolModule: BridgeToolModule = {
     godot_mcp_instance_list: async (raw) => {
       const parsed = z.object({ port: z.number().int().min(1024).max(65535).default(DEFAULT_GODOT_HTTP_PORT) }).parse(raw);
       const status = await getStatus(parsed.port);
-      const detail = status.status && typeof status.status === "object" ? status.status as Record<string, unknown> : {};
-      return {
-        endpoint: status.endpoint,
-        instances: detail.connected ? [{
-          projectPath: detail.project_path,
-          projectId: detail.project_id,
-          projectName: detail.project_name,
-          editorInstanceId: detail.editor_instance_id,
+      const detail = asRecord(status.status);
+      const instances = Array.isArray(detail.instances) ? detail.instances.map((entry) => {
+        const instance = asRecord(entry);
+        return {
+          projectPath: instance.project_path,
+          projectId: instance.project_id,
+          projectName: instance.project_name,
+          editorInstanceId: instance.editor_instance_id,
+          connectedAt: instance.connected_at,
           runtimeInstanceId: detail.runtime_instance_id,
-          runtimeConnected: Boolean(detail.runtime_instance_id),
+          runtimeConnected: Boolean(detail.runtime_instance_id) && instance.project_path === detail.project_path,
           mode: detail.tool_mode,
-        }] : [],
-      };
+        };
+      }) : [];
+      return { endpoint: status.endpoint, instances };
     },
     godot_mcp_query: async (raw) => {
       const parsed = z.object({
@@ -432,6 +473,7 @@ export const godotToolModule: BridgeToolModule = {
       const parsed = z.object({
         scenePaths: z.array(z.string().min(1)).min(1).max(24),
         activeScenePath: z.string().min(1).optional(),
+        ...targetZodFields,
         port: z.number().int().min(1024).max(65535).default(DEFAULT_GODOT_HTTP_PORT),
         timeoutMs: z.number().int().min(1000).max(120000).default(DEFAULT_TIMEOUT_MS),
       }).parse(raw);
@@ -439,11 +481,12 @@ export const godotToolModule: BridgeToolModule = {
       if (new Set(scenePaths).size !== scenePaths.length) throw new Error("scenePaths must not contain duplicates.");
       const activeScenePath = parsed.activeScenePath ? normalizeScenePath(parsed.activeScenePath) : scenePaths.at(-1)!;
       if (!scenePaths.includes(activeScenePath)) throw new Error("activeScenePath must also appear in scenePaths.");
-      const { status, detail } = await requireConnectedEditor(parsed.port);
+      const target = editorTarget(parsed);
+      const { status, detail } = await requireConnectedEditor(parsed.port, target);
       const opened = [];
-      for (const scenePath of scenePaths) opened.push(await openSceneNative(scenePath, parsed.port, parsed.timeoutMs));
-      if (scenePaths.at(-1) !== activeScenePath) await openSceneNative(activeScenePath, parsed.port, parsed.timeoutMs);
-      const finalActive = await verifyActiveScene(activeScenePath, parsed.port, parsed.timeoutMs);
+      for (const scenePath of scenePaths) opened.push(await openSceneNative(scenePath, parsed.port, parsed.timeoutMs, target));
+      if (scenePaths.at(-1) !== activeScenePath) await openSceneNative(activeScenePath, parsed.port, parsed.timeoutMs, target);
+      const finalActive = await verifyActiveScene(activeScenePath, parsed.port, parsed.timeoutMs, target);
       return {
         endpoint: status.endpoint,
         projectPath: detail.project_path,
@@ -465,11 +508,13 @@ export const godotToolModule: BridgeToolModule = {
         nodes: z.array(z.record(z.string(), z.unknown())).optional(),
         attachScript: z.string().min(1).optional(),
         openInEditor: z.boolean().default(true),
+        ...targetZodFields,
         port: z.number().int().min(1024).max(65535).default(DEFAULT_GODOT_HTTP_PORT),
         timeoutMs: z.number().int().min(1000).max(120000).default(DEFAULT_TIMEOUT_MS),
       }).parse(raw);
       const scenePath = normalizeScenePath(parsed.scenePath);
-      const { status, detail } = await requireConnectedEditor(parsed.port);
+      const target = editorTarget(parsed);
+      const { status, detail } = await requireConnectedEditor(parsed.port, target);
       const providerArgs: Record<string, unknown> = {
         scene_path: scenePath,
         root_node_type: parsed.rootNodeType,
@@ -477,14 +522,14 @@ export const godotToolModule: BridgeToolModule = {
       if (parsed.rootNodeName) providerArgs.root_node_name = parsed.rootNodeName;
       if (parsed.nodes) providerArgs.nodes = parsed.nodes;
       if (parsed.attachScript) providerArgs.attach_script = parsed.attachScript;
-      const createResponse = await actionQuery("create_scene", providerArgs, parsed.port, parsed.timeoutMs);
+      const createResponse = await actionQuery("create_scene", providerArgs, parsed.port, parsed.timeoutMs, target);
       const createResult = assertProviderResult("create_scene", createResponse.result);
-      const readResponse = await safeQuery("read_scene", { scene_path: scenePath }, parsed.port, parsed.timeoutMs);
+      const readResponse = await safeQuery("read_scene", { scene_path: scenePath }, parsed.port, parsed.timeoutMs, target);
       const readback = sceneReadbackSummary(readResponse.result);
       let openedInEditor = false;
       let activeScenePath: unknown = undefined;
       if (parsed.openInEditor) {
-        const opened = await openSceneNative(scenePath, parsed.port, parsed.timeoutMs);
+        const opened = await openSceneNative(scenePath, parsed.port, parsed.timeoutMs, target);
         openedInEditor = opened.verifiedActive;
         activeScenePath = scenePath;
       }
