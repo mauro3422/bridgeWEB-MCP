@@ -1331,3 +1331,22 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Regresión pendiente:** agregar un fixture Windows con ruta de ejecutable que contenga espacios y call operator de PowerShell; forzar timeout y exigir que el proceso y todos sus hijos terminen. El caso nominal debe comprobar también exit code, stdout y ausencia de procesos huérfanos.
 
 **Seguimiento:** reproducir en el owner de `git_multi_repo_publish`, corregir quoting/lifecycle mínimo y publicar únicamente después del gate Windows. El catálogo directo stale observado en la misma tarea ya está cubierto por los incidentes de catálogo del host del 6 y 8 de agosto; no se duplica aquí.
+
+
+## 2026-08-14 — `bridge_tool_query` contradecía la clasificación read-only del registry
+
+**Estado:** Corregido en source y activado en el runtime Bridge 0.6.92 mediante build aislado; publicación Git pendiente de integración con el trabajo paralelo del repositorio.
+
+**Capa / owner:** `src/tool-registry.ts`, clasificación de riesgo y wrappers `bridge_tool_query` / `bridge_tool_action`.
+
+**Síntoma observable:** `project_change_consistency` declaraba `readOnlyHint=true` en su schema y aparecía dentro de `bridge_health.riskSummary.readOnly`, pero `bridge_tool_query` lo rechazaba con `not classified read-only`.
+
+**Causa demostrada:** el registry publicaba annotations finales por tool, pero los wrappers autorizaban dispatch contra los Sets estáticos `readOnlyToolNames` / `destructiveToolNames`. Una tool con annotation explícita correcta podía por lo tanto divergir del wrapper.
+
+**Corrección:** se agregó una clasificación única derivada de las annotations finales registradas (`read-only`, `neutral`, `destructive`). `bridge_tool_query`, `bridge_tool_action` y `riskSummary` consumen esa misma clasificación. Annotations finales contradictorias (`readOnlyHint=true` y `destructiveHint=true`) fallan cerradas. Los Sets estáticos quedan sólo como defaults de annotation para contratos legacy, no como autoridad de dispatch.
+
+**Regresión / evidencia:** `scripts/test-project-change-consistency.mjs` reproduce el caso real, exige que el query delegado acepte `project_change_consistency`, que el action lo rechace por read-only, que el query rechace `project_context_update` y que annotations contradictorias fallen. Pasaron `npm run check`, build focal, `test-v060-tools`, `git diff --check` y `npm run test:regressions`. Tras restart HTTP controlado, el runtime vivo devolvió `classification=read-only` para `bridge_tool_query -> project_change_consistency`; los dos negativos de seguridad también fueron rechazados correctamente.
+
+**Aislamiento del runtime:** como el worktree contenía cambios paralelos de narrated-media/workflow, el `dist` activo se reconstruyó desde HEAD 0.6.92 más únicamente `src/tool-registry.ts` corregido en un worktree temporal. El worktree temporal fue eliminado después del restart y los cambios paralelos no se activaron.
+
+**Seguimiento:** integrar este hotfix en el próximo commit/release coherente usando sólo sus paths y el gate `project_change_consistency(scope=staged)`; no reintroducir una lista de dispatch separada de las annotations finales.

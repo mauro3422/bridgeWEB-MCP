@@ -4,6 +4,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { projectContextToolModule } from "../dist/tools/project-context-tools.js";
+import { createToolRegistry } from "../dist/tool-registry.js";
 
 const execFileAsync = promisify(execFile);
 const root = path.join(process.cwd(), "sandbox", "project-change-consistency-test");
@@ -73,6 +74,42 @@ try {
   assert.equal(ready.publishReady, true, JSON.stringify(ready.issues));
   assert.equal(ready.issues.length, 0, JSON.stringify(ready.issues));
   assert.equal(ready.projectAuthority.authorityStatus, "modular");
+
+  const registry = createToolRegistry([projectContextToolModule]);
+  const delegatedReady = await registry.call("bridge_tool_query", {
+    toolName: "project_change_consistency",
+    arguments: { projectRoot: root, mode: "persist" },
+  });
+  assert.equal(delegatedReady.classification, "read-only");
+  assert.equal(delegatedReady.result.publishReady, true, JSON.stringify(delegatedReady.result.issues));
+  await assert.rejects(
+    () => registry.call("bridge_tool_action", {
+      toolName: "project_change_consistency",
+      confirmToolName: "project_change_consistency",
+      arguments: { projectRoot: root, mode: "persist" },
+    }),
+    /classified read-only/,
+  );
+  await assert.rejects(
+    () => registry.call("bridge_tool_query", {
+      toolName: "project_context_update",
+      arguments: {},
+    }),
+    /not classified read-only/,
+  );
+  assert.throws(
+    () => createToolRegistry([{
+      name: "contradictory-risk-fixture",
+      tools: [{
+        name: "contradictory_risk_tool",
+        description: "Fixture with contradictory final risk annotations.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+        annotations: { readOnlyHint: true, destructiveHint: true },
+      }],
+      handlers: { contradictory_risk_tool: async () => ({ ok: true }) },
+    }]),
+    /contradictory risk annotations/,
+  );
 
   await execFileAsync("git", ["add", "src.txt", ".bridge/PROJECT_STATE.md", "changelogs/1.2.3.md"], { cwd: root, windowsHide: true });
   await fs.writeFile(path.join(root, "AGENTS.md"), "# Rules\n\nParallel unrelated edit.\n", "utf8");

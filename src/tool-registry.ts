@@ -256,11 +256,22 @@ function annotateTool(tool: BridgeToolSchema, moduleName: string): BridgeToolSch
   return { ...tool, annotations, metadata: toolMetadata(tool, moduleName) };
 }
 
+type ToolRiskClassification = "read-only" | "destructive" | "neutral";
+
+function toolRiskClassification(tool: BridgeToolSchema): ToolRiskClassification {
+  const readOnly = tool.annotations?.readOnlyHint === true;
+  const destructive = tool.annotations?.destructiveHint === true;
+  if (readOnly && destructive) {
+    throw new Error(`Tool '${tool.name}' has contradictory risk annotations: readOnlyHint and destructiveHint are both true.`);
+  }
+  return readOnly ? "read-only" : destructive ? "destructive" : "neutral";
+}
+
 function riskSummary(tools: BridgeToolSchema[]) {
   return {
-    readOnly: tools.filter((tool) => tool.annotations?.readOnlyHint).map((tool) => tool.name),
-    destructive: tools.filter((tool) => tool.annotations?.destructiveHint).map((tool) => tool.name),
-    neutral: tools.filter((tool) => !tool.annotations?.readOnlyHint && !tool.annotations?.destructiveHint).map((tool) => tool.name),
+    readOnly: tools.filter((tool) => toolRiskClassification(tool) === "read-only").map((tool) => tool.name),
+    destructive: tools.filter((tool) => toolRiskClassification(tool) === "destructive").map((tool) => tool.name),
+    neutral: tools.filter((tool) => toolRiskClassification(tool) === "neutral").map((tool) => tool.name),
   };
 }
 
@@ -402,7 +413,9 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
   });
   handlers.set("bridge_tool_query", async (args) => {
     const name = delegatedToolName(args.toolName);
-    if (!readOnlyToolNames.has(name)) throw new Error(`Tool '${name}' is not classified read-only; use its direct schema or bridge_tool_action.`);
+    const target = tools.find((tool) => tool.name === name);
+    if (!target) throw new Error(`Unknown modular tool: ${name}`);
+    if (toolRiskClassification(target) !== "read-only") throw new Error(`Tool '${name}' is not classified read-only; use its direct schema or bridge_tool_action.`);
     const handler = handlers.get(name)!;
     const delegatedResult = await handler(delegatedArguments(args.arguments));
     if (delegatedResult && typeof delegatedResult === "object" && !Array.isArray(delegatedResult)) {
@@ -420,9 +433,11 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
   });
   handlers.set("bridge_tool_action", async (args) => {
     const name = delegatedToolName(args.toolName);
-    if (readOnlyToolNames.has(name)) throw new Error(`Tool '${name}' is classified read-only; use its direct schema or bridge_tool_query.`);
+    const target = tools.find((tool) => tool.name === name);
+    if (!target) throw new Error(`Unknown modular tool: ${name}`);
+    const classification = toolRiskClassification(target);
+    if (classification === "read-only") throw new Error(`Tool '${name}' is classified read-only; use its direct schema or bridge_tool_query.`);
     if (args.confirmToolName !== name) throw new Error(`confirmToolName must exactly match '${name}'.`);
-    const classification = destructiveToolNames.has(name) ? "destructive" : "neutral";
     const handler = handlers.get(name)!;
     const delegatedResult = await handler(delegatedArguments(args.arguments));
     if (delegatedResult && typeof delegatedResult === "object" && !Array.isArray(delegatedResult)) {

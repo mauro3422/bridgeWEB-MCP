@@ -7,7 +7,10 @@
       "description": "Bridge architecture and canonical ownership needed for substantial work.",
       "source": {
         "path": ".bridge/PROJECT_CONTEXT.md",
-        "sections": ["## Architecture", "## Canonical ownership"]
+        "sections": [
+          "## Architecture",
+          "## Canonical ownership"
+        ]
       },
       "maxChars": 5000
     },
@@ -17,7 +20,9 @@
       "description": "Current Bridge release and deployment state.",
       "source": {
         "path": ".bridge/PROJECT_STATE.md",
-        "sections": ["## Current release"]
+        "sections": [
+          "## Current release"
+        ]
       },
       "maxChars": 2500
     }
@@ -29,10 +34,25 @@
       "description": "Observe-only MSSR learning boundary and activation constraint.",
       "source": {
         "path": ".bridge/PROJECT_MEMORY.md",
-        "sections": ["## MSSR learning boundary"]
+        "sections": [
+          "## MSSR learning boundary"
+        ]
       },
-      "domains": ["skill-system", "agent-orchestration"],
-      "actions": ["analyze", "maintain", "review", "debug"],
+      "stages": [],
+      "domains": [
+        "skill-system",
+        "agent-orchestration"
+      ],
+      "actions": [
+        "analyze",
+        "maintain",
+        "review",
+        "debug"
+      ],
+      "artifacts": [],
+      "needs": [],
+      "signals": [],
+      "required": false,
       "priority": 40,
       "maxChars": 3000
     },
@@ -42,10 +62,26 @@
       "description": "Project-memory/changelog consistency decision for maintenance and publication.",
       "source": {
         "path": ".bridge/PROJECT_MEMORY.md",
-        "sections": ["## Change and memory consistency"]
+        "sections": [
+          "## Change and memory consistency"
+        ]
       },
-      "actions": ["maintain", "version", "publish", "verify", "document"],
-      "needs": ["integrity-verification", "version-control"],
+      "stages": [],
+      "domains": [],
+      "actions": [
+        "maintain",
+        "version",
+        "publish",
+        "verify",
+        "document"
+      ],
+      "artifacts": [],
+      "needs": [
+        "integrity-verification",
+        "version-control"
+      ],
+      "signals": [],
+      "required": false,
       "priority": 60,
       "maxChars": 3500
     },
@@ -55,11 +91,28 @@
       "description": "Selective versioned changelog strategy for debugging/recovery.",
       "source": {
         "path": ".bridge/PROJECT_MEMORY.md",
-        "sections": ["## Debug history strategy"]
+        "sections": [
+          "## Debug history strategy"
+        ]
       },
-      "actions": ["debug", "recover", "analyze"],
-      "needs": ["history-recovery"],
-      "signals": ["error-observed", "conflicting-evidence", "repeated-friction", "recovery-needed"],
+      "stages": [],
+      "domains": [],
+      "actions": [
+        "debug",
+        "recover",
+        "analyze"
+      ],
+      "artifacts": [],
+      "needs": [
+        "history-recovery"
+      ],
+      "signals": [
+        "error-observed",
+        "conflicting-evidence",
+        "repeated-friction",
+        "recovery-needed"
+      ],
+      "required": false,
       "priority": 70,
       "maxChars": 3500
     },
@@ -69,10 +122,24 @@
       "description": "Current observe-only learning deployment state.",
       "source": {
         "path": ".bridge/PROJECT_STATE.md",
-        "sections": ["## Current MSSR learning state"]
+        "sections": [
+          "## Current MSSR learning state"
+        ]
       },
-      "domains": ["skill-system", "agent-orchestration"],
-      "actions": ["analyze", "review", "maintain"],
+      "stages": [],
+      "domains": [
+        "skill-system",
+        "agent-orchestration"
+      ],
+      "actions": [
+        "analyze",
+        "review",
+        "maintain"
+      ],
+      "artifacts": [],
+      "needs": [],
+      "signals": [],
+      "required": false,
       "priority": 35,
       "maxChars": 2500
     },
@@ -82,12 +149,71 @@
       "description": "Current workspace project-knowledge migration status.",
       "source": {
         "path": ".bridge/PROJECT_STATE.md",
-        "sections": ["## Project knowledge migration"]
+        "sections": [
+          "## Project knowledge migration"
+        ]
       },
-      "actions": ["maintain", "review", "document"],
-      "artifacts": ["project", "repository"],
+      "stages": [],
+      "domains": [],
+      "actions": [
+        "maintain",
+        "review",
+        "document"
+      ],
+      "artifacts": [
+        "project",
+        "repository"
+      ],
+      "needs": [],
+      "signals": [],
+      "required": false,
       "priority": 25,
       "maxChars": 2500
+    },
+    {
+      "id": "bridge-tool-risk-authority",
+      "kind": "memory",
+      "description": "Canonical Bridge decision for delegated tool risk classification and wrapper authorization.",
+      "source": {
+        "path": ".bridge/PROJECT_MEMORY.md",
+        "sections": [
+          "## Tool risk classification authority"
+        ]
+      },
+      "stages": [
+        "implement",
+        "verify",
+        "persist",
+        "close"
+      ],
+      "domains": [
+        "agent-orchestration",
+        "coding"
+      ],
+      "actions": [
+        "edit",
+        "verify",
+        "test",
+        "debug",
+        "maintain"
+      ],
+      "artifacts": [
+        "mcp",
+        "code"
+      ],
+      "needs": [
+        "safe-editing",
+        "integrity-verification",
+        "unit-tests"
+      ],
+      "signals": [
+        "error-observed",
+        "warning-observed",
+        "repeated-friction"
+      ],
+      "required": false,
+      "priority": 70,
+      "maxChars": 1800
     }
   ]
 }
