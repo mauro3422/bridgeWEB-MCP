@@ -14,12 +14,16 @@ await fs.mkdir(tempRoot, { recursive: true });
 const advertisedTools = [
   { name: 'read_scene', description: 'Read a Godot scene.', inputSchema: { type: 'object' } },
   { name: 'scene_tree_dump', description: 'Read the active edited scene.', inputSchema: { type: 'object' } },
+  { name: 'get_editor_scene_state', description: 'Read all open editor scenes.', inputSchema: { type: 'object' } },
   { name: 'take_screenshot', description: 'Capture the game viewport.', inputSchema: { type: 'object' } },
   { name: 'create_scene', description: 'Create a scene.', inputSchema: { type: 'object' } },
   { name: 'open_in_godot', description: 'Open a resource in the connected Godot editor.', inputSchema: { type: 'object' } },
+  { name: 'set_open_scenes', description: 'Replace the exact editor scene set.', inputSchema: { type: 'object' } },
 ];
 const observedCalls = [];
-let activeScenePath = 'res://main.tscn';
+let openScenePaths = ['res://demo/instance_host.tscn', 'res://demo/instanced_component.tscn'];
+let unsavedScenePaths = [];
+let activeScenePath = 'res://demo/instance_host.tscn';
 
 const server = http.createServer(async (req, res) => {
   res.setHeader('content-type', 'application/json');
@@ -57,11 +61,27 @@ const server = http.createServer(async (req, res) => {
       payload = { scene_path: body.args.scene_path, root: { name: 'Root', type: 'Node3D', children: [] } };
     } else if (body.name === 'scene_tree_dump') {
       payload = { ok: true, scene_path: activeScenePath, tree: 'Root (Node3D)' };
+    } else if (body.name === 'get_editor_scene_state') {
+      payload = {
+        ok: true,
+        open_scenes: [...openScenePaths],
+        unsaved_scenes: [...unsavedScenePaths],
+        active_scene: activeScenePath,
+      };
     } else if (body.name === 'create_scene') {
       payload = { created: true, scene_path: body.args.scene_path, node_count: 1 };
     } else if (body.name === 'open_in_godot') {
       activeScenePath = body.args.path;
+      if (!openScenePaths.includes(activeScenePath)) openScenePaths.push(activeScenePath);
       payload = { ok: true, message: `Opened ${body.args.path}` };
+    } else if (body.name === 'set_open_scenes') {
+      if (unsavedScenePaths.length) {
+        payload = { ok: false, error: 'Refusing to replace the open scene set while unsaved scenes exist', open_scenes: [...openScenePaths], unsaved_scenes: [...unsavedScenePaths] };
+      } else {
+        openScenePaths = [...body.args.scene_paths];
+        activeScenePath = body.args.active_scene_path ?? openScenePaths.at(-1);
+        payload = { ok: true, verified: true, open_scenes: [...openScenePaths], unsaved_scenes: [], active_scene: activeScenePath };
+      }
     } else if (body.name === 'take_screenshot') {
       await fs.writeFile(capturePath, png);
       payload = { absolute_path: capturePath, width: 1, height: 1 };
@@ -93,11 +113,11 @@ try {
   assert.equal(status.status.tool_mode, 'full');
 
   const catalog = await registry.call('godot_mcp_tool_list', { port, includeSchemas: false });
-  assert.deepEqual(catalog.tools.map((tool) => tool.name).sort(), ['create_scene', 'open_in_godot', 'read_scene', 'scene_tree_dump', 'take_screenshot']);
-  assert.equal(catalog.providerCount, 5);
-  assert.equal(catalog.toolCount, 5);
-  assert.equal(catalog.readOnlyCount, 3);
-  assert.equal(catalog.actionCount, 2);
+  assert.deepEqual(catalog.tools.map((tool) => tool.name).sort(), ['create_scene', 'get_editor_scene_state', 'open_in_godot', 'read_scene', 'scene_tree_dump', 'set_open_scenes', 'take_screenshot']);
+  assert.equal(catalog.providerCount, 7);
+  assert.equal(catalog.toolCount, 7);
+  assert.equal(catalog.readOnlyCount, 4);
+  assert.equal(catalog.actionCount, 3);
   assert.equal(catalog.tools.find((tool) => tool.name === 'create_scene').classification, 'action');
 
   const instances = await registry.call('godot_mcp_instance_list', { port });
@@ -160,9 +180,41 @@ try {
   assert.equal(openedScenes.opened.length, 2);
   assert.equal(openedScenes.activeScenePath, 'res://fixtures/a.tscn');
   assert.equal(openedScenes.opened[0].readback.scenePath, 'res://fixtures/a.tscn');
+  assert.equal(openedScenes.sceneSetMode, 'merge');
+  assert.equal(openedScenes.requestedSetVerified, true);
+  assert.equal(openedScenes.exactSetVerified, false);
+  assert.deepEqual(openedScenes.unexpectedOpenScenes, ['res://demo/instance_host.tscn', 'res://demo/instanced_component.tscn']);
   assert.equal(activeScenePath, 'res://fixtures/a.tscn');
   assert(observedCalls.some((call) => call.name === 'open_in_godot' && call.args.path === 'res://fixtures/b.tscn'));
   assert(observedCalls.some((call) => call.name === 'scene_tree_dump'));
+  assert(observedCalls.some((call) => call.name === 'get_editor_scene_state'));
+
+  const exactScenes = await registry.call('godot_scene_open', {
+    port,
+    projectPath: 'C:/Dev/godot-test/',
+    scenePaths: ['res://fixtures/a.tscn', 'res://fixtures/b.tscn'],
+    activeScenePath: 'res://fixtures/a.tscn',
+    sceneSetMode: 'exact',
+  });
+  assert.equal(exactScenes.verified, true);
+  assert.equal(exactScenes.exactSetVerified, true);
+  assert.deepEqual(exactScenes.openScenes, ['res://fixtures/a.tscn', 'res://fixtures/b.tscn']);
+  assert.deepEqual(exactScenes.unexpectedOpenScenes, []);
+  assert.equal(exactScenes.nativeProviderOperation, 'set_open_scenes');
+  assert(observedCalls.some((call) => call.name === 'set_open_scenes'));
+
+  unsavedScenePaths = ['res://fixtures/a.tscn'];
+  await assert.rejects(
+    registry.call('godot_scene_open', {
+      port,
+      projectPath: 'C:/Dev/godot-test/',
+      scenePaths: ['res://fixtures/a.tscn'],
+      sceneSetMode: 'exact',
+    }),
+    /Refusing to replace the open scene set while unsaved scenes exist/,
+  );
+  assert.deepEqual(openScenePaths, ['res://fixtures/a.tscn', 'res://fixtures/b.tscn']);
+  unsavedScenePaths = [];
 
   await assert.rejects(
     registry.call('godot_scene_open', { port, scenePaths: ['C:/wrong.tscn'] }),

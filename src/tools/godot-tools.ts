@@ -47,6 +47,7 @@ export const GODOT_READ_ONLY_TOOL_NAMES = new Set([
   "get_console_log",
   "get_errors",
   "scene_tree_dump",
+  "get_editor_scene_state",
   "list_settings",
   "is_playing",
   "get_runtime_status",
@@ -257,6 +258,22 @@ function sceneReadbackSummary(value: unknown): Record<string, unknown> {
   };
 }
 
+function editorSceneStateSummary(value: unknown) {
+  const result = assertProviderResult("get_editor_scene_state", value);
+  const openScenes = Array.isArray(result.open_scenes) ? result.open_scenes.map(String) : [];
+  const unsavedScenes = Array.isArray(result.unsaved_scenes) ? result.unsaved_scenes.map(String) : [];
+  return {
+    openScenes,
+    unsavedScenes,
+    activeScenePath: typeof result.active_scene === "string" ? result.active_scene : "",
+  };
+}
+
+async function getEditorSceneState(port: number, timeoutMs: number, target?: GodotEditorTarget) {
+  const response = await safeQuery("get_editor_scene_state", {}, port, timeoutMs, target);
+  return editorSceneStateSummary(response.result);
+}
+
 async function requireConnectedEditor(port: number, target?: GodotEditorTarget) {
   const status = await getStatus(port, target);
   const detail = asRecord(status.status);
@@ -363,12 +380,13 @@ export const godotToolModule: BridgeToolModule = {
     },
     {
       name: "godot_scene_open",
-      description: "Open one or more existing Godot .tscn/.scn scenes in the already-connected editor using Godot's native editor API, never Ctrl+O/click automation. Each scene is read back before opening and confirmed as the active edited scene immediately after opening. Optionally choose which opened scene remains active at the end.",
+      description: "Open one or more existing Godot .tscn/.scn scenes in the already-connected editor using Godot's native editor API, never Ctrl+O/click automation. Always reads back the complete editor scene-tab set. sceneSetMode=merge preserves existing tabs; sceneSetMode=exact replaces the tab set with exactly scenePaths and fails closed if any open scene has unsaved edits.",
       inputSchema: {
         type: "object",
         properties: {
           scenePaths: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 24, description: "Existing res:// .tscn/.scn scene paths to open in order." },
-          activeScenePath: { type: "string", description: "Optional opened scene that should remain active after the batch. Must also appear in scenePaths." },
+          activeScenePath: { type: "string", description: "Optional requested scene that should remain active after the operation. Must also appear in scenePaths." },
+          sceneSetMode: { type: "string", enum: ["merge", "exact"], default: "merge", description: "merge opens requested scenes without closing existing tabs; exact leaves only scenePaths open in the requested order. exact refuses to close/reorder while unsaved scenes exist." },
           ...targetSchemaProperties,
           port: { type: "number", default: DEFAULT_GODOT_HTTP_PORT, minimum: 1024, maximum: 65535 },
           timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS, minimum: 1000, maximum: 120000 },
@@ -473,6 +491,7 @@ export const godotToolModule: BridgeToolModule = {
       const parsed = z.object({
         scenePaths: z.array(z.string().min(1)).min(1).max(24),
         activeScenePath: z.string().min(1).optional(),
+        sceneSetMode: z.enum(["merge", "exact"]).default("merge"),
         ...targetZodFields,
         port: z.number().int().min(1024).max(65535).default(DEFAULT_GODOT_HTTP_PORT),
         timeoutMs: z.number().int().min(1000).max(120000).default(DEFAULT_TIMEOUT_MS),
@@ -484,20 +503,59 @@ export const godotToolModule: BridgeToolModule = {
       const target = editorTarget(parsed);
       const { status, detail } = await requireConnectedEditor(parsed.port, target);
       const opened = [];
-      for (const scenePath of scenePaths) opened.push(await openSceneNative(scenePath, parsed.port, parsed.timeoutMs, target));
-      if (scenePaths.at(-1) !== activeScenePath) await openSceneNative(activeScenePath, parsed.port, parsed.timeoutMs, target);
+      let nativeProviderOperation = "open_in_godot";
+
+      if (parsed.sceneSetMode === "exact") {
+        const beforeState = await getEditorSceneState(parsed.port, parsed.timeoutMs, target);
+        const alreadyExact = beforeState.openScenes.length === scenePaths.length
+          && beforeState.openScenes.every((scenePath, index) => scenePath === scenePaths[index]);
+        if (!alreadyExact && beforeState.unsavedScenes.length > 0) {
+          throw new Error(`Refusing to replace the open scene set while unsaved scenes exist: ${beforeState.unsavedScenes.join(", ")}`);
+        }
+        for (const scenePath of scenePaths) {
+          const readResponse = await safeQuery("read_scene", { scene_path: scenePath }, parsed.port, parsed.timeoutMs, target);
+          opened.push({ scenePath, opened: true, readback: sceneReadbackSummary(readResponse.result) });
+        }
+        const setResponse = await actionQuery("set_open_scenes", {
+          scene_paths: scenePaths,
+          active_scene_path: activeScenePath,
+        }, parsed.port, parsed.timeoutMs, target);
+        assertProviderResult("set_open_scenes", setResponse.result);
+        nativeProviderOperation = "set_open_scenes";
+      } else {
+        for (const scenePath of scenePaths) opened.push(await openSceneNative(scenePath, parsed.port, parsed.timeoutMs, target));
+        if (scenePaths.at(-1) !== activeScenePath) await openSceneNative(activeScenePath, parsed.port, parsed.timeoutMs, target);
+      }
+
       const finalActive = await verifyActiveScene(activeScenePath, parsed.port, parsed.timeoutMs, target);
+      const sceneState = await getEditorSceneState(parsed.port, parsed.timeoutMs, target);
+      const missingRequestedScenes = scenePaths.filter((scenePath) => !sceneState.openScenes.includes(scenePath));
+      const unexpectedOpenScenes = sceneState.openScenes.filter((scenePath) => !scenePaths.includes(scenePath));
+      const exactSetVerified = sceneState.openScenes.length === scenePaths.length
+        && sceneState.openScenes.every((scenePath, index) => scenePath === scenePaths[index]);
+      const requestedSetVerified = missingRequestedScenes.length === 0;
+      const verified = finalActive.scene_path === activeScenePath
+        && requestedSetVerified
+        && (parsed.sceneSetMode !== "exact" || exactSetVerified);
       return {
         endpoint: status.endpoint,
         projectPath: detail.project_path,
         projectId: detail.project_id,
         projectName: detail.project_name,
         editorInstanceId: detail.editor_instance_id,
+        sceneSetMode: parsed.sceneSetMode,
+        requestedScenePaths: scenePaths,
         opened,
-        activeScenePath: finalActive.scene_path,
-        verified: finalActive.scene_path === activeScenePath,
+        openScenes: sceneState.openScenes,
+        unsavedScenes: sceneState.unsavedScenes,
+        missingRequestedScenes,
+        unexpectedOpenScenes,
+        activeScenePath: sceneState.activeScenePath || finalActive.scene_path,
+        requestedSetVerified,
+        exactSetVerified: parsed.sceneSetMode === "exact" ? exactSetVerified : false,
+        verified,
         uiAutomation: false,
-        nativeProviderOperation: "open_in_godot",
+        nativeProviderOperation,
       };
     },
     godot_scene_create: async (raw) => {

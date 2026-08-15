@@ -39,7 +39,7 @@
     "docs:tools:check": "npm run build && node scripts/generate-tools-doc.mjs --check"
   },
   "dependencies": {
-    "@mauroprime/mssr": "file:vendor/mauroprime-mssr-0.2.14.tgz",
+    "@mauroprime/mssr": "file:vendor/mauroprime-mssr-0.2.15.tgz",
     "@modelcontextprotocol/core": "^2.0.0",
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
