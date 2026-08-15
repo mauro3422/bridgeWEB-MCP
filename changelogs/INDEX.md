@@ -4,6 +4,7 @@ Versioned release notes are the canonical change-history surface for MSSR debugg
 
 ## Current releases
 
+- [0.6.93](0.6.93.md) - route uploaded audio/video through narrated-media review and canonical media ingest before ad-hoc ASR fallback.
 - [0.6.92](0.6.92.md) - explicit multi-editor targeting for native Godot scene open/create; ambiguous mutations fail closed.
 - [0.6.91](0.6.91.md) - native Godot scene open/create tools with persistence/editor readback and packaged MSSR 0.2.14 `godot-scene-authoring` routing; no UI click automation.
 - [0.6.90](0.6.90.md) - durable MSSR Context Plane delivery with ack tombstone suppression on packaged MSSR core 0.2.12.

@@ -9,33 +9,54 @@
       "grabación de pantalla",
       "audio",
       "transcripción",
+      "transcribir",
+      "escuchar",
+      "meme",
       "timeline",
       "speech",
       "silence",
       "keyframes",
       "iteración visual",
-      "review"
+      "review",
+      "escuchá",
+      "transcribí",
+      "qué dice",
+      "video",
+      "ver y escuchar",
+      "asr"
     ],
     "phrases": [
       "te paso un video explicándote",
       "mirá este video y lo que voy diciendo",
+      "escuchá este audio",
+      "escucha este audio",
+      "transcribime este audio",
+      "transcribe este audio",
+      "escuchá este video",
+      "escucha este video",
+      "entendé este meme",
+      "entiende este meme",
+      "usa el sistema de transcripción",
+      "usá el sistema de transcripción",
       "grabé la pantalla mientras te explico",
       "relacioná lo que digo con lo que muestro",
       "usá mi narración para corregir esto",
-      "revisemos esta iteración con video"
+      "revisemos esta iteración con video",
+      "qué dice este audio",
+      "qué dice este video",
+      "transcribí y entendé el meme",
+      "ver y escuchar este video"
     ],
     "negativeKeywords": [
-      "transcribir solamente",
-      "transcribime este audio y nada más",
-      "solo transcripción",
-      "sólo transcripción",
-      "no relaciones la transcripción",
-      "convertir formato solamente"
+      "convertir formato solamente",
+      "extraer audio sin transcribir"
     ],
     "examples": [
       "El usuario graba Atlas y explica qué ramas se sienten mal posicionadas; correlacionar cada observación con la pantalla visible y luego trabajar en GodotAtlas.",
       "El usuario graba Blender mientras señala defectos de un asset; alinear voz y vistas, después cargar el proyecto propietario y corregir el modelo.",
-      "El usuario dibuja una idea mientras la explica; extraer estados visuales y discurso para construir un brief temporal antes de implementar."
+      "El usuario dibuja una idea mientras la explica; extraer estados visuales y discurso para construir un brief temporal antes de implementar.",
+      "El usuario adjunta un audio y pide escucharlo o transcribirlo; usar la ruta canónica de media_review_ingest y devolver el transcript sin exigir revisión visual.",
+      "El usuario adjunta un meme en video y pide entenderlo; correlacionar Google ASR con uno o más frames representativos antes de explicar el chiste."
     ]
   },
   "entrypoint": "GUIDE.md",

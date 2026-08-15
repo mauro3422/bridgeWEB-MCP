@@ -1350,3 +1350,20 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Aislamiento del runtime:** como el worktree contenía cambios paralelos de narrated-media/workflow, el `dist` activo se reconstruyó desde HEAD 0.6.92 más únicamente `src/tool-registry.ts` corregido en un worktree temporal. El worktree temporal fue eliminado después del restart y los cambios paralelos no se activaron.
 
 **Seguimiento:** integrar este hotfix en el próximo commit/release coherente usando sólo sus paths y el gate `project_change_consistency(scope=staged)`; no reintroducir una lista de dispatch separada de las annotations finales.
+
+
+## 2026-08-14 — Uploaded media could bypass the canonical narrated-media pipeline
+
+**Estado:** Corregido en Bridge 0.6.93.
+
+**Capa / owner:** Bridge workflow-guide discovery, `narrated-media-review`, and MSSR route/bootstrap adapter integration.
+
+**Síntoma observable:** direct requests such as listening to or transcribing an uploaded audio/video could bypass the existing `narrated-media-review` workflow and fall back to an improvised generic ASR/Whisper path. Pure transcription was also listed as a negative activation case, so the canonical `media_review_ingest` capability was not guaranteed to be selected for the simplest media request.
+
+**Causa demostrada:** workflow-guide discovery was not surfaced by `skill_route_plan` / `skill_bootstrap`, the narrated-media activation contract excluded pure transcription, and Bridge server/tool instructions did not explicitly require checking the existing media pipeline before ad-hoc fallback.
+
+**Corrección:** broadened narrated-media activation to listening/transcription/meme/video requests, made `media_review_ingest` the canonical first path while healthy, exposed workflow-guide recommendation through routing and auto-load through bootstrap, and required transcript/audio plus representative-frame evidence for audiovisual interpretation. Generic ASR fallback now requires an observable canonical-path failure or unavailability.
+
+**Regresión / evidencia:** `scripts/test-workflow-guide-routing.mjs` verifies recommendation/bootstrap routing and a nearby unrelated negative; `scripts/verify-narrated-media-workflow.mjs` verifies activation and fallback/evidence contracts. During publication review the verifier itself contained literal `\\n` sequences and failed `node --check`; that defect was corrected before the release gates were run.
+
+**Seguimiento:** keep workflow guides as Bridge-owned orchestration and MSSR skills as portable capability routing. Do not duplicate the narrated-media procedure into a second skill merely to improve activation.

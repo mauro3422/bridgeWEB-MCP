@@ -32,6 +32,7 @@ sandbox/
 # Bridge runtime coordination files
 .bridge-restart-request
 .bridge-restart-ack
+.bridge/mssr-context-inbox.json
 
 # Logs and temp files
 *.log

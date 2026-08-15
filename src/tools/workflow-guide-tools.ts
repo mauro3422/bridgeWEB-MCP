@@ -397,7 +397,7 @@ function reusablePattern(task: string) {
   };
 }
 
-async function recommendGuide(
+export async function recommendGuide(
   args: { task: string; projectRoot?: string; maxResults: number },
   existingDiscovery?: GuideDiscoveryResult,
 ) {
@@ -458,7 +458,7 @@ async function findGuide(name: string, projectRoot?: string): Promise<Discovered
   throw new Error(`Workflow guide not found: ${name}`);
 }
 
-async function loadGuide(args: {
+export async function loadGuide(args: {
   name: string;
   phase?: string;
   projectRoot?: string;
@@ -663,7 +663,7 @@ export const workflowGuideToolModule: BridgeToolModule = {
     },
     {
       name: "workflow_guide_recommend",
-      description: "Use this when a user describes a repeatable multi-step process, says it should happen every time or in future, asks for a skill/pipeline/template/hook, or when an existing reusable workflow may apply. Searches project/global guides and the existing Codex skill catalog. Prefer a strong guide, otherwise return use_existing_skill when a skill already owns the procedure; propose a new guide only when neither covers it.",
+      description: "Use this when a user describes a repeatable multi-step process, says it should happen every time or in future, asks for a skill/pipeline/template/hook, when an existing reusable workflow may apply, or when an uploaded audio/video should be listened to, transcribed, inspected, or interpreted through an existing media workflow. Search the existing guide/skill pipeline before inventing an ad-hoc fallback. Searches project/global guides and the existing Codex skill catalog. Prefer a strong guide, otherwise return use_existing_skill when a skill already owns the procedure; propose a new guide only when neither covers it.",
       inputSchema: {
         type: "object",
         properties: {

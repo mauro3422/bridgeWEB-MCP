@@ -203,6 +203,8 @@ function compactSkillRoute<T extends Record<string, unknown>>(route: T): Record<
     systemAwareness: route.systemAwareness,
     contextPlane: route.contextPlane,
     contextMessages: route.contextMessages,
+    workflowGuideRecommendation: route.workflowGuideRecommendation,
+    workflowGuide: route.workflowGuide,
     __bridgeNotices: route.__bridgeNotices,
   };
 }
@@ -228,6 +230,33 @@ function connectorFallback(
       },
     },
   };
+}
+
+async function resolveWorkflowGuideForTask(args: {
+  task: string;
+  projectRoot?: string | null;
+  load: boolean;
+}) {
+  // Workflow guides are Bridge-owned orchestration, separate from MSSR skill routing.
+  // Load lazily to avoid a static module cycle: workflow-guide-tools uses
+  // findExistingSkillCoverage from this module when ranking guide-vs-skill ownership.
+  const { recommendGuide, loadGuide } = await import("./workflow-guide-tools.js");
+  const recommendation = await recommendGuide({
+    task: args.task,
+    projectRoot: args.projectRoot ?? undefined,
+    maxResults: 5,
+  });
+  const selectedGuideName = recommendation.recommendation?.action === "load_existing"
+    ? recommendation.recommendation.guide
+    : null;
+  const workflowGuide = args.load && typeof selectedGuideName === "string" && selectedGuideName
+    ? await loadGuide({
+        name: selectedGuideName,
+        projectRoot: args.projectRoot ?? undefined,
+        includeManifest: true,
+      })
+    : null;
+  return { recommendation, workflowGuide };
 }
 
 function mssrConnectorPaths(traceId: string): Record<string, unknown> {
@@ -1184,6 +1213,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         ? contextPlane.contextMessages.selected.map(mssrContextMessageToBridgeNotice)
         : (inlineContextMessages?.notices ?? []);
       recordMssrRoute({ traceId, action: "plan", task, route: observedRoute as unknown as Record<string, unknown> });
+      const workflowGuideResolution = await resolveWorkflowGuideForTask({ task, projectRoot, load: false });
       const bootstrapArguments = {
         task,
         projectRoot: args.projectRoot,
@@ -1224,6 +1254,8 @@ export const skillCatalogToolModule: BridgeToolModule = {
           advisoryOnly: true,
         } : null,
         contextMessages,
+        workflowGuideRecommendation: workflowGuideResolution.recommendation,
+        workflowGuide: null,
         __bridgeNotices: [...systemAwareness.notices, ...contextMessageNotices],
         warnings: [...discovered.warnings, ...route.warnings],
         connectorExecution: connectorFallback("skill_bootstrap", bootstrapArguments, traceId),
@@ -1462,6 +1494,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
           duplicateCharsAvoided: contextInfo.duplicateCharsAvoided,
         });
       }
+      const workflowGuideResolution = await resolveWorkflowGuideForTask({ task, projectRoot, load: true });
       return {
         ...observedRoute,
         traceId,
@@ -1503,6 +1536,8 @@ export const skillCatalogToolModule: BridgeToolModule = {
         } : null,
         projectChangeHistory,
         contextMessages,
+        workflowGuideRecommendation: workflowGuideResolution.recommendation,
+        workflowGuide: workflowGuideResolution.workflowGuide,
         sourceHealth: discovered.sourceHealth,
         systemAwareness: systemAwareness.status,
         __bridgeNotices: [...systemAwareness.notices, ...contextMessageNotices],

@@ -6,7 +6,9 @@ Convierte videos, audios o grabaciones narradas de trabajo en evidencia temporal
 
 ## Activation
 
-Use this guide only when its activation phrases or keywords clearly match the user's task. If the match is uncertain, explain the possible match instead of silently forcing the workflow.
+Use this guide when the user asks to listen to, transcribe, inspect, or understand an audio/video attachment, or when its other activation phrases/keywords clearly match. A request that looks simple, such as "transcribime este audio", still belongs here because `media_review_ingest` is the canonical first transcription/review path. If the match is uncertain, explain the possible match instead of silently forcing the workflow.
+
+When `media_review_ingest` is available and healthy, use it as the canonical ASR/media entrypoint. Do **not** fall back to Whisper, a local transcription package, or another generic ASR path while that capability is healthy. Use another ASR only after the canonical capability has observably failed or is unavailable, and make that degradation explicit before replanning.
 
 ## Workflow
 
@@ -16,6 +18,12 @@ Use this guide only when its activation phrases or keywords clearly match the us
 4. **resolve-owner** — Determinar qué proyecto, aplicación o skill es autoridad para la observación detectada.
 5. **execute-review** — Convertir observaciones sincronizadas en cambios concretos bajo el workflow del owner.
 6. **iterate** — Cerrar el feedback loop con una nueva pasada comparable.
+
+### Fast paths
+
+- **Solo escuchar/transcribir audio:** `acquire-source → ingest-align → inspect-evidence → responder`. No exigir proyecto propietario ni fases visuales si no agregan valor.
+- **Meme o clip audiovisual:** `acquire-source → ingest-align → inspect-evidence`; inspect both the canonical transcript/audio evidence and at least one representative visual frame before explaining the meaning/joke.
+- **Video narrado que pide cambios sobre un proyecto:** usar el workflow completo y resolver el owner antes de mutar.
 
 ## Tool policy
 
@@ -31,6 +39,7 @@ Recommended tools:
 ## Verification
 
 - Record the last completed phase.
+- Do not claim that media was transcribed, listened to, or visually inspected unless the corresponding tool evidence exists.
 - Verify every persisted file or external side effect through a tool result.
 - On failure, report the exact resumable state and the next action.
 - Do not end a multi-step workflow with an empty response.
