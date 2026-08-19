@@ -15,7 +15,9 @@ const projectRoot = path.join(sandbox, "delegated-route-project");
 
 process.env.CODEX_HOME = codexHome;
 process.env.BRIDGE_MCP_METRICS_DIR = metricsDir;
+process.env.BRIDGE_MCP_METRICS_SQLITE = path.join(process.env.BRIDGE_MCP_METRICS_DIR, "bridge-metrics.sqlite");
 process.env.BRIDGE_MCP_LOG_DIR = logDir;
+process.env.BRIDGE_MCP_MSSR_EVENTS_JSONL = path.join(process.env.BRIDGE_MCP_LOG_DIR, "mssr-events.jsonl");
 process.env.BRIDGE_MCP_MSSR_STATE = path.join(metricsDir, "mssr-observability-state.json");
 process.env.BRIDGE_MCP_ALLOWED_ROOTS = [sandbox, process.cwd()].join(path.delimiter);
 

@@ -8,6 +8,7 @@ const metricsDir = path.join(sandbox, "metrics");
 const logDir = path.join(sandbox, "logs");
 process.env.BRIDGE_MCP_METRICS_DIR = metricsDir;
 process.env.BRIDGE_MCP_LOG_DIR = logDir;
+process.env.BRIDGE_MCP_MSSR_EVENTS_JSONL = path.join(process.env.BRIDGE_MCP_LOG_DIR, "mssr-events.jsonl");
 process.env.BRIDGE_MCP_METRICS_SQLITE = path.join(metricsDir, "bridge-metrics.sqlite");
 process.env.BRIDGE_MCP_EVENTS_JSONL = path.join(logDir, "bridge-events.jsonl");
 process.env.BRIDGE_MCP_MSSR_STATE = path.join(sandbox, "metrics", "mssr-observability-state.json");

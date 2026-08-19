@@ -14,6 +14,8 @@ const logDir = path.join(sandbox, 'logs');
 process.env.CODEX_HOME = codexHome;
 process.env.BRIDGE_MCP_METRICS_DIR = metricsDir;
 process.env.BRIDGE_MCP_LOG_DIR = logDir;
+process.env.BRIDGE_MCP_METRICS_SQLITE = path.join(metricsDir, 'bridge-metrics.sqlite');
+process.env.BRIDGE_MCP_MSSR_EVENTS_JSONL = path.join(logDir, 'mssr-events.jsonl');
 process.env.BRIDGE_MCP_MSSR_STATE = path.join(metricsDir, 'mssr-observability-state.json');
 process.env.BRIDGE_MCP_ALLOWED_ROOTS = [sandbox, process.cwd()].join(path.delimiter);
 
@@ -610,6 +612,8 @@ try {
     { name: 'skill_load', inputSchema: { type: 'object', properties: { traceId: { type: 'string' } } } },
     { name: 'mssr_trace_record', inputSchema: { type: 'object', properties: { traceId: { type: 'string' } } } },
     { name: 'trace-domain-tool', inputSchema: { type: 'object', properties: { traceId: { type: 'string' }, payload: { type: 'string' } }, additionalProperties: false } },
+    { name: 'apply_patch', inputSchema: { type: 'object', properties: { path: { type: 'string' }, oldText: { type: 'string' }, newText: { type: 'string' } } }, annotations: { destructiveHint: true } },
+    { name: 'project_context_health', inputSchema: { type: 'object', properties: { projectRoot: { type: 'string' } }, additionalProperties: false }, annotations: { readOnlyHint: true } },
     { name: 'bridge_tool_query', inputSchema: { type: 'object', properties: { toolName: { type: 'string' }, arguments: { type: 'object' } } } },
   ];
   const isolated = traceContext.createMssrTraceSessionCoordinator(schemas);
@@ -617,6 +621,245 @@ try {
   assert.ok(orphan.notices.some((item) => item.code === 'mssr-orphan-skill-load'));
   const noRouteOutcome = isolated.prepare('mssr_trace_record', { eventType: 'outcome', traceId: 'trace-no-route-001' });
   assert.ok(noRouteOutcome.notices.some((item) => item.code === 'mssr-outcome-without-route'));
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const projectMaintenance = traceContext.createMssrTraceSessionCoordinator(schemas);
+  projectMaintenance.observe('skill_route_plan', {
+    task: 'Change the portable host adapter contract.',
+    caller: 'chatgpt-web',
+    projectRoot: 'D:\\Dev\\bridge-mcp',
+    stage: 'implement',
+    intent: {
+      summary: 'Change the portable host adapter contract.',
+      domains: ['agent-orchestration', 'skill-system'],
+      actions: ['design', 'edit', 'maintain'],
+      artifacts: ['mcp', 'repository'],
+      needs: ['integrity-verification'],
+      signals: ['reusable-pattern'],
+      risk: 'write',
+      ambiguity: 'low',
+    },
+  }, {
+    traceId: 'trace-project-maintenance-001',
+    stage: 'implement',
+    activeSkills: [],
+  });
+  const projectReviewNotice = projectMaintenance.observe('apply_patch', {
+    path: 'D:\\Dev\\bridge-mcp\\src\\host-adapter-contract.ts',
+    oldText: 'old',
+    newText: 'new',
+  }, { changed: true });
+  assert.ok(projectReviewNotice.some((item) => item.code === 'mssr-project-knowledge-review-due'));
+  const projectMaintenanceSnapshot = projectMaintenance.snapshot();
+  assert.equal(projectMaintenanceSnapshot.projectMaintenance?.due, true);
+  assert.equal(projectMaintenanceSnapshot.maintenanceRequired, true);
+  assert.ok(projectMaintenanceSnapshot.projectMaintenance?.changedPathHints.includes('src/host-adapter-contract.ts'));
+  assert.ok(projectMaintenanceSnapshot.projectMaintenance?.targets.some((item) => item.target === 'agents'));
+  assert.equal(projectMaintenanceSnapshot.projectMaintenance?.projectRootKnown, true);
+  assert.equal(JSON.stringify(projectMaintenanceSnapshot).includes('old'), false, 'Project-maintenance metadata must not retain edited source content.');
+  const duplicateProjectReview = projectMaintenance.observe('apply_patch', {
+    path: 'D:\\Dev\\bridge-mcp\\src\\host-adapter-contract.ts',
+    oldText: 'old-2',
+    newText: 'new-2',
+  }, { changed: true });
+  assert.equal(duplicateProjectReview.some((item) => item.code === 'mssr-project-knowledge-review-due'), false, 'Same owner-level advisory should be deduplicated.');
+  const changedProjectReview = projectMaintenance.observe('apply_patch', {
+    path: 'D:\\Dev\\bridge-mcp\\changelogs\\0.6.100.md',
+    oldText: 'before',
+    newText: 'after',
+  }, { changed: true });
+  const changedProjectReviewNotice = changedProjectReview.find((item) => item.code === 'mssr-project-knowledge-review-due');
+  assert.ok(changedProjectReviewNotice, 'Meaningfully changed maintenance evidence should reopen the same subject.');
+  assert.equal(changedProjectReviewNotice.details?.event, 'changed');
+
+  projectMaintenance.observe('skill_route_plan', {
+    task: 'Close the maintenance review.',
+    caller: 'chatgpt-web',
+    stage: 'close',
+  }, {
+    traceId: 'trace-project-maintenance-001',
+    stage: 'close',
+    activeSkills: [],
+    requiredPhases: ['maintenance'],
+  });
+  const maintenanceResolved = projectMaintenance.observe('mssr_trace_record', {
+    traceId: 'trace-project-maintenance-001',
+    eventType: 'phase_completed',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    status: 'success',
+    completedPhases: ['maintenance'],
+  }, { traceId: 'trace-project-maintenance-001' });
+  const maintenanceResolvedNotice = maintenanceResolved.find((item) => item.code === 'mssr-project-knowledge-review-resolved');
+  assert.ok(maintenanceResolvedNotice, 'Fresh close+maintenance for the current lifecycle revision must resolve project-knowledge attention.');
+  assert.equal(maintenanceResolvedNotice.details?.event, 'resolved');
+  assert.equal(projectMaintenance.snapshot().maintenanceCloseFresh, true);
+
+
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const ordinaryWrite = traceContext.createMssrTraceSessionCoordinator(schemas);
+  ordinaryWrite.observe('skill_route_plan', {
+    task: 'Implement one ordinary stable feature.',
+    caller: 'chatgpt-web',
+    projectRoot: 'D:\\Dev\\bridge-mcp',
+    stage: 'implement',
+    intent: {
+      summary: 'Implement one ordinary stable feature.',
+      domains: ['coding'],
+      actions: ['edit'],
+      artifacts: ['code'],
+      needs: [],
+      signals: ['nominal'],
+      risk: 'write',
+      ambiguity: 'low',
+    },
+  }, {
+    traceId: 'trace-project-maintenance-watch-001',
+    stage: 'implement',
+    activeSkills: [],
+  });
+  const ordinaryNotice = ordinaryWrite.observe('apply_patch', {
+    path: 'D:\\Dev\\bridge-mcp\\src\\ordinary-feature.ts',
+    oldText: 'a',
+    newText: 'b',
+  }, { changed: true });
+  assert.equal(ordinaryNotice.some((item) => item.code.startsWith('mssr-project-knowledge-review')), false);
+  assert.equal(ordinaryWrite.snapshot().maintenanceRequired, false, 'Ordinary one-file writes must not force project-knowledge maintenance.');
+
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const healthFixtureSuffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const healthReview = traceContext.createMssrTraceSessionCoordinator(schemas);
+  healthReview.observe('skill_route_plan', {
+    task: 'Review an ordinary initialized project.',
+    caller: 'chatgpt-web',
+    projectRoot: 'D:\\Dev\\bridge-mcp',
+    stage: 'implement',
+    intent: {
+      summary: 'Review an ordinary initialized project.',
+      domains: ['coding'],
+      actions: ['review'],
+      artifacts: ['repository'],
+      needs: [],
+      signals: ['nominal'],
+      risk: 'read-only',
+      ambiguity: 'low',
+    },
+  }, {
+    traceId: `trace-project-health-review-${healthFixtureSuffix}`,
+    stage: 'implement',
+    activeSkills: [],
+  });
+  const healthReviewNotices = healthReview.observe('project_context_load', {
+    projectRoot: 'D:\\Dev\\bridge-mcp',
+  }, {
+    projectRoot: 'D:\\Dev\\bridge-mcp',
+    projectContextHealth: {
+      projectRoot: 'D:\\Dev\\bridge-mcp',
+      level: 'review',
+      manifestStatus: 'valid',
+      findings: [{ code: 'oversized-authority', target: '.mssr/PROJECT_STATE.md' }],
+      advisoryOnly: true,
+    },
+  });
+  const healthReviewNotice = healthReviewNotices.find((item) => item.code === 'mssr-project-knowledge-review-due');
+  assert.ok(healthReviewNotice, 'REVIEW Project Context Health must surface maintenance due.');
+  assert.equal(healthReviewNotice.details?.projectInitialized, true);
+  assert.equal(healthReviewNotice.details?.projectContextHealth, 'review');
+  const healthReviewSnapshot = healthReview.snapshot();
+  assert.equal(healthReviewSnapshot.projectMaintenance?.projectInitialized, true);
+  assert.equal(healthReviewSnapshot.projectMaintenance?.projectContextHealth, 'review');
+  assert.equal(healthReviewSnapshot.maintenanceRequired, true);
+  assert.equal(JSON.stringify(healthReviewSnapshot).includes('legacy-mssr-artifact'), false, 'Trace maintenance metadata must not retain Project Context Health finding payloads.');
+
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const healthOk = traceContext.createMssrTraceSessionCoordinator(schemas);
+  healthOk.observe('skill_route_plan', {
+    task: 'Inspect a healthy project.',
+    caller: 'chatgpt-web',
+    projectRoot: 'D:\\Dev\\bridge-mcp',
+    stage: 'implement',
+    intent: {
+      summary: 'Inspect a healthy project.',
+      domains: ['coding'],
+      actions: ['review'],
+      artifacts: ['repository'],
+      needs: [],
+      signals: ['nominal'],
+      risk: 'read-only',
+      ambiguity: 'low',
+    },
+  }, {
+    traceId: `trace-project-health-ok-${healthFixtureSuffix}`,
+    stage: 'implement',
+    activeSkills: [],
+  });
+  const healthOkNotices = healthOk.observe('project_context_health', { projectRoot: 'D:\\Dev\\bridge-mcp' }, {
+    projectRoot: 'D:\\Dev\\bridge-mcp',
+    level: 'ok',
+    manifestStatus: 'valid',
+    findings: [],
+    advisoryOnly: true,
+  });
+  assert.equal(healthOkNotices.some((item) => item.code.startsWith('mssr-project-knowledge-review')), false);
+  assert.equal(healthOk.snapshot().maintenanceRequired, false, 'Healthy initialized project context must not force maintenance by itself.');
+  assert.equal(healthOk.snapshot().projectMaintenance?.projectContextHealth, 'ok');
+
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const unknownFreshness = traceContext.createMssrTraceSessionCoordinator(schemas);
+  unknownFreshness.observe('skill_route_plan', { task: 'Observe unknown Context Plane freshness.', caller: 'chatgpt-web', stage: 'implement' }, {
+    traceId: 'trace-context-freshness-unknown-001', stage: 'implement', activeSkills: [],
+  });
+  const unknownFreshnessNotices = unknownFreshness.observe('trace-domain-tool', { payload: 'unknown-freshness' }, {
+    contextPlane: { projectContext: { receipts: [{ freshness: 'unknown' }] } },
+  });
+  assert.equal(unknownFreshnessNotices.some((item) => item.code.startsWith('mssr-context-plane-freshness-')), false, 'Unknown-only freshness is WATCH and must stay below the notification threshold.');
+  assert.equal(unknownFreshness.snapshot().projectMaintenance?.contextFreshnessIssues, 0, 'WATCH freshness must not force durable maintenance.');
+  assert.equal(unknownFreshness.snapshot().maintenanceRequired, false);
+
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const contextFreshness = traceContext.createMssrTraceSessionCoordinator(schemas);
+  contextFreshness.observe('skill_route_plan', { task: 'Track current Context Plane freshness.', caller: 'chatgpt-web', stage: 'implement' }, {
+    traceId: 'trace-context-freshness-001', stage: 'implement', activeSkills: [],
+  });
+  const staleFreshness = contextFreshness.observe('trace-domain-tool', { payload: 'stale-freshness' }, {
+    contextPlane: { projectContext: { receipts: [{ freshness: 'stale' }] } },
+  });
+  const staleFreshnessNotice = staleFreshness.find((item) => item.code === 'mssr-context-plane-freshness-review');
+  assert.ok(staleFreshnessNotice, 'Stale Context Plane evidence must open a freshness review.');
+  assert.equal(staleFreshnessNotice.details?.event, 'opened');
+  assert.equal(contextFreshness.snapshot().projectMaintenance?.contextFreshnessIssues, 1);
+  assert.equal(contextFreshness.snapshot().maintenanceRequired, true);
+
+  const duplicateStaleFreshness = contextFreshness.observe('trace-domain-tool', { payload: 'stale-freshness-again' }, {
+    contextPlane: { projectContext: { receipts: [{ freshness: 'stale' }] } },
+  });
+  assert.equal(duplicateStaleFreshness.some((item) => item.code === 'mssr-context-plane-freshness-review'), false, 'Stable stale evidence must stay quiet.');
+  contextFreshness.observe('trace-domain-tool', { payload: 'no-context-plane' }, { ok: true });
+  assert.equal(contextFreshness.snapshot().projectMaintenance?.contextFreshnessIssues, 1, 'A result without Context Plane evidence must not erase the last observed freshness state.');
+
+  const freshAgain = contextFreshness.observe('trace-domain-tool', { payload: 'fresh-again' }, {
+    contextPlane: { projectContext: { receipts: [{ freshness: 'fresh' }] } },
+  });
+  const freshnessResolved = freshAgain.find((item) => item.code === 'mssr-context-plane-freshness-resolved');
+  assert.ok(freshnessResolved, 'Fresh evidence must resolve the current freshness warning.');
+  assert.equal(freshnessResolved.details?.event, 'resolved');
+  assert.equal(contextFreshness.snapshot().projectMaintenance?.contextFreshnessIssues, 0, 'Freshness must be current state, not a monotonic historical maximum.');
+  assert.equal(contextFreshness.snapshot().maintenanceRequired, true, 'Accrued durable maintenance debt remains until an explicit maintenance close even after freshness resolves.');
+
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const conflictingFreshness = traceContext.createMssrTraceSessionCoordinator(schemas);
+  conflictingFreshness.observe('skill_route_plan', { task: 'Detect conflicting Context Plane evidence.', caller: 'chatgpt-web', stage: 'implement' }, {
+    traceId: 'trace-context-freshness-conflict-001', stage: 'implement', activeSkills: [],
+  });
+  const conflictNotices = conflictingFreshness.observe('trace-domain-tool', { payload: 'conflicting-freshness' }, {
+    contextPlane: { contextMessages: { selected: [{ freshness: 'conflicting' }] } },
+  });
+  const conflictNotice = conflictNotices.find((item) => item.code === 'mssr-context-plane-freshness-conflict');
+  assert.ok(conflictNotice);
+  assert.equal(conflictNotice.severity, 'error');
+
+  traceContext.resetSharedMssrTraceRegistryForTests();
+
+
 
   const negative = traceContext.createMssrTraceSessionCoordinator(schemas);
   negative.observe('skill_route_plan', { task: 'negative fixture', stage: 'implement' }, {
@@ -855,12 +1098,23 @@ try {
   const rotatedSnapshot = rotatedResolver.resolveMetricContext({
     caller: 'chatgpt-web',
     sessionKey: 'session-after-rotation',
-    project: 'mauroprime-skills',
+    project: 'bridge-mcp',
   });
   assert.equal(
     rotatedSnapshot.traceId,
     'trace-rotated-session-001',
-    'A rotated connector session and related repository must recover the only open trace for the same caller.',
+    'A rotated connector session must recover the only open trace when the known project owner remains the same.',
+  );
+  const rotatedCrossProjectResolver = traceContext.createMssrTraceSessionCoordinator(schemas);
+  const rotatedCrossProjectSnapshot = rotatedCrossProjectResolver.resolveMetricContext({
+    caller: 'chatgpt-web',
+    sessionKey: 'session-after-rotation',
+    project: 'mauroprime-skills',
+  });
+  assert.equal(
+    rotatedCrossProjectSnapshot.traceId,
+    null,
+    'A rotated connector session must not inherit a trace whose known project owner is different.',
   );
   const secondRotatedOwner = traceContext.createMssrTraceSessionCoordinator(schemas);
   secondRotatedOwner.resolveMetricContext({
@@ -934,13 +1188,104 @@ try {
     project: 'third-project-without-exact-trace',
   });
   assert.equal(
-    crossProjectTool.args.traceId,
-    'trace-cross-project-fresh-001',
-    'A stateless cross-project call must recover the single fresh route in the same session instead of becoming ambiguous with a stale trace.',
-  );
-  assert.equal(
-    crossProjectTool.notices.some((item) => item.code === 'mssr-trace-ambiguous'),
+    Object.prototype.hasOwnProperty.call(crossProjectTool.args, 'traceId'),
     false,
+    'A stateless call from another known project must not inherit the only fresh trace merely because the session matches.',
+  );
+  const sameProjectTool = crossProjectResolver.prepare('trace-domain-tool', { payload: 'fixture' }, {
+    caller: 'chatgpt-web',
+    sessionKey: 'session-cross-project-continuity',
+    project: 'newer-project',
+  });
+  assert.equal(
+    sameProjectTool.args.traceId,
+    'trace-cross-project-fresh-001',
+    'The same known project may still recover its fresh trace within the same session.',
+  );
+
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const workflowOwner = traceContext.createMssrTraceSessionCoordinator(schemas);
+  workflowOwner.resolveMetricContext({
+    caller: 'chatgpt-web',
+    sessionKey: 'session-workflow-owner',
+    project: 'workflow-project',
+    workflowKey: 'workflow-alpha',
+  });
+  workflowOwner.observe('skill_route_plan', {
+    task: 'workflow owner fixture',
+    caller: 'chatgpt-web',
+    stage: 'implement',
+    workflowKey: 'workflow-alpha',
+  }, {
+    traceId: 'trace-workflow-owner-001',
+    stage: 'implement',
+    workflowKey: 'workflow-alpha',
+    activeSkills: [],
+  });
+  const sameWorkflowResolver = traceContext.createMssrTraceSessionCoordinator(schemas);
+  const sameWorkflowSnapshot = sameWorkflowResolver.resolveMetricContext({
+    caller: 'chatgpt-web',
+    sessionKey: 'session-workflow-owner-rotated',
+    project: 'workflow-project',
+    workflowKey: 'workflow-alpha',
+  });
+  assert.equal(sameWorkflowSnapshot.traceId, 'trace-workflow-owner-001');
+  const differentWorkflowResolver = traceContext.createMssrTraceSessionCoordinator(schemas);
+  const differentWorkflowSnapshot = differentWorkflowResolver.resolveMetricContext({
+    caller: 'chatgpt-web',
+    sessionKey: 'session-workflow-owner',
+    project: 'workflow-project',
+    workflowKey: 'workflow-beta',
+  });
+  assert.equal(
+    differentWorkflowSnapshot.traceId,
+    null,
+    'A known workflow owner must not inherit a trace from another known workflow even inside the same project/session.',
+  );
+
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const persistedOwnerTraceId = 'trace-persisted-owner-integrity-001';
+  observatory.recordMssrEvent({
+    traceId: persistedOwnerTraceId,
+    eventType: 'route_planned',
+    caller: 'chatgpt-web',
+    stage: 'implement',
+    ok: true,
+    details: {
+      workflowKey: 'persisted-workflow-alpha',
+      activeSkills: [],
+      requiredPhases: [],
+      completedPhases: [],
+      agentProfile: { model: 'gpt-5.6-sol', reasoningEffort: 'high' },
+    },
+  });
+  const persistedMetric = metrics.beginToolMetric('trace-domain-tool', { payload: 'persisted-owner-fixture' }, {
+    traceId: persistedOwnerTraceId,
+    caller: 'chatgpt-web',
+    sessionKey: 'persisted-shared-session',
+    project: 'persisted-project-alpha',
+    workflowKey: 'persisted-workflow-alpha',
+  });
+  metrics.finishToolMetric(persistedMetric, true, 0);
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const persistedSameOwner = traceContext.createMssrTraceSessionCoordinator(schemas).resolveMetricContext({
+    caller: 'chatgpt-web',
+    sessionKey: 'persisted-shared-session',
+    project: 'persisted-project-alpha',
+    workflowKey: 'persisted-workflow-alpha',
+  });
+  assert.equal(persistedSameOwner.traceId, persistedOwnerTraceId, 'Persisted recovery must still work for the exact project/workflow owner.');
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const persistedDifferentOwner = traceContext.createMssrTraceSessionCoordinator(schemas).resolveMetricContext({
+    caller: 'chatgpt-web',
+    sessionKey: 'persisted-shared-session',
+    project: 'persisted-project-beta',
+    workflowKey: 'persisted-workflow-beta',
+  });
+  assert.equal(
+    persistedDifferentOwner.traceId,
+    null,
+    'Persisted recovery must not let a matching sessionKey override a different known project/workflow owner.',
   );
 
   traceContext.resetSharedMssrTraceRegistryForTests();
@@ -984,13 +1329,18 @@ try {
   assert.deepEqual(reminders[0].notice.details.closePreflight.missingRequiredSkills, []);
 
   watchdog.observe('trace-domain-tool', watchdogTool.args, { ok: true });
-  watchdog.observe('mssr_trace_record', {
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(reminders.length, 1, 'Equivalent idle debt after later activity must stay quiet while the lifecycle fingerprint is unchanged.');
+  const progressNotices = watchdog.observe('mssr_trace_record', {
     traceId: 'trace-watchdog-web-001',
     eventType: 'progress',
     caller: 'chatgpt-web',
     stage: 'implement',
     leaseMs: 30_000,
   }, { traceId: 'trace-watchdog-web-001' });
+  const idleResolvedNotice = progressNotices.find((item) => item.code === 'mssr-web-outcome-idle-resolved');
+  assert.ok(idleResolvedNotice, 'Explicit progress must resolve the current idle-attention state.');
+  assert.equal(idleResolvedNotice.details?.event, 'resolved');
   const heartbeatSnapshot = watchdog.snapshot();
   assert.ok(heartbeatSnapshot.progressLeaseRemainingMs > 29_000, 'Progress must renew a bounded liveness lease.');
   await new Promise((resolve) => setTimeout(resolve, 40));
@@ -1102,10 +1452,12 @@ try {
     await call('project_context_load', {
       projectRoot: previousProject,
       task: 'Load the project for the trace that will remain open.',
+      workflowKey: 'previous-open-trace-workflow',
     });
     const previousRoute = await call('skill_route_plan', {
       task: 'Open a routed task that remains active while another project is loaded.',
       context: 'This route intentionally remains open to reproduce cross-task project contamination.',
+      workflowKey: 'previous-open-trace-workflow',
       intent,
       caller: 'codex-local',
       stage: 'start',
@@ -1116,6 +1468,7 @@ try {
     await call('project_context_load', {
       projectRoot: freshProject,
       task: 'Load the project that must own the next independent route.',
+      workflowKey: 'fresh-route-project-isolation',
     });
     const freshRoute = await call('skill_route_plan', {
       task: 'Open an independent route after loading a different project.',
@@ -1129,7 +1482,14 @@ try {
     });
 
     assert.notEqual(freshRoute.traceId, previousRoute.traceId);
-    const recentProjectMetrics = metrics.getRecentMetrics(30, 'active').recent;
+    const recentProjectMetrics = metrics.getRecentMetrics(40, 'active').recent;
+    const freshContextMetric = recentProjectMetrics.find((row) =>
+      row.tool === 'project_context_load' && row.project === 'fresh-route-project');
+    assert.equal(
+      freshContextMetric?.trace_id,
+      null,
+      'Switching to a different explicit project/workflow owner must detach project_context_load from the previous open trace.',
+    );
     const freshRouteMetric = recentProjectMetrics.find((row) =>
       row.tool === 'skill_route_plan' && row.trace_id === freshRoute.traceId);
     assert.equal(
@@ -1137,6 +1497,14 @@ try {
       'fresh-route-project',
       'A new route must prefer freshly loaded project context over the project of another open trace.',
     );
+    assert.equal(freshRouteMetric?.workflow_key, 'fresh-route-project-isolation');
+
+    const previousEvidence = observatory.getMssrTraceEvidence(previousRoute.traceId, 100);
+    const freshEvidence = observatory.getMssrTraceEvidence(freshRoute.traceId, 100);
+    assert.deepEqual(previousEvidence.identity.projects, ['previous-open-trace-project']);
+    assert.deepEqual(previousEvidence.workflowKeys, ['previous-open-trace-workflow']);
+    assert.deepEqual(freshEvidence.identity.projects, ['fresh-route-project']);
+    assert.deepEqual(freshEvidence.workflowKeys, ['fresh-route-project-isolation']);
   });
 
   observatory.recordMssrSkillLoad({

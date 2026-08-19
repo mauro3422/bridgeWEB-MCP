@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "name": "project-zomboid-fast-test-loop",
+  "title": "Project Zomboid Fast Test Loop",
+  "description": "Reusable Build 42 mod-development loop for Mauro's Windows PC: inspect active PZ processes/RAM first, use isolated -cachedir profiles and dev-only Debug Scenarios, keep the expensive client open, and prefer terminal/file-trigger Lua hot reload plus bounded request/response runtime commands over focus-stealing debugger input. Reserve restarts and two-client MP only for changes that require them.",
+  "activation": {
+    "keywords": [
+      "project zomboid",
+      "zomboid",
+      "pz",
+      "b42",
+      "build 42",
+      "mod test",
+      "smoke test",
+      "cachedir",
+      "nosteam",
+      "runtime test",
+      "playtest",
+      "debug scenario",
+      "hot reload",
+      "reload lua",
+      "reloadLuaFile",
+      "terminal reload",
+      "terminal command",
+      "runtime rpc"
+    ],
+    "phrases": [
+      "proba el mod en project zomboid",
+      "abri project zomboid para probar",
+      "hagamos un smoke test de zomboid",
+      "ejecuta pz para verificar el mod",
+      "proba esto en b42",
+      "usa el test rapido de project zomboid",
+      "abre el laboratorio de zomboid",
+      "mantenelo abierto y recarga lua",
+      "usa hot reload en pz",
+      "recarga este lua sin reiniciar zomboid"
+    ],
+    "negativeKeywords": [
+      "roblox",
+      "roblox studio",
+      "blender",
+      "godot",
+      "unreal",
+      "minecraft"
+    ],
+    "examples": [
+      "Después de este cambio probalo rápido en Project Zomboid sin abrir instancias duplicadas.",
+      "Abrí el laboratorio B42 directo y dejá PZ abierto para iterar.",
+      "Cambiamos sólo Lua client-side: recargalo desde terminal sin tocar el debugger.",
+      "Necesitamos dos clientes de PZ para verificar multiplayer, pero cuidá la RAM.",
+      "Antes de abrir Project Zomboid verificá si ya hay una instancia activa y reutilizala."
+    ]
+  },
+  "entrypoint": "GUIDE.md",
+  "phases": {
+    "preflight": "phases/preflight.md",
+    "cheap-verification": "phases/cheap-verification.md",
+    "prepare-isolated-smoke": "phases/prepare-isolated-smoke.md",
+    "debug-lab-autolaunch": "phases/debug-lab-autolaunch.md",
+    "hot-reload-loop": "phases/hot-reload-loop.md",
+    "singleplayer-smoke": "phases/singleplayer-smoke.md",
+    "lifecycle-check": "phases/lifecycle-check.md",
+    "multiplayer-gate": "phases/multiplayer-gate.md",
+    "verify-close": "phases/verify-close.md"
+  },
+  "recommendedTools": [
+    "project_context_load",
+    "skill_bootstrap",
+    "work_once",
+    "work_begin",
+    "work_peek",
+    "work_feed",
+    "work_finish",
+    "search_files",
+    "read_file_lines",
+    "run_command",
+    "mssr_trace_record"
+  ],
+  "scopeNotes": "Global guide available to all projects connected through Mauro's Bridge MCP."
+}

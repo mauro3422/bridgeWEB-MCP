@@ -394,7 +394,8 @@ $bridgeBaseUrl = "http://$BridgeHost`:$BridgePort"
 $expectedServerVersion = [string](Get-Content -LiteralPath (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json).version
 $bridgeCommandPattern = '(?i)(?:^|\s)"?(?:[^"\r\n]*[\\/])?node(?:\.exe)?"?\s+.*?(?:dist[\\/]http\.js|src[\\/]http\.ts)(?:\s|$)'
 $escapedProfile = [regex]::Escape($Profile)
-$tunnelCommandPattern = '(?i)tunnel-client(?:\.exe)?.*\brun\b.*--profile\s+.*' + $escapedProfile + '(?:\s|$)'
+$profileTokenPattern = '(?:"' + $escapedProfile + '"|''' + $escapedProfile + '''|' + $escapedProfile + ')'
+$tunnelCommandPattern = '(?i)tunnel-client(?:\.exe)?.*\brun\b.*--profile\s+' + $profileTokenPattern + '(?:\s|$)'
 
 Write-BridgeLog "ProjectRoot=$ProjectRoot"
 Write-BridgeLog "Bridge HTTP=$bridgeBaseUrl$McpPath"

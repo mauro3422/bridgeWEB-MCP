@@ -8,6 +8,7 @@ process.env.CODEX_HOME = path.join(sandbox, "codex");
 process.env.MSSR_FIRST_PARTY_SKILLS_ROOT = path.join(process.cwd(), "..", "mssr", "skills");
 process.env.BRIDGE_MCP_METRICS_DIR = path.join(sandbox, "metrics");
 process.env.BRIDGE_MCP_LOG_DIR = path.join(sandbox, "logs");
+process.env.BRIDGE_MCP_MSSR_EVENTS_JSONL = path.join(process.env.BRIDGE_MCP_LOG_DIR, "mssr-events.jsonl");
 process.env.BRIDGE_MCP_METRICS_SQLITE = path.join(sandbox, "metrics.sqlite");
 process.env.BRIDGE_MCP_EVENTS_JSONL = path.join(sandbox, "events.jsonl");
 process.env.BRIDGE_MCP_MSSR_STATE = path.join(sandbox, "mssr-state.json");
@@ -17,7 +18,7 @@ const plan = skillCatalogToolModule.handlers.skill_route_plan;
 const bootstrap = skillCatalogToolModule.handlers.skill_bootstrap;
 const evidence = {
   kind: "project-state",
-  ref: ".bridge/PROJECT_STATE.md#Provider",
+  ref: ".mssr/PROJECT_STATE.md#Provider",
   summary: "Provider requires a fresh readback.",
   canonicalOwner: "bridge-mcp",
   provenance: "project",

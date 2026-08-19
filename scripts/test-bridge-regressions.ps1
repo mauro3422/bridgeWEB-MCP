@@ -449,6 +449,8 @@ console.log("  OK terminal lifecycle, process-tree timeout, cleanup, and wrapped
 Invoke-Check "HTTP body and session limits reject excess work" {
   $port = Get-Random -Minimum 32000 -Maximum 45000
   $baseUrl = "http://127.0.0.1:$port"
+  $healthRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("bridge-http-regression-health-" + [Guid]::NewGuid().ToString("N"))
+  New-Item -ItemType Directory -Path $healthRoot -Force | Out-Null
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = "node"
   $psi.Arguments = ".\dist\http.js"
@@ -462,6 +464,12 @@ Invoke-Check "HTTP body and session limits reject excess work" {
   $psi.Environment["BRIDGE_MCP_HTTP_MAX_SESSIONS"] = "1"
   $psi.Environment["BRIDGE_MCP_HTTP_CAPACITY_RECLAIM_IDLE_MS"] = "1000"
   $psi.Environment["BRIDGE_MCP_HTTP_MAX_BODY_BYTES"] = "1024"
+  $psi.Environment["BRIDGE_MCP_SKILL_HEALTH_PATH"] = Join-Path $healthRoot "skill-health.json"
+  $psi.Environment["BRIDGE_MCP_PROJECT_HEALTH_PATH"] = Join-Path $healthRoot "project-health.json"
+  $psi.Environment["BRIDGE_MCP_PROJECT_HEALTH_ROOT"] = $ProjectRoot
+  $psi.Environment["BRIDGE_MCP_RUNTIME_HEALTH_PATH"] = Join-Path $healthRoot "runtime-health.json"
+  $psi.Environment["BRIDGE_MCP_PROJECT_SITUATION_PATH"] = Join-Path $healthRoot "project-situation.json"
+  $psi.Environment["BRIDGE_MCP_PROJECT_SITUATION_ROOT"] = $ProjectRoot
   $process = [System.Diagnostics.Process]::Start($psi)
   try {
     $ready = $false
@@ -528,6 +536,7 @@ Invoke-Check "HTTP body and session limits reject excess work" {
   finally {
     if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
     if ($process) { $process.Dispose() }
+    if ($healthRoot) { Remove-Item -LiteralPath $healthRoot -Recurse -Force -ErrorAction SilentlyContinue }
   }
 }
 

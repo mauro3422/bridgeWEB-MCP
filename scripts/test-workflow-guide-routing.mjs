@@ -67,6 +67,30 @@ assert.equal(plan.workflowGuideRecommendation.recommendation.action, 'load_exist
 assert.equal(plan.workflowGuideRecommendation.recommendation.guide, 'narrated-media-review');
 assert.equal(plan.workflowGuide, null, 'route plan should recommend but not load the guide; bootstrap performs the load');
 
+const modularTask = 'Review and design the gradual modularization of this workspace using Functional Core / Imperative Shell and fixture-earned ownership boundaries; do not implement yet.';
+const modularRecommendation = await registry.call('workflow_guide_recommend', { task: modularTask, maxResults: 5 });
+assert.equal(modularRecommendation.recommendation.action, 'load_existing', 'modular architecture should load an existing workflow guide');
+assert.equal(modularRecommendation.recommendation.guide, 'safe-modular-refactoring', 'modular architecture should select safe-modular-refactoring');
+assert.equal(modularRecommendation.existingSkillCoverage.matches.some((item) => item.name.startsWith('figma-')), false, 'modular architecture must not claim Figma skill coverage from generic design/code tokens');
+
+const coverageDiagnosticTask = 'Fix generic existingSkillCoverage false positives: roblox-save-backup-recovery and roblox-placement-system-authoring must not cover Godot project-context maintenance; visual-evidence-cataloging must not cover panorama context verification.';
+const coverageDiagnostic = await registry.call('workflow_guide_recommend', { task: coverageDiagnosticTask, maxResults: 5 });
+assert.equal(coverageDiagnostic.existingSkillCoverage.covered, false, 'routing/coverage diagnostics must not treat named example skills as procedure ownership');
+assert.equal(coverageDiagnostic.recommendation.action, 'none', 'routing/coverage diagnostics must not auto-load a guide or propose another workflow from example capability names');
+for (const name of ['roblox-save-backup-recovery', 'roblox-placement-system-authoring', 'visual-evidence-cataloging']) {
+  assert.equal(coverageDiagnostic.existingSkillCoverage.matches.some((item) => item.name === name), false, `${name} must remain diagnostic evidence, not existing coverage`);
+}
+
+const positiveCoverageCases = [
+  ['In Roblox Studio, implement a placement system with a ghost preview, rotation and snapping.', 'roblox-placement-system-authoring'],
+  ['Save and back up my Roblox Studio place so I can recover it after risky edits.', 'roblox-save-backup-recovery'],
+  ['Implement this Figma design as code.', 'figma-design-to-code'],
+];
+for (const [task, expectedSkill] of positiveCoverageCases) {
+  const result = await registry.call('workflow_guide_recommend', { task, maxResults: 5 });
+  assert.equal(result.existingSkillCoverage.matches.some((item) => item.name === expectedSkill), true, `true specialist coverage regressed for ${expectedSkill}`);
+}
+
 const unrelated = await registry.call('skill_bootstrap', {
   task: 'revisa la función foo en src/index.ts',
   context: '',

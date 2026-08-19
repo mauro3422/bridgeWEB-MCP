@@ -27,6 +27,13 @@ const child = spawn(process.execPath, [path.join(root, "dist", "http.js")], {
     BRIDGE_MCP_METRICS_DIR: path.join(temp, "data"),
     BRIDGE_MCP_LOG_DIR: path.join(temp, "logs"),
     BRIDGE_MCP_METRICS_SQLITE: path.join(temp, "data", "metrics.sqlite"),
+    BRIDGE_MCP_MSSR_EVENTS_JSONL: path.join(temp, "logs", "mssr-events.jsonl"),
+    BRIDGE_MCP_SKILL_HEALTH_PATH: path.join(temp, "data", "skill-health.json"),
+    BRIDGE_MCP_PROJECT_HEALTH_PATH: path.join(temp, "data", "project-health.json"),
+    BRIDGE_MCP_PROJECT_HEALTH_ROOT: root,
+    BRIDGE_MCP_RUNTIME_HEALTH_PATH: path.join(temp, "data", "runtime-health.json"),
+    BRIDGE_MCP_PROJECT_SITUATION_PATH: path.join(temp, "data", "project-situation.json"),
+    BRIDGE_MCP_PROJECT_SITUATION_ROOT: root,
     BRIDGE_MCP_MSSR_INGEST_TOKEN_FILE: tokenPath,
   },
 });

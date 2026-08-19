@@ -14,6 +14,7 @@ process.env.CODEX_HOME = codexHome;
 process.env.MSSR_FIRST_PARTY_SKILLS_ROOT = firstPartyRoot;
 process.env.BRIDGE_MCP_METRICS_DIR = metricsDir;
 process.env.BRIDGE_MCP_LOG_DIR = logDir;
+process.env.BRIDGE_MCP_MSSR_EVENTS_JSONL = path.join(process.env.BRIDGE_MCP_LOG_DIR, "mssr-events.jsonl");
 process.env.BRIDGE_MCP_METRICS_SQLITE = path.join(metricsDir, "bridge-metrics.sqlite");
 process.env.BRIDGE_MCP_EVENTS_JSONL = path.join(logDir, "bridge-events.jsonl");
 process.env.BRIDGE_MCP_MSSR_STATE = path.join(metricsDir, "mssr-observability-state.json");

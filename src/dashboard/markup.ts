@@ -235,6 +235,44 @@ export const dashboardMarkup = `
           </div>
         </div>
       </article>
+      <article class="card span-12">
+        <div class="card-header"><div><div class="card-kicker">Auditoría diaria · read-only</div><h2 class="card-title">Salud estructural de skills</h2><p class="card-description">Revisa si el core sigue siendo un buen “sombrero”, si las recipes están indexadas y si una skill cae a carga completa. WATCH/REVIEW son propuestas de mantenimiento, no errores de routing ni permiso para autoeditar.</p></div><span id="mssr-skill-health-status" class="status-pill" data-tone="info"><span class="dot info"></span><span>sin snapshot</span></span></div>
+        <div class="card-body">
+          <div class="metric-grid">
+            <div class="metric-card"><div class="metric-label">Owned skills</div><div id="mssr-skill-health-owned" class="metric-value">—</div><div class="metric-note"><span id="mssr-skill-health-manifests">—</span> con manifest</div></div>
+            <div class="metric-card"><div class="metric-label">WATCH</div><div id="mssr-skill-health-watch" class="metric-value">—</div><div class="metric-note">revisión preventiva</div></div>
+            <div class="metric-card"><div class="metric-label">REVIEW</div><div id="mssr-skill-health-review" class="metric-value">—</div><div class="metric-note">prioridad estructural</div></div>
+            <div class="metric-card"><div class="metric-label">Historial</div><div id="mssr-skill-health-snapshots" class="metric-value">—</div><div class="metric-note">snapshots diarios</div></div>
+          </div>
+        </div>
+        <div class="table-wrap"><table><thead><tr><th>Skill</th><th>Estado</th><th>Core</th><th>Recipes</th><th>Δ chars</th><th>Señal / acción</th></tr></thead><tbody id="mssr-skill-health"><tr><td colspan="6" class="muted">Cargando salud estructural…</td></tr></tbody></table></div>
+      </article>
+
+      <article class="card span-12">
+        <div class="card-header"><div><div class="card-kicker">Auditoría diaria · project control plane</div><h2 class="card-title">Salud de contexto de proyectos</h2><p class="card-description">MSSR revisa inicialización, tamaño de PROJECT_*, presión de core/módulos y knowledge no indexado en el workspace. WATCH queda silencioso; REVIEW genera atención y un plan, nunca autoedición.</p></div><span id="mssr-project-health-status" class="status-pill" data-tone="info"><span class="dot info"></span><span>sin snapshot</span></span></div>
+        <div class="card-body">
+          <div class="metric-grid">
+            <div class="metric-card"><div class="metric-label">Proyectos</div><div id="mssr-project-health-projects" class="metric-value">—</div><div class="metric-note"><span id="mssr-project-health-initialized">—</span> inicializados</div></div>
+            <div class="metric-card"><div class="metric-label">OK</div><div id="mssr-project-health-ok" class="metric-value">—</div><div class="metric-note">control plane sano</div></div>
+            <div class="metric-card"><div class="metric-label">WATCH</div><div id="mssr-project-health-watch" class="metric-value">—</div><div class="metric-note">visible, sin notificación</div></div>
+            <div class="metric-card"><div class="metric-label">REVIEW</div><div id="mssr-project-health-review" class="metric-value">—</div><div class="metric-note"><span id="mssr-project-health-snapshots">—</span> snapshots</div></div>
+          </div>
+        </div>
+        <div class="table-wrap"><table><thead><tr><th>Proyecto</th><th>Estado</th><th>Core / módulos</th><th>Δ findings</th><th>Señal / siguiente acción</th></tr></thead><tbody id="mssr-project-health"><tr><td colspan="5" class="muted">Cargando salud de proyectos…</td></tr></tbody></table></div>
+      </article>
+
+      <article class="card span-12">
+        <div class="card-header"><div><div class="card-kicker">Operational Notice Plane · infraestructura</div><h2 class="card-title">Tunnel / runtime / restart</h2><p class="card-description">Correlaciona salud del túnel, continuidad del boot y estado del watchdog. Una respuesta perdida o 502 externo es evidencia de transporte, no prueba automática de que Bridge o la operación hayan fallado.</p></div><span id="mssr-runtime-health-status" class="status-pill" data-tone="info"><span class="dot info"></span><span>sin snapshot</span></span></div>
+        <div class="card-body">
+          <div class="metric-grid">
+            <div class="metric-card"><div class="metric-label">Tunnel</div><div id="mssr-runtime-health-tunnel" class="metric-value">—</div><div class="metric-note">healthz + readyz</div></div>
+            <div class="metric-card"><div class="metric-label">Runtime</div><div id="mssr-runtime-health-runtime" class="metric-value">—</div><div class="metric-note">continuidad entre boots</div></div>
+            <div class="metric-card"><div class="metric-label">Restart</div><div id="mssr-runtime-health-restart" class="metric-value">—</div><div class="metric-note">request / watchdog ack</div></div>
+            <div class="metric-card"><div class="metric-label">Historial</div><div id="mssr-runtime-health-history" class="metric-value">—</div><div class="metric-note">snapshots metadata-only</div></div>
+          </div>
+          <div id="mssr-runtime-health-detail" class="metric-note">Sin evidencia persistida todavía.</div>
+        </div>
+      </article>
 
       <article class="card span-7">
         <div class="card-header"><div><div class="card-kicker">Últimas ejecuciones</div><h2 class="card-title">Contexto por traza</h2><p class="card-description">Resume presión, ahorro, skips y overflow por ejecución sin almacenar el texto procedural.</p></div></div>

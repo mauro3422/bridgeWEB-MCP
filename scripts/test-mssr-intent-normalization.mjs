@@ -8,7 +8,9 @@ const metricsDir = path.join(sandbox, "metrics");
 const logDir = path.join(sandbox, "logs");
 process.env.CODEX_HOME = path.join(sandbox, "codex");
 process.env.BRIDGE_MCP_METRICS_DIR = metricsDir;
+process.env.BRIDGE_MCP_METRICS_SQLITE = path.join(process.env.BRIDGE_MCP_METRICS_DIR, "bridge-metrics.sqlite");
 process.env.BRIDGE_MCP_LOG_DIR = logDir;
+process.env.BRIDGE_MCP_MSSR_EVENTS_JSONL = path.join(process.env.BRIDGE_MCP_LOG_DIR, "mssr-events.jsonl");
 process.env.BRIDGE_MCP_MSSR_STATE = path.join(metricsDir, "mssr-observability-state.json");
 
 const [{ normalizeMssrIntent }, { skillCatalogToolModule }, observatory] = await Promise.all([

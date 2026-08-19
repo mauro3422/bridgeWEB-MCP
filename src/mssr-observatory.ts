@@ -1092,6 +1092,7 @@ export function findPersistedMssrTraceCandidates(args: {
   caller?: string;
   sessionKey?: string;
   project?: string;
+  workflowKey?: string;
   skillName?: string;
   maxAgeMs?: number;
   limit?: number;
@@ -1104,6 +1105,7 @@ export function findPersistedMssrTraceCandidates(args: {
   const caller = typeof args.caller === "string" ? args.caller.trim().toLowerCase() : "";
   const sessionKey = typeof args.sessionKey === "string" ? args.sessionKey.trim().toLowerCase() : "";
   const project = typeof args.project === "string" ? args.project.trim().toLowerCase() : "";
+  const workflowKey = typeof args.workflowKey === "string" ? args.workflowKey.trim().toLowerCase() : "";
   const skillName = typeof args.skillName === "string" ? args.skillName.trim() : "";
   const rows = database.prepare(`
     SELECT trace_id, MAX(occurred_at) AS latest_route_at
@@ -1121,7 +1123,10 @@ export function findPersistedMssrTraceCandidates(args: {
     if (!state || state.closed || Date.now() - state.updatedAt > maxAgeMs) continue;
     if (caller && caller !== "other" && state.caller !== caller) continue;
     if (sessionKey && sessionKey !== "unknown" && state.sessionKey !== sessionKey) continue;
-    if ((!sessionKey || sessionKey === "unknown") && project && project !== "unknown" && state.project !== project) continue;
+    if (project && project !== "unknown" && state.project !== "unknown" && state.project !== project) continue;
+    if (workflowKey && workflowKey !== "unknown" && workflowKey !== "unscoped"
+      && state.workflowKey !== "unknown" && state.workflowKey !== "unscoped"
+      && state.workflowKey !== workflowKey) continue;
     if (skillName && (!state.selectedSkills.includes(skillName) || state.loadedSkills.includes(skillName))) continue;
     candidates.push(state);
     if (candidates.length >= limit) break;

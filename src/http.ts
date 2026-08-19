@@ -10,12 +10,18 @@ import { getBridgeHttpConfig, SERVER_NAME, SERVER_VERSION } from "./config.js";
 import { renderDashboardHtml } from "./dashboard.js";
 import { closeRobloxMcpConnection } from "./integrations/roblox-mcp-client.js";
 import { getMetricsErrors, getMetricsOverview, getMetricsStatus, getMetricsSummary, getMetricsTimeline, getRecentMetrics } from "./metrics.js";
-import { peekBridgeNoticeHistory } from "./notices.js";
+import { emitBridgeNotice, peekBridgeNoticeHistory } from "./notices.js";
 import { queryMssrObservatory } from "./mssr-observatory.js";
 import { authorizeMssrTelemetry, ensureMssrTelemetryToken, ingestMssrTelemetry } from "./mssr-telemetry-ingest.js";
 import { TOOL_AUDIT_VIEWS, type ToolAuditView } from "./tool-audit.js";
 import { getDefaultToolAudit } from "./tool-registry.js";
 import { RUNTIME_BOOT_ID } from "./runtime-identity.js";
+import { getSkillHealthReport, startSkillHealthScheduler } from "./skill-health.js";
+import { getProjectHealthReport, startProjectHealthScheduler } from "./project-health.js";
+import { buildProjectHealthNoticeInputs, buildSkillHealthNoticeInputs } from "./operational-notices.js";
+import { getRuntimeHealthReport, observeBridgeRuntimeHealth, startRuntimeHealthScheduler } from "./runtime-health.js";
+import { getReleaseConsistencyReport, startReleaseConsistencyScheduler } from "./release-consistency.js";
+import { buildProjectSituationNoticeInputs, getProjectSituationReport, startProjectSituationScheduler } from "./project-situation.js";
 
 const config = getBridgeHttpConfig();
 const startedAt = new Date();
@@ -466,6 +472,34 @@ async function main() {
     });
   }, CLEANUP_INTERVAL_MS);
   cleanupTimer.unref();
+  const skillHealthScheduler = startSkillHealthScheduler({
+    onSnapshot: (snapshot, previous) => {
+      for (const notice of buildSkillHealthNoticeInputs(snapshot, previous)) emitBridgeNotice(notice);
+    },
+    onError: (error) => log("warn", "daily skill health audit failed", { error: error instanceof Error ? error.message : String(error) }),
+  });
+  const projectHealthScheduler = startProjectHealthScheduler({
+    onSnapshot: (snapshot, previous) => {
+      for (const notice of buildProjectHealthNoticeInputs(snapshot, previous)) emitBridgeNotice(notice);
+    },
+    onError: (error) => log("warn", "daily project context health audit failed", { error: error instanceof Error ? error.message : String(error) }),
+  });
+  const projectSituationScheduler = startProjectSituationScheduler({
+    onSnapshot: (snapshot, previous) => {
+      for (const notice of buildProjectSituationNoticeInputs(snapshot, previous)) emitBridgeNotice(notice);
+    },
+    onError: (error) => log("warn", "project situation audit failed", { error: error instanceof Error ? error.message : String(error) }),
+  });
+  const runtimeHealthScheduler = startRuntimeHealthScheduler({
+    observe: observeBridgeRuntimeHealth,
+    onNotice: (notice) => emitBridgeNotice(notice),
+    onError: (error) => log("warn", "runtime health audit failed", { error: error instanceof Error ? error.message : String(error) }),
+  });
+  const releaseConsistencyScheduler = startReleaseConsistencyScheduler({
+    onNotice: (notice) => emitBridgeNotice(notice),
+    onError: (error) => log("warn", "release consistency audit failed", { error: error instanceof Error ? error.message : String(error) }),
+  });
+
 
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const requestId = randomUUID();
@@ -502,6 +536,27 @@ async function main() {
         }) as Record<string, unknown>);
         return;
       }
+      if (req.method === "GET" && url.pathname === "/api/mssr/skill-health") {
+        sendJson(res, 200, await getSkillHealthReport());
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/api/mssr/project-health") {
+        sendJson(res, 200, await getProjectHealthReport());
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/api/mssr/project-situation") {
+        sendJson(res, 200, await getProjectSituationReport());
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/api/mssr/runtime-health") {
+        sendJson(res, 200, await getRuntimeHealthReport());
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/api/mssr/release-consistency") {
+        sendJson(res, 200, getReleaseConsistencyReport());
+        return;
+      }
+
 
       if (req.method === "POST" && url.pathname === "/api/mssr/events") {
         if (!authorizeMssrTelemetry(req.headers.authorization)) {
@@ -600,7 +655,7 @@ async function main() {
       sendJson(res, 404, {
         error: "not_found",
         requestId,
-        routes: ["GET /healthz", "GET /readyz", "GET /status", "GET /dashboard", "GET /api/notices", "GET /api/tools/audit", "GET /api/metrics/*", "POST /api/mssr/events (Bearer token)", `${config.mcpPath} MCP Streamable HTTP`],
+        routes: ["GET /healthz", "GET /readyz", "GET /status", "GET /dashboard", "GET /api/mssr/summary", "GET /api/mssr/skill-health", "GET /api/mssr/project-health", "GET /api/mssr/project-situation", "GET /api/mssr/runtime-health", "GET /api/mssr/release-consistency", "GET /api/notices", "GET /api/tools/audit", "GET /api/metrics/*", "POST /api/mssr/events (Bearer token)", `${config.mcpPath} MCP Streamable HTTP`],
       });
     } catch (error) {
       const candidateStatus = error && typeof error === "object" && "statusCode" in error
@@ -629,6 +684,11 @@ async function main() {
     closing = true;
     ready = false;
     clearInterval(cleanupTimer);
+    skillHealthScheduler.stop();
+    projectHealthScheduler.stop();
+    projectSituationScheduler.stop();
+    runtimeHealthScheduler.stop();
+    releaseConsistencyScheduler.stop();
     log("warn", "shutdown requested", { signal });
 
     httpServer.close(async () => {

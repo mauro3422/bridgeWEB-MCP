@@ -1,0 +1,11 @@
+# Bridge project state
+
+## Current release
+Bridge `0.6.110` is the current live release over the verified 0.6.109 trace-owner-integrity implementation and consumes exact `@mauroprime/mssr` `0.2.45` from `vendor/mauroprime-mssr-0.2.45.tgz`. Artifact identity matches `pkg:0.2.45#37797b88`, `571648` bytes, SHA-256 `37797b88787464717736e4a45d25cebaea291663c48cfb725f831aa0c2f070b7`. `npm run check` and routing are green with 218 effective cases and 50/50 owned skills explicitly covered. Controlled restart `ffde0d4d-0482-4879-a6af-995f5e463af8` was acknowledged; live HTTP smoke proves Bridge `0.6.110`, PID `34668`, boot `5e22da6c-a016-46fb-a6dd-7671b8bd5773`, tunnel live/ready and 156 tools. Final gate `bridge_verify_1787113520104_1` passed doctor/check/build, HTTP, dual-era, complete regressions, skill-routing, watchdog/metrics and tools-list; its sole required failure was stale generated `TOOLS.md`, repaired and reverified by `npm run docs:tools && npm run docs:tools:check`. No Bridge-local routing exception was introduced.
+
+## Current MSSR learning state
+
+Learning digest collection is active in `observe-only` mode with `routingInfluence=false`. Strict digests are accumulating; historical priors remain observability only and must not affect routing/context decisions yet.
+
+## Project knowledge migration
+The canonical-only workspace initialization under `D:\Dev` discovers 22 managed Git repositories after portable MSSR discovery excludes generated migration-backup/audit/vendor/snapshot trees. All 22 have valid `.mssr/project-context.json` contracts, the recursive second pass changed 0 and blocked 0, and the first persisted daily Project Context Health snapshot reports 16 `ok`, 2 `watch` (`LLM-Rig`, `mauroprime-godot-mcp`) and 4 `review` (`electronics-repair-simulator`, `GodotAtlas`, `MyceliumFront`, `TabletWhiteboard`). WATCH/REVIEW are structural maintenance evidence, not failed initialization and not permission for automatic splitting. `project_context_modularization_plan` can turn pressure into hash-addressed exact indexed-section candidates while core narrowing and unindexed knowledge remain explicit review decisions. Cleanup remains bounded to known obsolete MSSR artifacts; unrelated Bridge-owned `.bridge` content is preserved.

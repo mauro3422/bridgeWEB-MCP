@@ -4,35 +4,31 @@ Local MCP bridge for MauroPrime. The goal is to let ChatGPT operate MauroPrime t
 
 ## Current status
 
-```txt
-Project root: C:\dev\bridge-mcp
-Server: bridge-mcp v0.6.86
-Mode: HTTP production-candidate
-Bridge MCP: http://127.0.0.1:3001/mcp
-Bridge status: http://127.0.0.1:3001/status
-Tunnel admin: http://127.0.0.1:8081
-Tunnel profile: bridge-local-http
-Rollback profile: stdio through scripts/start-bridge-watchdog.ps1
-Runtime tools: 146 (live on 0.6.86)
-```
+Current live release: `0.6.108` at `D:\Dev\bridge-mcp`; Situation Model C2f-B Architecture Impact host observation is live on packaged `@mauroprime/mssr` `0.2.34`, while Operational Notice Plane Gate E5 remains closed from the prior release.
+Packaged dependency/install: `@mauroprime/mssr` `0.2.34`; verified tarball SHA-256 `f86dd2fd66bf6441d93b61c0dca65e5fe070e3d76ab15de197abbfbb552a2cec`, 498079 bytes.
+Live tool catalog remains `156`; C2f-B adds no MCP tool, queue, retry runtime, scheduler or watcher.
+
+0.6.108 adds only the Bridge host filesystem boundary for the portable C2f-A/B contract: exact declared architecture refs are observed on demand as SHA-256/availability evidence and normalized by MSSR. The current canonical MSSR manifest yields 2 architectures / 11 refs, all available in the verified smoke. No baseline/source-set comparison, `possible-impact` classification, Architecture Impact notice, context feedback or reviewed-current receipt exists yet; C2f-C is the next implementation gate.
 
 Do not commit keys, tunnel secrets, `node_modules`, `dist`, logs, SQLite metrics, sandbox files, or tunnel-client binaries.
 
 ## Known-good checks
 
-Known-good checks for live v0.6.86:
+Known-good checks for live v0.6.108:
 
 ```txt
-bridge_self_check -> ok true
-bridge_verify_all -> ok true
-npm run check -> OK
-npm run build -> OK
-scripts/test-bridge-http.ps1 -> OK
-scripts/test-bridge-regressions.ps1 -> OK
-http://127.0.0.1:3001/status -> bridge-mcp v0.6.85
-http://127.0.0.1:8081/healthz -> live
-http://127.0.0.1:8081/readyz -> ready
-git -> ## main...origin/main
+bridge_health -> 0.6.108, tunnel live/ready, 156 tools, restart pending=false
+live HTTP -> PID 37168 / boot 5bcca910-4660-4129-992b-0c01d6f011f0
+watchdog -> PID 27356; controlled C2f-B restart ACK 0514372f-7e3c-422d-8cff-b816da561e36
+HTTP-only restart -> tunnel PID 12556 preserved and live/ready
+package/source/dist/live -> 0.6.108; packaged/installed MSSR -> 0.2.34
+canonical MSSR architecture-impact smoke -> 2 architectures / 11 declared refs, all available; no C2f-C fields
+npm run test:regressions -> PASS, exit 0; C2f-B observer + Gate E5 matrix included in aggregate
+bridge_verify_all -> PASS, code 0, failedRequired=0 on PID 37168 generation
+routing gate -> 210 canonical effective cases, audit healthy
+TOOLS.md -> current with 156 registry tools
+C2f-B -> on-demand host observation only; no baseline/fingerprint/possible-impact/notice/watcher/queue/new tool
+source/vendor MSSR 0.2.34 tarball -> 498079 bytes, SHA-256 f86dd2fd66bf6441d93b61c0dca65e5fe070e3d76ab15de197abbfbb552a2cec
 ```
 
 If anything points at `8080`, treat it as stale context unless the active profile was intentionally changed.
@@ -392,66 +388,99 @@ Source `0.6.89` integrates Bridge as an adapter for the portable MSSR Context Me
 
 This is response delivery, not a new durable inbox. Runtime publication/restart and cross-host lifecycle parity remain separate verification gates.
 
-### MSSR Context Plane durable delivery (ack tombstone semantics)
+### MSSR Context Plane durable delivery
 
-Source `0.6.90` packages MSSR core `0.2.12` and wires Bridge onto the durable project context plane under `.bridge/mssr-context-inbox.json`. `skill_route_plan`/`skill_bootstrap` select and redeliver pending messages until `mssr_context_ack` records an explicit receipt. Bridge then suppresses identical acknowledged evidence on its delivery surface (same id, kind, and evidence identity including revision), allowing reappearance only when revision or content changes. Bridge remains the delivery/retention adapter, never the message-semantics owner. Http tunnel live publication and cross-host parity for Bridge/ChatGPT Web remain separate verification gates.
+Bridge consumes the packaged portable Context Plane under canonical `.mssr/runtime/context-inbox.json`. `skill_route_plan`/`skill_bootstrap` select pending evidence and `mssr_context_ack` records explicit receipts/tombstones. Bridge remains the delivery/retention adapter; portable MSSR owns message identity, freshness and acknowledgement semantics. `.bridge/` is not an active MSSR project-authority fallback.
 
 ### Project knowledge and change-history governance
 
-Completed in source 0.6.86:
+Current contract:
 
 ```txt
-project_context_audit: read-only workspace classification of modular / legacy / invalid / empty / not-initialized project authorities
+project_context_audit: read-only recursive workspace health/classification under canonical `.mssr`
 project_change_consistency: Git + package version + changelogs/<version>.md + INDEX + PROJECT_* impact gate
 versioned changelog contract: updated / reviewed-none / pending for PROJECT_CONTEXT, PROJECT_MEMORY and PROJECT_STATE
 selective debugging history: load changelogs/INDEX.md + current release only when MSSR intent requires history/recovery
-Bridge and MSSR now own real modular .bridge PROJECT_CONTEXT / PROJECT_MEMORY / PROJECT_STATE authorities
-legacy changelog preserved under changelogs/LEGACY.md; no automatic full-history injection
-no audit, telemetry or learning process auto-writes durable project memory
+all managed repositories discovered in the verified D:\Dev workspace are explicitly initialized; no mass legacy-migration task remains
+portable native/Codex/OpenCode/Bridge project-control semantics come from packaged MSSR instead of host-specific copies
+no audit, telemetry, health watcher, notice or learning process auto-writes durable project memory
 ```
 
-Still pending:
+Current follow-up:
 
 ```txt
-migrate active legacy projects only after reading their real repository evidence
-extend the same authority/change-consistency contract to Codex/OpenCode/native MSSR hosts
-add long-term staleness/receipt semantics if working-tree evidence proves insufficient after publication
-use project_change_consistency as an explicit persistence/publication gate in first-party MSSR maintenance workflows
+keep project_change_consistency as an explicit persistence/publication gate in first-party maintenance workflows
+add stronger long-term staleness/receipt semantics only when real post-publication evidence shows the current contract is insufficient
+resolve structural REVIEW through reviewed modularization/capture, never through automatic mass splitting or invented project facts
+keep cross-host project-control conformance green as host adapters evolve
 ```
 
 ### MSSR first-party core skill package
 
-Next architecture phase:
+Current architecture:
 
 ```txt
-move the canonical source of MSSR-owned operational skills into the MSSR package
-first audit/strengthen mssr-agent-routing, shared-skill-governance, skill-routing-maintainer, skill-maintenance-loop and on-demand mssr-observability-maintenance
+canonical MSSR-owned operational skills live in the MSSR package
 "first-party core" does not mean "load on every task"; activation/workflow requirements remain explicit
-- [ ] Codex: install/mount the packaged core skills into native discovery without maintaining copied editable sources
-- [ ] OpenCode: consume the same packaged core through its MSSR adapter
-- [x] ChatGPT Web: Bridge discovers the MSSR package directly instead of depending on Mauro's Codex-home copy
-keep Mauro/user/project/plugin skills as separate external provider catalogs
-- [x] Reserve first-party names or surface shadowing as an explicit conflict in Bridge routing/audit.
-- [ ] Add cross-host conformance tests for version, routing metadata, dependency closure, maintenance and learning-digest behavior.
+Codex/OpenCode/native MSSR consume the same portable package/adapter contracts
+ChatGPT Web: Bridge discovers and loads the packaged MSSR core directly instead of depending on Mauro's Codex-home copies
+Mauro/user/project/plugin skills remain separate external provider catalogs
+reserved first-party names surface shadowing/conflict explicitly in routing/audit
+cross-host routing/dependency/maintenance conformance is verified in the MSSR suite and should remain a release gate
 ```
 
-### Next implementation work
+### Operational Notice Plane
+
+Completed in 0.6.99:
 
 ```txt
-use `blender_review_bundle` to drive evidence-based CBAnimal character refinements
-exercise v0.6.6 mixed text/image tool results through the live connector
-add further convenience tools only when repeated friction is observed
-consider native connector file parameters if the MCP/client surface exposes them
-continue improving code graphs only from real project failures
+Bridge keeps `bridgeNotices` as the single general notice queue/TTL/history/automatic-response transport
+packaged MSSR 0.2.19 owns the pure attention transition policy; Bridge does not clone it
+Skill Health and Project Context Health compare each daily observation with the previous persisted snapshot
+stable OK/WATCH stays quiet; stable REVIEW with the same bounded fingerprint does not repeat after yesterday's notice was drained
+material actionable changes and escalation/deescalation notify; leaving the actionable threshold emits an explicit resolution
+suggested notice actions are bounded preflights/recovery hints and never authorization or automatic execution
 ```
 
-The bridge covers the normal inspect/edit/verify/Git loop, project workflow guides, image/Blender work and resumable binary transport. Avoid broad architecture rewrites until real project usage exposes a concrete gap.
+Completed in 0.6.100 / packaged MSSR 0.2.20:
+
+```txt
+trace lifecycle idle/missing-outcome is projected through the same portable attention contract
+idle alone can open REVIEW but cannot prove completion, synthesize outcome, or become ERROR by itself
+explicit progress/outcome resolves idle attention; timer callbacks revalidate a later progress lease before notifying
+project-knowledge REVIEW/REQUIRED uses semantic transitions and can now emit changed/escalated/deescalated/resolved instead of a producer-specific key
+maintenance attention resolves only after maintenance closes the current lifecycle revision and can reopen after a later material invalidation
+Context Plane freshness is current state: fresh=OK, unknown-only=WATCH, stale/unavailable=REVIEW, conflicting=ERROR
+fresh evidence clears the current freshness issue count instead of inheriting a monotonic historical maximum
+WATCH freshness does not force durable maintenance; accrued maintenance debt still requires an explicit maintenance close
+```
+
+Completed through 0.6.105 / packaged MSSR 0.2.26:
+
+```txt
+C2a -> provider/tunnel/runtime/restart evidence uses shared semantic transitions instead of treating 502 as proof of failure
+C2b -> route/trace/required-skill/required-phase compliance is observable and recoverable through the same attention contract
+C2c -> bounded canonical/replica/historical claims expose explicit consistency mismatch and resolution
+C2d -> evidence-first-v1 ranks ready/deferred advisory recovery with causal gates, information gain and bounded risk/cost/blast radius
+C2e -> Situation Model brings delivered PROJECT_CONTEXT/PROJECT_MEMORY/PROJECT_STATE/changelog/ADR revisions into C2c/C2d; Bridge watches active receipts across managed projects and emits classified context-refresh/consistency transitions through bridgeNotices
+```
+
+Next:
+
+```txt
+C2e-D -> explicit contract-defined semantic claim producers for selected project facts (release/state/ownership/decision revisions), never arbitrary prose-to-truth inference
+C2e-E -> feed active Situation attention back into bounded context selection so smaller maintenance agents can refresh the minimum stale/missing authority for later larger-agent work
+C2f/shadow -> collect recommendation/outcome calibration metadata before any learned policy can influence ranking; replay/calibration/feature flag/rollback remain mandatory
+continue project-specific watchers only where the evidence contract is reusable, privacy-bounded and advisory
+```
+
+The bridge covers the normal inspect/edit/verify/Git loop, project workflow guides, image/Blender work, resumable binary transport and a general operational notice delivery surface. Avoid broad architecture rewrites until real usage exposes a concrete gap.
 
 ## Rollback
 
 `stdio` rollback remains available:
 
 ```powershell
-Set-Location C:\dev\bridge-mcp
-.\scripts\start-bridge-watchdog.ps1 -ProjectRoot C:\dev\bridge-mcp
+Set-Location D:\Dev\bridge-mcp
+.\scripts\start-bridge-watchdog.ps1 -ProjectRoot D:\Dev\bridge-mcp
 ```

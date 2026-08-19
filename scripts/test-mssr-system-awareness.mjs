@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import {
   classifyRobloxTargetState,
   isRobloxMssrRoute,
+  mapRobloxTargetOperationalState,
   parseRobloxStudioMode,
+  projectRobloxOperationalHealth,
 } from "../dist/mssr-system-awareness.js";
 
 const studio = { id: "studio-1", name: "1.rbxl", active: false };
@@ -27,4 +29,17 @@ assert.equal(classifyRobloxTargetState({ catalogStatus: "healthy", studios: [act
 assert.equal(classifyRobloxTargetState({ catalogStatus: "healthy", studios: [activeStudio], activeStudio, mode: "Unknown" }), "active-unknown");
 assert.equal(classifyRobloxTargetState({ catalogStatus: "healthy", studios: [], activeStudio: null, mode: "Unknown", inspectionError: "boom" }), "studio-inspection-failed");
 
+assert.equal(mapRobloxTargetOperationalState("active-edit"), "ready");
+assert.equal(mapRobloxTargetOperationalState("single-studio-inactive"), "inactive");
+assert.equal(mapRobloxTargetOperationalState("multiple-studios-no-active"), "ambiguous");
+assert.equal(mapRobloxTargetOperationalState("no-studio"), "missing");
+assert.equal(mapRobloxTargetOperationalState("studio-inspection-failed"), "inspection-failed");
+
+assert.equal(projectRobloxOperationalHealth("healthy", "active-play").level, "ok");
+assert.equal(projectRobloxOperationalHealth("healthy", "single-studio-inactive").level, "watch");
+assert.equal(projectRobloxOperationalHealth("healthy", "multiple-studios-no-active").level, "review");
+assert.equal(projectRobloxOperationalHealth("healthy", "no-studio").level, "review");
+assert.equal(projectRobloxOperationalHealth("healthy", "studio-inspection-failed").level, "review");
+assert.equal(projectRobloxOperationalHealth("degraded", "catalog-degraded").level, "review");
+assert.equal(projectRobloxOperationalHealth("unavailable", "catalog-unavailable").level, "error");
 console.log("mssr system awareness: ok");

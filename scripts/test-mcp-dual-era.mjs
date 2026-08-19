@@ -1,11 +1,24 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
+const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "bridge-dual-era-"));
 const port = 3900 + Math.floor(Math.random() * 500);
 const baseUrl = `http://127.0.0.1:${port}`;
 const child = spawn(process.execPath, ["dist/http.js"], {
   cwd: process.cwd(),
-  env: { ...process.env, BRIDGE_MCP_HTTP_PORT: String(port) },
+  env: {
+    ...process.env,
+    BRIDGE_MCP_HTTP_PORT: String(port),
+    BRIDGE_MCP_SKILL_HEALTH_PATH: path.join(tempRoot, "skill-health.json"),
+    BRIDGE_MCP_PROJECT_HEALTH_PATH: path.join(tempRoot, "project-health.json"),
+    BRIDGE_MCP_PROJECT_HEALTH_ROOT: process.cwd(),
+    BRIDGE_MCP_RUNTIME_HEALTH_PATH: path.join(tempRoot, "runtime-health.json"),
+    BRIDGE_MCP_PROJECT_SITUATION_PATH: path.join(tempRoot, "project-situation.json"),
+    BRIDGE_MCP_PROJECT_SITUATION_ROOT: process.cwd(),
+  },
   stdio: ["ignore", "ignore", "pipe"],
   windowsHide: true,
 });
@@ -122,4 +135,5 @@ try {
     child.once("exit", resolve);
     setTimeout(resolve, 2000).unref();
   });
+  fs.rmSync(tempRoot, { recursive: true, force: true });
 }

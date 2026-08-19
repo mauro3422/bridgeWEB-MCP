@@ -16,7 +16,7 @@ import { terminalList } from "./process-tools.js";
 
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
-async function tunnelHealth(baseUrl = DEFAULT_TUNNEL_ADMIN_BASE_URL) {
+export async function tunnelHealth(baseUrl = DEFAULT_TUNNEL_ADMIN_BASE_URL) {
   const fetchEndpoint = async (name: string) => {
     const url = `${baseUrl}/${name}`;
     try {

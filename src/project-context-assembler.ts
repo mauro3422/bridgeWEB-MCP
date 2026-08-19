@@ -1,18 +1,17 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
+  MSSR_PROJECT_CONTROL_FILES,
+  loadProjectContextModules,
   projectContextManifestSchema,
-  selectProjectContextModules,
+  resolveMssrProjectFile,
   type ProjectContextCore,
-  type ProjectContextModule,
   type ProjectContextSource,
   type SkillStage,
   type StructuredSkillIntent,
 } from "@mauroprime/mssr";
 
-const MANIFEST_PATH = path.join(".bridge", "project-context.json");
 const MAX_SOURCE_CHARS = 80_000;
-const UNBOUNDED_BUDGET = Number.MAX_SAFE_INTEGER;
 
 export type ProjectContextDocument = {
   kind: "context" | "memory" | "state";
@@ -20,6 +19,8 @@ export type ProjectContextDocument = {
   path: string;
   text: string;
   source: "core" | "module";
+  topic?: string;
+  area?: string;
 };
 
 export type ProjectDirective = {
@@ -28,10 +29,12 @@ export type ProjectDirective = {
   path: string;
   text: string;
   matched: string[];
+  topic?: string;
+  area?: string;
 };
 
 export type ProjectContextAssembly = {
-  mode: "modular" | "legacy";
+  mode: "modular" | "uninitialized";
   manifestStatus: "loaded" | "missing" | "invalid";
   manifestPath: string;
   documents: ProjectContextDocument[];
@@ -58,15 +61,6 @@ function ensureInside(root: string, candidate: string): string {
   return resolvedCandidate;
 }
 
-async function pathExists(filePath: string): Promise<boolean> {
-  try {
-    await fs.stat(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function headingLevel(line: string): number | null {
   const match = /^(#{1,6})\s+\S/.exec(line.trim());
   return match ? match[1].length : null;
@@ -76,12 +70,8 @@ export function extractProjectMarkdownSections(markdown: string, headings: strin
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
   const chunks: string[] = [];
   for (const requested of headings) {
-    const matches = lines
-      .map((line, index) => ({ line: line.trim(), index }))
-      .filter((item) => item.line === requested.trim());
-    if (matches.length !== 1) {
-      throw new Error(`Expected one project-context heading '${requested}', found ${matches.length}.`);
-    }
+    const matches = lines.map((line, index) => ({ line: line.trim(), index })).filter((item) => item.line === requested.trim());
+    if (matches.length !== 1) throw new Error(`Expected one project-context heading '${requested}', found ${matches.length}.`);
     const start = matches[0].index;
     const level = headingLevel(lines[start]);
     if (!level) throw new Error(`Project context section is not a markdown heading: ${requested}`);
@@ -105,37 +95,40 @@ async function materializeSource(projectRoot: string, source: ProjectContextSour
   const text = await fs.readFile(filePath, "utf8");
   const selected = source.sections?.length ? extractProjectMarkdownSections(text, source.sections) : text.trim();
   const limit = maxChars ?? MAX_SOURCE_CHARS;
-  if (selected.length > limit) {
-    throw new Error(`Project context source '${source.path}' exceeds ${limit} characters after selection.`);
-  }
+  if (Buffer.byteLength(selected, "utf8") > limit) throw new Error(`Project context source '${source.path}' exceeds ${limit} bytes after selection.`);
   return { path: filePath, text: selected };
 }
 
 async function materializeCore(projectRoot: string, core: ProjectContextCore[]) {
   return await Promise.all(core.map(async (entry) => {
     const materialized = await materializeSource(projectRoot, entry.source, entry.maxChars);
-    return { entry, ...materialized, chars: materialized.text.length };
+    return { entry, ...materialized, chars: Buffer.byteLength(materialized.text, "utf8") };
   }));
 }
 
-async function materializeEligibleModules(args: {
-  projectRoot: string;
-  modules: ProjectContextModule[];
-  intent: StructuredSkillIntent;
-  stage: SkillStage;
-}) {
-  const eligibility = selectProjectContextModules({
-    modules: args.modules.map((module) => ({ ...module, chars: 0 })),
-    intent: args.intent,
-    stage: args.stage,
-    maxModuleChars: UNBOUNDED_BUDGET,
-  });
-  const eligibleIds = new Set(eligibility.selected.map((module) => module.id));
-  const materialized = await Promise.all(args.modules.filter((module) => eligibleIds.has(module.id)).map(async (module) => {
-    const source = await materializeSource(args.projectRoot, module.source, module.maxChars);
-    return { ...module, ...source, chars: source.text.length };
-  }));
-  return { materialized, eligibility };
+function emptyAssembly(args: {
+  manifestStatus: "missing" | "invalid";
+  manifestPath: string;
+  maxContextChars: number;
+  warning: string;
+}): ProjectContextAssembly {
+  return {
+    mode: "uninitialized",
+    manifestStatus: args.manifestStatus,
+    manifestPath: args.manifestPath,
+    documents: [],
+    directives: [],
+    decisions: [],
+    coreIncluded: false,
+    coreCharsLoaded: 0,
+    moduleCharsLoaded: 0,
+    totalCharsLoaded: 0,
+    remainingContextChars: Math.max(0, Math.floor(args.maxContextChars)),
+    requiredBudgetExceeded: false,
+    optionalContextOmitted: false,
+    ambiguousGroups: [],
+    warning: args.warning,
+  };
 }
 
 export async function assembleProjectContext(args: {
@@ -146,82 +139,50 @@ export async function assembleProjectContext(args: {
   includeCore?: boolean;
 }): Promise<ProjectContextAssembly> {
   const projectRoot = path.resolve(args.projectRoot);
-  const manifestPath = path.join(projectRoot, MANIFEST_PATH);
-  if (!(await pathExists(manifestPath))) {
-    const bridgeDir = path.dirname(manifestPath);
-    const hasBridgeAuthority = await pathExists(bridgeDir);
-    const legacyFiles = ["PROJECT_CONTEXT.md", "PROJECT_MEMORY.md", "PROJECT_STATE.md"];
-    const existingLegacyFiles = hasBridgeAuthority
-      ? (await Promise.all(legacyFiles.map(async (name) => (await pathExists(path.join(bridgeDir, name))) ? name : null))).filter((name): name is string => Boolean(name))
-      : [];
-    const warning = hasBridgeAuthority
-      ? existingLegacyFiles.length > 0
-        ? `Project context is using legacy full-document fallback because .bridge/project-context.json is missing. Existing authorities: ${existingLegacyFiles.join(", ")}. Register stable sections deliberately before relying on modular retrieval.`
-        : "Project has a .bridge authority directory but no project-context manifest or PROJECT_CONTEXT/PROJECT_MEMORY/PROJECT_STATE documents. Initialize durable project knowledge deliberately when this repository needs cross-session state; do not invent empty memory automatically."
-      : undefined;
-    return {
-      mode: "legacy",
+  const manifestResolution = await resolveMssrProjectFile(projectRoot, MSSR_PROJECT_CONTROL_FILES.projectContextManifest);
+  const manifestPath = manifestResolution.absolutePath;
+  const maxContextChars = Math.max(0, Math.floor(args.maxContextChars));
+
+  if (manifestResolution.source === "missing") {
+    return emptyAssembly({
       manifestStatus: "missing",
       manifestPath,
-      documents: [],
-      directives: [],
-      decisions: [],
-      coreIncluded: false,
-      coreCharsLoaded: 0,
-      moduleCharsLoaded: 0,
-      totalCharsLoaded: 0,
-      remainingContextChars: args.maxContextChars,
-      requiredBudgetExceeded: false,
-      optionalContextOmitted: false,
-      ambiguousGroups: [],
-      ...(warning ? { warning } : {}),
-    };
+      maxContextChars,
+      warning: "MSSR project context is not initialized. Run project_context_initialize before relying on project knowledge; Bridge will not fall back to .bridge or arbitrary project documents.",
+    });
   }
 
   let manifest;
   try {
     manifest = projectContextManifestSchema.parse(JSON.parse(await fs.readFile(manifestPath, "utf8")));
   } catch (error) {
-    return {
-      mode: "legacy",
+    return emptyAssembly({
       manifestStatus: "invalid",
       manifestPath,
-      documents: [],
-      directives: [],
-      decisions: [],
-      coreIncluded: false,
-      coreCharsLoaded: 0,
-      moduleCharsLoaded: 0,
-      totalCharsLoaded: 0,
-      remainingContextChars: args.maxContextChars,
-      requiredBudgetExceeded: false,
-      optionalContextOmitted: false,
-      ambiguousGroups: [],
-      warning: `Invalid project-context manifest; using legacy full-document fallback: ${error instanceof Error ? error.message : String(error)}`,
-    };
+      maxContextChars,
+      warning: `Invalid MSSR project-context manifest. Repair or re-initialize the contract before loading project knowledge: ${error instanceof Error ? error.message : String(error)}`,
+    });
   }
 
   const coreIncluded = args.includeCore !== false;
-  const core = coreIncluded ? await materializeCore(projectRoot, manifest.core) : [];
-  const coreCharsLoaded = core.reduce((sum, item) => sum + item.chars, 0);
-  const maxContextChars = Math.max(0, Math.floor(args.maxContextChars));
-  const moduleBudget = Math.max(0, maxContextChars - coreCharsLoaded);
-  const documents: ProjectContextDocument[] = core.map(({ entry, path: sourcePath, text }) => ({
-    kind: entry.kind,
-    id: entry.id,
-    path: sourcePath,
-    text,
-    source: "core",
-  }));
-  const directives: ProjectDirective[] = [];
-
   if (!args.intent) {
+    const core = coreIncluded ? await materializeCore(projectRoot, manifest.core) : [];
+    const documents: ProjectContextDocument[] = core.map(({ entry, path: sourcePath, text }) => ({
+      kind: entry.kind,
+      id: entry.id,
+      path: sourcePath,
+      text,
+      source: "core",
+      ...(entry.topic ? { topic: entry.topic } : {}),
+      ...(entry.area ? { area: entry.area } : {}),
+    }));
+    const coreCharsLoaded = core.reduce((sum, item) => sum + item.chars, 0);
     return {
       mode: "modular",
       manifestStatus: "loaded",
       manifestPath,
       documents,
-      directives,
+      directives: [],
       decisions: manifest.modules.map((module) => ({ id: module.id, selected: false, reason: "intent-required" })),
       coreIncluded,
       coreCharsLoaded,
@@ -234,57 +195,80 @@ export async function assembleProjectContext(args: {
     };
   }
 
-  const eligible = await materializeEligibleModules({
+  // Portable MSSR owns semantic eligibility, budget ordering, required overflow,
+  // ambiguity and module decisions. Bridge only maps materialized records into its
+  // host-facing document/directive representation.
+  const loaded = await loadProjectContextModules({
     projectRoot,
-    modules: manifest.modules,
     intent: args.intent,
     stage: args.stage,
+    maxChars: maxContextChars,
+    includeCore: coreIncluded,
   });
-  const materializedById = new Map(eligible.materialized.map((module) => [module.id, module]));
-  const requiredModuleChars = eligible.materialized
-    .filter((module) => module.required)
-    .reduce((sum, module) => sum + module.chars, 0);
-  const finalSelection = selectProjectContextModules({
-    modules: eligible.materialized,
-    intent: args.intent,
-    stage: args.stage,
-    // Required project modules may overflow visibly, but optional modules never receive
-    // extra budget because of that overflow. Required entries are ranked first.
-    maxModuleChars: Math.max(moduleBudget, requiredModuleChars),
-  });
-  const selectedIds = new Set(finalSelection.selected.map((module) => module.id));
+  if (loaded.manifestStatus !== "loaded") {
+    return emptyAssembly({
+      manifestStatus: "missing",
+      manifestPath: loaded.manifestPath,
+      maxContextChars,
+      warning: "MSSR project context became unavailable during selection. Re-run project_context_health/initialize before continuing.",
+    });
+  }
 
-  for (const selected of finalSelection.selected) {
-    const module = materializedById.get(selected.id);
-    if (!module) continue;
-    if (module.kind === "directive") {
-      directives.push({ kind: "directive", id: module.id, path: module.path, text: module.text, matched: finalSelection.decisions.find((item) => item.id === module.id)?.matched ?? [] });
+  const documents: ProjectContextDocument[] = [];
+  const directives: ProjectDirective[] = [];
+  for (const record of loaded.core) {
+    if (record.kind === "directive") continue;
+    documents.push({
+      kind: record.kind,
+      id: record.ref,
+      path: path.resolve(projectRoot, record.sourcePath),
+      text: record.content,
+      source: "core",
+      ...(record.topic ? { topic: record.topic } : {}),
+      ...(record.area ? { area: record.area } : {}),
+    });
+  }
+  for (const record of loaded.selected) {
+    const decision = loaded.decisions.find((item) => item.id === record.ref);
+    if (record.kind === "directive") {
+      directives.push({
+        kind: "directive",
+        id: record.ref,
+        path: path.resolve(projectRoot, record.sourcePath),
+        text: record.content,
+        matched: decision?.matched ?? [],
+        ...(record.topic ? { topic: record.topic } : {}),
+        ...(record.area ? { area: record.area } : {}),
+      });
     } else {
-      documents.push({ kind: module.kind, id: module.id, path: module.path, text: module.text, source: "module" });
+      documents.push({
+        kind: record.kind,
+        id: record.ref,
+        path: path.resolve(projectRoot, record.sourcePath),
+        text: record.content,
+        source: "module",
+        ...(record.topic ? { topic: record.topic } : {}),
+        ...(record.area ? { area: record.area } : {}),
+      });
     }
   }
 
-  const decisions = manifest.modules.map((module) => {
-    const semanticDecision = eligible.eligibility.decisions.find((item) => item.id === module.id);
-    if (!materializedById.has(module.id)) return semanticDecision ?? { id: module.id, selected: false, reason: "intent-mismatch" };
-    return finalSelection.decisions.find((item) => item.id === module.id) ?? { id: module.id, selected: selectedIds.has(module.id), reason: "selected" };
-  });
-  const moduleCharsLoaded = finalSelection.selectedChars;
-
+  const coreCharsLoaded = loaded.core.reduce((sum, record) => sum + record.bytes, 0);
+  const moduleCharsLoaded = loaded.selected.reduce((sum, record) => sum + record.bytes, 0);
   return {
     mode: "modular",
     manifestStatus: "loaded",
-    manifestPath,
+    manifestPath: loaded.manifestPath,
     documents,
     directives,
-    decisions,
+    decisions: loaded.decisions as Array<Record<string, unknown>>,
     coreIncluded,
     coreCharsLoaded,
     moduleCharsLoaded,
     totalCharsLoaded: coreCharsLoaded + moduleCharsLoaded,
-    remainingContextChars: Math.max(0, maxContextChars - coreCharsLoaded - moduleCharsLoaded),
-    requiredBudgetExceeded: coreCharsLoaded + requiredModuleChars > maxContextChars,
-    optionalContextOmitted: finalSelection.decisions.some((item) => item.reason === "budget-exceeded" && !manifest.modules.find((module) => module.id === item.id)?.required),
-    ambiguousGroups: finalSelection.ambiguousGroups,
+    remainingContextChars: loaded.remainingChars,
+    requiredBudgetExceeded: loaded.requiredBudgetExceeded.length > 0 || loaded.requiredOverflow.length > 0,
+    optionalContextOmitted: loaded.decisions.some((item) => item.reason === "budget-exceeded"),
+    ambiguousGroups: loaded.ambiguousExclusiveGroups,
   };
 }

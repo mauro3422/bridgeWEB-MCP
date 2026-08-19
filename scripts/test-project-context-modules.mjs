@@ -5,7 +5,7 @@ import { assembleProjectContext } from "../dist/project-context-assembler.js";
 import { workflowGuideToolModule } from "../dist/tools/workflow-guide-tools.js";
 
 const root = path.join(process.cwd(), "sandbox", "project-context-modules-test");
-const bridgeDir = path.join(root, ".bridge");
+const bridgeDir = path.join(root, ".mssr");
 
 await fs.rm(root, { recursive: true, force: true });
 await fs.mkdir(bridgeDir, { recursive: true });
@@ -48,10 +48,10 @@ try {
     stage: "start",
     maxContextChars: 12_000,
   });
-  assert.equal(legacyPreflight.mode, "legacy");
+  assert.equal(legacyPreflight.mode, "uninitialized");
   assert.equal(legacyPreflight.manifestStatus, "missing");
-  assert.match(legacyPreflight.warning ?? "", /legacy full-document fallback/);
-  assert.match(legacyPreflight.warning ?? "", /PROJECT_CONTEXT\.md/);
+  assert.match(legacyPreflight.warning ?? "", /project_context_initialize/);
+  assert.match(legacyPreflight.warning ?? "", /will not fall back/i);
 
   await fs.writeFile(path.join(bridgeDir, "project-context.json"), JSON.stringify({
     schemaVersion: 1,
@@ -60,7 +60,7 @@ try {
         id: "architecture-core",
         kind: "context",
         description: "Minimal architecture facts.",
-        source: { path: ".bridge/PROJECT_CONTEXT.md", sections: ["## Architecture"] },
+        source: { path: ".mssr/PROJECT_CONTEXT.md", sections: ["## Architecture"] },
       },
     ],
     modules: [
@@ -68,7 +68,7 @@ try {
         id: "write-safety",
         kind: "directive",
         description: "Extra write checks.",
-        source: { path: ".bridge/PROJECT_MEMORY.md", sections: ["## Write safety"] },
+        source: { path: ".mssr/PROJECT_MEMORY.md", sections: ["## Write safety"] },
         domains: ["coding"],
         actions: ["edit"],
         needs: ["integrity-verification"],
@@ -79,7 +79,7 @@ try {
         id: "required-verification-gate",
         kind: "directive",
         description: "Required verification evidence.",
-        source: { path: ".bridge/PROJECT_MEMORY.md", sections: ["## Required verification gate"] },
+        source: { path: ".mssr/PROJECT_MEMORY.md", sections: ["## Required verification gate"] },
         stages: ["verify"],
         required: true,
         priority: 80,
@@ -88,7 +88,7 @@ try {
         id: "implementation-state",
         kind: "state",
         description: "Current implementation state.",
-        source: { path: ".bridge/PROJECT_STATE.md", sections: ["## Current implementation"] },
+        source: { path: ".mssr/PROJECT_STATE.md", sections: ["## Current implementation"] },
         domains: ["coding"],
         actions: ["edit"],
         stages: ["implement"],
@@ -97,7 +97,7 @@ try {
         id: "roblox-state",
         kind: "state",
         description: "Unrelated Roblox state.",
-        source: { path: ".bridge/PROJECT_STATE.md", sections: ["## Roblox"] },
+        source: { path: ".mssr/PROJECT_STATE.md", sections: ["## Roblox"] },
         domains: ["roblox"],
         actions: ["review"],
         stages: ["implement"],

@@ -20,6 +20,20 @@ const intent = {
 };
 
 try {
+  await assert.rejects(
+    () => projectContextToolModule.handlers.project_context_update({
+      projectRoot: root,
+      kind: "memory",
+      heading: "## Must initialize first",
+      content: "This write must fail before the MSSR project contract exists.",
+    }),
+    /project_context_initialize/,
+  );
+
+  const initialized = await projectContextToolModule.handlers.project_context_initialize({ root, scope: "project" });
+  assert.equal(initialized.initialized, true);
+  assert.equal(initialized.manifestStatus, "valid");
+
   const created = await projectContextToolModule.handlers.project_context_update({
     projectRoot: root,
     kind: "memory",
@@ -41,14 +55,15 @@ try {
   assert.equal(created.manifest.created, true);
   assert.match(created.section.afterSha256, /^[0-9a-f]{64}$/);
 
-  const memoryPath = path.join(root, ".bridge", "PROJECT_MEMORY.md");
+  const memoryPath = path.join(root, ".mssr", "PROJECT_MEMORY.md");
   const memory = await fs.readFile(memoryPath, "utf8");
   assert.equal((memory.match(/## Broad refactor safety/g) ?? []).length, 1);
-  const manifestPath = path.join(root, ".bridge", "project-context.json");
+  const manifestPath = path.join(root, ".mssr", "project-context.json");
   const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
-  assert.equal(manifest.modules.length, 1);
-  assert.equal(manifest.modules[0].source.path, ".bridge/PROJECT_MEMORY.md");
-  assert.deepEqual(manifest.modules[0].source.sections, ["## Broad refactor safety"]);
+  const createdModule = manifest.modules.find((item) => item.id === "broad-refactor-safety");
+  assert.ok(createdModule);
+  assert.equal(createdModule.source.path, ".mssr/PROJECT_MEMORY.md");
+  assert.deepEqual(createdModule.source.sections, ["## Broad refactor safety"]);
 
   const loaded = await workflowGuideToolModule.handlers.project_context_load({
     projectRoot: root,
@@ -94,8 +109,9 @@ try {
   assert.equal((replacedMemory.match(/## Broad refactor safety/g) ?? []).length, 1);
   assert.equal(replacedMemory.includes("verify its diff"), true);
   const replacedManifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
-  assert.equal(replacedManifest.modules.length, 1);
-  assert.equal(replacedManifest.modules[0].priority, 50);
+  const replacedModule = replacedManifest.modules.find((item) => item.id === "broad-refactor-safety");
+  assert.ok(replacedModule);
+  assert.equal(replacedModule.priority, 50);
 
   console.log("project context update tests passed");
 } finally {

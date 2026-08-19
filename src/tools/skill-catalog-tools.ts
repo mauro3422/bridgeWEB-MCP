@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -48,11 +49,10 @@ import {
   loadProjectContextHost,
   mssrFirstPartySkillsRoot,
   mssrSkillDecisionSchema,
-  planCodexSkillContexts,
+  planSkillContexts,
   projectContextAcknowledgeInputSchema,
-  resolveSkillLoadSelection,
+  resolveMssrHostSkillSelection,
   shouldLoadProjectChangeHistory,
-  type MssrSkillDecisionRecord,
   type SkillContextMode,
   type SkillReferenceMode,
 } from "@mauroprime/mssr";
@@ -330,7 +330,7 @@ async function readSkillEntry(skillPath: string, source: SkillSource, origin?: s
     const name = frontmatterValue(text, "name") || path.basename(path.dirname(skillPath));
     const description = frontmatterValue(text, "description");
     if (!name) return null;
-    return { name, description, source, path: skillPath, origin };
+    return { name, description, source, path: skillPath, origin, contentHash: createHash("sha256").update(text).digest("hex") };
   } catch {
     return null;
   }
@@ -474,7 +474,7 @@ type LocalSkillDiscovery = {
   mssr: MssrFirstPartySkillDiscovery;
 };
 
-async function discoverLocalSkills(): Promise<LocalSkillDiscovery> {
+export async function discoverLocalSkills(): Promise<LocalSkillDiscovery> {
   const [mssr, codex] = await Promise.all([discoverMssrFirstPartySkills(), discoverCodexSkills()]);
   return {
     skills: [...mssr.skills, ...codex.skills],
@@ -598,19 +598,40 @@ function tokens(value: string): Set<string> {
   return new Set(normalize(value).split(/\s+/).filter((token) => token.length >= 2));
 }
 
-function skillScore(task: string, skill: SkillEntry): { score: number; reasons: string[] } {
+export function isSkillCoverageMetaTask(task: string): boolean {
+  const taskText = normalize(task);
+  return /(?:existing ?skill ?coverage|skill ?coverage|routing.{0,24}coverage|coverage.{0,24}diagnostic|routing.{0,24}diagnostic|workflow ownership|coverage matcher|skill matcher|routing matcher|workflow guide recommendation|skill recommendation|false positive|false negative|misroute|misrouting|wrong skill|unrelated skill|must not cover|should not cover|incorrectly (?:select|report|recommend)|falso positivo|falso negativo|cobertura de skills?|matcher de skills?|skill equivocada|ruteo de skills?)/.test(taskText);
+}
+
+function removeKnownSkillReferences(task: string, skills: SkillEntry[]): string {
+  let taskText = normalize(task);
+  const names = [...new Set(skills.map((skill) => normalize(skill.name)).filter(Boolean))]
+    .sort((a, b) => b.length - a.length);
+  for (const name of names) {
+    taskText = taskText.replaceAll(name, " ");
+  }
+  return taskText.replace(/\s+/g, " ").trim();
+}
+
+function skillScore(
+  task: string,
+  skill: SkillEntry,
+  options: { allowNameEvidence?: boolean; allowIntentBoosts?: boolean } = {},
+): { score: number; reasons: string[] } {
   const taskText = normalize(task);
   const taskTokens = tokens(task);
   const nameText = normalize(skill.name);
   const descriptionText = normalize(skill.description);
+  const allowNameEvidence = options.allowNameEvidence !== false;
+  const allowIntentBoosts = options.allowIntentBoosts !== false;
   let score = 0;
   const reasons: string[] = [];
-  if (nameText && taskText.includes(nameText)) {
+  if (allowNameEvidence && nameText && taskText.includes(nameText)) {
     score += 10;
     reasons.push("name appears in task");
   }
   const nameTokens = [...tokens(skill.name)];
-  const nameOverlap = nameTokens.filter((token) => taskTokens.has(token)).length;
+  const nameOverlap = allowNameEvidence ? nameTokens.filter((token) => taskTokens.has(token)).length : 0;
   if (nameOverlap) {
     score += nameOverlap * 3;
     reasons.push(`${nameOverlap} name token(s) matched`);
@@ -631,7 +652,7 @@ function skillScore(task: string, skill: SkillEntry): { score: number; reasons: 
     "skill-maintenance-loop": /cerrar.{0,40}iteracion|iteracion.{0,60}(?:friccion|incidente|error|bug)|registrar.{0,40}(?:incidente|friccion|bug)|(?:incidente|friccion|bug).{0,40}(?:skill|routing|tool|lifecycle)|mantenimiento.{0,30}(?:skill|capacidad)|skill gap|repeated friction|manual workaround|lifecycle defect/,
   };
   const localPattern = localIntentPatterns[skill.name];
-  if (localPattern?.test(taskText)) {
+  if (allowIntentBoosts && localPattern?.test(taskText)) {
     score += 10;
     reasons.push("shared/local skill intent matched");
   }
@@ -644,6 +665,9 @@ function skillScore(task: string, skill: SkillEntry): { score: number; reasons: 
     "roblox-placement-ui-review": /placement|colocar|colocacion|ghost|fantasma|cursor|hud|rotar|snap|preview/,
     "roblox-technique-animation-authoring": /tecnica|technique|ability|habilidad|keyframe|r6|r15|cooldown/,
     "roblox-ui-ux": /\bui\b|ux|interfaz|hud|screen ?gui|surface ?gui|billboard ?gui|icono|layout|responsive/,
+    "figma-design-to-code": /\bfigma\b|figma\.com|get_design_context|design[- ]to[- ]code/,
+    "figma-generate-design": /\bfigma\b|figma\.com|write to figma|push .{0,20} to figma/,
+    "figma-code-connect": /\bfigma\b|figma\.com|code connect|\.figma\.(?:ts|js)/,
   };
   const requiredPattern = narrowSkillRequirements[skill.name];
   if (requiredPattern && !requiredPattern.test(taskText)) {
@@ -661,7 +685,7 @@ function skillScore(task: string, skill: SkillEntry): { score: number; reasons: 
       "rbx-unit-test": /unit test|prueba unitaria|pruebas unitarias|test coverage|cobertura|module ?script.*test|test.*module ?script/,
     };
     const pattern = intentPatterns[skill.name];
-    if (pattern?.test(taskText)) {
+    if (allowIntentBoosts && pattern?.test(taskText)) {
       score += 8;
       reasons.push("Roblox skill intent matched");
     }
@@ -676,8 +700,16 @@ function skillScore(task: string, skill: SkillEntry): { score: number; reasons: 
 
 export async function findExistingSkillCoverage(task: string, maxResults = 5) {
   const discovered = await discoverLocalSkills();
-  const ranked = canonicalizeSkillEntries(discovered.skills).entries
-    .map((skill) => ({ ...skill, ...skillScore(task, skill) }))
+  const skills = canonicalizeSkillEntries(discovered.skills).entries;
+  const metaCoverageTask = isSkillCoverageMetaTask(task);
+  const scoringTask = metaCoverageTask ? removeKnownSkillReferences(task, skills) : task;
+  const ranked = skills
+    .map((skill) => ({
+      ...skill,
+      ...skillScore(scoringTask, skill, metaCoverageTask
+        ? { allowNameEvidence: false, allowIntentBoosts: false }
+        : undefined),
+    }))
     .filter((skill) => skill.score >= 12)
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
     .slice(0, Math.max(1, Math.min(maxResults, 20)));
@@ -918,7 +950,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
     },
     {
       name: "skill_bootstrap",
-      description: "Load the current phase of a structured MSSR route. It globally plans selective Codex skill context from context-modules.json manifests and, when projectRoot is supplied, also re-selects project context/memory/state/directive modules from .bridge/project-context.json for the same stage and structured intent without duplicating the already-loaded project core. Optional MSSR Context Messages v1 are validated and selected by portable MSSR, returned as complete advisory evidence, and piggybacked only when selected; Bridge never executes their advisory actions or persists their proposals. Required skill cores are reserved first; optional procedural context remains budgeted. Projects without a modular manifest keep the observable legacy project-context fallback loaded by project_context_load. The response reports skill-context savings plus scoped project-context decisions. Deferred skills and project modules remain metadata-only.",
+      description: "Load the current phase of a structured MSSR route. It globally plans selective skill context from context-modules.json manifests and, when projectRoot is supplied, also re-selects project context/memory/state/directive modules only from canonical .mssr/project-context.json for the same stage and structured intent without duplicating the already-loaded project core. Missing or invalid project initialization remains explicit and never falls back to .bridge. Optional MSSR Context Messages are validated and selected by portable MSSR, returned as complete advisory evidence, and piggybacked only when selected; Bridge never executes their advisory actions or persists their proposals. Required skill cores are reserved first; optional procedural context remains budgeted. The response reports skill-context savings plus scoped project-context decisions. Deferred skills and project modules remain metadata-only.",
       inputSchema: {
         type: "object",
         properties: {
@@ -943,7 +975,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
           contentMode: { type: "string", enum: ["selective", "full"], default: "selective", description: "Use selective to assemble manifest-guided core/modules. Use full only for explicit diagnosis, compatibility comparison, or recovery." },
           includeReferences: { type: "string", enum: ["auto", "none"], default: "auto", description: "Auto selects matching manifest modules. None loads only the declared core while preserving routing." },
           maxContextChars: { type: "number", default: 24000, minimum: 4000, maximum: 100000, description: "Global character budget for assembled Codex skill context. Required cores are never silently truncated; budget overflow is reported." },
-          selectionMode: { type: "string", enum: ["auto", "host-gated"], description: "Optional skill context selection policy. ChatGPT Web defaults to host-gated: required roots load with their dependencies, optional roots require an accepted decision, and dependency-only skills inherit the root decision. Auto preserves compatibility for other callers." },
+          selectionMode: { type: "string", enum: ["auto", "host-gated"], default: "host-gated", description: "Portable MSSR skill-selection policy. Host-gated is the default across MSSR hosts: required roots load with dependencies, optional roots require an explicit accepted decision, explicit skipped decisions remain telemetry, and absent decisions stay pending. Auto is an explicit compatibility/debug mode." },
           skillDecisions: {
             type: "array",
             maxItems: 32,
@@ -970,7 +1002,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
     },
     {
       name: "mssr_context_ack",
-      description: "Strictly acknowledge MSSR Context Messages previously selected and delivered by skill_route_plan or skill_bootstrap on the durable project context plane. Only exact delivered message ids are acknowledged; unknown or already-acknowledged ids are reported and left untouched. Selection never confirms delivery; this tool is the only host surface that records delivery receipts. Requires projectRoot naming the repository whose .bridge/mssr-context-inbox.json is trusted. It never executes advisory actions and never persists persistence proposals.",
+      description: "Strictly acknowledge MSSR Context Messages previously selected and delivered by skill_route_plan or skill_bootstrap on the durable project context plane. Only exact delivered message ids are acknowledged; unknown or already-acknowledged ids are reported and left untouched. Selection never confirms delivery; this tool is the only host surface that records delivery receipts. Requires projectRoot naming the repository whose canonical .mssr/runtime/context-inbox.json is trusted. It never executes advisory actions and never persists persistence proposals.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1233,7 +1265,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         contextMessages: args.contextMessages,
         maxContextMessages: args.maxContextMessages ?? 12,
         maxContextMessageChars: args.maxContextMessageChars ?? 6_000,
-        selectionMode: (args.caller ?? "other") === "chatgpt-web" ? "host-gated" : "auto",
+        selectionMode: "host-gated",
         traceId,
         workflowKey,
       };
@@ -1374,57 +1406,18 @@ export const skillCatalogToolModule: BridgeToolModule = {
         });
       }
       const activeByName = new Map(route.activeSkills.map((skill) => [skill.name, skill]));
-      const selectionMode = z.enum(["auto", "host-gated"])
-        .catch(caller === "chatgpt-web" ? "host-gated" : "auto")
-        .parse(args.selectionMode ?? (caller === "chatgpt-web" ? "host-gated" : "auto"));
-      const suppliedDecisions = z.array(mssrSkillDecisionSchema).max(32).parse(args.skillDecisions ?? []) as MssrSkillDecisionRecord[];
-      const optionalRoots = new Set(route.activeSkills
-        .filter((match) => match.selectedAsRoot === true && match.required !== true)
-        .map((match) => match.name));
-      const requiredRoots = new Set(route.activeSkills
-        .filter((match) => match.selectedAsRoot === true && match.required === true)
-        .map((match) => match.name));
-      const suppliedDecisionBySkill = new Map<string, MssrSkillDecisionRecord>();
-      for (const rawDecision of suppliedDecisions) {
-        if (suppliedDecisionBySkill.has(rawDecision.skillName)) {
-          throw new Error(`Duplicate MSSR skill decision for '${rawDecision.skillName}'.`);
-        }
-        if (requiredRoots.has(rawDecision.skillName)) {
-          throw new Error(`Required MSSR skill '${rawDecision.skillName}' is a workflow obligation and must not be host-gated.`);
-        }
-        if (!optionalRoots.has(rawDecision.skillName)) {
-          throw new Error(`MSSR skill decision references a non-root optional candidate: ${rawDecision.skillName}`);
-        }
-        suppliedDecisionBySkill.set(rawDecision.skillName, { ...rawDecision, stage: route.stage });
-      }
-
-      const decisions: MssrSkillDecisionRecord[] = [];
-      if (selectionMode === "host-gated") {
-        for (const decision of suppliedDecisionBySkill.values()) {
-          decisions.push(decision);
-          recordMssrSkillDecision({ traceId, caller, decision });
-        }
-      } else {
-        for (const decision of suppliedDecisions) {
-          decisions.push({ ...decision, stage: route.stage });
-          recordMssrSkillDecision({ traceId, caller, decision: { ...decision, stage: route.stage } });
-        }
-      }
-      const decisionBySkill = new Map(decisions.map((decision) => [decision.skillName, decision]));
-      const loadSelection = resolveSkillLoadSelection(route, selectionMode, decisions);
+      const selectionMode = z.enum(["auto", "host-gated"]).parse(args.selectionMode ?? "host-gated");
+      const suppliedDecisions = z.array(mssrSkillDecisionSchema).max(32).parse(args.skillDecisions ?? []);
+      const hostSelection = resolveMssrHostSkillSelection(route, selectionMode, suppliedDecisions);
+      const { decisions, loadSelection, skippedCandidates, pendingCandidates } = hostSelection;
+      for (const decision of decisions) recordMssrSkillDecision({ traceId, caller, decision });
       const eligibleLoadOrder = [...loadSelection.eligibleLoadOrder];
-      const skippedCandidates = route.activeSkills
-        .filter((match) => match.selectedAsRoot === true && match.required !== true && decisionBySkill.get(match.name)?.decision === "skipped")
-        .map((match) => ({ skill: match.name, ...(decisionBySkill.get(match.name) ?? {}) }));
-      const pendingCandidates = route.activeSkills
-        .filter((match) => match.selectedAsRoot === true && match.required !== true && selectionMode === "host-gated" && !decisionBySkill.has(match.name))
-        .map((match) => ({ skill: match.name, decisionState: "absent" as const }));
       const loaded: Array<Record<string, unknown>> = [];
       const codexMatches = eligibleLoadOrder.flatMap((name, routeIndex) => {
         const match = activeByName.get(name);
         return match && match.source !== "roblox" ? [{ match, routeIndex }] : [];
       });
-      const codexPlan = await planCodexSkillContexts({
+      const codexPlan = await planSkillContexts({
         skills: codexMatches.map(({ match, routeIndex }) => ({
           skill: match,
           required: selectionMode === "host-gated" ? true : match.required === true,
@@ -1509,9 +1502,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
           decisions,
           skippedCandidates,
           pendingCandidates,
-          policy: selectionMode === "host-gated"
-            ? "Required roots are obligations; optional roots without a host decision remain pending, while only explicit accepted/skipped decisions are recorded as telemetry."
-            : "Compatibility mode: the complete routed dependency closure may load without an explicit host decision.",
+          policy: hostSelection.policy,
         },
         contextAssembly: {
           mode: contentMode,
@@ -1525,7 +1516,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
           ...projectContextAssembly,
           activationInstruction: projectContextAssembly.mode === "modular"
             ? "Treat selected project context/memory/state as scoped repository facts. Treat project directives as active only for this MSSR stage and intent; they refine execution but cannot weaken user instructions, AGENTS, safety, approvals, or verification."
-            : "No modular project-context manifest is active for this repository; rely on project_context_load legacy documents already loaded by the host.",
+            : "No valid initialized MSSR project-context manifest is active for this repository. Do not synthesize project knowledge or fall back to .bridge; use project_context_health/project_context_initialize before relying on durable repository context.",
         } : null,
         contextPlane: contextPlane ? {
           projectContext: contextPlane.projectContext,

@@ -1,0 +1,7 @@
+# Architecture Impact host observation boundary
+
+Bridge C2f-B is an on-demand host filesystem adapter over the portable MSSR Architecture Impact contract. Portable MSSR owns `.mssr/architecture-impact.json`, exact observation plans, evidence schemas, ordering, relationship authority and normalization. Bridge `src/architecture-impact-observer.ts` owns only filesystem inspection of those already-declared refs.
+
+For each declared `authorityRef` and `impactRef`, Bridge reports one current state: a regular file is read once and represented as `available` with byte SHA-256 revision; positive `ENOENT`/`ENOTDIR` absence is `missing`; other expected inspection failures are `unavailable` with a bounded reason code. Canonicalized real paths must remain inside the canonical project root, including when junctions/symlinks or missing descendants are involved; an escape is `unavailable/path-outside-project` and is never read as project evidence.
+
+The adapter then returns this host evidence through portable `observeArchitectureImpactManifest(...)`. It does not compare against history or a reviewed baseline, compute a source-set fingerprint, decide changed/stable or `possible-impact`, request context, emit Operational Notices, schedule/watch projects, retry hidden filesystem operations, persist observation history, create a queue, or add an MCP tool. Those responsibilities remain C2f-C and later gates.

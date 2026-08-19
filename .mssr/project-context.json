@@ -6,7 +6,7 @@
       "kind": "context",
       "description": "Bridge architecture and canonical ownership needed for substantial work.",
       "source": {
-        "path": ".bridge/PROJECT_CONTEXT.md",
+        "path": ".mssr/PROJECT_CONTEXT.md",
         "sections": [
           "## Architecture",
           "## Canonical ownership"
@@ -19,7 +19,7 @@
       "kind": "state",
       "description": "Current Bridge release and deployment state.",
       "source": {
-        "path": ".bridge/PROJECT_STATE.md",
+        "path": ".mssr/PROJECT_STATE.md",
         "sections": [
           "## Current release"
         ]
@@ -33,7 +33,7 @@
       "kind": "memory",
       "description": "Observe-only MSSR learning boundary and activation constraint.",
       "source": {
-        "path": ".bridge/PROJECT_MEMORY.md",
+        "path": ".mssr/PROJECT_MEMORY.md",
         "sections": [
           "## MSSR learning boundary"
         ]
@@ -61,7 +61,7 @@
       "kind": "memory",
       "description": "Project-memory/changelog consistency decision for maintenance and publication.",
       "source": {
-        "path": ".bridge/PROJECT_MEMORY.md",
+        "path": ".mssr/PROJECT_MEMORY.md",
         "sections": [
           "## Change and memory consistency"
         ]
@@ -90,7 +90,7 @@
       "kind": "memory",
       "description": "Selective versioned changelog strategy for debugging/recovery.",
       "source": {
-        "path": ".bridge/PROJECT_MEMORY.md",
+        "path": ".mssr/PROJECT_MEMORY.md",
         "sections": [
           "## Debug history strategy"
         ]
@@ -121,7 +121,7 @@
       "kind": "state",
       "description": "Current observe-only learning deployment state.",
       "source": {
-        "path": ".bridge/PROJECT_STATE.md",
+        "path": ".mssr/PROJECT_STATE.md",
         "sections": [
           "## Current MSSR learning state"
         ]
@@ -148,7 +148,7 @@
       "kind": "state",
       "description": "Current workspace project-knowledge migration status.",
       "source": {
-        "path": ".bridge/PROJECT_STATE.md",
+        "path": ".mssr/PROJECT_STATE.md",
         "sections": [
           "## Project knowledge migration"
         ]
@@ -171,11 +171,56 @@
       "maxChars": 2500
     },
     {
+      "id": "bridge-project-knowledge-maintenance-inheritance",
+      "kind": "memory",
+      "description": "Portable MSSR ownership and review semantics for project-knowledge drift advisories.",
+      "source": {
+        "path": ".mssr/PROJECT_MEMORY.md",
+        "sections": [
+          "## Project knowledge maintenance inheritance"
+        ]
+      },
+      "stages": [
+        "verify",
+        "persist",
+        "close"
+      ],
+      "domains": [
+        "agent-orchestration",
+        "skill-system",
+        "filesystem"
+      ],
+      "actions": [
+        "maintain",
+        "review",
+        "verify",
+        "document"
+      ],
+      "artifacts": [
+        "project",
+        "repository",
+        "skill",
+        "mcp"
+      ],
+      "needs": [
+        "integrity-verification",
+        "version-control"
+      ],
+      "signals": [
+        "conflicting-evidence",
+        "reusable-pattern",
+        "repeated-friction"
+      ],
+      "required": false,
+      "priority": 80,
+      "maxChars": 4000
+    },
+    {
       "id": "bridge-tool-risk-authority",
       "kind": "memory",
       "description": "Canonical Bridge decision for delegated tool risk classification and wrapper authorization.",
       "source": {
-        "path": ".bridge/PROJECT_MEMORY.md",
+        "path": ".mssr/PROJECT_MEMORY.md",
         "sections": [
           "## Tool risk classification authority"
         ]
@@ -214,6 +259,141 @@
       "required": false,
       "priority": 70,
       "maxChars": 1800
+    },
+    {
+      "id": "bridge-http-watchdog-recovery-invariant",
+      "kind": "memory",
+      "description": "Durable diagnosis and recovery invariant for the Bridge HTTP watchdog and bridge-local-http tunnel identity boundary.",
+      "source": {
+        "path": ".mssr/PROJECT_MEMORY.md",
+        "sections": [
+          "## HTTP watchdog identity and recovery invariant"
+        ]
+      },
+      "topic": "operations",
+      "area": "bridge-runtime",
+      "stages": [
+        "start",
+        "verify",
+        "close",
+        "resume"
+      ],
+      "domains": [
+        "coding",
+        "filesystem",
+        "other"
+      ],
+      "actions": [
+        "debug",
+        "recover",
+        "verify",
+        "maintain"
+      ],
+      "artifacts": [
+        "mcp",
+        "code",
+        "repository"
+      ],
+      "needs": [
+        "integrity-verification",
+        "safe-editing"
+      ],
+      "signals": [
+        "error-observed",
+        "recovery-needed",
+        "conflicting-evidence"
+      ],
+      "required": false,
+      "priority": 45,
+      "maxChars": 3000
+    },
+    {
+      "id": "bridge-architecture-impact-host-boundary",
+      "kind": "context",
+      "description": "Bridge C2f-B host filesystem observation boundary for declared Architecture Impact refs.",
+      "source": {
+        "path": ".mssr/knowledge/architecture/architecture-impact-observer.md"
+      },
+      "topic": "architecture",
+      "area": "project-context",
+      "stages": [
+        "implement",
+        "verify",
+        "persist",
+        "close"
+      ],
+      "domains": [
+        "coding",
+        "filesystem",
+        "agent-orchestration"
+      ],
+      "actions": [
+        "design",
+        "review",
+        "verify",
+        "test",
+        "maintain"
+      ],
+      "artifacts": [
+        "code",
+        "project",
+        "repository",
+        "mcp"
+      ],
+      "needs": [
+        "integrity-verification"
+      ],
+      "signals": [],
+      "required": false,
+      "priority": 75,
+      "maxChars": 2200
+    },
+    {
+      "id": "bridge-trace-owner-integrity",
+      "kind": "memory",
+      "description": "Bridge MSSR trace project/workflow owner compatibility and implicit recovery invariant.",
+      "source": {
+        "path": ".mssr/knowledge/observability/trace-owner-integrity.md"
+      },
+      "topic": "operations",
+      "area": "trace-identity",
+      "stages": [
+        "implement",
+        "verify",
+        "persist",
+        "close",
+        "resume"
+      ],
+      "domains": [
+        "coding",
+        "agent-orchestration",
+        "skill-system"
+      ],
+      "actions": [
+        "debug",
+        "recover",
+        "verify",
+        "maintain",
+        "analyze"
+      ],
+      "artifacts": [
+        "mcp",
+        "code",
+        "repository"
+      ],
+      "needs": [
+        "integrity-verification",
+        "cross-agent"
+      ],
+      "signals": [
+        "error-observed",
+        "conflicting-evidence",
+        "recovery-needed",
+        "reusable-pattern"
+      ],
+      "required": false,
+      "priority": 80,
+      "maxChars": 2200
     }
   ]
 }

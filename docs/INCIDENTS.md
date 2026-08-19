@@ -15,10 +15,46 @@ Cada incidente debe incluir:
 - prueba de regresión;
 - seguimiento pendiente.
 
-Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/skills pertenecen a `D:\Dev\mssr\docs\skill-routing\INCIDENTS.md`; los defectos exclusivos de un proyecto pertenecen a su `.bridge/PROJECT_STATE.md`, `docs/INCIDENTS.md` o `BUGS.md`.
+Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/skills pertenecen a `D:\Dev\mssr\docs\skill-routing\INCIDENTS.md`; los defectos exclusivos de un proyecto pertenecen a su `.mssr/PROJECT_STATE.md`, `docs/INCIDENTS.md` o `BUGS.md`. MSSR project knowledge es canonical-only bajo `.mssr/`; cualquier viejo artefacto MSSR bajo `.bridge/` es sólo evidencia de cleanup/migración y nunca autoridad activa.
+
+---
+## 2026-08-19 — Una traza MSSR mezclaba proyectos/workflows independientes por continuidad de sesión
+
+**Estado:** Corregido, adoptado y verificado en runtime `0.6.109`; restart HTTP controlado ack `66c3d781-4c79-466d-82ca-aa7d5ddf056f`, doctor posterior PASS.
+
+**Capa/owner:** coordinación de trazas, atribución de métricas y recovery persistido de `bridge-mcp`. El contrato portable MSSR no era la causa: el defecto estaba en la semántica host de recuperación implícita.
+
+**Síntoma observable:** la evidencia de una traza podía acumular más de un proyecto/workflow independiente —caso real observado: trabajo MSSR mezclado con Smartwatch— aunque el segundo trabajo debía tener otro owner. `identity.projects`/`workflowKeys` quedaban contaminados y esa atribución podía llegar a métricas, mantenimiento y learning observe-only.
+
+**Causa demostrada:** tres caminos daban demasiado peso a continuidad local/de sesión: `localTraceId` podía reutilizarse sin comprobar owner; el recovery shared-memory aceptaba una única candidata antes de validar proyecto; y `findPersistedMssrTraceCandidates()` dejaba de filtrar por proyecto cuando existía `sessionKey`. Además `MssrTraceHostContext` no transportaba `workflowKey`, por lo que el host no podía usarlo como frontera explícita.
+
+**Corrección:** project/workflow conocidos forman el owner compatible de una traza; `sessionKey` queda sólo como pista de continuidad. Recovery implícito local, RAM y SQLite rechaza mismatches conocidos. `bridge-server` propaga `workflowKey` y un cambio explícito de workflow/proyecto separa la próxima ruta. Un `traceId` explícito conserva la selección deliberada de una traza concreta. Los repos/cwd auxiliares dentro del mismo workflow siguen perteneciendo a la traza activa y se registran como `related_project`, sin reemplazar el owner primario.
+
+**Regresión:** `scripts/test-mssr-trace-contract.mjs` prueba rotación de sesión con mismo owner, rechazo cross-project, rechazo cross-workflow, recovery SQLite con owner exacto y mismatch, y un flujo end-to-end A→B en una misma sesión. El último `npm run build && node scripts/test-mssr-trace-contract.mjs` terminó exit 0 con `correlatedRouteLoadCoverage=100`, `requiredLoadCompliance=100`, `orphanLoadEvents=0` y evidencia A/B aislada por proyecto/workflow.
+
+**Seguimiento:** mantener la misma compatibilidad de owner en cualquier futuro recovery/adapter de trazas. El learning histórico sigue `observe-only`; datos viejos contaminados no se convierten en autoridad ni routing influence.
 
 ---
 
+## 2026-08-16 — El watchdog reinició correctamente pero adoptó un `dist` stale
+
+**Estado:** Corregido y verificado en runtime vivo `0.6.102`.
+
+**Capa/owner:** build/release adoption de `bridge-mcp`; la continuidad/restart pertenece al watchdog, pero la identidad de bytes ejecutables pertenece al gate de build/release.
+
+**Síntoma observable:** después del primer restart controlado de 0.6.102, el ack confirmó `restart-http` sin request pendiente, pero `bridge_health` y Runtime Health seguían reportando Bridge `0.6.101`.
+
+**Evidencia causal:** `package.json` y `src/config.ts` declaraban `0.6.102`, mientras una lectura directa de `dist/config.js` devolvió `SERVER_VERSION=0.6.101`. El watchdog no falló: relanzó correctamente el ejecutable disponible.
+
+**Causa demostrada:** `src/config.ts` se corrigió después de un preflight de versión, pero el artefacto compilado no se reconstruyó antes del primer restart. El gate había probado fuente/package y tests previos, no la identidad final de `dist` inmediatamente antes de adopción.
+
+**Corrección:** reconstruir, comprobar explícitamente `package=source=dist=0.6.102`, repetir sólo los gates ejecutable-sensibles y solicitar un segundo restart HTTP. El segundo request `9771a358-210e-4a50-b281-381583d3e1ad` fue reconocido por el watchdog y levantó PID `26820`, boot `d4ce874c-d2bb-4f55-8458-fec3b8a7a719`, versión `0.6.102`, con túnel preservado `live/ready`.
+
+**Regresión:** el preflight `test-bridge-regressions.ps1` valida consistencia de fuentes de versión; además el contrato durable exige ahora comparar package/source/compiled/live antes de considerar adoptada una release. Un 502 transitorio durante el segundo corte no provocó un tercer restart: ack + runtime readback demostraron éxito.
+
+**Seguimiento:** C2c debe generalizar este caso junto con Context Plane freshness y `project_change_consistency` para proyectar mismatches explícitos entre memoria/receipt, autoridad canónica, paquete, artefacto compilado y runtime vivo.
+
+---
 ## 2026-08-12 — El host de ChatGPT omitió tools con `openai/fileParams` aunque el runtime las exponía
 
 **Estado:** Mitigado y verificado en runtime vivo; metadata operativa corregida para `0.6.80`.

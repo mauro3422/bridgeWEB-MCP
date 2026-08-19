@@ -1,3 +1,5 @@
+import { parseMssrNoticeV1, type MssrNotice } from "@mauroprime/mssr";
+
 export type BridgeNoticeSeverity = "info" | "warning" | "error";
 
 export type BridgeNoticeAction = {
@@ -14,6 +16,8 @@ export type BridgeNoticeInput = {
   message: string;
   details?: Record<string, unknown>;
   actions?: BridgeNoticeAction[];
+  /** Genuine portable MSSR semantic payload. Host delivery metadata must stay outside this object. */
+  mssrNotice?: MssrNotice;
   dedupeKey?: string;
   ttlMs?: number;
 };
@@ -26,6 +30,8 @@ export type BridgeNotice = {
   message: string;
   details?: Record<string, unknown>;
   actions?: BridgeNoticeAction[];
+  /** Exact validated MSSR semantic payload when this delivery originated from MSSR. */
+  mssrNotice?: MssrNotice;
   createdAt: string;
   updatedAt: string;
   expiresAt: string;
@@ -73,6 +79,17 @@ function safeActions(actions: BridgeNoticeAction[] | undefined): BridgeNoticeAct
   });
 }
 
+function safeMssrNotice(notice: MssrNotice | undefined): MssrNotice | undefined {
+  return notice ? parseMssrNoticeV1(notice) : undefined;
+}
+
+function cloneBridgeNotice(notice: BridgeNotice): BridgeNotice {
+  return {
+    ...notice,
+    ...(notice.mssrNotice ? { mssrNotice: parseMssrNoticeV1(notice.mssrNotice) } : {}),
+  };
+}
+
 function cleanupExpired(now = Date.now()) {
   for (let index = queue.length - 1; index >= 0; index -= 1) {
     if (Date.parse(queue[index].expiresAt) <= now) queue.splice(index, 1);
@@ -105,6 +122,7 @@ export function emitBridgeNotice(input: BridgeNoticeInput): BridgeNotice {
   const source = boundedText(input.source, 160) || "bridge";
   const dedupeKey = boundedText(input.dedupeKey || `${source}:${code}:${message}`, 1600);
   const ttlMs = Math.max(1000, Math.min(input.ttlMs ?? DEFAULT_TTL_MS, 24 * 60 * 60 * 1000));
+  const mssrNotice = safeMssrNotice(input.mssrNotice);
   const existing = queue.find((item) => item.dedupeKey === dedupeKey);
   if (existing) {
     existing.occurrences += 1;
@@ -113,8 +131,9 @@ export function emitBridgeNotice(input: BridgeNoticeInput): BridgeNotice {
     existing.severity = input.severity;
     existing.details = safeDetails(input.details);
     existing.actions = safeActions(input.actions);
+    if (mssrNotice) existing.mssrNotice = mssrNotice;
     rememberNotice(existing, now);
-    return { ...existing };
+    return cloneBridgeNotice(existing);
   }
 
   const notice: BridgeNotice = {
@@ -125,6 +144,7 @@ export function emitBridgeNotice(input: BridgeNoticeInput): BridgeNotice {
     message,
     details: safeDetails(input.details),
     actions: safeActions(input.actions),
+    ...(mssrNotice ? { mssrNotice } : {}),
     createdAt: new Date(now).toISOString(),
     updatedAt: new Date(now).toISOString(),
     expiresAt: new Date(now + ttlMs).toISOString(),
@@ -134,25 +154,25 @@ export function emitBridgeNotice(input: BridgeNoticeInput): BridgeNotice {
   queue.push(notice);
   rememberNotice(notice, now);
   if (queue.length > MAX_NOTICES) queue.splice(0, queue.length - MAX_NOTICES);
-  return { ...notice };
+  return cloneBridgeNotice(notice);
 }
 
 export function peekBridgeNotices(limit = MAX_NOTICES): BridgeNotice[] {
   cleanupExpired();
   const boundedLimit = Math.max(1, Math.min(Math.floor(limit), MAX_NOTICES));
-  return queue.slice(0, boundedLimit).map((item) => ({ ...item }));
+  return queue.slice(0, boundedLimit).map(cloneBridgeNotice);
 }
 
 export function peekBridgeNoticeHistory(limit = 50): BridgeNotice[] {
   cleanupExpired();
   const boundedLimit = Math.max(1, Math.min(Math.floor(limit), MAX_HISTORY));
-  return history.slice(-boundedLimit).reverse().map((item) => ({ ...item }));
+  return history.slice(-boundedLimit).reverse().map(cloneBridgeNotice);
 }
 
 export function drainBridgeNotices(limit = MAX_NOTICES): BridgeNotice[] {
   cleanupExpired();
   const boundedLimit = Math.max(1, Math.min(Math.floor(limit), MAX_NOTICES));
-  return queue.splice(0, boundedLimit).map((item) => ({ ...item }));
+  return queue.splice(0, boundedLimit).map(cloneBridgeNotice);
 }
 
 export function clearBridgeNotices(): number {

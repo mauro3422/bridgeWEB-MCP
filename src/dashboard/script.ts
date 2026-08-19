@@ -310,6 +310,114 @@ function renderMssrProgress(benchmark) {
     progressRow('Aceptación medida', 'Outcomes medidos que fueron aceptados.', benchmark.outcomeAcceptanceRate, 90, 75)
   ].join('');
 }
+function renderSkillHealth(report) {
+  const target = byId('mssr-skill-health');
+  const latest = report && report.latest ? report.latest : null;
+  setText('mssr-skill-health-snapshots', report ? num(report.snapshotCount) : '—');
+  if (!latest) {
+    setPill('mssr-skill-health-status', 'info', 'sin snapshot');
+    setText('mssr-skill-health-owned', '—');
+    setText('mssr-skill-health-manifests', '—');
+    setText('mssr-skill-health-watch', '—');
+    setText('mssr-skill-health-review', '—');
+    if (target) target.innerHTML = '<tr><td colspan="6" class="muted">El scheduler todavía no guardó un snapshot estructural.</td></tr>';
+    return;
+  }
+  const counts = latest.counts || {};
+  const watch = Number(counts.ownedStructuralWatch || 0);
+  const review = Number(counts.ownedStructuralReview || 0);
+  setText('mssr-skill-health-owned', num(counts.ownedSkills));
+  setText('mssr-skill-health-manifests', num(counts.ownedWithContextManifest));
+  setText('mssr-skill-health-watch', num(watch));
+  setText('mssr-skill-health-review', num(review));
+  setPill('mssr-skill-health-status', review > 0 ? 'bad' : watch > 0 ? 'warn' : 'ok', review > 0 ? review + ' REVIEW' : watch > 0 ? watch + ' WATCH' : 'sin deuda estructural');
+  if (!target) return;
+  const rows = Array.isArray(latest.skills) ? latest.skills.filter((item) => item.status !== 'ok') : [];
+  if (!rows.length) {
+    target.innerHTML = '<tr><td colspan="6" class="muted">Todas las skills owned están OK en el último snapshot.</td></tr>';
+    return;
+  }
+  target.innerHTML = rows.slice(0, 30).map((item) => {
+    const tone = item.status === 'review' ? 'bad' : 'warn';
+    const recipes = num(item.referenceFiles) + ' refs · ' + num(item.contextModuleCount) + ' módulos';
+    const delta = item.deltaChars === null || item.deltaChars === undefined ? '—' : (Number(item.deltaChars) > 0 ? '+' : '') + num(item.deltaChars);
+    const reasons = (item.reasonCodes || []).join(', ') || item.recommendation || '—';
+    return '<tr>' +
+      '<td><code>' + esc(item.name || '—') + '</code></td>' +
+      '<td><span class="status-pill" data-tone="' + tone + '"><span class="dot ' + tone + '"></span><span>' + esc(String(item.status || '').toUpperCase()) + '</span></span></td>' +
+      '<td>' + num(item.lines) + ' líneas · ' + num(item.chars) + ' chars</td>' +
+      '<td>' + esc(recipes) + '</td>' +
+      '<td>' + esc(delta) + '</td>' +
+      '<td class="recent-detail"><code>' + esc(reasons) + '</code><div>' + esc(item.recommendation || '') + '</div></td>' +
+    '</tr>';
+  }).join('');
+}
+function renderProjectHealth(report) {
+  const target = byId('mssr-project-health');
+  const latest = report && report.latest ? report.latest : null;
+  setText('mssr-project-health-snapshots', report ? num(report.snapshotCount) : '—');
+  if (!latest) {
+    setPill('mssr-project-health-status', 'info', 'sin snapshot');
+    setText('mssr-project-health-projects', '—');
+    setText('mssr-project-health-initialized', '—');
+    setText('mssr-project-health-ok', '—');
+    setText('mssr-project-health-watch', '—');
+    setText('mssr-project-health-review', '—');
+    if (target) target.innerHTML = '<tr><td colspan="5" class="muted">El scheduler todavía no guardó un snapshot de Project Context Health.</td></tr>';
+    return;
+  }
+  const counts = latest.counts || {};
+  const watch = Number(counts.watch || 0);
+  const review = Number(counts.review || 0);
+  setText('mssr-project-health-projects', num(counts.projects));
+  setText('mssr-project-health-initialized', num(counts.initialized));
+  setText('mssr-project-health-ok', num(counts.ok));
+  setText('mssr-project-health-watch', num(watch));
+  setText('mssr-project-health-review', num(review));
+  setPill('mssr-project-health-status', review > 0 ? 'bad' : watch > 0 ? 'warn' : 'ok', review > 0 ? review + ' REVIEW' : watch > 0 ? watch + ' WATCH' : 'workspace sano');
+  if (!target) return;
+  const rows = Array.isArray(latest.projects) ? latest.projects.filter((item) => item.level !== 'ok') : [];
+  if (!rows.length) {
+    target.innerHTML = '<tr><td colspan="5" class="muted">Todos los proyectos administrados están OK.</td></tr>';
+    return;
+  }
+  target.innerHTML = rows.slice(0, 30).map((item) => {
+    const tone = item.level === 'review' ? 'bad' : 'warn';
+    const delta = item.deltaFindings === null || item.deltaFindings === undefined ? '—' : (Number(item.deltaFindings) > 0 ? '+' : '') + num(item.deltaFindings);
+    const reasons = (item.findingCodes || []).join(', ') || '—';
+    return '<tr>' +
+      '<td><code>' + esc(item.relativeRoot || item.name || '—') + '</code></td>' +
+      '<td><span class="status-pill" data-tone="' + tone + '"><span class="dot ' + tone + '"></span><span>' + esc(String(item.level || '').toUpperCase()) + '</span></span></td>' +
+      '<td>' + num(item.coreEntries) + ' core · ' + num(item.modules) + ' módulos</td>' +
+      '<td>' + esc(delta) + '</td>' +
+      '<td class="recent-detail"><code>' + esc(reasons) + '</code><div>' + esc(item.level === 'review' ? 'usar planner / maintenance' : 'revisar en mantenimiento') + '</div></td>' +
+    '</tr>';
+  }).join('');
+}
+
+function renderRuntimeHealth(report) {
+  const latest = report && report.latest ? report.latest : null;
+  setText('mssr-runtime-health-history', report && Array.isArray(report.snapshots) ? num(report.snapshots.length) : '—');
+  if (!latest) {
+    setPill('mssr-runtime-health-status', 'info', 'sin snapshot');
+    setText('mssr-runtime-health-tunnel', '—');
+    setText('mssr-runtime-health-runtime', '—');
+    setText('mssr-runtime-health-restart', '—');
+    setText('mssr-runtime-health-detail', 'Sin evidencia persistida todavía.');
+    return;
+  }
+  const level = String((latest.projection && latest.projection.level) || 'ok');
+  const tone = level === 'error' ? 'bad' : level === 'review' ? 'warn' : level === 'watch' ? 'info' : 'ok';
+  setPill('mssr-runtime-health-status', tone, level.toUpperCase());
+  setText('mssr-runtime-health-tunnel', String((latest.tunnel && latest.tunnel.state) || 'unknown').toUpperCase());
+  setText('mssr-runtime-health-runtime', String((latest.runtime && latest.runtime.continuity) || 'unknown').toUpperCase());
+  setText('mssr-runtime-health-restart', String((latest.restart && latest.restart.state) || 'unknown').toUpperCase());
+  const reasons = latest.projection && Array.isArray(latest.projection.reasonCodes) ? latest.projection.reasonCodes.join(', ') : '';
+  const version = latest.runtime && latest.runtime.version ? 'Bridge ' + latest.runtime.version : 'Bridge';
+  const observed = latest.observedAt ? dateTime(latest.observedAt) : '—';
+  setText('mssr-runtime-health-detail', version + ' · ' + observed + (reasons ? ' · ' + reasons : ' · sin señales de atención') + ' · transport observado externamente');
+}
+
 
 function renderSkillOutcomes(inputRows) {
   const target = byId('mssr-skill-outcomes');
@@ -861,7 +969,7 @@ async function refresh() {
   if (refreshing) return;
   refreshing = true;
   try {
-    const [status, overview, summary, recent, errors, timeline, mssr, toolAudit, toolNotices] = await Promise.all([
+    const [status, overview, summary, recent, errors, timeline, mssr, skillHealth, projectHealth, runtimeHealth, toolAudit, toolNotices] = await Promise.all([
       getJson('/status'),
       getJson('/api/metrics/overview?scope=active'),
       getJson('/api/metrics/summary?limit=12&scope=active'),
@@ -869,6 +977,9 @@ async function refresh() {
       getJson('/api/metrics/errors?limit=20&scope=active'),
       getJson('/api/metrics/timeline?limit=500&scope=active'),
       getJson('/api/mssr/summary?days=30&scope=active'),
+      getJson('/api/mssr/skill-health'),
+      getJson('/api/mssr/project-health'),
+      getJson('/api/mssr/runtime-health'),
       getToolAudit(),
       getJson('/api/notices?limit=20')
     ]);
@@ -877,6 +988,9 @@ async function refresh() {
     updateSummary(status, overview, summary, recent, timeline, mssr);
     updateActivity(summary, recent, timeline);
     updateMssr(mssr);
+    renderSkillHealth(skillHealth);
+    renderProjectHealth(projectHealth);
+    renderRuntimeHealth(runtimeHealth);
     updateToolPortfolio(toolAudit);
     updateToolNotices(toolNotices);
     updateSystem(status, overview, mssr);

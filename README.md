@@ -7,9 +7,11 @@ El objetivo es tener un puente local controlado por nosotros para operar filesys
 ## Estado actual
 
 ```text
-bridge-mcp v0.6.86
-Mode: HTTP production-candidate
-Project root: C:\dev\bridge-mcp
+bridge-mcp current release v0.6.107
+Live runtime: v0.6.107
+Packaged MSSR: 0.2.32
+Mode: Streamable HTTP live; Operational Notice Plane Gate E5 migration/invariant integration closed and live-verified
+Project root: D:\Dev\bridge-mcp
 Bridge MCP: http://127.0.0.1:3001/mcp
 Bridge status: http://127.0.0.1:3001/status
 Tunnel admin: http://127.0.0.1:8081
@@ -90,23 +92,35 @@ Para trabajo sustancial en un repositorio, ChatGPT debe llamar una vez a `projec
 
 ```text
 <project>/AGENTS.override.md o AGENTS.md
-<project>/.bridge/PROJECT_CONTEXT.md
-<project>/.bridge/PROJECT_MEMORY.md
-<project>/.bridge/PROJECT_STATE.md
+<project>/.mssr/PROJECT_CONTEXT.md
+<project>/.mssr/PROJECT_MEMORY.md
+<project>/.mssr/PROJECT_STATE.md
 <project>/.bridge/workflow-guides/*
 ```
 
 `AGENTS.md` sigue siendo la entrada nativa para Codex. En ChatGPT web, la carga ocurre por instrucciones MCP y `project_context_load`; las guias aplicables se detectan con `workflow_guide_recommend` y se incorporan con `workflow_guide_load`.
 
-Cuando existe `.bridge/project-context.json`, el core se carga primero y los módulos de contexto/memoria/estado/directivas se seleccionan por intent y stage. `project_context_audit` detecta repos modulares, legacy, inválidos o no inicializados sin mutarlos. `project_change_consistency` compara Git, versión, `changelogs/<version>.md`, `changelogs/INDEX.md` y el impacto declarado sobre PROJECT_CONTEXT/MEMORY/STATE; en `persist` puede bloquear publicación si quedó deuda, pero nunca inventa memoria automáticamente.
+MSSR project context es canonical-only: `.mssr/project-context.json` es el único manifest activo, `.mssr/knowledge/` contiene memoria modular durable y `.mssr/runtime/` contiene receipts/cache efímeros. `project_context_load` nunca cae a `.bridge/`; un repo sin contrato válido devuelve estado no inicializado y debe pasar explícitamente por `project_context_initialize`. Con un manifest válido, el core se carga primero y `@mauroprime/mssr` selecciona módulos de contexto/memoria/estado/directivas por intent y stage. `project_context_health` clasifica `ok/watch/review`; `project_context_audit` aplica esa salud recursivamente a un workspace; `project_context_capture` persiste conocimiento revisado en `.mssr/knowledge/` con transacción contenido+manifest. `project_change_consistency` compara Git, versión, changelog e impacto PROJECT_* y puede bloquear `persist`, pero ningún audit/watch inventa memoria automáticamente.
 
 Para debugging/recovery MSSR puede cargar selectivamente sólo `changelogs/INDEX.md` y el changelog de la versión actual. `changelogs/LEGACY.md` queda fuera del contexto normal y se consulta únicamente para una regresión histórica concreta.
 
+### Operational Notice Plane
+
+Bridge usa `bridgeNotices` como único transporte general de avisos operativos: cola acotada, TTL, deduplicación pendiente, historial reciente y entrega automática dentro de una respuesta MCP posterior. MSSR define la política portable que decide si evidencia acotada merece atención; Bridge observa el host/proyecto y adapta el candidato al transporte. No se crea una segunda cola MSSR.
+
+Trace, outcome, Context Message y aviso operacional son contratos distintos. Un aviso puede sugerir un preflight o una recuperación, pero nunca autoriza ni ejecuta esa acción automáticamente. Tampoco es server push: no puede interrumpir una tool opaca en curso y normalmente llega en el siguiente límite MCP observable.
+
+Desde 0.6.99, Skill Health y Project Context Health comparan cada snapshot diario con el anterior y usan fingerprints estructurales acotados. `OK/WATCH` estable queda silencioso; `REVIEW` estable con la misma evidencia no se repite después de que el aviso anterior haya sido drenado; cambios materiales, escaladas/deescaladas y resoluciones sí generan transición. Ver `docs/OPERATIONAL_NOTICE_PLANE_ADAPTER.md` y la especificación portable de MSSR.
+Desde 0.6.100, el mismo contrato cubre también lifecycle idle/missing-outcome, mantenimiento de conocimiento y frescura del Context Plane mediante proyecciones portables de MSSR 0.2.20. El timer y los leases siguen siendo responsabilidad del host: idle sólo puede pedir REVIEW, `progress`/outcome resuelven esa atención y el callback revalida cualquier lease nuevo antes de avisar. La frescura es estado actual (`fresh=OK`, unknown-only=WATCH, stale/unavailable=REVIEW, conflicting=ERROR), por lo que volver a `fresh` resuelve el aviso de frescura aunque una deuda durable ya acumulada siga necesitando un cierre explícito de mantenimiento.
+
+Desde 0.6.105, C2e conecta proyecto+memoria con el mismo plano: `src/project-situation.ts` observa proyectos gestionados que tengan receipts operativamente activos del Context Plane, compara las revisiones entregadas de PROJECT_CONTEXT/PROJECT_MEMORY/PROJECT_STATE/changelogs/ADRs con las revisiones canónicas actuales mediante el MSSR empaquetado y entrega la contradicción a C2c/C2d. En 0.6.107 el paquete MSSR es `0.2.32`; `/api/mssr/project-situation` sigue exponiendo sólo metadata acotada. `noticeClass`, categoría y prioridad sirven para enrutar atención, pero no crean otra cola ni otra autoridad. Un receipt nuevo/una carga actual reemplaza evidencia vieja para esa autoridad; una alerta puede resolver sin borrar historia. Bridge sólo muestra acciones C2d `ready` y nunca interpreta prosa libre de memoria como verdad canónica. Ver `docs/SITUATION_MODEL_ADAPTER.md`.
+
+Desde 0.6.106, Gate E3 preserva el `MssrNotice v1` genuino como `BridgeNotice.mssrNotice` dentro del mismo `bridgeNotices`: `noticeId`, dedupe semántico y payload portable quedan intactos; `BridgeNotice.id`, timestamps, TTL, occurrences, mirrors de UI/details y acciones son metadata de delivery del host. En 0.6.107 / MSSR 0.2.32, Gate E5 cierra la migración: E4 direct-host sigue independiente, los notices Bridge-native y external-MCP conservan su identidad, el schema portable sigue rechazando metadata de delivery/ejecución y la cola general de Bridge sigue siendo una sola. Ver `docs/OPERATIONAL_NOTICE_PLANE_ADAPTER.md`.
 Las guias globales viven en `integrations/workflow-guides/`. Las guias del proyecto tienen prioridad sobre una global con el mismo nombre.
 
 ## Tools expuestas
 
-El runtime vivo de la release 0.6.86 expone 146 tools; `bridge_self_check` confirma typecheck/build, catálogo y tunnel `live/ready` sobre esa versión.
+El catálogo MCP sigue en `156` tools. La release live `0.6.107` carga `@mauroprime/mssr` `0.2.32`; Gate E5 no agrega otra MCP tool ni otra cola. La adopción quedó probada por full regression, `bridge_verify_all` con `failedRequired=0`, watchdog/tunnel `live/ready`, matriz E5 y relay `mssr-notice-v1` preservado.
 
 `blender_review_bundle` genera en una sola llamada vistas ortográficas múltiples, una hoja de contacto adjunta al resultado MCP y un manifiesto con geometría, materiales, colecciones, visibilidad, rig, acciones, diagnósticos, hashes y confirmación de restauración de la escena.
 

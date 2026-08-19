@@ -1,9 +1,16 @@
+import {
+  evaluateMssrOperationalNoticeTransition,
+  evaluateMssrProviderOperationalAttention,
+  type MssrProviderOperationalProjection,
+  type MssrProviderTargetOperationalState,
+} from "@mauroprime/mssr";
 import { SERVER_VERSION } from "./config.js";
 import {
   inspectRobloxStudioState,
   type RobloxStudioInstance,
 } from "./integrations/roblox-mcp-client.js";
 import type { BridgeNoticeInput } from "./notices.js";
+import { adaptMssrOperationalDecision } from "./operational-notices.js";
 
 export type MssrSystemTargetState =
   | "catalog-unavailable"
@@ -74,7 +81,7 @@ export type MssrSystemAwarenessResult = {
 const SNAPSHOT_TTL_MS = 5_000;
 const STUDIO_WARMUP_GRACE_MS = 10_000;
 let cachedSnapshot: { capturedAtMs: number; status: MssrSystemAwarenessStatus } | null = null;
-let lastObservedState: MssrSystemTargetState | null = null;
+let lastProviderProjection: MssrProviderOperationalProjection | null = null;
 let firstNoStudioAtMs: number | null = null;
 
 function stringArray(value: unknown): string[] {
@@ -159,72 +166,91 @@ function statePresentation(state: MssrSystemTargetState, studios: RobloxStudioIn
   }
 }
 
-function noticeForStatus(status: MssrSystemAwarenessStatus, previousState: MssrSystemTargetState | null): BridgeNoticeInput[] {
+export function mapRobloxTargetOperationalState(state: MssrSystemTargetState): MssrProviderTargetOperationalState {
+  switch (state) {
+    case "active-edit":
+    case "active-play":
+      return "ready";
+    case "studio-warming-up":
+      return "warming";
+    case "single-studio-inactive":
+      return "inactive";
+    case "multiple-studios-no-active":
+      return "ambiguous";
+    case "no-studio":
+      return "missing";
+    case "studio-inspection-failed":
+      return "inspection-failed";
+    case "active-unknown":
+      return "unknown";
+    case "catalog-unavailable":
+    case "catalog-degraded":
+      return "not-applicable";
+  }
+}
+
+export function projectRobloxOperationalHealth(
+  catalogStatus: RobloxSourceHealth["status"],
+  state: MssrSystemTargetState,
+): MssrProviderOperationalProjection {
+  return evaluateMssrProviderOperationalAttention({
+    providerKey: "roblox-studio-mcp",
+    provider: catalogStatus,
+    target: mapRobloxTargetOperationalState(state),
+  });
+}
+
+function noticeForStatus(
+  status: MssrSystemAwarenessStatus,
+  previous: MssrProviderOperationalProjection | null,
+): { notices: BridgeNoticeInput[]; projection: MssrProviderOperationalProjection } {
   const state = status.roblox.target.state;
-  if (state === previousState) return [];
-
-  if ((state === "active-edit" || state === "active-play") && previousState && previousState !== "active-edit" && previousState !== "active-play" && previousState !== "studio-warming-up") {
-    return [{
-      severity: "info",
-      code: "mssr-system-recovered",
-      source: "mssr-system-awareness",
-      message: status.summary,
-      details: { previousState, state, mode: status.roblox.target.mode, studio: status.roblox.target.activeStudio?.name ?? null },
-      dedupeKey: `mssr-system-recovered:${previousState}:${state}`,
-      ttlMs: 5 * 60 * 1000,
-    }];
-  }
-
-  if (state === "active-edit" || state === "active-play" || state === "studio-warming-up") return [];
-
-  const common = {
+  const projection = projectRobloxOperationalHealth(status.roblox.catalog.status, state);
+  const decision = evaluateMssrOperationalNoticeTransition({
+    subject: "provider:roblox-studio-mcp",
     source: "mssr-system-awareness",
-    details: {
-      state,
-      studios: status.roblox.target.studios.map((studio) => ({ id: studio.id, name: studio.name, active: studio.active })),
-      recoverableWithoutRestart: status.roblox.target.recoverableWithoutRestart,
-      recommendedAction: status.roblox.target.recommendedAction,
-    },
-    dedupeKey: `mssr-system-awareness:${state}`,
-    ttlMs: 10 * 60 * 1000,
-  } satisfies Partial<BridgeNoticeInput>;
+    code: "mssr-provider-health-review",
+    resolutionCode: "mssr-provider-health-resolved",
+    currentLevel: projection.level,
+    previousLevel: previous?.level ?? null,
+    currentFingerprint: projection.fingerprint,
+    previousFingerprint: previous?.fingerprint ?? null,
+    message: `${status.summary} Estado operacional: ${projection.level.toUpperCase()}.`,
+    resolutionMessage: `Roblox Studio MCP salió del nivel de atención: ${status.summary}`,
+    recommendation: status.roblox.target.recommendedAction,
+  });
 
-  if (state === "single-studio-inactive") {
-    return [{
-      ...common,
-      severity: "info",
-      code: "mssr-roblox-target-inactive",
-      message: `${status.summary} No hace falta reiniciar.`,
-      actions: [{
-        label: "Activar y leer Studio",
-        toolName: "roblox_mcp_query",
-        arguments: { toolName: "get_studio_state", arguments: {} },
-        instruction: "Selecciona la única instancia conectada y lee su modo sin reiniciar Studio ni el Bridge.",
-      }],
-    } as BridgeNoticeInput];
-  }
+  const actions: BridgeNoticeInput["actions"] = decision.event === "resolved"
+    ? []
+    : state === "multiple-studios-no-active"
+      ? [{
+          label: "Listar Studios",
+          toolName: "roblox_mcp_studio_list",
+          arguments: {},
+          instruction: "Elige un studioId explícito antes de mutar. No reinicies Bridge ni Studio sólo por ambigüedad del target.",
+        }]
+      : [{
+          label: "Verificar Roblox MCP",
+          toolName: "roblox_mcp_status",
+          arguments: {},
+          instruction: "Obtén evidencia fresca del provider y del target antes de reiniciar procesos o atribuir una falla de transporte.",
+        }];
 
-  if (state === "multiple-studios-no-active") {
-    return [{
-      ...common,
-      severity: "warning",
-      code: "mssr-roblox-target-ambiguous",
-      message: status.summary,
-      actions: [{ label: "Listar Studios", toolName: "roblox_mcp_studio_list", arguments: {}, instruction: "Elige un studioId explícito antes de mutar." }],
-    } as BridgeNoticeInput];
-  }
+  const notice = adaptMssrOperationalDecision(decision, {
+    providerKey: projection.providerKey,
+    providerStatus: projection.provider,
+    targetOperationalState: projection.target,
+    targetState: state,
+    reasonCodes: projection.reasonCodes,
+    mode: status.roblox.target.mode,
+    activeStudio: status.roblox.target.activeStudio?.name ?? null,
+    studios: status.roblox.target.studios.slice(0, 8).map((studio) => ({ id: studio.id, name: studio.name, active: studio.active })),
+    recoverableWithoutRestart: status.roblox.target.recoverableWithoutRestart,
+    recommendedAction: status.roblox.target.recommendedAction,
+    advisoryOnly: true,
+  }, actions);
 
-  if (state === "no-studio") {
-    return [{ ...common, severity: "warning", code: "mssr-roblox-studio-missing", message: status.summary } as BridgeNoticeInput];
-  }
-
-  return [{
-    ...common,
-    severity: state === "catalog-unavailable" ? "error" : "warning",
-    code: `mssr-roblox-${state}`,
-    message: status.summary,
-    actions: [{ label: "Verificar Roblox MCP", toolName: "roblox_mcp_status", arguments: {}, instruction: "Obtén evidencia fresca antes de reiniciar procesos." }],
-  } as BridgeNoticeInput];
+  return { notices: notice ? [notice] : [], projection };
 }
 
 export async function buildMssrSystemAwareness(input: SystemAwarenessInput): Promise<MssrSystemAwarenessResult> {
@@ -298,8 +324,8 @@ export async function buildMssrSystemAwareness(input: SystemAwarenessInput): Pro
     },
   };
 
-  const notices = noticeForStatus(status, lastObservedState);
-  lastObservedState = state;
+  const noticeResult = noticeForStatus(status, lastProviderProjection);
+  lastProviderProjection = noticeResult.projection;
   cachedSnapshot = { capturedAtMs: now, status };
-  return { status, notices };
+  return { status, notices: noticeResult.notices };
 }

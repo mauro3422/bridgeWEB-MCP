@@ -10,6 +10,7 @@ import {
   SKILL_RISKS,
   SKILL_SIGNALS,
   SKILL_STAGES,
+  auditMssrProjectContextHealth,
   shouldLoadProjectChangeHistory,
   structuredSkillIntentSchema,
   type SkillStage,
@@ -19,7 +20,7 @@ import type { BridgeToolModule } from "./types.js";
 import { assembleProjectContext } from "../project-context-assembler.js";
 import { resolveToolPath } from "./shared/process.js";
 
-import { findExistingSkillCoverage } from "./skill-catalog-tools.js";
+import { findExistingSkillCoverage, isSkillCoverageMetaTask } from "./skill-catalog-tools.js";
 const GUIDE_SCHEMA_VERSION = 1;
 const MAX_GUIDES = 200;
 const MAX_GUIDE_TEXT_CHARS = 120_000;
@@ -214,21 +215,15 @@ async function loadProjectContext(args: {
       })
     : null;
 
-  if (args.includeProjectContext && projectContextAssembly) {
-    if (projectContextAssembly.mode === "legacy") {
-      await addDocument("project-context", path.join(projectRoot, ".bridge", "PROJECT_CONTEXT.md"));
-      await addDocument("project-memory", path.join(projectRoot, ".bridge", "PROJECT_MEMORY.md"));
-      await addDocument("project-state", path.join(projectRoot, ".bridge", "PROJECT_STATE.md"));
-    } else {
-      for (const document of projectContextAssembly.documents) {
-        documents.push({
-          kind: `project-${document.kind}`,
-          path: document.path,
-          text: document.text,
-          id: document.id,
-          source: document.source,
-        });
-      }
+  if (args.includeProjectContext && projectContextAssembly?.mode === "modular") {
+    for (const document of projectContextAssembly.documents) {
+      documents.push({
+        kind: `project-${document.kind}`,
+        path: document.path,
+        text: document.text,
+        id: document.id,
+        source: document.source,
+      });
     }
   }
 
@@ -422,12 +417,13 @@ export async function recommendGuide(
 
   const pattern = reusablePattern(args.task);
   const skillCoverage = await findExistingSkillCoverage(args.task, args.maxResults);
+  const ownershipMetaTask = isSkillCoverageMetaTask(args.task);
   const bestDomainGuide = ranked.find((item) => item.name !== "workflow-guide-builder") ?? null;
   const builderGuide = ranked.find((item) => item.name === "workflow-guide-builder") ?? null;
   const bestSkill = skillCoverage.matches[0] ?? null;
-  const shouldLoadExisting = Boolean(bestDomainGuide && bestDomainGuide.score >= 4);
-  const useExistingSkill = !shouldLoadExisting && skillCoverage.covered;
-  const createNewRecommended = !shouldLoadExisting && !useExistingSkill && pattern.detected;
+  const shouldLoadExisting = !ownershipMetaTask && Boolean(bestDomainGuide && bestDomainGuide.score >= 4);
+  const useExistingSkill = !ownershipMetaTask && !shouldLoadExisting && skillCoverage.covered;
+  const createNewRecommended = !ownershipMetaTask && !shouldLoadExisting && !useExistingSkill && pattern.detected;
 
   return {
     task: args.task,
@@ -437,13 +433,15 @@ export async function recommendGuide(
     reusablePattern: pattern,
     existingSkillCoverage: skillCoverage,
     matches: ranked,
-    recommendation: shouldLoadExisting
-      ? { action: "load_existing", guide: bestDomainGuide?.name, skill: null, builderGuide: null, reason: "A domain guide matched the task strongly." }
-      : useExistingSkill
-        ? { action: "use_existing_skill", guide: null, skill: bestSkill?.name, builderGuide: null, reason: "An existing skill already owns this reusable procedure; do not create a duplicate workflow guide." }
-        : createNewRecommended
-          ? { action: "propose_new", guide: null, skill: null, builderGuide: builderGuide?.name ?? "workflow-guide-builder", reason: "The task looks repeatable and neither a domain guide nor an existing skill covers it strongly." }
-          : { action: "none", guide: null, skill: null, builderGuide: null, reason: "No strong reusable-workflow signal, domain guide, or existing skill match was found." },
+    recommendation: ownershipMetaTask
+      ? { action: "none", guide: null, skill: null, builderGuide: null, reason: "This task is diagnosing skill/workflow routing or coverage; named capabilities are evidence for the diagnosis, not ownership intent." }
+      : shouldLoadExisting
+        ? { action: "load_existing", guide: bestDomainGuide?.name, skill: null, builderGuide: null, reason: "A domain guide matched the task strongly." }
+        : useExistingSkill
+          ? { action: "use_existing_skill", guide: null, skill: bestSkill?.name, builderGuide: null, reason: "An existing skill already owns this reusable procedure; do not create a duplicate workflow guide." }
+          : createNewRecommended
+            ? { action: "propose_new", guide: null, skill: null, builderGuide: builderGuide?.name ?? "workflow-guide-builder", reason: "The task looks repeatable and neither a domain guide nor an existing skill covers it strongly." }
+            : { action: "none", guide: null, skill: null, builderGuide: null, reason: "No strong reusable-workflow signal, domain guide, or existing skill match was found." },
   };
 }
 
@@ -628,7 +626,7 @@ export const workflowGuideToolModule: BridgeToolModule = {
   tools: [
     {
       name: "project_context_load",
-      description: "Use this once when beginning substantial work in a known repository, resuming a project, or when project-specific rules may affect the task. Loads AGENTS plus durable project context through an optional .bridge/project-context.json manifest. Without a manifest it preserves the legacy PROJECT_CONTEXT/PROJECT_MEMORY/PROJECT_STATE behavior. With a manifest it loads only core context before intent is available and selects context/memory/state/directive modules by structured intent and stage. Also returns workflow guides and an optional guide recommendation.",
+      description: "Use this once when beginning substantial work in a known repository, resuming a project, or when project-specific rules may affect the task. Loads AGENTS plus durable project context only through canonical .mssr/project-context.json. If the repository is not initialized or its manifest is invalid, project knowledge is omitted with an actionable warning; Bridge never falls back to .bridge or arbitrary PROJECT_* documents. With a valid manifest it loads bounded core context before intent and selects context/memory/state/directive modules by structured intent and stage through portable MSSR. Bridge-specific workflow guides remain a separate host-owned surface. Also returns workflow guides and an optional guide recommendation.",
       inputSchema: {
         type: "object",
         properties: {
@@ -742,8 +740,11 @@ export const workflowGuideToolModule: BridgeToolModule = {
         includeProjectContext: z.boolean().default(true),
         includeGuides: z.boolean().default(true),
       }).parse(raw);
-      const context = await loadProjectContext(parsed);
-      return { ...context, workflowKey: parsed.workflowKey ?? null };
+      const [context, projectContextHealth] = await Promise.all([
+        loadProjectContext(parsed),
+        auditMssrProjectContextHealth(path.resolve(parsed.projectRoot)),
+      ]);
+      return { ...context, projectContextHealth, workflowKey: parsed.workflowKey ?? null };
     },
     workflow_guide_recommend: async (raw) => {
       const parsed = z.object({

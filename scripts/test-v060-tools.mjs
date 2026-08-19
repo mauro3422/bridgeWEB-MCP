@@ -10,7 +10,9 @@ process.env.BRIDGE_MCP_CACHE_DIR = path.join(sandbox, 'cache-store');
 process.env.BRIDGE_MCP_SNAPSHOT_DIR = path.join(sandbox, 'snapshot-store');
 process.env.BRIDGE_MCP_BINARY_UPLOAD_DIR = path.join(sandbox, 'binary-upload-store');
 process.env.BRIDGE_MCP_METRICS_DIR = path.join(sandbox, 'metrics-store');
+process.env.BRIDGE_MCP_METRICS_SQLITE = path.join(process.env.BRIDGE_MCP_METRICS_DIR, "bridge-metrics.sqlite");
 process.env.BRIDGE_MCP_LOG_DIR = path.join(sandbox, 'log-store');
+process.env.BRIDGE_MCP_MSSR_EVENTS_JSONL = path.join(process.env.BRIDGE_MCP_LOG_DIR, "mssr-events.jsonl");
 const fixtureCodexHome = path.join(sandbox, 'codex-home');
 process.env.CODEX_HOME = fixtureCodexHome;
 const fixtureSkillRoot = path.join(fixtureCodexHome, 'skills');
@@ -163,11 +165,11 @@ try {
   if (drainedNotices.length !== 1 || getBridgeNoticeStatus().pendingCount !== 0) throw new Error('Bridge notice one-shot drain failed');
   if (!noticeHistory.some((item) => item.code === 'fixture-warning' && item.actions?.[0]?.toolName === 'terminal_list')) throw new Error('Bridge notice history did not retain actionable reminder after drain');
 
-  if (registry.tools.length !== 149) throw new Error(`expected 149 tools, got ${registry.tools.length}`);
+  if (registry.tools.length !== 156) throw new Error(`expected 156 tools, got ${registry.tools.length}`);
   const catalogComparison = await call('bridge_connector_catalog_compare', {
     exposedToolNames: ['skill_catalog', 'skill_recommend', 'skill_load', 'host_private_tool'],
   });
-  if (catalogComparison.runtime.count !== 149 || catalogComparison.mssr.runtime !== 12) throw new Error('connector catalog comparison runtime baseline failed');
+  if (catalogComparison.runtime.count !== 156 || catalogComparison.mssr.runtime !== 12) throw new Error('connector catalog comparison runtime baseline failed');
   if (catalogComparison.mssr.directCoveragePercent !== 25) throw new Error(`unexpected MSSR direct coverage: ${catalogComparison.mssr.directCoveragePercent}`);
   if (!catalogComparison.mssr.delegatedViaQuery.includes('skill_bootstrap') || !catalogComparison.mssr.delegatedViaAction.includes('mssr_trace_record') || !catalogComparison.mssr.delegatedViaAction.includes('mssr_trace_working_update')) throw new Error('connector catalog wrapper classification failed');
   if (!catalogComparison.connectorObservation.unrecognized.includes('host_private_tool') || catalogComparison.interpretation.wrapperReachabilityIsDirectExposure !== false) throw new Error('connector catalog boundary classification failed');
@@ -388,7 +390,7 @@ try {
   const skillLoadSchema = await call('bridge_tool_schema', {toolName:'skill_load'});
   if (!skillLoadSchema.tool?.metadata?.usage?.recovery?.some((rule) => rule.code === 'mssr-orphan-skill-load' && rule.toolName === 'skill_bootstrap')) throw new Error('skill_load MSSR recovery metadata failed');
   const aliasAudit = await call('bridge_tool_audit', {view:'aliases',scope:'active',days:30,limit:20});
-  if (aliasAudit.summary?.registeredTools !== 149 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
+  if (aliasAudit.summary?.registeredTools !== 156 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
   const delegatedMetric = beginToolMetric('bridge_tool_query', {toolName:'bridge_tool_audit',arguments:{view:'all'}}, {caller:'chatgpt-web',sessionKey:'fixture-session',project:'fixture-project'});
   finishToolMetric(delegatedMetric, true, 128);
   const delegatedSnapshot = getToolAuditMetrics(30, 'active');
@@ -567,8 +569,17 @@ try {
   fs.writeFileSync(path.join(root, '.env.development'), 'SECRET=dev\n');
   fs.writeFileSync(path.join(root, 'AGENTS.md'), '# Fixture agents\n\n- Verify project rules.\n');
   fs.mkdirSync(path.join(root, '.bridge'), {recursive:true});
-  fs.writeFileSync(path.join(root, '.bridge', 'PROJECT_CONTEXT.md'), '# Fixture context\n\nProject-specific durable context.\n');
-  fs.writeFileSync(path.join(root, '.bridge', 'PROJECT_STATE.md'), '# Fixture state\n\nCurrent milestone.\n');
+  fs.mkdirSync(path.join(root, '.mssr'), {recursive:true});
+  fs.writeFileSync(path.join(root, '.mssr', 'PROJECT_CONTEXT.md'), '# Fixture context\n\n## Durable context\n\nProject-specific durable context.\n');
+  fs.writeFileSync(path.join(root, '.mssr', 'PROJECT_STATE.md'), '# Fixture state\n\n## Current milestone\n\nCurrent milestone.\n');
+  fs.writeFileSync(path.join(root, '.mssr', 'project-context.json'), JSON.stringify({
+    schemaVersion:1,
+    core:[
+      {id:'fixture-context',kind:'context',description:'Fixture durable context.',source:{path:'.mssr/PROJECT_CONTEXT.md',sections:['## Durable context']}},
+      {id:'fixture-state',kind:'state',description:'Fixture current state.',source:{path:'.mssr/PROJECT_STATE.md',sections:['## Current milestone']}},
+    ],
+    modules:[],
+  }, null, 2));
   execFileSync('git', ['init', '-b', 'main'], {cwd:root,stdio:'ignore'});
   execFileSync('git', ['config', 'user.email', 'bridge@example.test'], {cwd:root});
   execFileSync('git', ['config', 'user.name', 'Bridge Test'], {cwd:root});

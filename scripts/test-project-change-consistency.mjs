@@ -8,7 +8,7 @@ import { createToolRegistry } from "../dist/tool-registry.js";
 
 const execFileAsync = promisify(execFile);
 const root = path.join(process.cwd(), "sandbox", "project-change-consistency-test");
-const bridgeDir = path.join(root, ".bridge");
+const bridgeDir = path.join(root, ".mssr");
 const changelogDir = path.join(root, "changelogs");
 
 await fs.rm(root, { recursive: true, force: true });
@@ -24,8 +24,8 @@ try {
   await fs.writeFile(path.join(bridgeDir, "PROJECT_STATE.md"), "# Project state\n\n## Current\nBaseline.\n", "utf8");
   await fs.writeFile(path.join(bridgeDir, "project-context.json"), JSON.stringify({
     schemaVersion: 1,
-    core: [{ id: "architecture", kind: "context", description: "Architecture", source: { path: ".bridge/PROJECT_CONTEXT.md", sections: ["## Architecture"] } }],
-    modules: [{ id: "current", kind: "state", description: "Current state", source: { path: ".bridge/PROJECT_STATE.md", sections: ["## Current"] }, actions: ["maintain"] }],
+    core: [{ id: "architecture", kind: "context", description: "Architecture", source: { path: ".mssr/PROJECT_CONTEXT.md", sections: ["## Architecture"] } }],
+    modules: [{ id: "current", kind: "state", description: "Current state", source: { path: ".mssr/PROJECT_STATE.md", sections: ["## Current"] }, actions: ["maintain"] }],
   }, null, 2), "utf8");
   await fs.writeFile(path.join(changelogDir, "INDEX.md"), "# Changelog index\n\n- [1.2.3](1.2.3.md) — fixture baseline.\n", "utf8");
   await fs.writeFile(path.join(changelogDir, "1.2.3.md"), [
@@ -111,13 +111,13 @@ try {
     /contradictory risk annotations/,
   );
 
-  await execFileAsync("git", ["add", "src.txt", ".bridge/PROJECT_STATE.md", "changelogs/1.2.3.md"], { cwd: root, windowsHide: true });
+  await execFileAsync("git", ["add", "src.txt", ".mssr/PROJECT_STATE.md", "changelogs/1.2.3.md"], { cwd: root, windowsHide: true });
   await fs.writeFile(path.join(root, "AGENTS.md"), "# Rules\n\nParallel unrelated edit.\n", "utf8");
   const staged = await projectContextToolModule.handlers.project_change_consistency({ projectRoot: root, mode: "persist", scope: "staged" });
   assert.equal(staged.publishReady, true, JSON.stringify(staged.issues));
   assert.equal(staged.scope, "staged");
   assert.equal(staged.changedPaths.includes("src.txt"), true);
-  assert.equal(staged.changedPaths.includes(".bridge/PROJECT_STATE.md"), true);
+  assert.equal(staged.changedPaths.includes(".mssr/PROJECT_STATE.md"), true);
   assert.equal(staged.changedPaths.includes("changelogs/1.2.3.md"), true);
   assert.equal(staged.changedPaths.includes("AGENTS.md"), false, "staged consistency must not attribute unrelated working-tree edits");
 

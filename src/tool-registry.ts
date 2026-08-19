@@ -27,6 +27,7 @@ import { skillCatalogToolModule } from "./tools/skill-catalog-tools.js";
 import { workspaceToolModule } from "./tools/workspace-tools.js";
 import { workflowGuideToolModule } from "./tools/workflow-guide-tools.js";
 import { whiteboardToolModule } from "./tools/whiteboard-tools.js";
+import { windowsAdminToolModule } from "./tools/windows-admin-tools.js";
 import { buildToolAudit, TOOL_AUDIT_VIEWS, type ToolAuditArgs, type ToolAuditView } from "./tool-audit.js";
 import { getToolAuditMetrics, type BridgeMetricsScope } from "./metrics.js";
 import type { BridgeToolMetadata, BridgeToolModule, BridgeToolRegistry, BridgeToolSchema, BridgeToolUsageGuidance } from "./tools/types.js";
@@ -37,9 +38,9 @@ const readOnlyToolNames = new Set([
   "git_status", "git_diff", "git_log", "git_show_commit", "git_compare_branches",
   "tunnel_health", "bridge_health", "bridge_connector_catalog_compare", "bridge_self_check", "bridge_restart_status",
   "bridge_metrics_status", "bridge_metrics_summary", "bridge_metrics_recent", "bridge_metrics_query", "bridge_verify_status", "mssr_observatory_query", "mssr_trace_evidence", "bridge_visualization_catalog", "bridge_visualize_metrics", "bridge_notice_status", "bridge_notice_drain",
-  "path_policy_status", "project_profile", "workspace_diff", "workspace_snapshot_list", "cache_status",
+  "path_policy_status", "project_profile", "workspace_diff", "workspace_snapshot_list", "cache_status", "windows_admin_cache_status", "windows_admin_storage_audit",
   "analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code",
-  "project_context_load", "workflow_guide_recommend", "workflow_guide_load", "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query",
+  "project_context_load", "project_context_audit", "project_context_health", "project_context_modularization_plan", "project_change_consistency", "workflow_guide_recommend", "workflow_guide_load", "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query",
   "skill_catalog", "skill_recommend", "skill_route_audit", "skill_route_vocabulary", "skill_route_plan", "skill_bootstrap", "skill_load", "roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list", "roblox_mcp_query",
   "binary_file_info", "binary_file_read_chunk", "binary_upload_status", "image_file_attach",
   "blender_status", "blender_scene_info", "blender_validate_reference_pack", "blender_character_loop_status",
@@ -52,7 +53,7 @@ const destructiveToolNames = new Set([
   "write_text_file", "apply_patch", "edit_lines", "run_command", "terminal_start", "terminal_write", "terminal_stop",
   "work_once", "work_begin", "work_feed", "work_finish",
   "git_create_branch", "git_restore_file", "git_set_remote", "git_commit_all", "git_push_current_branch", "git_multi_repo_publish",
-  "project_profile_save", "project_context_update", "workspace_snapshot", "workspace_rollback", "cache_prune",
+  "project_profile_save", "project_context_initialize", "project_context_update", "project_context_capture", "workspace_snapshot", "workspace_rollback", "cache_prune", "windows_admin_cache_cleanup",
   "bridge_request_restart", "bridge_verify_all", "workflow_guide_create", "bridge_tool_action", "roblox_mcp_action", "roblox_studio_window_capture_save", "roblox_screen_capture_save", "roblox_photo_capture_job", "roblox_place_save",
   "roblox_asset_upload",
   "image_asset_save", "image_asset_import_files", "image_character_views_prepare", "image_reference_pack_prepare",
@@ -78,7 +79,7 @@ const providerProxyToolNames = new Set([
   "godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list", "godot_mcp_query", "godot_mcp_action",
 ]);
 const protectedToolNames = new Set([
-  "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query", "bridge_tool_action", "bridge_connector_catalog_compare", "project_context_load", "project_context_update",
+  "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query", "bridge_tool_action", "bridge_connector_catalog_compare", "project_context_load", "project_context_audit", "project_context_health", "project_context_modularization_plan", "project_context_initialize", "project_context_update", "project_context_capture",
   "skill_route_plan", "skill_bootstrap", "skill_load", "mssr_trace_record", "mssr_trace_evidence", "bridge_verify_all", "git_multi_repo_publish", "roblox_place_save",
 ]);
 
@@ -88,12 +89,30 @@ const toolUsageGuidance = new Map<string, BridgeToolUsageGuidance>([
     preflightTools: ["skill_bootstrap"],
     recovery: [{ code: "mssr-unrouted-tool-call", toolName: "skill_bootstrap", instruction: "Bootstrap the current MSSR phase with structured intent so required skills are loaded automatically." }],
   }],
+  ["project_context_initialize", {
+    prerequisites: ["Use only for repositories/workspaces that should participate in MSSR project knowledge. Initialization creates bounded .mssr skeleton/control files and may remove only known legacy MSSR-owned .bridge artifacts."],
+    preflightTools: ["project_context_health"],
+    recovery: [{ code: "legacy-cleanup-blocked", toolName: "project_context_health", instruction: "Inspect the blocked legacy MSSR artifact and preserve durable data until a reviewed canonical migration exists." }],
+  }],
+  ["project_context_modularization_plan", {
+    prerequisites: ["Use after Project Context Health reports growth/core/module/index pressure. The planner is read-only: core narrowing and unindexed knowledge remain review decisions."],
+    preflightTools: ["project_context_health"],
+    recovery: [{ code: "project-context-not-initialized", toolName: "project_context_initialize", instruction: "Initialize the canonical .mssr contract first; do not fall back to .bridge or synthesize durable facts." }],
+  }],
   ["project_context_update", {
-    prerequisites: ["Update only deliberate durable project facts/decisions/state; use stable section headings and expectedSha256 when modifying an already-read file."],
+    prerequisites: ["The repository must already be initialized with a valid .mssr/project-context.json. Update only deliberate durable project facts/decisions/state; use stable section headings and expectedSha256 when modifying an already-read file."],
     preflightTools: ["project_context_load"],
     recovery: [
       { code: "target-not-found", toolName: "project_context_load", instruction: "Reload the project root/context and retry the durable update against the intended repository." },
       { code: "concurrent-modification", toolName: "project_context_load", instruction: "Reload current project context, reconcile the changed section, and retry with the new expectedSha256." },
+    ],
+  }],
+  ["project_context_capture", {
+    prerequisites: ["The repository must already be initialized. Persist only reviewed durable knowledge that belongs in .mssr/knowledge; existing targets require an expectedTargetSha256 from a prior read."],
+    preflightTools: ["project_context_health", "project_context_load"],
+    recovery: [
+      { code: "target-exists", toolName: "project_context_load", instruction: "Read/reconcile the existing durable knowledge before retrying capture with its expectedTargetSha256." },
+      { code: "concurrent-modification", toolName: "project_context_health", instruction: "Re-audit the canonical contract and retry only after reconciling the changed target/manifest." },
     ],
   }],
   ["skill_route_plan", {
@@ -496,6 +515,7 @@ const defaultToolModules: readonly BridgeToolModule[] = [
   blenderToolModule,
   godotToolModule,
   whiteboardToolModule,
+  windowsAdminToolModule,
   bridgeWorkflowToolModule,
 ];
 

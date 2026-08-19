@@ -19,6 +19,7 @@ import { createDefaultToolRegistry } from "./tool-registry.js";
 import type { BridgeToolSchema } from "./tools/types.js";
 import { createMssrTraceSessionCoordinator } from "./mssr-trace-context.js";
 import { recordMssrEvent } from "./mssr-observatory.js";
+import { createMssrRoutingComplianceNoticeTracker } from "./mssr-routing-compliance.js";
 import { normalizeModelIdentifier, normalizeWorkflowKey, resolveMetricTaskKey, resolveMetricWorkflowKey } from "./runtime-identity.js";
 
 export { SERVER_NAME, SERVER_VERSION } from "./config.js";
@@ -46,12 +47,7 @@ const sessionProjects = new Map<string, string>();
 const sessionProjectRoots = new Map<string, string>();
 const sessionTaskKeys = new Map<string, string>();
 const sessionWorkflowKeys = new Map<string, string>();
-const unroutedWarnings = new Map<string, number>();
 const maxScopedMetricEntries = 2048;
-const unroutedWarningIntervalMs = Math.max(
-  10_000,
-  Number(process.env.BRIDGE_MCP_MSSR_UNROUTED_WARNING_MS) || 60_000,
-);
 
 function validNoticeInput(value: unknown): value is BridgeNoticeInput {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -375,41 +371,36 @@ function metricProfile(
   };
 }
 
-function emitUnroutedNotice(
+function emitRoutingComplianceNotice(
   toolName: string,
   metric: ReturnType<typeof beginToolMetric>,
   destructive: boolean,
+  tracker: ReturnType<typeof createMssrRoutingComplianceNoticeTracker>,
 ): void {
-  if (metric.routingStatus !== "unrouted") return;
-  const key = `${metric.sessionKey}:${metric.project}:${metric.caller}`;
-  const now = Date.now();
-  if (now - (unroutedWarnings.get(key) ?? 0) < unroutedWarningIntervalMs) return;
-  unroutedWarnings.set(key, now);
-  for (const [candidate, warnedAt] of unroutedWarnings) {
-    if (now - warnedAt > unroutedWarningIntervalMs * 4 || unroutedWarnings.size > maxScopedMetricEntries) {
-      unroutedWarnings.delete(candidate);
-    }
-  }
-  emitBridgeNotice({
-    severity: destructive ? "warning" : "info",
-    code: "mssr-unrouted-tool-call",
-    source: toolName,
-    message: `${toolName} se ejecutó sin una traza MSSR activa. Antes de continuar trabajo sustancial, abre skill_bootstrap con intent estructurado; la llamada no fue bloqueada.`,
+  if (metric.routingStatus !== "traced" && metric.routingStatus !== "unrouted") return;
+  const subject = `routing-chain:${metric.sessionKey}:${metric.project}:${metric.caller}`;
+  const projected = tracker.observe({
+    subject,
+    source: "mssr-routing-compliance",
+    traceId: metric.traceId ?? null,
+    observation: {
+      trace: metric.routingStatus === "traced" ? "matched" : "not-applicable",
+      route: metric.routingStatus === "traced" ? "present" : "missing",
+      boundary: destructive ? "substantial-tool" : "ordinary",
+    },
     details: {
       toolName,
       caller: metric.caller,
       project: metric.project,
       sessionKey: metric.sessionKey,
       destructive,
-      policy: "observe-and-warn; MSSR does not grant permissions or proxy execution",
+      routingStatus: metric.routingStatus,
+      policy: "portable projection + host delivery; advisory only",
     },
-    actions: [{
-      label: "Cargar fase MSSR",
-      toolName: "skill_bootstrap",
-      instruction: "Construye intent estructurado y carga automáticamente todas las skills de la fase antes de continuar la cadena sustancial.",
-    }],
-    dedupeKey: `mssr-unrouted-tool-call:${key}`,
+    message: `${toolName} inició trabajo ${destructive ? "sustancial" : "observable"} sin routing MSSR activo. La llamada no fue bloqueada; revisa la ruta antes de continuar si la proyección requiere atención.`,
+    resolutionMessage: `La cadena ${subject} volvió a tener routing MSSR compatible.`,
   });
+  if (projected.notice) emitBridgeNotice(projected.notice);
 }
 
 type BridgeServerSurface = {
@@ -419,6 +410,7 @@ type BridgeServerSurface = {
 
 function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
   const modularToolRegistry = createDefaultToolRegistry();
+  const routingCompliance = createMssrRoutingComplianceNoticeTracker();
   const pendingContextProjects = new Set<string>();
   const pendingContextRoots = new Set<string>();
   let localTaskKey: string | undefined;
@@ -529,14 +521,32 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
       && activeTraceBeforeCall.project !== "unknown"
       ? activeTraceBeforeCall.project
       : undefined;
+    const activeTraceWorkflowKey = activeTraceBeforeCall.active
+      && !activeTraceBeforeCall.closed
+      && activeTraceBeforeCall.workflowKey
+      && activeTraceBeforeCall.workflowKey !== "unscoped"
+      ? activeTraceBeforeCall.workflowKey
+      : undefined;
+    const requestedWorkflowKey = explicitWorkflowKey
+      ?? (hostProfile.sessionKey ? sessionWorkflowKeys.get(hostProfile.sessionKey) : undefined)
+      ?? localWorkflowKey;
+    const workflowOwnerChanged = Boolean(
+      requestedWorkflowKey
+      && activeTraceWorkflowKey
+      && requestedWorkflowKey !== activeTraceWorkflowKey,
+    );
+    const workflowOwner = workflowOwnerChanged || startsNewRoute
+      ? requestedWorkflowKey
+      : activeTraceWorkflowKey ?? requestedWorkflowKey;
     const resolvedCallProject = resolveProject(name, scopedArgs, hostProfile);
-    const project = startsNewRoute
+    const project = startsNewRoute || workflowOwnerChanged
       ? observedProject ?? pendingProject ?? resolvedCallProject
       : activeTraceProject ?? resolvedCallProject ?? pendingProject;
     const prepared = mssrTraceSession.prepare(name, scopedArgs, {
       caller: hostProfile.caller,
       sessionKey: hostProfile.sessionKey,
       project,
+      workflowKey: workflowOwner,
     });
     for (const notice of prepared.notices) emitBridgeNotice(notice);
     const args = prepared.args;
@@ -545,6 +555,7 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
       caller: typeof effectivePrepared.args.caller === "string" ? effectivePrepared.args.caller : hostProfile.caller,
       sessionKey: hostProfile.sessionKey,
       project,
+      workflowKey: workflowOwner,
     });
     const traceMetricProject = traceSnapshot.project && traceSnapshot.project !== "unknown"
       ? traceSnapshot.project
@@ -585,7 +596,7 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
       }
     }
     const toolSchema = modularToolRegistry.tools.find((tool) => tool.name === name);
-    emitUnroutedNotice(name, metric, toolSchema?.annotations?.destructiveHint === true);
+    emitRoutingComplianceNotice(name, metric, toolSchema?.annotations?.destructiveHint === true, routingCompliance);
 
     const complete = (rawData: unknown, ok = true, error?: string) => {
       if (rawData && typeof rawData === "object" && !Array.isArray(rawData)) {
