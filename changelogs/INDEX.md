@@ -4,6 +4,8 @@ Versioned release notes are the canonical change-history surface for MSSR debugg
 
 ## Current releases
 
+- [0.6.117](0.6.117.md) - Adopt measured Context Message budgets and bound automatic notice delivery so real Web bootstraps retain room for paged skills.
+- [0.6.116](0.6.116.md) - Adopt MSSR 0.2.55 so generic maintenance warnings load a compact friction index instead of one indivisible 20 KB unit.
 - [0.6.115](0.6.115.md) - Adopt MSSR 0.2.54, expose review-only Context Plane proposals, and make post-pagination lifecycle closure explicit without inferred success.
 - [0.6.114](0.6.114.md) - Bounded resumable MSSR context delivery with `skill_context_next`, opaque cursor validation, required/accepted preservation, and privacy-safe envelope observability.
 - [0.6.113](0.6.113.md) - Adopt MSSR 0.2.50 and add privacy-safe repeated tool-friction clustering/prioritization to `bridge_tool_audit`, preserving legacy metrics while surfacing recurring cross-workflow maintenance debt.

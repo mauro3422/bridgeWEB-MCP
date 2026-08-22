@@ -101,6 +101,14 @@ function noticeSeverity(message: MssrContextMessage): BridgeNoticeInput["severit
 }
 
 export function mssrContextMessageToBridgeNotice(message: MssrContextMessage): BridgeNoticeInput {
+  const compactEvidence = (message.evidence ?? []).slice(0, 8).map((item) => ({
+    kind: item.kind,
+    ref: item.ref,
+    canonicalOwner: item.canonicalOwner,
+    provenance: item.provenance,
+    freshness: item.freshness,
+    ...(item.revision ? { revision: item.revision } : {}),
+  }));
   return {
     severity: noticeSeverity(message),
     code: `mssr-context-${message.kind}`,
@@ -111,12 +119,25 @@ export function mssrContextMessageToBridgeNotice(message: MssrContextMessage): B
       contextMessageId: message.id,
       kind: message.kind,
       portableSeverity: message.severity,
-      evidence: message.evidence,
+      evidence: compactEvidence,
+      evidenceCount: message.evidence.length,
       advisoryActions: message.advisoryActions,
-      ...(message.continuation ? { continuation: message.continuation } : {}),
-      ...(message.persistenceProposal ? { persistenceProposal: message.persistenceProposal } : {}),
+      ...(message.continuation ? { continuation: {
+        traceId: message.continuation.traceId,
+        freshness: message.continuation.freshness,
+        currentStage: message.continuation.currentStage,
+        completedPhases: message.continuation.completedPhases,
+        nextGate: message.continuation.nextGate,
+        unresolvedRefs: message.continuation.unresolvedRefs.slice(0, 8),
+        sourceReceiptCount: message.continuation.sourceReceipts.length,
+      } } : {}),
+      ...(message.persistenceProposal ? { persistenceProposal: {
+        target: message.persistenceProposal.target,
+        reviewRequired: true,
+        evidenceRefs: message.persistenceProposal.evidence.slice(0, 8).map((item) => item.ref),
+      } } : {}),
       advisoryOnly: true,
-      policy: "Evidence and persistence proposals require host review. Bridge does not execute advisory actions or persist proposals automatically.",
+      policy: "Review evidence at its canonical owner; no advisory action or proposal is executed automatically.",
     },
   };
 }

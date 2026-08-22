@@ -92,7 +92,7 @@ const { createDefaultToolRegistry } = await import('../dist/tool-registry.js');
 const { writePersistentCache } = await import('../dist/tools/shared/persistent-cache.js');
 const { asRobloxMcpDiscoveryHealth, classifyRobloxMcpToolCatalog, getRobloxMcpToolRequestOptions, parseRobloxStudios } = await import('../dist/integrations/roblox-mcp-client.js');
 const { extractRobloxMcpImage, validateRobloxCaptureImage } = await import('../dist/tools/roblox-studio-tools.js');
-const { clearBridgeNotices, drainBridgeNotices, emitBridgeNotice, getBridgeNoticeStatus, peekBridgeNoticeHistory } = await import('../dist/notices.js');
+const { clearBridgeNotices, drainBridgeNotices, drainBridgeNoticesWithinBudget, emitBridgeNotice, getBridgeNoticeStatus, peekBridgeNoticeHistory } = await import('../dist/notices.js');
 const { closeMssrObservatoryForTests, getMssrTraceEvidence, queryMssrObservatory, recordMssrCheckpoint, recordMssrRoute } = await import('../dist/mssr-observatory.js');
 const { buildToolAudit } = await import('../dist/tool-audit.js');
 const { buildBridgeToolFrictionProjection, classifyBridgeToolFrictionSignature } = await import('../dist/mssr-tool-friction.js');
@@ -165,6 +165,15 @@ try {
   const noticeHistory = peekBridgeNoticeHistory(5);
   if (drainedNotices.length !== 1 || getBridgeNoticeStatus().pendingCount !== 0) throw new Error('Bridge notice one-shot drain failed');
   if (!noticeHistory.some((item) => item.code === 'fixture-warning' && item.actions?.[0]?.toolName === 'terminal_list')) throw new Error('Bridge notice history did not retain actionable reminder after drain');
+
+  for (let index = 0; index < 6; index += 1) emitBridgeNotice({severity:'info',code:`bounded-${index}`,source:'fixture',message:'x'.repeat(200)});
+  const boundedDelivery = drainBridgeNoticesWithinBudget(4, 2_000);
+  if (boundedDelivery.items.length < 1 || boundedDelivery.items.length > 4 || JSON.stringify(boundedDelivery.items).length > 3_000 || boundedDelivery.remaining < 1) throw new Error('Bridge automatic notice delivery budget failed');
+  clearBridgeNotices();
+  emitBridgeNotice({severity:'warning',code:'oversized-automatic-notice',source:'fixture',message:'Inspect explicitly',details:{payload:'x'.repeat(6_000)}});
+  const oversizedDelivery = drainBridgeNoticesWithinBudget(4, 2_000);
+  if (oversizedDelivery.items.length !== 0 || oversizedDelivery.remaining !== 1) throw new Error('Bridge automatic notice delivery must leave an indivisible oversized notice for explicit inspection');
+  clearBridgeNotices();
 
   if (registry.tools.length !== 162) throw new Error(`expected 162 tools, got ${registry.tools.length}`);
   const catalogComparison = await call('bridge_connector_catalog_compare', {

@@ -1503,3 +1503,15 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Corrección / regresión:** `scripts/test-bridge-http.ps1` espera `/readyz=ready` hasta 45 s antes de ejecutar aserciones. El smoke focal pasó sobre Bridge 0.6.115, PID 8136, boot `71184ced-6786-4879-a03b-018a10056f1d`, dashboard y catálogo 162; una segunda ejecución completa de `npm run verify:all` terminó con cero gates requeridos fallidos.
 
 **Seguimiento:** mantener la espera en el smoke reutilizable, no insertar sleeps ciegos en `verify:all`, y correlacionar ack/health antes de repetir una operación con posibles efectos.
+
+## 2026-08-22 — Context Messages y notices volvieron a ocupar todo el envelope compacto
+
+**Estado:** Corregido y cerrado en Bridge 0.6.117 / MSSR 0.2.57, con adopción viva y gate integral verificados.
+
+**Síntoma observable:** tras dividir la referencia de fricción, la traza real de cierre seguía fallando con envelope 32.000: la metadata compacta previa a skills medía 58.329 caracteres. Con envelope diagnóstico 120.000, `contextMessages` ocupaba 14.704, `projectContext` 12.887 y los notices automáticos 19–22 KB antes de las unidades procedurales.
+
+**Causa demostrada:** doce changelogs históricos pendientes conservaban `estimatedChars=320` aunque su JSON estructurado medía 808–1.266 caracteres. Además, cada Context Message se convertía en un notice con evidencia/receipts repetidos y el servidor drenaba hasta 100 notices en una sola respuesta sin presupuesto de caracteres.
+
+**Corrección:** MSSR 0.2.56 usa tamaño serializado real como piso presupuestario. La reproducción posterior demostró dos capas adicionales: los defaults independientes de proyecto/mensajes todavía competían con el envelope completo y el cursor ligaba la continuación al presupuesto reducido de la primera página. MSSR 0.2.57 conserva identidad por selección/orden/bytes pero permite presupuesto por página. Bridge deriva los caps compactos de proyecto/mensajes del envelope, resume metadata repetida, separa notices internos del conteo público y drena como máximo cuatro notices bajo un objetivo de 4.000 caracteres, reducido a 1.500 en bootstrap/continuación compactos; overflow o un notice indivisible permanece en cola con `remainingPending` para inspección explícita.
+
+**Regresión / evidencia:** MSSR prueba cambio de presupuesto 18.000 → 10.000 sobre una misma cadena, entrega exacta, tamper y stale bytes. Bridge prueba envelope, continuación adaptable, un Context Message subestimado, estimaciones medidas del provider, lote automático acotado, notice indivisible retenido, Project Health y REVIEW automático de Architecture Impact. `npm run verify:all` pasa con `failedRequired=0`. Tras restart ack `70b3ca79-c6f2-45c2-a18c-7a622b4b1a3c`, runtime 0.6.117 quedó en PID `37868`, boot `bbf6cf53-1166-4f7a-89b2-d3f8507728fe`, dashboard HTTP 200. La traza original completó a 32.000 en cuatro páginas 31.180 / 28.149 / 31.716 / 14.943, sin blockers y con `contextChain=complete`; seis notices mayores quedaron pendientes para inspección explícita en vez de invadir el contexto.

@@ -95,6 +95,8 @@ function assertPartial(response, label) {
   assert.ok(response.remaining && typeof response.remaining === "object", `${label} must expose remaining selection metadata`);
   assert.ok(Array.isArray(response.remaining.units), `${label} must expose remaining units without their contents`);
   assert.ok(response.remaining.units.length > 0, `${label} must name at least one remaining unit`);
+  assert.ok(Number.isInteger(response.remaining.requiredCount), `${label} must report the required unit count`);
+  assert.ok(Number.isInteger(response.remaining.acceptedCount), `${label} must report the accepted unit count`);
   assert.ok(Number.isInteger(response.remaining.chars) && response.remaining.chars > 0, `${label} must report remaining chars`);
 }
 
@@ -103,7 +105,7 @@ function assertComplete(response, label) {
   assert.equal(response.mustContinue, false, `${label} must stop continuation after completion`);
   assert.equal(response.cursor, null, `${label} must clear the consumed cursor`);
   assert.equal(response.nextAction, undefined, `${label} must not emit a continuation action after completion`);
-  assert.deepEqual(response.remaining, { required: [], accepted: [], units: [], chars: 0 }, `${label} must not retain pending delivery metadata`);
+  assert.deepEqual(response.remaining, { requiredCount: 0, acceptedCount: 0, units: [], chars: 0 }, `${label} must not retain pending delivery metadata`);
   assert.equal(response.lifecycleGate?.contextChain, "complete", `${label} must expose the post-context lifecycle gate`);
   assert.equal(response.lifecycleGate?.traceId, response.traceId, `${label} lifecycle gate must preserve trace identity`);
   assert.equal(response.lifecycleGate?.automaticCheckpoint, false, `${label} must not claim that delivered context was used`);

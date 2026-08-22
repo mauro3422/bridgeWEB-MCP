@@ -9,7 +9,7 @@ import {
 import { SERVER_NAME, SERVER_VERSION } from "./config.js";
 import { beginToolMetric, classifyMssrRoutingStatus, classifyToolAuditError, extractToolResultMetric, finishToolMetric, type BridgeMetricProfile } from "./metrics.js";
 import {
-  drainBridgeNotices,
+  drainBridgeNoticesWithinBudget,
   emitBridgeNotice,
   type BridgeNotice,
   type BridgeNoticeAction,
@@ -48,6 +48,7 @@ const mssrRouteTools = new Set([
   "skill_route_plan",
   "skill_bootstrap",
 ]);
+const compactContextEnvelopeTools = new Set(["skill_bootstrap", "skill_context_next"]);
 const sessionProjects = new Map<string, string>();
 const sessionProjectRoots = new Map<string, string>();
 const sessionTaskKeys = new Map<string, string>();
@@ -74,7 +75,7 @@ function extractInternalNotices(data: unknown): { payload: unknown; notices: Bri
   return { payload, notices };
 }
 
-function toolContent(data: JsonValue | unknown, deliveredNotices: BridgeNotice[] = []) {
+function toolContent(data: JsonValue | unknown, deliveredNotices: BridgeNotice[] = [], remainingNotices = 0) {
   let payload = data;
   let images: BridgeImageAttachment[] = [];
   if (data && typeof data === "object" && !Array.isArray(data)) {
@@ -92,10 +93,11 @@ function toolContent(data: JsonValue | unknown, deliveredNotices: BridgeNotice[]
     payload = publicPayload;
   }
 
-  if (deliveredNotices.length > 0) {
+  if (deliveredNotices.length > 0 || remainingNotices > 0) {
     const bridgeNotices = {
       delivery: "automatic-drain",
       count: deliveredNotices.length,
+      remainingPending: remainingNotices,
       items: deliveredNotices,
     };
     payload = payload && typeof payload === "object" && !Array.isArray(payload)
@@ -725,8 +727,10 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
       }, 0);
       const event = finishToolMetric(metric, ok, outputChars, error, extractToolResultMetric(name, rawData));
       emitAutomaticMetricNotices(name, event, toolSchema, hasImages);
-      const delivered = noticeInspectionTools.has(name) ? [] : drainBridgeNotices();
-      return toolContent(extracted.payload, delivered);
+      const delivery = noticeInspectionTools.has(name)
+        ? { items: [] as BridgeNotice[], remaining: 0 }
+        : drainBridgeNoticesWithinBudget(4, compactContextEnvelopeTools.has(name) ? 1_500 : 4_000);
+      return toolContent(extracted.payload, delivery.items, delivery.remaining);
     };
 
     try {

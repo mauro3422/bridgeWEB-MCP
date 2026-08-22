@@ -175,6 +175,23 @@ export function drainBridgeNotices(limit = MAX_NOTICES): BridgeNotice[] {
   return queue.splice(0, boundedLimit).map(cloneBridgeNotice);
 }
 
+export function drainBridgeNoticesWithinBudget(maxItems = 4, maxChars = 4_000): { items: BridgeNotice[]; remaining: number } {
+  cleanupExpired();
+  const itemLimit = Math.max(1, Math.min(Math.floor(maxItems), MAX_NOTICES));
+  const charLimit = Math.max(512, Math.min(Math.floor(maxChars), 32_000));
+  const selected: BridgeNotice[] = [];
+  let used = 0;
+  while (queue.length > 0 && selected.length < itemLimit) {
+    const candidate = queue[0];
+    const chars = JSON.stringify(candidate).length;
+    if (used + chars > charLimit) break;
+    selected.push(queue.shift()!);
+    used += chars;
+    if (used >= charLimit) break;
+  }
+  return { items: selected.map(cloneBridgeNotice), remaining: queue.length };
+}
+
 export function clearBridgeNotices(): number {
   const count = queue.length;
   queue.splice(0, queue.length);

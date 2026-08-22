@@ -102,8 +102,8 @@ function remainingContextSummary(page: {
   const accepted = page.remaining.accepted;
   const units = [...required, ...accepted];
   return {
-    required,
-    accepted,
+    requiredCount: required.length,
+    acceptedCount: accepted.length,
     units,
     chars: units.reduce((sum, unit) => sum + unit.chars, 0),
   };
@@ -130,10 +130,13 @@ function compactContextAssembly(
     requiredCoreReservedChars: page.requiredCoreReservedChars,
     requiredModuleReservedChars: page.requiredModuleReservedChars,
     requiredOverflowChars: page.requiredOverflowChars,
-    acceptedOverflowChars: remaining.accepted.reduce((sum, unit) => sum + unit.chars, 0),
+    acceptedOverflowChars: page.remaining.accepted.reduce((sum, unit) => sum + unit.chars, 0),
     units: page.units,
     blocked: page.blocked,
-    globallySelectedModules: page.globallySelectedModules,
+    globallySelectedModules: {
+      count: page.globallySelectedModules.length,
+      chars: page.globallySelectedModules.reduce((sum, unit) => sum + unit.chars, 0),
+    },
     skills: page.skills.map((item) => ({
       name: item.skill.name,
       required: item.obligation === "required",
@@ -1511,7 +1514,14 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const maxContextChars = z.number().int().min(4_000).max(100_000).catch(24_000).parse(args.maxContextChars ?? 24_000);
       const maxEnvelopeChars = z.number().int().min(4_000).max(120_000).catch(32_000).parse(args.maxEnvelopeChars ?? 32_000);
       const responseMode = z.enum(routeResponseModes).catch("compact").parse(args.responseMode ?? "compact");
-      const maxProjectContextChars = z.number().int().min(2_000).max(80_000).catch(12_000).parse(args.maxProjectContextChars ?? 12_000);
+      const requestedProjectContextChars = z.number().int().min(2_000).max(80_000).catch(12_000).parse(args.maxProjectContextChars ?? 12_000);
+      const requestedContextMessageChars = z.number().int().min(0).max(20_000).catch(6_000).parse(args.maxContextMessageChars ?? 6_000);
+      const maxProjectContextChars = responseMode === "debug"
+        ? requestedProjectContextChars
+        : Math.min(requestedProjectContextChars, Math.max(2_000, Math.floor(maxEnvelopeChars * 0.22)));
+      const maxContextMessageChars = responseMode === "debug"
+        ? requestedContextMessageChars
+        : Math.min(requestedContextMessageChars, Math.max(0, Math.floor(maxEnvelopeChars * 0.10)));
       const routedIntent = structuredSkillIntentSchema.parse(route.intent);
       const projectRoot = typeof args.projectRoot === "string" && args.projectRoot.trim()
         ? path.resolve(args.projectRoot.trim())
@@ -1526,7 +1536,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
             maxProjectContextChars,
             maxProjectContextModules: z.number().int().min(0).max(32).catch(8).parse(args.maxProjectContextModules ?? 8),
             maxContextMessages: z.number().int().min(0).max(32).catch(12).parse(args.maxContextMessages ?? 12),
-            maxContextMessageChars: z.number().int().min(0).max(20_000).catch(6_000).parse(args.maxContextMessageChars ?? 6_000),
+            maxContextMessageChars,
             inboxConfig: args.inboxConfig,
             contextMessages: args.contextMessages,
           })
@@ -1536,7 +1546,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         intent: routedIntent,
         stage: route.stage,
         maxMessages: args.maxContextMessages,
-        maxChars: args.maxContextMessageChars,
+        maxChars: maxContextMessageChars,
       });
       const contextMessages = contextPlane?.contextMessages ?? inlineContextMessages?.selection ?? null;
       const contextMessageNotices = contextPlane
@@ -1679,6 +1689,8 @@ export const skillCatalogToolModule: BridgeToolModule = {
         activeSkills: route.activeSkills.map((skill) => ({ name: skill.name, source: skill.source, required: skill.required === true, selectedAsRoot: skill.selectedAsRoot === true, requires: skill.requires })),
         deferredSkills: route.deferredSkills.map((skill) => ({ name: skill.name, source: skill.source })),
       };
+      const internalBridgeNotices = [...systemAwareness.notices, ...contextMessageNotices];
+      const automaticNoticeEnvelopeReserveChars = 2_000;
       const baseResponse = {
         ...routeSummary,
         responseMode,
@@ -1695,7 +1707,6 @@ export const skillCatalogToolModule: BridgeToolModule = {
         workflowGuideDelivery,
         sourceHealth: discovered.sourceHealth,
         systemAwareness: systemAwareness.status,
-        __bridgeNotices: [...systemAwareness.notices, ...contextMessageNotices],
         warnings: [
           ...discovered.warnings,
           ...route.warnings,
@@ -1712,7 +1723,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
       }));
       let pageBudget = responseMode === "debug"
         ? maxContextChars
-        : Math.max(256, Math.min(maxContextChars, maxEnvelopeChars - jsonCharacterLength(baseResponse) - 2_000));
+        : Math.max(256, Math.min(maxContextChars, maxEnvelopeChars - jsonCharacterLength(baseResponse) - automaticNoticeEnvelopeReserveChars - 2_000));
       let page = await planSkillContextPage({
         skills: codexMatches.map(({ match, routeIndex, obligation }) => ({ skill: match, obligation, routeIndex, routeScore: Number((match as { score?: number }).score ?? 0) })),
         intent: routedIntent,
@@ -1724,7 +1735,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const buildResponse = () => {
         const remaining = remainingContextSummary(page);
         const cursor = page.cursor ?? null;
-        return withResponseChars({
+        const publicResponse = withResponseChars({
           ...baseResponse,
           loaded: [...robloxLoaded, ...compactLoadedContextItems(page)],
           status: page.status,
@@ -1739,9 +1750,13 @@ export const skillCatalogToolModule: BridgeToolModule = {
             diagnostic: { route: observedRoute, contextPlane, projectChangeHistory, workflowGuide: workflowGuideResolution.workflowGuide, plan: page },
           } : {}),
         });
+        return {
+          ...publicResponse,
+          __bridgeNotices: internalBridgeNotices,
+        };
       };
       let response = buildResponse();
-      for (let attempt = 0; responseMode === "compact" && response.responseChars > maxEnvelopeChars && pageBudget > 256 && attempt < 4; attempt += 1) {
+      for (let attempt = 0; responseMode === "compact" && response.responseChars > maxEnvelopeChars && pageBudget > 256 && attempt < 12; attempt += 1) {
         pageBudget = Math.max(256, pageBudget - (response.responseChars - maxEnvelopeChars) - 256);
         page = await planSkillContextPage({
           skills: codexMatches.map(({ match, routeIndex, obligation }) => ({ skill: match, obligation, routeIndex, routeScore: Number((match as { score?: number }).score ?? 0) })),
@@ -1768,7 +1783,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
           mode: contentMode,
           references: referenceMode,
           requestedContextChars: maxContextChars,
-          maxContextChars: page.maxContextChars,
+          maxContextChars,
           maxEnvelopeChars,
           postContextAction,
           cursorFingerprint: contextCursorFingerprint(page.cursor),
@@ -1782,7 +1797,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         recordMssrSkillLoad({ traceId, skillName: planned.skill.name, source: planned.skill.source, stage: route.stage, required: planned.obligation === "required", loaded: true, via: "skill_bootstrap", warning: info.warning, contentMode: info.mode, coreCharsLoaded: info.coreCharsLoaded, moduleCharsLoaded: info.moduleCharsLoaded, totalCharsLoaded: info.totalCharsLoaded, fullSkillChars: info.fullSkillChars, estimatedCharsSaved: info.estimatedCharsSaved, selectedModules: info.selectedModules, moduleDecisions: info.moduleDecisions, manifestStatus: info.manifestStatus, ambiguousGroups: info.ambiguousGroups, budgetExceeded: info.budgetExceeded, planningMode: info.planningMode, allocationTiers: info.allocationTiers, duplicateCharsAvoided: info.duplicateCharsAvoided });
       }
       const remaining = remainingContextSummary(page);
-      recordMssrContextAssembly({ traceId, caller, stage: route.stage, requestedContextChars: maxContextChars, deliveredContextChars: page.deliveredChars, responseChars: response.responseChars, envelopeChars: maxEnvelopeChars, requiredOverflowChars: remaining.required.reduce((sum, unit) => sum + unit.chars, 0), acceptedOverflowChars: remaining.accepted.reduce((sum, unit) => sum + unit.chars, 0), remainingRequiredUnits: remaining.required.length, remainingAcceptedUnits: remaining.accepted.length, continuationIssued: page.mustContinue, chainCompleted: !page.mustContinue });
+      recordMssrContextAssembly({ traceId, caller, stage: route.stage, requestedContextChars: maxContextChars, deliveredContextChars: page.deliveredChars, responseChars: response.responseChars, envelopeChars: maxEnvelopeChars, requiredOverflowChars: page.remaining.required.reduce((sum, unit) => sum + unit.chars, 0), acceptedOverflowChars: page.remaining.accepted.reduce((sum, unit) => sum + unit.chars, 0), remainingRequiredUnits: page.remaining.required.length, remainingAcceptedUnits: page.remaining.accepted.length, continuationIssued: page.mustContinue, chainCompleted: !page.mustContinue });
       return response;
     },
     skill_context_next: async (args) => {
@@ -1798,26 +1813,33 @@ export const skillCatalogToolModule: BridgeToolModule = {
         if (!skill) throw new Error(`Stale skill context cursor: selected skill '${entry.name}' is no longer available from '${entry.source}'. Run skill_bootstrap again.`);
         return { skill, obligation: entry.obligation, routeIndex: entry.routeIndex, routeScore: entry.routeScore };
       });
-      const page = await continueSkillContextPage({ skills: selected, intent: state.intent, stage: z.enum(SKILL_STAGES).parse(state.stage), mode: state.mode, references: state.references, maxContextChars: state.maxContextChars, cursor });
-      const remaining = remainingContextSummary(page);
+      let pageBudget = state.maxContextChars;
+      let page = await continueSkillContextPage({ skills: selected, intent: state.intent, stage: z.enum(SKILL_STAGES).parse(state.stage), mode: state.mode, references: state.references, maxContextChars: pageBudget, cursor });
+      const buildResponse = () => {
+        const remaining = remainingContextSummary(page);
+        const nextCursor = page.cursor ?? null;
+        return withResponseChars({
+          responseMode: "compact",
+          traceId,
+          stage: state.stage,
+          loaded: compactLoadedContextItems(page),
+          status: page.status,
+          mustContinue: page.mustContinue,
+          cursor: nextCursor,
+          remaining,
+          contextAssembly: compactContextAssembly(page, state.requestedContextChars, state.mode, state.references),
+          ...(nextCursor
+            ? { nextAction: skillContextNextAction(traceId, nextCursor) }
+            : { lifecycleGate: skillContextCompletionGate(traceId, state.stage, state.postContextAction) }),
+        });
+      };
+      let response = buildResponse();
+      for (let attempt = 0; response.responseChars > state.maxEnvelopeChars && pageBudget > 256 && attempt < 12; attempt += 1) {
+        pageBudget = Math.max(256, pageBudget - (response.responseChars - state.maxEnvelopeChars) - 256);
+        page = await continueSkillContextPage({ skills: selected, intent: state.intent, stage: z.enum(SKILL_STAGES).parse(state.stage), mode: state.mode, references: state.references, maxContextChars: pageBudget, cursor });
+        response = buildResponse();
+      }
       const nextCursor = page.cursor ?? null;
-      let response = withResponseChars({
-        responseMode: "compact",
-        traceId,
-        stage: state.stage,
-        loaded: compactLoadedContextItems(page),
-        status: page.status,
-        mustContinue: page.mustContinue,
-        cursor: nextCursor,
-        remaining,
-        contextAssembly: compactContextAssembly(page, state.requestedContextChars, state.mode, state.references),
-        ...(nextCursor
-          ? { nextAction: skillContextNextAction(traceId, nextCursor) }
-          : { lifecycleGate: skillContextCompletionGate(traceId, state.stage, state.postContextAction) }),
-        activationInstruction: page.mustContinue
-          ? "Apply this page with prior compatible pages, then call nextAction before dependent work."
-          : "The selected context chain is complete; continue the active phase using all delivered pages.",
-      });
       if (page.mustContinue && !nextCursor) throw new Error("Selected skill context continuation is blocked by an indivisible unit; run skill_bootstrap again with a larger envelope or modularize the owning skill.");
       if (response.responseChars > state.maxEnvelopeChars) throw new Error(`skill_context_next response requires ${response.responseChars} characters, above the preserved envelope ${state.maxEnvelopeChars}. Run skill_bootstrap again with a larger maxEnvelopeChars.`);
       if (nextCursor) {
@@ -1829,7 +1851,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         const info = planned.contextAssembly;
         recordMssrSkillLoad({ traceId, skillName: planned.skill.name, source: planned.skill.source, stage: state.stage, required: planned.obligation === "required", loaded: true, via: "skill_bootstrap", warning: info.warning, contentMode: info.mode, coreCharsLoaded: info.coreCharsLoaded, moduleCharsLoaded: info.moduleCharsLoaded, totalCharsLoaded: info.totalCharsLoaded, fullSkillChars: info.fullSkillChars, estimatedCharsSaved: info.estimatedCharsSaved, selectedModules: info.selectedModules, moduleDecisions: info.moduleDecisions, manifestStatus: info.manifestStatus, ambiguousGroups: info.ambiguousGroups, budgetExceeded: info.budgetExceeded, planningMode: info.planningMode, allocationTiers: info.allocationTiers, duplicateCharsAvoided: info.duplicateCharsAvoided });
       }
-      recordMssrContextAssembly({ traceId, caller: state.caller, stage: state.stage, requestedContextChars: state.requestedContextChars, deliveredContextChars: page.deliveredChars, responseChars: response.responseChars, envelopeChars: state.maxEnvelopeChars, requiredOverflowChars: remaining.required.reduce((sum, unit) => sum + unit.chars, 0), acceptedOverflowChars: remaining.accepted.reduce((sum, unit) => sum + unit.chars, 0), remainingRequiredUnits: remaining.required.length, remainingAcceptedUnits: remaining.accepted.length, continuationIssued: page.mustContinue, continuationConsumed: true, chainCompleted: !page.mustContinue });
+      recordMssrContextAssembly({ traceId, caller: state.caller, stage: state.stage, requestedContextChars: state.requestedContextChars, deliveredContextChars: page.deliveredChars, responseChars: response.responseChars, envelopeChars: state.maxEnvelopeChars, requiredOverflowChars: page.remaining.required.reduce((sum, unit) => sum + unit.chars, 0), acceptedOverflowChars: page.remaining.accepted.reduce((sum, unit) => sum + unit.chars, 0), remainingRequiredUnits: page.remaining.required.length, remainingAcceptedUnits: page.remaining.accepted.length, continuationIssued: page.mustContinue, continuationConsumed: true, chainCompleted: !page.mustContinue });
       return response;
     },
     mssr_context_proposal_review: async (args) => ({
