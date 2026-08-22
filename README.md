@@ -134,7 +134,7 @@ El origen predeterminado se configura con `TABLET_WHITEBOARD_URL`. Orígenes pri
 
 ```powershell
 $env:TABLET_WHITEBOARD_URL = "http://127.0.0.1:8787"
-$env:TABLET_WHITEBOARD_ALLOWED_ORIGINS = "http://192.168.1.33:8787"
+$env:TABLET_WHITEBOARD_ALLOWED_ORIGINS = "http://192.0.2.10:8787"
 ```
 
 
@@ -198,6 +198,19 @@ Robustez de procesos:
 - Una sesion finalizada por senal se informa como `running: false` y respeta `cleanupAfterMs`, incluso cuando vale `0`.
 - Los aliases `work_*` tienen esquemas tipados y las mismas anotaciones de riesgo que sus tools equivalentes.
 - La lista de comandos bloqueados es una barrera contra accidentes, no una sandbox. El Bridge debe mantenerse en un entorno confiable.
+
+### Nodos remotos Linux por SSH
+
+```text
+remote_node_list
+remote_node_status
+remote_node_exec
+remote_node_upload_file
+```
+
+El módulo `remote-node` pertenece al Bridge y no requiere que Kairos esté iniciado. La conexión usa `ssh2` dentro del proceso Node, una identidad privada configurada localmente y un fingerprint SHA-256 fijado para verificar la clave del host; las tools no aceptan host, usuario ni clave SSH arbitrarios desde el caller. `remote_node_status` puede recuperar una IP que cambió dentro de un `/24` configurado sólo si encuentra una única máquina que autentique con la identidad y el host-key pin esperados. `remote_node_exec` y `remote_node_upload_file` requieren repetir exactamente `confirmNodeId` y están clasificadas como destructivas.
+
+La configuración viva es local/ignorada en `data/remote-nodes.json` o en la ruta indicada por `BRIDGE_REMOTE_NODES_FILE`. El ejemplo versionado está en `config/remote-nodes.example.json`; nunca se commitean claves privadas ni secretos.
 
 ### Git
 
@@ -381,13 +394,14 @@ Limites y seguridad HTTP:
 
 ```text
 BRIDGE_MCP_HTTP_MAX_SESSIONS=64
+BRIDGE_MCP_HTTP_SOFT_SESSION_LIMIT=16
 BRIDGE_MCP_HTTP_MAX_BODY_BYTES=16777216
 BRIDGE_MCP_HTTP_SESSION_IDLE_MS=1800000
 BRIDGE_MCP_HTTP_CAPACITY_RECLAIM_IDLE_MS=15000
 BRIDGE_MCP_HTTP_ANON_TTL_MS=60000
 ```
 
-Las inicializaciones reservan capacidad de forma atomica. Si se alcanza el limite, el Bridge conserva todas las sesiones con requests activos y puede reciclar la sesion inactiva mas antigua que ya supere `BRIDGE_MCP_HTTP_CAPACITY_RECLAIM_IDLE_MS`; si todas siguen activas o son demasiado recientes, responde `503`. Los clientes locales de smoke/verificacion cierran sus sesiones mediante `DELETE /mcp`. Los cuerpos JSON que superan `BRIDGE_MCP_HTTP_MAX_BODY_BYTES` responden `413`. El servidor sigue limitado a loopback por defecto.
+Las inicializaciones usan `BRIDGE_MCP_HTTP_SOFT_SESSION_LIMIT` como objetivo estable y `BRIDGE_MCP_HTTP_MAX_SESSIONS` como techo de ráfaga. Al crear una sesión nueva, el Bridge puede reciclar primero la sesión inactiva más antigua que ya supere `BRIDGE_MCP_HTTP_CAPACITY_RECLAIM_IDLE_MS`; las sesiones activas o recientes quedan protegidas y pueden ocupar temporalmente el margen hasta el hard limit. La admisión de transports nuevos se serializa sólo durante la reserva de capacidad, por lo que inicializaciones concurrentes de ChatGPT Web tampoco pueden sobrepasar el techo duro. Si ese techo se alcanza y no hay una sesión inactiva elegible, responde `503`. La política no depende del navegador ni intenta identificar Edge/Chrome: el Bridge HTTP es el adapter de ChatGPT Web, mientras la continuidad/capacidad de otros hosts como Codex pertenece a MSSR y a sus adapters locales, no a este lifecycle HTTP. Los clientes locales de smoke/verificación cierran sus sesiones mediante `DELETE /mcp`. Los cuerpos JSON que superan `BRIDGE_MCP_HTTP_MAX_BODY_BYTES` responden `413`. El servidor sigue limitado a loopback por defecto.
 
 Perfil de tunel:
 
@@ -547,7 +561,9 @@ antes de evaluar los gates de fase.
 `skill_route_plan` y `skill_recommend` usan `responseMode=compact` por defecto:
 devuelven la ruta accionable, nombres, razón corta, obligatoriedad, orden y
 warnings. `responseMode=debug` conserva scores, planes de fase y metadata completa.
-El contenido procedural entra mediante `skill_bootstrap` o `skill_load`. Bootstrap usa `contentMode=selective` por defecto y planifica globalmente el presupuesto. Para `caller=chatgpt-web`, además separa tres estados observables: **recommended**, **accepted/skipped** y **loaded**. Los roots requeridos siguen siendo obligaciones; sólo los roots opcionales reciben una decisión del host. Si un root opcional es `accepted`, su cierre transitivo de dependencias se materializa junto con él; si es `skipped`, las dependencias que existen únicamente por ese root permanecen fuera del contexto. Un `skipped` conserva un motivo acotado (`irrelevant-domain`, `redundant`, `deferred-phase`, `context-budget`, etc.) y no se registra como fallo de carga. El modo `auto` queda disponible para callers compatibles que no implementan gate explícito.
+El contenido procedural entra mediante `skill_bootstrap` o `skill_load`. Bootstrap usa `contentMode=selective` por defecto y planifica globalmente el presupuesto. La respuesta compacta distingue el presupuesto procedural (`maxContextChars`) del sobre serializado completo (`maxEnvelopeChars`, 32.000 por defecto). Si toda la selección no cabe, devuelve `status=partial`, `mustContinue=true`, un cursor opaco y un `nextAction` exacto hacia `skill_context_next`; el caller debe encadenar páginas hasta `status=complete` antes de ejecutar trabajo dependiente. El cursor no contiene prompt, transcript ni texto procedural, se valida contra las bytes y orden vigentes, y falla explícitamente si fue alterado, consumido, caducó, cambió la fuente o reinició el Bridge. Los notices sólo recuerdan una continuación abandonada: no transportan contexto.
+
+Para `caller=chatgpt-web`, además separa tres estados observables: **recommended**, **accepted/skipped** y **loaded**. Los roots requeridos siguen siendo obligaciones; sólo los roots opcionales reciben una decisión del host. Si un root opcional es `accepted`, su cierre transitivo de dependencias se mantiene elegible y paginable sin relabelarlo como `required`; si es `skipped`, las dependencias que existen únicamente por ese root permanecen fuera del contexto. Un `skipped` conserva un motivo acotado (`irrelevant-domain`, `redundant`, `deferred-phase`, `context-budget`, etc.) y no se registra como fallo de carga. El modo `auto` queda disponible para callers compatibles que no implementan gate explícito.
 
 Bridge puede conservar durante una traza abierta working metadata acotada —resumen resuelto, hipótesis, decisiones/evidencia y próximo gate— únicamente en RAM. `mssr_trace_working_update` no escribe esa memoria en SQLite. En un `outcome`, Bridge primero intenta destilar un `learning-digest-v1` estricto y luego purga siempre la RAM; un fallo del destilado no retiene la memoria efímera ni bloquea un outcome verdadero. Nunca se copian al digest `workingSummary`, hipótesis activas, prompts crudos, transcripts, secretos, decisiones arbitrarias de scratchpad ni chain-of-thought privado.
 

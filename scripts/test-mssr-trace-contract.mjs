@@ -1559,6 +1559,67 @@ try {
     'review-budget',
   );
 
+  // Bootstrap-level envelope observations are authoritative for a trace. They
+  // must not be inflated by the individual skill rows that happen to compose
+  // the same bootstrap, and must never persist a continuation cursor.
+  const continuationTraceId = 'fixture-context-continuation';
+  observatory.recordMssrSkillLoad({
+    traceId: continuationTraceId,
+    skillName: 'context-core-fixture',
+    required: true,
+    loaded: true,
+    via: 'skill_bootstrap',
+    contentMode: 'selective',
+    totalCharsLoaded: 18_000,
+    fullSkillChars: 24_000,
+    budgetExceeded: true,
+  });
+  observatory.recordMssrContextAssembly({
+    traceId: continuationTraceId,
+    requestedContextChars: 18_000,
+    deliveredContextChars: 18_000,
+    responseChars: 26_000,
+    envelopeChars: 55_000,
+    requiredOverflowChars: 5_301,
+    acceptedOverflowChars: 1_000,
+    remainingRequiredUnits: 2,
+    remainingAcceptedUnits: 4,
+    continuationIssued: true,
+  });
+  observatory.recordMssrContextAssembly({
+    traceId: continuationTraceId,
+    requestedContextChars: 18_000,
+    deliveredContextChars: 6_301,
+    responseChars: 12_000,
+    envelopeChars: 14_000,
+    continuationConsumed: true,
+    chainCompleted: true,
+  });
+  observatory.recordMssrEvent({
+    traceId: continuationTraceId,
+    eventType: 'fixture_privacy',
+    details: { cursor: 'must-not-persist', safeCount: 1 },
+  });
+  const continuationSummary = observatory.queryMssrObservatory({ kind: 'summary', scope: 'all', days: 30 });
+  assert.equal(continuationSummary.contextAssembly.bootstrapEvents >= 2, true);
+  assert.equal(continuationSummary.contextAssembly.requiredOverflowChars >= 5_301, true);
+  assert.equal(continuationSummary.contextAssembly.acceptedOverflowChars >= 1_000, true);
+  assert.equal(continuationSummary.contextAssembly.continuationIssued >= 1, true);
+  assert.equal(continuationSummary.contextAssembly.continuationConsumed >= 1, true);
+  assert.equal(continuationSummary.contextAssembly.chainCompleted >= 1, true);
+  const continuationTrace = continuationSummary.contextAssembly.recentTraces
+    .find((row) => row.traceId === continuationTraceId);
+  assert.equal(continuationTrace?.bootstrapObserved, true);
+  assert.equal(continuationTrace?.requestedContextChars, 18_000);
+  assert.equal(continuationTrace?.deliveredContextChars, 6_301);
+  assert.equal(continuationTrace?.chainCompleted, true);
+  assert.equal(continuationTrace?.requiredOverflowLoads, 0,
+    'bootstrap aggregate must replace per-skill overflow inference for the same trace');
+  const continuationEvents = observatory.queryMssrObservatory({ kind: 'trace', scope: 'all', traceId: continuationTraceId, limit: 20 }).trace;
+  const privacyEvent = continuationEvents.find((event) => event.eventType === 'fixture_privacy');
+  assert.equal(privacyEvent?.details?.cursor, undefined, 'continuation cursor values must never persist');
+  assert.equal(privacyEvent?.details?.safeCount, 1);
+
   console.log(JSON.stringify({
     ok: true,
     traceId,

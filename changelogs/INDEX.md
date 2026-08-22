@@ -4,6 +4,10 @@ Versioned release notes are the canonical change-history surface for MSSR debugg
 
 ## Current releases
 
+- [0.6.114](0.6.114.md) - Bounded resumable MSSR context delivery with `skill_context_next`, opaque cursor validation, required/accepted preservation, and privacy-safe envelope observability.
+- [0.6.113](0.6.113.md) - Adopt MSSR 0.2.50 and add privacy-safe repeated tool-friction clustering/prioritization to `bridge_tool_audit`, preserving legacy metrics while surfacing recurring cross-workflow maintenance debt.
+- [0.6.112](0.6.112.md) - Workspace snapshot retention: automatically keep two complete rollback points plus one truncated diagnostic generation per project root, prune historical excess before quota evaluation, and keep the 1 GiB cap as the final steady-state guard.
+- [0.6.111](0.6.111.md) - Architecture Impact host adoption C: Bridge/ChatGPT Web uses packaged MSSR 0.2.47 for explicit-path pre/post observation, optional structural/import-graph evidence, host-local reviewed receipts, and bounded REVIEW/context-feedback notices without moving semantic ownership into Bridge.
 - [0.6.110](0.6.110.md) - Adopt exact MSSR 0.2.45 release artifact, close packaged routing drift for `steam-workshop-publication`, and publish the accumulated Bridge host checkpoint without a Bridge-local routing exception.
 - [0.6.109](0.6.109.md) - MSSR trace owner integrity: known project/workflow identity now outranks session continuity across local, RAM and SQLite recovery; same-owner rotation and supporting repositories remain supported without cross-project evidence contamination.
 - [0.6.108](0.6.108.md) - Situation Model C2f-B host adoption on MSSR 0.2.34: exact declared architecture refs observed on demand with SHA-256/availability evidence and portable normalization, without baseline comparison, possible-impact classification, notices, watchers, queues, or a new MCP tool.

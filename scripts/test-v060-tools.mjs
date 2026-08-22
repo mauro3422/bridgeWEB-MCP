@@ -95,6 +95,7 @@ const { extractRobloxMcpImage, validateRobloxCaptureImage } = await import('../d
 const { clearBridgeNotices, drainBridgeNotices, emitBridgeNotice, getBridgeNoticeStatus, peekBridgeNoticeHistory } = await import('../dist/notices.js');
 const { closeMssrObservatoryForTests, getMssrTraceEvidence, queryMssrObservatory, recordMssrCheckpoint, recordMssrRoute } = await import('../dist/mssr-observatory.js');
 const { buildToolAudit } = await import('../dist/tool-audit.js');
+const { buildBridgeToolFrictionProjection, classifyBridgeToolFrictionSignature } = await import('../dist/mssr-tool-friction.js');
 const { beginToolMetric, classifyToolAuditError, closeMetricsForTests, extractToolResultMetric, finishToolMetric, getMetricsSummary, getRecentMetrics, getToolAuditMetrics } = await import('../dist/metrics.js');
 const { RUNTIME_BOOT_ID, resolveMetricTaskKey, resolveMetricWorkflowKey } = await import('../dist/runtime-identity.js');
 const { createMssrTraceSessionCoordinator } = await import('../dist/mssr-trace-context.js');
@@ -165,12 +166,12 @@ try {
   if (drainedNotices.length !== 1 || getBridgeNoticeStatus().pendingCount !== 0) throw new Error('Bridge notice one-shot drain failed');
   if (!noticeHistory.some((item) => item.code === 'fixture-warning' && item.actions?.[0]?.toolName === 'terminal_list')) throw new Error('Bridge notice history did not retain actionable reminder after drain');
 
-  if (registry.tools.length !== 156) throw new Error(`expected 156 tools, got ${registry.tools.length}`);
+  if (registry.tools.length !== 161) throw new Error(`expected 161 tools, got ${registry.tools.length}`);
   const catalogComparison = await call('bridge_connector_catalog_compare', {
     exposedToolNames: ['skill_catalog', 'skill_recommend', 'skill_load', 'host_private_tool'],
   });
-  if (catalogComparison.runtime.count !== 156 || catalogComparison.mssr.runtime !== 12) throw new Error('connector catalog comparison runtime baseline failed');
-  if (catalogComparison.mssr.directCoveragePercent !== 25) throw new Error(`unexpected MSSR direct coverage: ${catalogComparison.mssr.directCoveragePercent}`);
+  if (catalogComparison.runtime.count !== 161 || catalogComparison.mssr.runtime !== 13) throw new Error('connector catalog comparison runtime baseline failed');
+  if (catalogComparison.mssr.directCoveragePercent !== 23.08) throw new Error(`unexpected MSSR direct coverage: ${catalogComparison.mssr.directCoveragePercent}`);
   if (!catalogComparison.mssr.delegatedViaQuery.includes('skill_bootstrap') || !catalogComparison.mssr.delegatedViaAction.includes('mssr_trace_record') || !catalogComparison.mssr.delegatedViaAction.includes('mssr_trace_working_update')) throw new Error('connector catalog wrapper classification failed');
   if (!catalogComparison.connectorObservation.unrecognized.includes('host_private_tool') || catalogComparison.interpretation.wrapperReachabilityIsDirectExposure !== false) throw new Error('connector catalog boundary classification failed');
   const delegatedQueryTool = registry.tools.find((tool) => tool.name === 'bridge_tool_query');
@@ -183,7 +184,7 @@ try {
   if (!registry.riskSummary.readOnly.includes('project_context_audit') || !registry.riskSummary.readOnly.includes('project_change_consistency')) throw new Error('project context audit/consistency tools must be classified as read-only Bridge tools');
   if (!registry.riskSummary.destructive.includes('project_context_update')) throw new Error('project_context_update must be classified as a write/destructive Bridge tool');
   for (const moduleName of ['project','project-context','workspace','cache','workflow-guides','skill-catalog-and-roblox-proxy','git-publication','roblox-studio-ops','roblox-assets','roblox-photo-capture','notices','mssr-observatory','binary-files','images','media-review','blender','godot','tablet-whiteboard']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
-  for (const toolName of ['project_context_load','project_context_audit','project_change_consistency','project_context_update','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','bridge_connector_catalog_compare','bridge_tool_schema','bridge_tool_audit','git_multi_repo_publish','skill_catalog','skill_recommend','skill_route_audit','skill_route_vocabulary','skill_route_plan','skill_bootstrap','skill_load','mssr_observatory_query','mssr_trace_evidence','mssr_trace_working_update','mssr_trace_record','mssr_observatory_epoch_start','bridge_notice_status','bridge_notice_drain','mssr_context_ack','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_studio_list','roblox_mcp_query','roblox_mcp_action','roblox_asset_upload','roblox_studio_window_capture_save','roblox_screen_capture_save','roblox_photo_capture_job','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_file_attach','image_asset_save','image_asset_import_files','image_character_views_prepare','image_reference_pack_prepare','media_review_ingest','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_focus_review','blender_review_bundle','blender_execute_code','blender_batch_script','blender_validate_reference_pack','blender_install_reference_pack','blender_setup_character_references','blender_character_loop_status','godot_mcp_status','godot_mcp_tool_list','godot_mcp_instance_list','godot_mcp_query','godot_scene_open','godot_scene_create','godot_screen_capture_save','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list','whiteboard_add_text','whiteboard_add_svg','whiteboard_add_diagram','whiteboard_insert_image']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/media/Blender/whiteboard tool ${toolName}`);
+  for (const toolName of ['project_context_load','project_context_audit','project_change_consistency','project_context_update','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','bridge_connector_catalog_compare','bridge_tool_schema','bridge_tool_audit','git_multi_repo_publish','skill_catalog','skill_recommend','skill_route_audit','skill_route_vocabulary','skill_route_plan','skill_bootstrap','skill_context_next','skill_load','mssr_observatory_query','mssr_trace_evidence','mssr_trace_working_update','mssr_trace_record','mssr_observatory_epoch_start','bridge_notice_status','bridge_notice_drain','mssr_context_ack','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_studio_list','roblox_mcp_query','roblox_mcp_action','roblox_asset_upload','roblox_studio_window_capture_save','roblox_screen_capture_save','roblox_photo_capture_job','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_file_attach','image_asset_save','image_asset_import_files','image_character_views_prepare','image_reference_pack_prepare','media_review_ingest','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_focus_review','blender_review_bundle','blender_execute_code','blender_batch_script','blender_validate_reference_pack','blender_install_reference_pack','blender_setup_character_references','blender_character_loop_status','godot_mcp_status','godot_mcp_tool_list','godot_mcp_instance_list','godot_mcp_query','godot_scene_open','godot_scene_create','godot_screen_capture_save','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list','whiteboard_add_text','whiteboard_add_svg','whiteboard_add_diagram','whiteboard_insert_image']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/media/Blender/whiteboard tool ${toolName}`);
   if (!registry.riskSummary.destructive.includes('roblox_mcp_action') || !registry.riskSummary.destructive.includes('roblox_studio_window_capture_save') || !registry.riskSummary.destructive.includes('roblox_screen_capture_save') || !registry.riskSummary.destructive.includes('roblox_photo_capture_job') || !registry.riskSummary.destructive.includes('roblox_place_save')) throw new Error('Roblox action/capture/save risk classification failed');
   for (const name of ['godot_mcp_status','godot_mcp_tool_list','godot_mcp_instance_list','godot_mcp_query']) if (!registry.riskSummary.readOnly.includes(name)) throw new Error(`Godot query tool ${name} must be read-only`);
   if (!registry.riskSummary.destructive.includes('godot_scene_create') || !registry.riskSummary.destructive.includes('godot_screen_capture_save')) throw new Error('Godot scene creation and capture must be classified as filesystem-writing actions');
@@ -246,7 +247,8 @@ try {
   if (workOnceTool?.metadata?.role !== 'alias' || workOnceTool.metadata.aliasOf !== 'run_command' || workOnceTool.metadata.family !== 'process') throw new Error('tool alias metadata failed');
   const evidenceTool = registry.tools.find((tool) => tool.name === 'mssr_trace_evidence');
   if (!evidenceTool || !registry.riskSummary.readOnly.includes('mssr_trace_evidence') || evidenceTool.metadata?.lifecycle !== 'protected') throw new Error('mssr_trace_evidence metadata/risk failed');
-  if (workOnceTool?.inputSchema?.properties?.timeoutMs?.maximum !== 45000) throw new Error('work_once synchronous timeout cap regression');
+  if (workOnceTool?.inputSchema?.properties?.timeoutMs?.maximum !== 60000) throw new Error('work_once synchronous timeout cap regression');
+  if (!/60000 ms \(60 seconds\)/i.test(workOnceTool?.description || '') || !/work_begin\/terminal_start/i.test(workOnceTool?.description || '')) throw new Error('work_once timeout guidance regression');
   if (evidenceTool.inputSchema?.properties?.limit?.default !== 100 || evidenceTool.inputSchema?.properties?.limit?.maximum !== 500) throw new Error('mssr_trace_evidence bounded limit regression');
   const verifyStartTool = registry.tools.find((tool) => tool.name === 'bridge_verify_all');
   const verifyStatusTool = registry.tools.find((tool) => tool.name === 'bridge_verify_status');
@@ -390,7 +392,7 @@ try {
   const skillLoadSchema = await call('bridge_tool_schema', {toolName:'skill_load'});
   if (!skillLoadSchema.tool?.metadata?.usage?.recovery?.some((rule) => rule.code === 'mssr-orphan-skill-load' && rule.toolName === 'skill_bootstrap')) throw new Error('skill_load MSSR recovery metadata failed');
   const aliasAudit = await call('bridge_tool_audit', {view:'aliases',scope:'active',days:30,limit:20});
-  if (aliasAudit.summary?.registeredTools !== 156 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
+  if (aliasAudit.summary?.registeredTools !== 161 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
   const delegatedMetric = beginToolMetric('bridge_tool_query', {toolName:'bridge_tool_audit',arguments:{view:'all'}}, {caller:'chatgpt-web',sessionKey:'fixture-session',project:'fixture-project'});
   finishToolMetric(delegatedMetric, true, 128);
   const delegatedSnapshot = getToolAuditMetrics(30, 'active');
@@ -419,6 +421,37 @@ try {
   if (classifyToolAuditError('Expected 1 replacement(s), found 0.') !== 'patch-conflict') throw new Error('patch conflict classification failed');
   if (classifyToolAuditError('confirmToolName must exactly match target') !== 'permission-or-risk-mismatch') throw new Error('risk mismatch classification failed');
   if (classifyToolAuditError('Unknown terminal session: missing-session') !== 'target-not-found') throw new Error('missing target classification failed');
+  const max45Error = JSON.stringify([{code:'too_big',maximum:45000,type:'number',inclusive:true,message:'Number must be less than or equal to 45000',path:['timeoutMs']}]);
+  const max60Error = JSON.stringify([{code:'too_big',maximum:60000,type:'number',inclusive:true,message:'Number must be less than or equal to 60000',path:['timeoutMs']}]);
+  if (classifyToolAuditError(max45Error) !== 'schema-validation') throw new Error('Zod maximum error did not classify as schema-validation');
+  if (classifyBridgeToolFrictionSignature(max45Error) !== 'schema:timeoutMs:maximum') throw new Error('45s maximum friction signature failed');
+  if (classifyBridgeToolFrictionSignature(max60Error) !== 'schema:timeoutMs:maximum') throw new Error('60s maximum friction signature did not remain stable');
+  if (classifyBridgeToolFrictionSignature('process-result:failed:code=1') !== null) throw new Error('child process exits must not masquerade as Bridge tool-contract friction');
+  const repeatedFriction = buildBridgeToolFrictionProjection({
+    enabled:true,sqliteAvailable:true,scope:'active',days:30,since:'2026-08-01T00:00:00.000Z',
+    rows:Array.from({length:44},(_,i)=>({
+      toolName:'quiet_repeated_tool',error:i<40?max45Error:max60Error,
+      observedAt:`2026-08-20T05:${String(i%50).padStart(2,'0')}:00.000Z`,workflowKey:`workflow-${i%8}`,traceId:`trace-${i}`,
+    })),
+  }, '2026-08-20T06:00:00.000Z');
+  if (repeatedFriction.clusters.length !== 1 || repeatedFriction.clusters[0].occurrenceCount !== 44 || repeatedFriction.clusters[0].distinctWorkflowCount !== 8 || repeatedFriction.clusters[0].priorityScore !== 100 || repeatedFriction.clusters[0].level !== 'error') throw new Error(`repeated friction clustering failed: ${JSON.stringify(repeatedFriction.clusters)}`);
+  const isolatedFriction = buildBridgeToolFrictionProjection({
+    enabled:true,sqliteAvailable:true,scope:'active',days:30,since:'2026-08-01T00:00:00.000Z',
+    rows:[{toolName:'isolated_tool',error:'Unknown terminal session: missing-session',observedAt:'2026-08-20T05:55:00.000Z',workflowKey:'one',traceId:'one'}],
+  }, '2026-08-20T06:00:00.000Z');
+  if (isolatedFriction.clusters[0]?.level !== 'watch') throw new Error('isolated friction must stay watch-only');
+  const frictionPriorityAudit = buildToolAudit([
+    {name:'quiet_repeated_tool',description:'fixture',inputSchema:{},annotations:{readOnlyHint:true},metadata:{role:'dedicated',family:'fixture',lifecycle:'stable'}},
+    {name:'isolated_noise_tool',description:'fixture',inputSchema:{},annotations:{readOnlyHint:true},metadata:{role:'dedicated',family:'fixture',lifecycle:'stable'}},
+  ], {
+    enabled:true,sqliteAvailable:true,scope:'active',days:30,since:'2026-08-01T00:00:00.000Z',rows:[
+      {tool:'quiet_repeated_tool',calls:100,okCalls:95,errorCalls:5,avgDurationMs:1,maxDurationMs:2,lastStartedAt:'2026-08-20T05:49:00.000Z',lastSuccessAt:'2026-08-20T05:49:00.000Z',lastErrorAt:'2026-08-20T05:48:00.000Z',uniqueSessions:8,uniqueProjects:4,errorCategories:[{name:'schema-validation',count:5}]},
+      {tool:'isolated_noise_tool',calls:2,okCalls:0,errorCalls:2,avgDurationMs:1,maxDurationMs:2,lastStartedAt:'2026-08-20T05:49:00.000Z',lastSuccessAt:null,lastErrorAt:'2026-08-20T05:49:00.000Z',uniqueSessions:1,uniqueProjects:1,errorCategories:[{name:'runtime-internal',count:2}]},
+    ],
+  }, {view:'needs-attention',limit:20}, repeatedFriction);
+  if (frictionPriorityAudit.items[0]?.tool !== 'quiet_repeated_tool' || frictionPriorityAudit.items[0]?.status !== 'maintain' || frictionPriorityAudit.items[0]?.maintenanceFriction?.signal !== 'repeated-friction') throw new Error(`repeated friction did not override legacy attention ordering: ${JSON.stringify(frictionPriorityAudit.items)}`);
+  if (frictionPriorityAudit.maintenanceFriction.clusters[0]?.toolName !== 'quiet_repeated_tool') throw new Error('global maintenance-friction cluster lost its tool identity');
+  if (frictionPriorityAudit.privacy.rawErrorTextReturned !== false || JSON.stringify(frictionPriorityAudit).includes('45000') || JSON.stringify(frictionPriorityAudit).includes('60000')) throw new Error('tool audit leaked raw repeated-friction error text');
   const syntheticAudit = buildToolAudit([
     {name:'schema_fail_tool',description:'fixture',inputSchema:{},annotations:{readOnlyHint:true},metadata:{role:'dedicated',family:'fixture',lifecycle:'stable'}},
     {name:'fallback_tool',description:'fixture',inputSchema:{},annotations:{readOnlyHint:true},metadata:{role:'fallback',family:'fixture',lifecycle:'stable'}},

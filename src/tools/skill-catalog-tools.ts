@@ -49,7 +49,8 @@ import {
   loadProjectContextHost,
   mssrFirstPartySkillsRoot,
   mssrSkillDecisionSchema,
-  planSkillContexts,
+  continueSkillContextPage,
+  planSkillContextPage,
   projectContextAcknowledgeInputSchema,
   resolveMssrHostSkillSelection,
   shouldLoadProjectChangeHistory,
@@ -64,6 +65,7 @@ import {
 import {
   hashMssrTask,
   recordMssrEvent,
+  recordMssrContextAssembly,
   recordMssrProjectContextSelection,
   recordMssrRoute,
   recordMssrSkillDecision,
@@ -74,11 +76,99 @@ import { requireWorkflowKey } from "../runtime-identity.js";
 import { buildMssrSystemAwareness, isRobloxMssrRoute } from "../mssr-system-awareness.js";
 import { filterAcknowledgedContextMessages } from "../mssr-context-plane.js";
 import { assembleProjectContext } from "../project-context-assembler.js";
+import {
+  clearSkillContextContinuation,
+  readSkillContextContinuation,
+  rememberSkillContextContinuation,
+  type BridgeSkillContextContinuationEntry,
+} from "../skill-context-continuation-state.js";
+import { jsonCharacterLength, skillContextNextAction, withResponseChars } from "../skill-context-response.js";
 
 const MAX_SKILL_FILE_CHARS = 160_000;
 const MAX_DISCOVERED_SKILLS = 600;
 const routeResponseModes = ["compact", "debug"] as const;
 const reasoningEfforts = ["low", "medium", "high", "xhigh", "max", "ultra", "unknown"] as const;
+
+function contextCursorFingerprint(cursor: string): string {
+  return createHash("sha256").update(cursor).digest("base64url");
+}
+
+function remainingContextSummary(page: {
+  remaining: { required: Array<{ chars: number }>; accepted: Array<{ chars: number }> };
+}) {
+  const required = page.remaining.required;
+  const accepted = page.remaining.accepted;
+  const units = [...required, ...accepted];
+  return {
+    required,
+    accepted,
+    units,
+    chars: units.reduce((sum, unit) => sum + unit.chars, 0),
+  };
+}
+
+function compactContextAssembly(
+  page: Awaited<ReturnType<typeof planSkillContextPage>>,
+  requestedContextChars: number,
+  mode: SkillContextMode,
+  references: SkillReferenceMode,
+) {
+  const remaining = remainingContextSummary(page);
+  return {
+    mode,
+    includeReferences: references,
+    maxContextChars: requestedContextChars,
+    pageContextChars: page.maxContextChars,
+    page: page.page,
+    planningMode: page.planningMode,
+    deliveredChars: page.deliveredChars,
+    totalContextCharsLoaded: page.totalContextCharsLoaded,
+    estimatedCharsSaved: page.estimatedCharsSaved,
+    selectedChars: page.deliveredChars + remaining.chars,
+    requiredCoreReservedChars: page.requiredCoreReservedChars,
+    requiredModuleReservedChars: page.requiredModuleReservedChars,
+    requiredOverflowChars: page.requiredOverflowChars,
+    acceptedOverflowChars: remaining.accepted.reduce((sum, unit) => sum + unit.chars, 0),
+    units: page.units,
+    blocked: page.blocked,
+    globallySelectedModules: page.globallySelectedModules,
+    skills: page.skills.map((item) => ({
+      name: item.skill.name,
+      required: item.obligation === "required",
+      obligation: item.obligation,
+      loaded: item.loaded,
+      coreCharsLoaded: item.contextAssembly.coreCharsLoaded,
+      moduleCharsLoaded: item.contextAssembly.moduleCharsLoaded,
+      totalCharsLoaded: item.contextAssembly.totalCharsLoaded,
+      contextDeferred: item.contextAssembly.contextDeferred,
+      ...(item.contextAssembly.skipped ? { skipped: true, skippedReason: item.contextAssembly.skippedReason } : {}),
+    })),
+  };
+}
+
+function loadedContextItems(page: Awaited<ReturnType<typeof planSkillContextPage>>) {
+  return page.skills.filter((item) => item.loaded);
+}
+
+function compactLoadedContextItems(page: Awaited<ReturnType<typeof planSkillContextPage>>) {
+  return loadedContextItems(page).map((item) => ({
+    skill: { name: item.skill.name, source: item.skill.source },
+    obligation: item.obligation,
+    loaded: true,
+    activationInstruction: item.activationInstruction,
+    content: item.content,
+    contextAssembly: {
+      mode: item.contextAssembly.mode,
+      manifestStatus: item.contextAssembly.manifestStatus,
+      coreCharsLoaded: item.contextAssembly.coreCharsLoaded,
+      moduleCharsLoaded: item.contextAssembly.moduleCharsLoaded,
+      totalCharsLoaded: item.contextAssembly.totalCharsLoaded,
+      selectedModules: item.contextAssembly.selectedModules,
+      contextDeferred: item.contextAssembly.contextDeferred,
+      ...(item.contextAssembly.warning ? { warning: item.contextAssembly.warning } : {}),
+    },
+  }));
+}
 
 function agentProfile(args: Record<string, unknown>): Record<string, string> {
   return {
@@ -975,6 +1065,8 @@ export const skillCatalogToolModule: BridgeToolModule = {
           contentMode: { type: "string", enum: ["selective", "full"], default: "selective", description: "Use selective to assemble manifest-guided core/modules. Use full only for explicit diagnosis, compatibility comparison, or recovery." },
           includeReferences: { type: "string", enum: ["auto", "none"], default: "auto", description: "Auto selects matching manifest modules. None loads only the declared core while preserving routing." },
           maxContextChars: { type: "number", default: 24000, minimum: 4000, maximum: 100000, description: "Global character budget for assembled Codex skill context. Required cores are never silently truncated; budget overflow is reported." },
+          maxEnvelopeChars: { type: "number", default: 32000, minimum: 4000, maximum: 120000, description: "Hard target for the compact serialized bootstrap envelope, including routed metadata and delivered procedural context. Selected context that cannot fit is continued explicitly instead of silently omitted." },
+          responseMode: { type: "string", enum: routeResponseModes, default: "compact", description: "compact returns one bounded context page plus exact continuation metadata; debug preserves the full diagnostic route and assembly details." },
           selectionMode: { type: "string", enum: ["auto", "host-gated"], default: "host-gated", description: "Portable MSSR skill-selection policy. Host-gated is the default across MSSR hosts: required roots load with dependencies, optional roots require an explicit accepted decision, explicit skipped decisions remain telemetry, and absent decisions stay pending. Auto is an explicit compatibility/debug mode." },
           skillDecisions: {
             type: "array",
@@ -997,6 +1089,19 @@ export const skillCatalogToolModule: BridgeToolModule = {
           traceId: { type: "string", description: "Optional existing MSSR trace id for a replan. A new id is generated when omitted." },
         },
         required: ["task"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "skill_context_next",
+      description: "Continue a partial skill_bootstrap context delivery on the same MSSR trace. The opaque cursor is fingerprint-validated against the live selected skills; changed source, tampering, expiry, restart, or trace mismatch fails explicitly and requires a fresh bootstrap. Call repeatedly while mustContinue=true and do not execute a dependent phase until status=complete.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          traceId: { type: "string", minLength: 6, maxLength: 128, description: "Exact trace id returned by the partial skill_bootstrap response." },
+          cursor: { type: "string", minLength: 16, maxLength: 8192, description: "Opaque cursor returned by skill_bootstrap or the previous skill_context_next response. It contains no prompt, transcript, secret, or procedural content." },
+        },
+        required: ["traceId", "cursor"],
         additionalProperties: false,
       },
     },
@@ -1330,6 +1435,8 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const contentMode = z.enum(["selective", "full"]).catch("selective").parse(args.contentMode ?? "selective") as SkillContextMode;
       const referenceMode = z.enum(["auto", "none"]).catch("auto").parse(args.includeReferences ?? "auto") as SkillReferenceMode;
       const maxContextChars = z.number().int().min(4_000).max(100_000).catch(24_000).parse(args.maxContextChars ?? 24_000);
+      const maxEnvelopeChars = z.number().int().min(4_000).max(120_000).catch(32_000).parse(args.maxEnvelopeChars ?? 32_000);
+      const responseMode = z.enum(routeResponseModes).catch("compact").parse(args.responseMode ?? "compact");
       const maxProjectContextChars = z.number().int().min(2_000).max(80_000).catch(12_000).parse(args.maxProjectContextChars ?? 12_000);
       const routedIntent = structuredSkillIntentSchema.parse(route.intent);
       const projectRoot = typeof args.projectRoot === "string" && args.projectRoot.trim()
@@ -1412,120 +1519,82 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const { decisions, loadSelection, skippedCandidates, pendingCandidates } = hostSelection;
       for (const decision of decisions) recordMssrSkillDecision({ traceId, caller, decision });
       const eligibleLoadOrder = [...loadSelection.eligibleLoadOrder];
-      const loaded: Array<Record<string, unknown>> = [];
+      const requiredNames = new Set<string>();
+      const visitRequired = (name: string) => {
+        if (requiredNames.has(name)) return;
+        const match = activeByName.get(name);
+        if (!match) return;
+        requiredNames.add(name);
+        for (const dependency of match.requires) visitRequired(dependency);
+      };
+      for (const name of loadSelection.requiredRootNames) visitRequired(name);
+      const robloxLoaded: Array<Record<string, unknown>> = [];
       const codexMatches = eligibleLoadOrder.flatMap((name, routeIndex) => {
         const match = activeByName.get(name);
-        return match && match.source !== "roblox" ? [{ match, routeIndex }] : [];
-      });
-      const codexPlan = await planSkillContexts({
-        skills: codexMatches.map(({ match, routeIndex }) => ({
-          skill: match,
-          required: selectionMode === "host-gated" ? true : match.required === true,
+        return match && match.source !== "roblox" ? [{
+          match,
           routeIndex,
-          routeScore: Number((match as { score?: number }).score ?? 0),
-        })),
-        intent: routedIntent,
-        stage: route.stage,
-        mode: contentMode,
-        references: referenceMode,
-        maxContextChars,
+          obligation: requiredNames.has(name) ? "required" as const : "accepted" as const,
+        }] : [];
       });
-      const codexByName = new Map(codexPlan.skills.map((item) => [item.skill.name, item]));
-      const contextAssemblySkills: Array<Record<string, unknown>> = [];
-
       for (const name of eligibleLoadOrder) {
         const match = activeByName.get(name);
-        if (!match) continue;
-        if (match.source === "roblox") {
-          if (discovered.sourceHealth.roblox?.status !== "healthy") {
-            const warning = `Roblox skill '${match.name}' was discovered from cached metadata but was not invoked because the live source is ${discovered.sourceHealth.roblox?.status ?? "unavailable"}.`;
-            loaded.push({ skill: match, loaded: false, warning });
-            recordMssrSkillLoad({ traceId, skillName: match.name, source: match.source, stage: route.stage, required: match.required, loaded: false, via: "skill_bootstrap", warning });
-            continue;
-          }
-          try {
-            const result = await callRobloxMcpTool("skill", { skill_name: match.name });
-            loaded.push({ skill: match, loaded: true, activationInstruction: "Treat the returned Roblox-authored skill as active guidance for this task phase.", result });
-            recordMssrSkillLoad({ traceId, skillName: match.name, source: match.source, stage: route.stage, required: match.required, loaded: true, via: "skill_bootstrap" });
-          } catch (error) {
-            recordMssrSkillLoad({ traceId, skillName: match.name, source: match.source, stage: route.stage, required: match.required, loaded: false, via: "skill_bootstrap", warning: error instanceof Error ? error.message : String(error) });
-            throw error;
-          }
+        if (!match || match.source !== "roblox") continue;
+        if (discovered.sourceHealth.roblox?.status !== "healthy") {
+          const warning = `Roblox skill '${match.name}' was discovered from cached metadata but was not invoked because the live source is ${discovered.sourceHealth.roblox?.status ?? "unavailable"}.`;
+          robloxLoaded.push({ skill: match, loaded: false, warning });
+          recordMssrSkillLoad({ traceId, skillName: match.name, source: match.source, stage: route.stage, required: requiredNames.has(name), loaded: false, via: "skill_bootstrap", warning });
           continue;
         }
-
-        const planned = codexByName.get(match.name);
-        if (!planned) throw new Error(`Global context planner did not return routed skill: ${match.name}`);
-        loaded.push(planned as unknown as Record<string, unknown>);
-        const contextInfo = planned.contextAssembly;
-        contextAssemblySkills.push({ name: match.name, required: match.required === true, ...contextInfo });
-        recordMssrSkillLoad({
-          traceId,
-          skillName: match.name,
-          source: match.source,
-          stage: route.stage,
-          required: match.required,
-          loaded: planned.loaded,
-          via: "skill_bootstrap",
-          warning: planned.loaded ? contextInfo.warning : planned.warning,
-          contentMode: contextInfo.mode,
-          coreCharsLoaded: contextInfo.coreCharsLoaded,
-          moduleCharsLoaded: contextInfo.moduleCharsLoaded,
-          totalCharsLoaded: contextInfo.totalCharsLoaded,
-          fullSkillChars: contextInfo.fullSkillChars,
-          estimatedCharsSaved: contextInfo.estimatedCharsSaved,
-          selectedModules: contextInfo.selectedModules,
-          moduleDecisions: contextInfo.moduleDecisions as Array<Record<string, unknown>>,
-          manifestStatus: contextInfo.manifestStatus,
-          ambiguousGroups: contextInfo.ambiguousGroups,
-          budgetExceeded: contextInfo.budgetExceeded,
-          skipped: contextInfo.skipped,
-          skippedReason: contextInfo.skippedReason,
-          candidateChars: contextInfo.candidateChars,
-          planningMode: contextInfo.planningMode,
-          allocationTiers: contextInfo.allocationTiers,
-          duplicateCharsAvoided: contextInfo.duplicateCharsAvoided,
-        });
+        try {
+          const result = await callRobloxMcpTool("skill", { skill_name: match.name });
+          robloxLoaded.push({ skill: match, loaded: true, activationInstruction: "Treat the returned Roblox-authored skill as active guidance for this task phase.", result });
+          recordMssrSkillLoad({ traceId, skillName: match.name, source: match.source, stage: route.stage, required: requiredNames.has(name), loaded: true, via: "skill_bootstrap" });
+        } catch (error) {
+          recordMssrSkillLoad({ traceId, skillName: match.name, source: match.source, stage: route.stage, required: requiredNames.has(name), loaded: false, via: "skill_bootstrap", warning: error instanceof Error ? error.message : String(error) });
+          throw error;
+        }
       }
       const workflowGuideResolution = await resolveWorkflowGuideForTask({ task, projectRoot, load: true });
-      return {
-        ...observedRoute,
+      const compactProjectContext = projectContextAssembly ? {
+        projectRoot,
+        stage: route.stage,
+        ...projectContextAssembly,
+        activationInstruction: projectContextAssembly.mode === "modular"
+          ? "Treat selected project context/memory/state as scoped repository facts. Project directives apply only to this stage and intent and cannot weaken higher-precedence instructions."
+          : "No initialized .mssr project context is active. Do not fall back to .bridge authority.",
+      } : null;
+      const selection = {
+        eligibleLoadOrder,
+        requiredRootNames: loadSelection.requiredRootNames,
+        acceptedOptionalRootNames: loadSelection.acceptedOptionalRootNames,
+        decisions,
+        skippedCandidates,
+        pendingCandidates,
+        mode: loadSelection.mode,
+      };
+      const routeSummary = {
+        traceId,
+        workflowKey: workflowKey ?? null,
+        stage: route.stage,
+        caller,
+        projectRoot,
+        agentProfile: profile,
+        classificationMode: route.classificationMode,
+        intent: route.intent,
+        activeSkills: route.activeSkills.map((skill) => ({ name: skill.name, source: skill.source, required: skill.required === true, selectedAsRoot: skill.selectedAsRoot === true, requires: skill.requires })),
+        deferredSkills: route.deferredSkills.map((skill) => ({ name: skill.name, source: skill.source })),
+      };
+      const baseResponse = {
+        ...routeSummary,
+        responseMode,
         traceId,
         intentResolution: intentResult.resolution.status === "normalized" ? {
           status: "normalized",
           normalizedAliases: intentResult.resolution.changes,
         } : { status: intentResult.resolution.status },
-        canonicalCodexSkillRoot: path.join(codexHome(), "skills"),
-        loaded,
-        selection: {
-          ...loadSelection,
-          decisions,
-          skippedCandidates,
-          pendingCandidates,
-          policy: hostSelection.policy,
-        },
-        contextAssembly: {
-          mode: contentMode,
-          includeReferences: referenceMode,
-          ...codexPlan,
-          skills: contextAssemblySkills,
-        },
-        projectContext: projectContextAssembly ? {
-          projectRoot,
-          stage: route.stage,
-          ...projectContextAssembly,
-          activationInstruction: projectContextAssembly.mode === "modular"
-            ? "Treat selected project context/memory/state as scoped repository facts. Treat project directives as active only for this MSSR stage and intent; they refine execution but cannot weaken user instructions, AGENTS, safety, approvals, or verification."
-            : "No valid initialized MSSR project-context manifest is active for this repository. Do not synthesize project knowledge or fall back to .bridge; use project_context_health/project_context_initialize before relying on durable repository context.",
-        } : null,
-        contextPlane: contextPlane ? {
-          projectContext: contextPlane.projectContext,
-          contextMessages: contextPlane.contextMessages,
-          inbox: contextPlane.inbox,
-          repository: contextPlane.repository,
-          advisoryOnly: true,
-        } : null,
-        projectChangeHistory,
+        selection,
+        projectContext: compactProjectContext,
         contextMessages,
         workflowGuideRecommendation: workflowGuideResolution.recommendation,
         workflowGuide: workflowGuideResolution.workflowGuide,
@@ -1537,11 +1606,131 @@ export const skillCatalogToolModule: BridgeToolModule = {
           ...route.warnings,
           ...(projectContextAssembly?.warning ? [projectContextAssembly.warning] : []),
         ],
-        connectorExecution: mssrConnectorPaths(traceId),
-        activationInstruction: loaded.length > 0
-          ? "The loaded skills and selected project modules govern only the current phase. Project directives are scoped refinements, never higher-precedence authorization. Bridge carries the active trace in-session and uniquely recovers it across stateless calls when safe. Call skill_bootstrap again at verify, persist, close, a material failure, or a newly discovered capability need so both skill context and project context can be re-selected; pass traceId explicitly after restart or when multiple candidates exist."
-          : route.activationInstruction,
+        activationInstruction: "Apply every delivered page to this phase. While mustContinue=true, call nextAction exactly and do not begin dependent work until status=complete. Re-plan at verify, persist, close, or a material phase change.",
       };
+      const entries: BridgeSkillContextContinuationEntry[] = codexMatches.map(({ match, routeIndex, obligation }) => ({
+        name: match.name,
+        source: match.source,
+        obligation,
+        routeIndex,
+        routeScore: Number((match as { score?: number }).score ?? 0),
+      }));
+      let pageBudget = responseMode === "debug"
+        ? maxContextChars
+        : Math.max(256, Math.min(maxContextChars, maxEnvelopeChars - jsonCharacterLength(baseResponse) - 2_000));
+      let page = await planSkillContextPage({
+        skills: codexMatches.map(({ match, routeIndex, obligation }) => ({ skill: match, obligation, routeIndex, routeScore: Number((match as { score?: number }).score ?? 0) })),
+        intent: routedIntent,
+        stage: route.stage,
+        mode: contentMode,
+        references: referenceMode,
+        maxContextChars: pageBudget,
+      });
+      const buildResponse = () => {
+        const remaining = remainingContextSummary(page);
+        const cursor = page.cursor ?? null;
+        return withResponseChars({
+          ...baseResponse,
+          loaded: [...robloxLoaded, ...compactLoadedContextItems(page)],
+          status: page.status,
+          mustContinue: page.mustContinue,
+          cursor,
+          remaining,
+          contextAssembly: compactContextAssembly(page, maxContextChars, contentMode, referenceMode),
+          ...(cursor ? { nextAction: skillContextNextAction(traceId, cursor) } : {}),
+          ...(responseMode === "debug" ? {
+            diagnostic: { route: observedRoute, contextPlane, projectChangeHistory, workflowGuide: workflowGuideResolution.workflowGuide, plan: page },
+          } : {}),
+        });
+      };
+      let response = buildResponse();
+      for (let attempt = 0; responseMode === "compact" && response.responseChars > maxEnvelopeChars && pageBudget > 256 && attempt < 4; attempt += 1) {
+        pageBudget = Math.max(256, pageBudget - (response.responseChars - maxEnvelopeChars) - 256);
+        page = await planSkillContextPage({
+          skills: codexMatches.map(({ match, routeIndex, obligation }) => ({ skill: match, obligation, routeIndex, routeScore: Number((match as { score?: number }).score ?? 0) })),
+          intent: routedIntent,
+          stage: route.stage,
+          mode: contentMode,
+          references: referenceMode,
+          maxContextChars: pageBudget,
+        });
+        response = buildResponse();
+      }
+      if (page.mustContinue && !page.cursor) {
+        throw new Error(`Selected skill context contains an indivisible unit that cannot fit the ${maxEnvelopeChars}-character response envelope (page budget ${pageBudget}, compact metadata ${jsonCharacterLength(baseResponse)}). Increase maxEnvelopeChars or modularize the owning skill.`);
+      }
+      if (response.responseChars > maxEnvelopeChars && responseMode === "compact") {
+        throw new Error(`Compact skill_bootstrap response requires ${response.responseChars} characters, above maxEnvelopeChars=${maxEnvelopeChars}. Reduce project/context-message caps or increase maxEnvelopeChars.`);
+      }
+      if (page.cursor) {
+        rememberSkillContextContinuation({
+          traceId,
+          caller,
+          stage: route.stage,
+          intent: routedIntent,
+          mode: contentMode,
+          references: referenceMode,
+          requestedContextChars: maxContextChars,
+          maxContextChars: page.maxContextChars,
+          maxEnvelopeChars,
+          cursorFingerprint: contextCursorFingerprint(page.cursor),
+          entries,
+        });
+      } else {
+        clearSkillContextContinuation(traceId);
+      }
+      for (const planned of loadedContextItems(page)) {
+        const info = planned.contextAssembly;
+        recordMssrSkillLoad({ traceId, skillName: planned.skill.name, source: planned.skill.source, stage: route.stage, required: planned.obligation === "required", loaded: true, via: "skill_bootstrap", warning: info.warning, contentMode: info.mode, coreCharsLoaded: info.coreCharsLoaded, moduleCharsLoaded: info.moduleCharsLoaded, totalCharsLoaded: info.totalCharsLoaded, fullSkillChars: info.fullSkillChars, estimatedCharsSaved: info.estimatedCharsSaved, selectedModules: info.selectedModules, moduleDecisions: info.moduleDecisions, manifestStatus: info.manifestStatus, ambiguousGroups: info.ambiguousGroups, budgetExceeded: info.budgetExceeded, planningMode: info.planningMode, allocationTiers: info.allocationTiers, duplicateCharsAvoided: info.duplicateCharsAvoided });
+      }
+      const remaining = remainingContextSummary(page);
+      recordMssrContextAssembly({ traceId, caller, stage: route.stage, requestedContextChars: maxContextChars, deliveredContextChars: page.deliveredChars, responseChars: response.responseChars, envelopeChars: maxEnvelopeChars, requiredOverflowChars: remaining.required.reduce((sum, unit) => sum + unit.chars, 0), acceptedOverflowChars: remaining.accepted.reduce((sum, unit) => sum + unit.chars, 0), remainingRequiredUnits: remaining.required.length, remainingAcceptedUnits: remaining.accepted.length, continuationIssued: page.mustContinue, chainCompleted: !page.mustContinue });
+      return response;
+    },
+    skill_context_next: async (args) => {
+      const traceId = z.string().min(6).max(128).parse(args.traceId);
+      const cursor = z.string().min(16).max(8192).parse(args.cursor);
+      const state = readSkillContextContinuation(traceId);
+      if (!state) throw new Error("Skill context cursor is expired, consumed, or unavailable after restart; run skill_bootstrap again for a fresh compatible trace.");
+      if (contextCursorFingerprint(cursor) !== state.cursorFingerprint) throw new Error("Stale, consumed, or tampered skill context cursor.");
+      const discovered = await discoverAllSkills(false);
+      const liveByIdentity = new Map(discovered.skills.map((skill) => [`${skill.source}\u0000${skill.name}`, skill]));
+      const selected = state.entries.map((entry) => {
+        const skill = liveByIdentity.get(`${entry.source}\u0000${entry.name}`);
+        if (!skill) throw new Error(`Stale skill context cursor: selected skill '${entry.name}' is no longer available from '${entry.source}'. Run skill_bootstrap again.`);
+        return { skill, obligation: entry.obligation, routeIndex: entry.routeIndex, routeScore: entry.routeScore };
+      });
+      const page = await continueSkillContextPage({ skills: selected, intent: state.intent, stage: z.enum(SKILL_STAGES).parse(state.stage), mode: state.mode, references: state.references, maxContextChars: state.maxContextChars, cursor });
+      const remaining = remainingContextSummary(page);
+      const nextCursor = page.cursor ?? null;
+      let response = withResponseChars({
+        responseMode: "compact",
+        traceId,
+        stage: state.stage,
+        loaded: compactLoadedContextItems(page),
+        status: page.status,
+        mustContinue: page.mustContinue,
+        cursor: nextCursor,
+        remaining,
+        contextAssembly: compactContextAssembly(page, state.requestedContextChars, state.mode, state.references),
+        ...(nextCursor ? { nextAction: skillContextNextAction(traceId, nextCursor) } : {}),
+        activationInstruction: page.mustContinue
+          ? "Apply this page with prior compatible pages, then call nextAction before dependent work."
+          : "The selected context chain is complete; continue the active phase using all delivered pages.",
+      });
+      if (page.mustContinue && !nextCursor) throw new Error("Selected skill context continuation is blocked by an indivisible unit; run skill_bootstrap again with a larger envelope or modularize the owning skill.");
+      if (response.responseChars > state.maxEnvelopeChars) throw new Error(`skill_context_next response requires ${response.responseChars} characters, above the preserved envelope ${state.maxEnvelopeChars}. Run skill_bootstrap again with a larger maxEnvelopeChars.`);
+      if (nextCursor) {
+        rememberSkillContextContinuation({ ...state, cursorFingerprint: contextCursorFingerprint(nextCursor) });
+      } else {
+        clearSkillContextContinuation(traceId);
+      }
+      for (const planned of loadedContextItems(page)) {
+        const info = planned.contextAssembly;
+        recordMssrSkillLoad({ traceId, skillName: planned.skill.name, source: planned.skill.source, stage: state.stage, required: planned.obligation === "required", loaded: true, via: "skill_bootstrap", warning: info.warning, contentMode: info.mode, coreCharsLoaded: info.coreCharsLoaded, moduleCharsLoaded: info.moduleCharsLoaded, totalCharsLoaded: info.totalCharsLoaded, fullSkillChars: info.fullSkillChars, estimatedCharsSaved: info.estimatedCharsSaved, selectedModules: info.selectedModules, moduleDecisions: info.moduleDecisions, manifestStatus: info.manifestStatus, ambiguousGroups: info.ambiguousGroups, budgetExceeded: info.budgetExceeded, planningMode: info.planningMode, allocationTiers: info.allocationTiers, duplicateCharsAvoided: info.duplicateCharsAvoided });
+      }
+      recordMssrContextAssembly({ traceId, caller: state.caller, stage: state.stage, requestedContextChars: state.requestedContextChars, deliveredContextChars: page.deliveredChars, responseChars: response.responseChars, envelopeChars: state.maxEnvelopeChars, requiredOverflowChars: remaining.required.reduce((sum, unit) => sum + unit.chars, 0), acceptedOverflowChars: remaining.accepted.reduce((sum, unit) => sum + unit.chars, 0), remainingRequiredUnits: remaining.required.length, remainingAcceptedUnits: remaining.accepted.length, continuationIssued: page.mustContinue, continuationConsumed: true, chainCompleted: !page.mustContinue });
+      return response;
     },
     mssr_context_ack: async (args) => {
       const projectRoot = typeof args.projectRoot === "string" && args.projectRoot.trim()

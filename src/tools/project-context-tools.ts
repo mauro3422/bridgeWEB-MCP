@@ -316,7 +316,7 @@ export const projectContextToolModule: BridgeToolModule = {
     },
     {
       name: "project_context_update",
-      description: "Safely upsert one stable Markdown section in an already initialized canonical .mssr/PROJECT_CONTEXT.md, PROJECT_MEMORY.md, or PROJECT_STATE.md. Supports optimistic concurrency and optional module registration. It never reads .bridge fallback and refuses to create an ad-hoc project contract; run project_context_initialize first.",
+      description: "Safely upsert one deliberate root/core Markdown section in an already initialized canonical .mssr/PROJECT_CONTEXT.md, PROJECT_MEMORY.md, or PROJECT_STATE.md. Supports optimistic concurrency and optional module registration, but new optional kind=memory modules are reference-backed by default and must use project_context_capture instead of adding another PROJECT_MEMORY.md section. Existing legacy root-backed memory modules may still be maintained until migrated. It never reads .bridge fallback and refuses to create an ad-hoc project contract; run project_context_initialize first.",
       inputSchema: {
         type: "object",
         properties: {
@@ -354,7 +354,7 @@ export const projectContextToolModule: BridgeToolModule = {
     },
     {
       name: "project_context_capture",
-      description: "Persist one reviewed durable project statement as an indexed .mssr/knowledge/<topic>/ module. Portable MSSR plans the topic/kind/path/module; Bridge performs a hash-checked content+manifest transaction with rollback. Existing targets require expectedTargetSha256. Never use for raw conversations, hidden reasoning, secrets, large logs or transient tool output.",
+      description: "Persist one reviewed durable project statement as an indexed .mssr/knowledge/<topic>/ module. This is the normal creation/update path for optional kind=memory knowledge; PROJECT_MEMORY.md stays compact and core/cross-area. Portable MSSR plans the topic/kind/path/module; Bridge performs a hash-checked content+manifest transaction with rollback. Existing targets require expectedTargetSha256. Never use for raw conversations, hidden reasoning, secrets, large logs or transient tool output.",
       inputSchema: {
         type: "object",
         properties: {

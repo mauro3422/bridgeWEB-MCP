@@ -30,6 +30,10 @@ const SESSION_IDLE_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_SESSION_IDLE_MS", 30 
 const SESSION_CAPACITY_RECLAIM_IDLE_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_CAPACITY_RECLAIM_IDLE_MS", 15 * 1000);
 const ANONYMOUS_TRANSPORT_TTL_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_ANON_TTL_MS", 60 * 1000);
 const MAX_SESSIONS = getPositiveIntEnv("BRIDGE_MCP_HTTP_MAX_SESSIONS", 64);
+const SOFT_SESSION_LIMIT = Math.min(
+  MAX_SESSIONS,
+  getPositiveIntEnv("BRIDGE_MCP_HTTP_SOFT_SESSION_LIMIT", Math.min(16, MAX_SESSIONS)),
+);
 const CLEANUP_INTERVAL_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_CLEANUP_INTERVAL_MS", 60 * 1000);
 const MAX_REQUEST_BODY_BYTES = getPositiveIntEnv("BRIDGE_MCP_HTTP_MAX_BODY_BYTES", 16 * 1024 * 1024);
 
@@ -39,6 +43,9 @@ let transportsCreating = 0;
 let legacyProtocolRequests = 0;
 let modernProtocolRequests = 0;
 let modernProtocolErrors = 0;
+let steadyStateSessionReclaims = 0;
+let hardCapacitySessionReclaims = 0;
+let capacityAdmissionTail: Promise<void> = Promise.resolve();
 
 const modernMcpHandler = createMcpHandler(
   () => createModernBridgeServer(),
@@ -186,8 +193,13 @@ function getStatus() {
     idleSessions: sessions.size - activeSessions,
     anonymousTransports: anonymousTransports.size,
     transportsCreating,
+    sessionLifecycle: {
+      steadyStateReclaims: steadyStateSessionReclaims,
+      hardCapacityReclaims: hardCapacitySessionReclaims,
+    },
     limits: {
       maxSessions: MAX_SESSIONS,
+      softSessionLimit: SOFT_SESSION_LIMIT,
       sessionIdleMs: SESSION_IDLE_MS,
       capacityReclaimIdleMs: SESSION_CAPACITY_RECLAIM_IDLE_MS,
       anonymousTransportTtlMs: ANONYMOUS_TRANSPORT_TTL_MS,
@@ -218,6 +230,45 @@ async function closeTransport(transport: BridgeHttpTransport, reason: string, se
   }
 }
 
+function allocatedTransportCount(): number {
+  return sessions.size + anonymousTransports.size + transportsCreating;
+}
+
+async function reclaimInactiveSessions(
+  targetAllocated: number,
+  reason: "steady-state" | "hard-capacity",
+  requestId?: string,
+): Promise<number> {
+  let allocated = allocatedTransportCount();
+  if (allocated <= targetAllocated) return allocated;
+
+  const now = Date.now();
+  const reclaimable = Array.from(sessions.entries())
+    .filter(([, record]) => record.activeRequests === 0 && now - record.lastSeenMs >= SESSION_CAPACITY_RECLAIM_IDLE_MS)
+    .sort((a, b) => a[1].lastSeenMs - b[1].lastSeenMs);
+
+  for (const [sessionId, record] of reclaimable) {
+    if (allocated <= targetAllocated) break;
+    if (!sessions.has(sessionId)) continue;
+    const idleMs = now - record.lastSeenMs;
+    if (reason === "steady-state") steadyStateSessionReclaims += 1;
+    else hardCapacitySessionReclaims += 1;
+    log(reason === "steady-state" ? "info" : "warn", "Reclaiming inactive MCP HTTP session", {
+      reason,
+      requestId,
+      sessionId,
+      idleMs,
+      reclaimIdleMs: SESSION_CAPACITY_RECLAIM_IDLE_MS,
+      softSessionLimit: SOFT_SESSION_LIMIT,
+      maxSessions: MAX_SESSIONS,
+    });
+    await closeTransport(record.transport, reason === "steady-state" ? "steady-state-reclaim" : "capacity-reclaim", sessionId);
+    allocated = allocatedTransportCount();
+  }
+
+  return allocated;
+}
+
 async function cleanupTransports(reason = "periodic") {
   const now = Date.now();
   const closePromises: Promise<void>[] = [];
@@ -229,18 +280,6 @@ async function cleanupTransports(reason = "periodic") {
     }
   }
 
-  const sessionEntries = Array.from(sessions.entries())
-    .filter(([, record]) => record.activeRequests === 0)
-    .sort((a, b) => a[1].lastSeenMs - b[1].lastSeenMs);
-  while (sessions.size + anonymousTransports.size + transportsCreating > MAX_SESSIONS) {
-    const next = sessionEntries.shift();
-    if (!next) break;
-    const [sessionId, record] = next;
-    if (!sessions.has(sessionId)) continue;
-    log("warn", "Closing oldest inactive MCP HTTP session over limit", { reason, sessionId, maxSessions: MAX_SESSIONS });
-    closePromises.push(closeTransport(record.transport, "session-limit", sessionId));
-  }
-
   for (const [transport, createdAtMs] of anonymousTransports) {
     if (transport.bridgeActiveRequests === 0 && now - createdAtMs > ANONYMOUS_TRANSPORT_TTL_MS) {
       log("warn", "Closing stale anonymous MCP HTTP transport", { reason, ageMs: now - createdAtMs });
@@ -249,42 +288,51 @@ async function cleanupTransports(reason = "periodic") {
   }
 
   await Promise.allSettled(closePromises);
+
+  if (allocatedTransportCount() > SOFT_SESSION_LIMIT) {
+    await reclaimInactiveSessions(SOFT_SESSION_LIMIT, "steady-state");
+  }
 }
 
 async function reclaimCapacity(requestId: string): Promise<number> {
   await cleanupTransports("before-create");
-  let allocated = sessions.size + anonymousTransports.size + transportsCreating;
+  let allocated = allocatedTransportCount();
+
+  // Keep the steady-state pool bounded without sacrificing the hard limit as
+  // burst headroom. Recent or active sessions are never reclaimed here.
+  if (allocated >= SOFT_SESSION_LIMIT) {
+    allocated = await reclaimInactiveSessions(Math.max(0, SOFT_SESSION_LIMIT - 1), "steady-state", requestId);
+  }
   if (allocated < MAX_SESSIONS) return allocated;
 
-  const now = Date.now();
-  const reclaimable = Array.from(sessions.entries())
-    .filter(([, record]) => record.activeRequests === 0 && now - record.lastSeenMs >= SESSION_CAPACITY_RECLAIM_IDLE_MS)
-    .sort((a, b) => a[1].lastSeenMs - b[1].lastSeenMs);
+  // The hard limit remains the last-resort safety boundary. If every session
+  // is active or inside the reconnect grace window, creation still fails 503.
+  return reclaimInactiveSessions(Math.max(0, MAX_SESSIONS - 1), "hard-capacity", requestId);
+}
 
-  for (const [sessionId, record] of reclaimable) {
-    if (allocated < MAX_SESSIONS) break;
-    if (!sessions.has(sessionId)) continue;
-    log("warn", "Reclaiming inactive MCP HTTP session for capacity", {
-      requestId,
-      sessionId,
-      idleMs: now - record.lastSeenMs,
-      reclaimIdleMs: SESSION_CAPACITY_RECLAIM_IDLE_MS,
-      maxSessions: MAX_SESSIONS,
-    });
-    await closeTransport(record.transport, "capacity-reclaim", sessionId);
-    allocated = sessions.size + anonymousTransports.size + transportsCreating;
+async function reserveTransportCapacity(requestId: string): Promise<void> {
+  let releaseAdmission!: () => void;
+  const previousAdmission = capacityAdmissionTail;
+  capacityAdmissionTail = new Promise<void>((resolve) => {
+    releaseAdmission = resolve;
+  });
+
+  await previousAdmission;
+  try {
+    const allocated = await reclaimCapacity(requestId);
+    if (allocated >= MAX_SESSIONS) {
+      throw Object.assign(new Error(`MCP session capacity reached (${MAX_SESSIONS}); all remaining sessions are active or too recent to reclaim.`), { statusCode: 503 });
+    }
+    // Reserve before releasing the admission gate so concurrent initializations
+    // observe this in-flight transport in their own capacity calculation.
+    transportsCreating += 1;
+  } finally {
+    releaseAdmission();
   }
-
-  return allocated;
 }
 
 async function createTransport(requestId: string): Promise<BridgeHttpTransport> {
-  const allocated = await reclaimCapacity(requestId);
-  if (allocated >= MAX_SESSIONS) {
-    throw Object.assign(new Error(`MCP session capacity reached (${MAX_SESSIONS}); all remaining sessions are active or too recent to reclaim.`), { statusCode: 503 });
-  }
-
-  transportsCreating += 1;
+  await reserveTransportCapacity(requestId);
   try {
     const mcpServer = createBridgeServer();
     let transport: BridgeHttpTransport;
@@ -746,7 +794,9 @@ async function main() {
       status: `http://${config.host}:${config.port}/status`,
       limits: {
         maxSessions: MAX_SESSIONS,
+        softSessionLimit: SOFT_SESSION_LIMIT,
         sessionIdleMs: SESSION_IDLE_MS,
+        capacityReclaimIdleMs: SESSION_CAPACITY_RECLAIM_IDLE_MS,
         anonymousTransportTtlMs: ANONYMOUS_TRANSPORT_TTL_MS,
       },
     });

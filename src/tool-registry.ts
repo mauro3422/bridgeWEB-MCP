@@ -20,6 +20,7 @@ import { processToolModule } from "./tools/process-tools.js";
 import { projectToolModule } from "./tools/project-tools.js";
 import { projectContextToolModule } from "./tools/project-context-tools.js";
 import { pythonToolModule } from "./tools/python-tools.js";
+import { remoteNodeToolModule } from "./tools/remote-node-tools.js";
 import { robloxPhotoCaptureToolModule } from "./tools/roblox-photo-capture-tools.js";
 import { robloxAssetToolModule } from "./tools/roblox-asset-tools.js";
 import { robloxStudioToolModule } from "./tools/roblox-studio-tools.js";
@@ -29,7 +30,8 @@ import { workflowGuideToolModule } from "./tools/workflow-guide-tools.js";
 import { whiteboardToolModule } from "./tools/whiteboard-tools.js";
 import { windowsAdminToolModule } from "./tools/windows-admin-tools.js";
 import { buildToolAudit, TOOL_AUDIT_VIEWS, type ToolAuditArgs, type ToolAuditView } from "./tool-audit.js";
-import { getToolAuditMetrics, type BridgeMetricsScope } from "./metrics.js";
+import { getToolAuditMetrics, getToolFrictionMetrics, type BridgeMetricsScope } from "./metrics.js";
+import { buildBridgeToolFrictionProjection } from "./mssr-tool-friction.js";
 import type { BridgeToolMetadata, BridgeToolModule, BridgeToolRegistry, BridgeToolSchema, BridgeToolUsageGuidance } from "./tools/types.js";
 
 const readOnlyToolNames = new Set([
@@ -41,12 +43,13 @@ const readOnlyToolNames = new Set([
   "path_policy_status", "project_profile", "workspace_diff", "workspace_snapshot_list", "cache_status", "windows_admin_cache_status", "windows_admin_storage_audit",
   "analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code",
   "project_context_load", "project_context_audit", "project_context_health", "project_context_modularization_plan", "project_change_consistency", "workflow_guide_recommend", "workflow_guide_load", "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query",
-  "skill_catalog", "skill_recommend", "skill_route_audit", "skill_route_vocabulary", "skill_route_plan", "skill_bootstrap", "skill_load", "roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list", "roblox_mcp_query",
+  "skill_catalog", "skill_recommend", "skill_route_audit", "skill_route_vocabulary", "skill_route_plan", "skill_bootstrap", "skill_context_next", "skill_load", "roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list", "roblox_mcp_query",
   "binary_file_info", "binary_file_read_chunk", "binary_upload_status", "image_file_attach",
   "blender_status", "blender_scene_info", "blender_validate_reference_pack", "blender_character_loop_status",
   "godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list", "godot_mcp_query",
   "whiteboard_latest_capture", "whiteboard_capture_list",
   "python_validate", "python_symbols", "python_impact_analysis", "python_import_graph", "python_call_graph", "python_dead_code", "python_test_plan", "pytest_testmon",
+  "remote_node_list", "remote_node_status",
 ]);
 
 const destructiveToolNames = new Set([
@@ -61,6 +64,7 @@ const destructiveToolNames = new Set([
   "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_finish", "binary_upload_abort",
   "blender_open", "blender_viewport_screenshot", "blender_focus_review", "blender_review_bundle", "blender_execute_code", "blender_batch_script", "blender_store_reference_image", "blender_install_reference_pack", "blender_setup_character_references",
   "godot_mcp_action", "godot_scene_create", "godot_screen_capture_save",
+  "remote_node_exec", "remote_node_upload_file",
 ]);
 
 const aliasTargets = new Map<string, string>([
@@ -80,7 +84,7 @@ const providerProxyToolNames = new Set([
 ]);
 const protectedToolNames = new Set([
   "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query", "bridge_tool_action", "bridge_connector_catalog_compare", "project_context_load", "project_context_audit", "project_context_health", "project_context_modularization_plan", "project_context_initialize", "project_context_update", "project_context_capture",
-  "skill_route_plan", "skill_bootstrap", "skill_load", "mssr_trace_record", "mssr_trace_evidence", "bridge_verify_all", "git_multi_repo_publish", "roblox_place_save",
+  "skill_route_plan", "skill_bootstrap", "skill_context_next", "skill_load", "mssr_trace_record", "mssr_trace_evidence", "bridge_verify_all", "git_multi_repo_publish", "roblox_place_save",
 ]);
 
 const toolUsageGuidance = new Map<string, BridgeToolUsageGuidance>([
@@ -100,11 +104,12 @@ const toolUsageGuidance = new Map<string, BridgeToolUsageGuidance>([
     recovery: [{ code: "project-context-not-initialized", toolName: "project_context_initialize", instruction: "Initialize the canonical .mssr contract first; do not fall back to .bridge or synthesize durable facts." }],
   }],
   ["project_context_update", {
-    prerequisites: ["The repository must already be initialized with a valid .mssr/project-context.json. Update only deliberate durable project facts/decisions/state; use stable section headings and expectedSha256 when modifying an already-read file."],
+    prerequisites: ["The repository must already be initialized with a valid .mssr/project-context.json. Use this for deliberate root/core PROJECT_* edits; new optional kind=memory knowledge belongs in reference-backed .mssr/knowledge via project_context_capture. Use stable section headings and expectedSha256 when modifying an already-read file."],
     preflightTools: ["project_context_load"],
     recovery: [
       { code: "target-not-found", toolName: "project_context_load", instruction: "Reload the project root/context and retry the durable update against the intended repository." },
       { code: "concurrent-modification", toolName: "project_context_load", instruction: "Reload current project context, reconcile the changed section, and retry with the new expectedSha256." },
+      { code: "optional-memory-reference-required", toolName: "project_context_capture", instruction: "Create the reviewed optional memory as a selector-backed .mssr/knowledge reference instead of adding another PROJECT_MEMORY.md section." },
     ],
   }],
   ["project_context_capture", {
@@ -233,6 +238,22 @@ const toolUsageGuidance = new Map<string, BridgeToolUsageGuidance>([
     preflightTools: ["blender_status", "blender_scene_info"],
     recovery: [{ code: "provider-unavailable", toolName: "blender_status", instruction: "Check or restore the Blender bridge before retrying." }],
   }],
+  ["remote_node_exec", {
+    prerequisites: ["Use only a node id returned by remote_node_list and repeat it exactly in confirmNodeId. Remote hosts/users/keys are configuration-owned and are never supplied ad hoc."],
+    preflightTools: ["remote_node_list", "remote_node_status"],
+    recovery: [
+      { code: "target-not-found", toolName: "remote_node_list", instruction: "Resolve a configured node id before retrying remote execution." },
+      { code: "remote-node-connect-failed", toolName: "remote_node_status", instruction: "Verify pinned SSH identity, current LAN host, and node health before retrying a remote command." },
+    ],
+  }],
+  ["remote_node_upload_file", {
+    prerequisites: ["Verify the node with remote_node_status, use an allowed local file path, an absolute POSIX remotePath, and repeat nodeId in confirmNodeId."],
+    preflightTools: ["remote_node_list", "remote_node_status"],
+    recovery: [
+      { code: "remote-node-target-exists", toolName: "remote_node_status", instruction: "Confirm replacement is intended before retrying with overwrite=true." },
+      { code: "remote-node-connect-failed", toolName: "remote_node_status", instruction: "Recover the pinned SSH connection before retrying the upload." },
+    ],
+  }],
   ["git_push_current_branch", {
     prerequisites: ["Verify the working tree, commit content, tracking branch and remote before push."],
     preflightTools: ["git_status", "git_show_commit", "git_compare_branches"],
@@ -339,7 +360,7 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
   };
   const auditTool: BridgeToolSchema = {
     name: "bridge_tool_audit",
-    description: "Audit registered Bridge tools against privacy-safe operational metrics and return evidence-backed maintenance recommendations. Use views for one tool, aliases, fallback overuse, unused tools, all tools, or only items needing attention. This tool never changes lifecycle or visibility automatically.",
+    description: "Audit registered Bridge tools against privacy-safe operational metrics plus sanitized repeated-failure signatures. The needs-attention view prioritizes recurring cross-workflow friction over isolated low-sample noise; raw error text is never returned. This tool never changes lifecycle or visibility automatically.",
     inputSchema: {
       type: "object",
       properties: {
@@ -512,6 +533,7 @@ const defaultToolModules: readonly BridgeToolModule[] = [
   codeIntelligenceToolModule,
   codeGraphToolModule,
   pythonToolModule,
+  remoteNodeToolModule,
   blenderToolModule,
   godotToolModule,
   whiteboardToolModule,
@@ -527,11 +549,13 @@ export type RegisteredToolAuditArgs = ToolAuditArgs & {
 };
 
 export function buildRegisteredToolAudit(tools: readonly BridgeToolSchema[], args: RegisteredToolAuditArgs) {
-  return buildToolAudit(tools, getToolAuditMetrics(args.days, args.scope), {
+  const auditMetrics = getToolAuditMetrics(args.days, args.scope);
+  const friction = buildBridgeToolFrictionProjection(getToolFrictionMetrics(args.days, args.scope));
+  return buildToolAudit(tools, auditMetrics, {
     view: args.view,
     toolName: args.toolName,
     limit: args.limit,
-  });
+  }, friction);
 }
 
 export function getDefaultToolCatalog(): readonly BridgeToolSchema[] {

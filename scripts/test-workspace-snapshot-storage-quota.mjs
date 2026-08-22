@@ -3,51 +3,90 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-snapshot-quota-'));
-const projectRoot = path.join(sandbox, 'project');
+const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-snapshot-retention-'));
+const projectA = path.join(sandbox, 'project-a');
+const projectB = path.join(sandbox, 'project-b');
+const projectTruncated = path.join(sandbox, 'project-truncated');
+const projectTooLarge = path.join(sandbox, 'project-too-large');
 const snapshotRoot = path.join(sandbox, 'snapshots');
-fs.mkdirSync(projectRoot, { recursive: true });
-fs.writeFileSync(path.join(projectRoot, 'payload.bin'), Buffer.alloc(600 * 1024, 0x41));
+for (const root of [projectA, projectB, projectTruncated, projectTooLarge]) fs.mkdirSync(root, { recursive: true });
 
+fs.writeFileSync(path.join(projectA, 'payload.bin'), Buffer.alloc(600 * 1024, 0x41));
+fs.writeFileSync(path.join(projectA, 'meta.txt'), 'project-a\n');
+fs.writeFileSync(path.join(projectB, 'payload.bin'), Buffer.alloc(32 * 1024, 0x42));
+fs.writeFileSync(path.join(projectTruncated, 'a.txt'), 'a\n');
+fs.writeFileSync(path.join(projectTruncated, 'b.txt'), 'b\n');
+fs.writeFileSync(path.join(projectTooLarge, 'payload.bin'), Buffer.alloc(600 * 1024, 0x43));
+
+const storageLimit = 1536 * 1024;
 process.env.BRIDGE_MCP_SNAPSHOT_DIR = snapshotRoot;
-process.env.BRIDGE_MCP_SNAPSHOT_MAX_STORAGE_BYTES = String(1024 * 1024);
+process.env.BRIDGE_MCP_SNAPSHOT_MAX_STORAGE_BYTES = String(storageLimit);
 process.env.BRIDGE_MCP_ALLOWED_ROOTS = [sandbox, process.cwd()].join(path.delimiter);
 
 const { workspaceToolModule } = await import('../dist/tools/workspace-tools.js');
 const snapshot = workspaceToolModule.handlers.workspace_snapshot;
 const list = workspaceToolModule.handlers.workspace_snapshot_list;
 
+const forRoot = (listing, root) => listing.snapshots.filter((item) => path.resolve(item.sourceRoot) === path.resolve(root));
+const labels = (items) => new Set(items.map((item) => item.label));
+
 try {
-  const concurrent = await Promise.allSettled([
-    snapshot({ projectRoot, label: 'quota-concurrent-a' }),
-    snapshot({ projectRoot, label: 'quota-concurrent-b' }),
+  const a1 = await snapshot({ projectRoot: projectA, label: 'a1' });
+  const a2 = await snapshot({ projectRoot: projectA, label: 'a2' });
+  const a3 = await snapshot({ projectRoot: projectA, label: 'a3' });
+  assert.equal(a1.verified && a2.verified && a3.verified, true);
+  assert.equal(a3.retention.after.removedCount, 1, 'third complete snapshot should rotate the oldest complete fallback');
+  assert.ok(a3.retention.transientProjectedBytes > storageLimit, 'test must exercise a transient over-quota write');
+  assert.ok(a3.retention.steadyStateProjectedBytes <= storageLimit, 'post-retention projection must remain within quota');
+
+  let listing = await list({ limit: 50 });
+  assert.deepEqual(listing.retention, { completePerProject: 2, truncatedPerProject: 1 });
+  let aSnapshots = forRoot(listing, projectA);
+  assert.equal(aSnapshots.length, 2);
+  assert.deepEqual(labels(aSnapshots), new Set(['a2', 'a3']));
+  assert.ok(!fs.existsSync(a1.storagePath), 'oldest complete snapshot directory should be removed');
+
+  const concurrent = await Promise.all([
+    snapshot({ projectRoot: projectA, label: 'a4' }),
+    snapshot({ projectRoot: projectA, label: 'a5' }),
   ]);
-  const fulfilled = concurrent.filter((item) => item.status === 'fulfilled');
-  const rejected = concurrent.filter((item) => item.status === 'rejected');
-  assert.equal(fulfilled.length, 1, 'quota check must serialize concurrent snapshot creation');
-  assert.equal(rejected.length, 1, 'one concurrent snapshot must be rejected by the aggregate quota');
-  assert.match(String(rejected[0].reason), /storage quota exceeded.*Existing snapshots were preserved/i);
+  assert.ok(concurrent.every((item) => item.verified), 'serialized concurrent creation should retain and rotate instead of racing quota');
+  listing = await list({ limit: 50 });
+  aSnapshots = forRoot(listing, projectA);
+  assert.equal(aSnapshots.length, 2);
+  assert.deepEqual(labels(aSnapshots), new Set(['a4', 'a5']));
 
-  const first = fulfilled[0].value;
-  assert.equal(first.created, true);
-  assert.equal(first.verified, true);
+  const truncated1 = await snapshot({ projectRoot: projectTruncated, label: 'truncated-1', maxFiles: 1 });
+  const truncated2 = await snapshot({ projectRoot: projectTruncated, label: 'truncated-2', maxFiles: 1 });
+  assert.equal(truncated1.snapshot.truncated, true);
+  assert.equal(truncated2.snapshot.truncated, true);
+  listing = await list({ limit: 50 });
+  const truncatedSnapshots = forRoot(listing, projectTruncated);
+  assert.equal(truncatedSnapshots.length, 1, 'truncated diagnostics should retain only their newest generation');
+  assert.equal(truncatedSnapshots[0].label, 'truncated-2');
+  assert.equal(truncatedSnapshots[0].truncated, true);
 
-  const afterConcurrent = await list({ limit: 20 });
-  assert.equal(afterConcurrent.count, 1);
-  assert.equal(afterConcurrent.storage.limitBytes, 1024 * 1024);
-  assert.ok(afterConcurrent.storage.bytes >= 600 * 1024);
-  assert.ok(afterConcurrent.storage.remainingBytes < afterConcurrent.storage.limitBytes);
+  await snapshot({ projectRoot: projectB, label: 'b1' });
+  await snapshot({ projectRoot: projectB, label: 'b2' });
+  await snapshot({ projectRoot: projectB, label: 'b3' });
+  listing = await list({ limit: 50 });
+  const bSnapshots = forRoot(listing, projectB);
+  assert.equal(bSnapshots.length, 2, 'retention must be independent per sourceRoot');
+  assert.deepEqual(labels(bSnapshots), new Set(['b2', 'b3']));
+  assert.deepEqual(labels(forRoot(listing, projectA)), new Set(['a4', 'a5']), 'rotating another project must not evict project A fallbacks');
 
+  const countBeforeRejected = listing.count;
   await assert.rejects(
-    () => snapshot({ projectRoot, label: 'quota-later' }),
-    /storage quota exceeded.*Existing snapshots were preserved/i,
+    () => snapshot({ projectRoot: projectTooLarge, label: 'too-large' }),
+    /storage quota exceeded after automatic retention/i,
   );
+  const afterRejected = await list({ limit: 50 });
+  assert.equal(afterRejected.count, countBeforeRejected, 'a true post-retention quota failure must preserve retained history');
+  assert.equal(forRoot(afterRejected, projectTooLarge).length, 0);
+  assert.ok(afterRejected.storage.bytes <= afterRejected.storage.limitBytes);
+  assert.equal(fs.readdirSync(snapshotRoot).length, afterRejected.count, 'failed snapshot directory must be cleaned up');
 
-  const afterRejected = await list({ limit: 20 });
-  assert.equal(afterRejected.count, 1, 'rejected snapshot must not delete or add history');
-  assert.equal(afterRejected.snapshots[0].id, first.snapshot.id);
-  assert.equal(fs.readdirSync(snapshotRoot).length, 1, 'failed snapshot directories must be cleaned up');
-  console.log('workspace snapshot storage quota regression: PASS');
+  console.log('workspace snapshot retention/quota regression: PASS');
 } finally {
   fs.rmSync(sandbox, { recursive: true, force: true });
 }

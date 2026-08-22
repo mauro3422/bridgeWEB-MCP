@@ -169,7 +169,7 @@ try {
       stage: "start",
       sources: ["codex-local"],
       maxSkills: 12,
-      maxContextChars: 6_000,
+      maxContextChars: 10_000,
       selectionMode: "auto", // This regression targets the selective budget planner; host-gated behavior is covered separately.
       traceId: route.traceId,
     },
@@ -178,30 +178,27 @@ try {
   assert.equal(bootstrap.traceId, route.traceId, "Delegated bootstrap must preserve the delegated route trace.");
   assert.equal(bootstrap.contextAssembly?.mode, "selective", "Delegated bootstrap must use selective context by default.");
   assert.equal(bootstrap.contextAssembly?.planningMode, "global-required-core-first");
-  assert.equal(typeof bootstrap.contextAssembly?.totalContextCharsLoaded, "number");
-  assert.equal(typeof bootstrap.contextAssembly?.estimatedCharsSaved, "number");
-  assert.equal(typeof bootstrap.contextAssembly?.requiredCoreReservedChars, "number");
-  assert.equal(Array.isArray(bootstrap.contextAssembly?.globallySelectedModules), true);
-  assert.equal(Array.isArray(bootstrap.contextAssembly?.skills), true);
-  const requiredAssembly = bootstrap.contextAssembly.skills.filter((item) => item.required === true);
-  assert.equal(requiredAssembly.every((item) => item.skipped !== true && item.coreCharsLoaded > 0), true, "Every required skill core must be reserved before optional context.");
-  assert.equal(
-    bootstrap.contextAssembly.requiredCoreReservedChars,
-    requiredAssembly.reduce((sum, item) => sum + item.coreCharsLoaded, 0),
-  );
-  assert.equal(
-    bootstrap.contextAssembly.totalContextCharsLoaded,
-    bootstrap.contextAssembly.skills.reduce((sum, item) => sum + item.totalCharsLoaded, 0),
-  );
-  const skippedForBudget = bootstrap.contextAssembly.skills.filter((item) => item.skippedReason === "optional-context-exceeds-budget");
-  assert.equal(skippedForBudget.length > 0, true, "A constrained bootstrap must exercise the optional context skip path.");
-  assert.equal(skippedForBudget.every((item) => item.required === false && item.totalCharsLoaded === 0), true);
-  const loadedNames = new Set(
-    bootstrap.loaded
-      .filter((item) => item.loaded === true)
-      .map((item) => item.skill?.name)
-      .filter(Boolean),
-  );
+  const pages = [bootstrap];
+  let currentPage = bootstrap;
+  while (currentPage.mustContinue) {
+    assert.equal(typeof currentPage.cursor, "string", "A partial delegated bootstrap must return a cursor.");
+    assert.equal(currentPage.nextAction?.toolName, "skill_context_next");
+    currentPage = await call("skill_context_next", { traceId: currentPage.traceId, cursor: currentPage.cursor });
+    pages.push(currentPage);
+  }
+  assert.equal(currentPage.status, "complete", "Delegated context must complete through deterministic continuation pages.");
+  for (const page of pages) {
+    assert.equal(page.contextAssembly?.planningMode, "global-required-core-first");
+    assert.equal(typeof page.contextAssembly?.totalContextCharsLoaded, "number");
+    assert.equal(Array.isArray(page.contextAssembly?.skills), true);
+    assert.equal(page.contextAssembly.skills.some((item) => item.skippedReason === "optional-context-exceeds-budget"), false, "Selected context must be deferred, not silently dropped for budget.");
+  }
+  const acceptedObservations = pages.flatMap((page) => page.contextAssembly.skills).filter((item) => item.obligation === "accepted");
+  assert.equal(acceptedObservations.every((item) => item.required === false), true, "Accepted optional roots must never be relabeled required during continuation.");
+  const loadedNames = new Set(pages.flatMap((page) => page.loaded)
+    .filter((item) => item.loaded === true)
+    .map((item) => item.skill?.name)
+    .filter(Boolean));
   for (const skill of required) {
     assert.equal(loadedNames.has(skill.name), true, `Delegated bootstrap must report required skill ${skill.name} as loaded.`);
   }
@@ -429,4 +426,3 @@ if (sessionMode === "named") {
   );
   process.stdout.write(anonymous.stdout);
 }
-

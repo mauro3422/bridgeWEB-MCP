@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { assembleCodexSkillContext, mssrFirstPartySkillsRoot, planCodexSkillContexts } from "@mauroprime/mssr";
+import { assembleCodexSkillContext, continueSkillContextPage, mssrFirstPartySkillsRoot, planCodexSkillContexts } from "@mauroprime/mssr";
 import { structuredSkillIntentSchema } from "@mauroprime/mssr";
 
 const firstPartySkillsRoot = mssrFirstPartySkillsRoot();
@@ -33,7 +33,7 @@ const selective = await assembleCodexSkillContext({
   stage: "implement",
   mode: "selective",
   references: "auto",
-  remainingChars: 12_000,
+  remainingChars: 20_000,
 });
 assert.equal(selective.contextAssembly.manifestStatus, "loaded");
 assert.equal(selective.contextAssembly.fallbackFull, false);
@@ -48,7 +48,7 @@ const coreOnly = await assembleCodexSkillContext({
   stage: "implement",
   mode: "selective",
   references: "none",
-  remainingChars: 12_000,
+  remainingChars: 20_000,
 });
 assert.deepEqual(coreOnly.contextAssembly.selectedModules, []);
 assert.equal(coreOnly.contextAssembly.moduleCharsLoaded, 0);
@@ -60,7 +60,7 @@ const full = await assembleCodexSkillContext({
   stage: "implement",
   mode: "full",
   references: "auto",
-  remainingChars: 12_000,
+  remainingChars: 20_000,
 });
 const exact = await fs.readFile(skill("mssr-agent-routing").path, "utf8");
 assert.equal(full.content, exact);
@@ -72,7 +72,7 @@ const fallback = await assembleCodexSkillContext({
   stage: "implement",
   mode: "selective",
   references: "auto",
-  remainingChars: 12_000,
+  remainingChars: 20_000,
 });
 assert.equal(fallback.contextAssembly.manifestStatus, "missing");
 assert.equal(fallback.contextAssembly.fallbackFull, true);
@@ -157,14 +157,16 @@ try {
   const unconstrainedByName = new Map(unconstrainedPlan.skills.map((item) => [item.skill.name, item]));
   const requiredCoreChars = [...unconstrainedByName.values()].reduce((sum, item) => sum + item.contextAssembly.coreCharsLoaded, 0);
   const highChars = unconstrainedByName.get("second-required").contextAssembly.moduleDecisions.find((item) => item.id === "high-priority").chars;
-  const constrainedPlan = await planCodexSkillContexts({
+  const lowChars = unconstrainedByName.get("first-required").contextAssembly.moduleDecisions.find((item) => item.id === "low-priority").chars;
+  const constrainedArgs = {
     skills: plannerSkills,
     intent,
     stage: "implement",
     mode: "selective",
     references: "auto",
-    maxContextChars: requiredCoreChars + highChars + 4,
-  });
+    maxContextChars: Math.max(lowChars, requiredCoreChars + highChars + 4),
+  };
+  const constrainedPlan = await planCodexSkillContexts(constrainedArgs);
   const constrainedByName = new Map(constrainedPlan.skills.map((item) => [item.skill.name, item]));
   assert.equal(constrainedPlan.planningMode, "global-required-core-first");
   assert.equal(constrainedByName.get("first-required").loaded, true);
@@ -173,16 +175,22 @@ try {
   assert.deepEqual(constrainedByName.get("first-required").contextAssembly.selectedModules, []);
   assert.equal(
     constrainedByName.get("first-required").contextAssembly.moduleDecisions.find((item) => item.id === "low-priority").reason,
-    "budget-exceeded",
+    "deferred-to-next-page",
   );
   assert.equal(constrainedPlan.requiredCoreReservedChars, requiredCoreChars);
-  assert.equal(constrainedPlan.budgetExceeded, false, 'Omitting only optional context must not report a required bootstrap overflow.');
+  assert.equal(constrainedPlan.status, "partial");
+  assert.equal(constrainedPlan.mustContinue, true);
+  assert.equal(typeof constrainedPlan.cursor, "string");
+  assert.equal(constrainedPlan.budgetExceeded, false, 'Deferring selected optional context must not report a required bootstrap overflow.');
   assert.equal(constrainedPlan.requiredBudgetExceeded, false);
-  assert.equal(constrainedPlan.optionalContextOmitted, true);
+  assert.equal(constrainedPlan.optionalContextOmitted, false);
   assert.equal(constrainedByName.get("first-required").contextAssembly.budgetExceeded, false);
   assert.equal(constrainedByName.get("first-required").contextAssembly.requiredBudgetExceeded, false);
-  assert.equal(constrainedByName.get("first-required").contextAssembly.optionalContextOmitted, true);
+  assert.equal(constrainedByName.get("first-required").contextAssembly.contextDeferred, true);
   assert.equal(constrainedPlan.globallySelectedModules[0].module, "high-priority");
+  const constrainedNext = await continueSkillContextPage({ ...constrainedArgs, skills: plannerSkills.map((item) => ({ ...item, obligation: "required" })), cursor: constrainedPlan.cursor });
+  assert.equal(constrainedNext.status, "complete");
+  assert.deepEqual(constrainedNext.skills.find((item) => item.skill.name === "first-required").contextAssembly.selectedModules, ["low-priority"]);
 
   const overlapDir = path.join(tempRoot, "overlap");
   await fs.mkdir(overlapDir, { recursive: true });

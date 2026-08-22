@@ -95,6 +95,7 @@ async function compareConnectorCatalog(exposedToolNames: string[]) {
     "skill_route_vocabulary",
     "skill_route_plan",
     "skill_bootstrap",
+    "skill_context_next",
     "skill_load",
     "mssr_observatory_query",
     "mssr_trace_evidence",

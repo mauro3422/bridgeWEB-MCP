@@ -34,6 +34,29 @@ try {
   assert.equal(initialized.initialized, true);
   assert.equal(initialized.manifestStatus, "valid");
 
+  await assert.rejects(
+    () => projectContextToolModule.handlers.project_context_update({
+      projectRoot: root,
+      kind: "memory",
+      heading: "## Optional routing memory",
+      content: "This optional memory must be stored as a reference-backed knowledge module.",
+      module: {
+        id: "optional-routing-memory",
+        kind: "memory",
+        topic: "decision",
+        area: "routing",
+        description: "Optional routing memory.",
+        domains: ["coding"],
+        actions: ["edit"],
+      },
+    }),
+    /optional-memory-reference-required.*project_context_capture/,
+  );
+  const memoryAfterRejectedOptional = await fs.readFile(path.join(root, ".mssr", "PROJECT_MEMORY.md"), "utf8");
+  assert.equal(memoryAfterRejectedOptional.includes("Optional routing memory"), false);
+  const manifestAfterRejectedOptional = JSON.parse(await fs.readFile(path.join(root, ".mssr", "project-context.json"), "utf8"));
+  assert.equal(manifestAfterRejectedOptional.modules.some((item) => item.id === "optional-routing-memory"), false);
+
   const created = await projectContextToolModule.handlers.project_context_update({
     projectRoot: root,
     kind: "memory",

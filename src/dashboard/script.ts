@@ -806,11 +806,23 @@ function renderMssrContextAssembly(context) {
       if (Number(row.requiredOverflowLoads || 0) > 0) incidents.push(num(row.requiredOverflowLoads) + ' overflow requerido');
       if (Number(row.optionalOverflowLoads || 0) > 0) incidents.push(num(row.optionalOverflowLoads) + ' presión opcional');
       if (Number(row.overflowLoads || 0) > 0 && Number(row.requiredOverflowLoads || 0) === 0 && Number(row.optionalOverflowLoads || 0) === 0 && Number(row.skippedForBudgetLoads || 0) === 0) incidents.push(num(row.overflowLoads) + ' overflow legado');
+      if (Number(row.requiredOverflowChars || 0) > 0) incidents.push(num(row.requiredOverflowChars) + ' chars req. pendientes');
+      if (Number(row.acceptedOverflowChars || 0) > 0) incidents.push(num(row.acceptedOverflowChars) + ' chars acept. pendientes');
+      if (Number(row.remainingRequiredUnits || 0) > 0) incidents.push(num(row.remainingRequiredUnits) + ' unidades req.');
+      if (Number(row.remainingAcceptedUnits || 0) > 0) incidents.push(num(row.remainingAcceptedUnits) + ' unidades acept.');
+      if (row.continuationIssued === true) incidents.push(row.chainCompleted === true ? 'cadena completada' : row.continuationConsumed === true ? 'continuación consumida' : 'continuación pendiente');
       if (Number(row.duplicateCharsAvoided || 0) > 0) incidents.push(num(row.duplicateCharsAvoided) + ' dup. evitados');
+      const bootstrapObserved = row.bootstrapObserved === true;
+      const contextBudget = bootstrapObserved
+        ? num(row.deliveredContextChars) + ' / ' + num(row.requestedContextChars)
+        : num(row.loadedChars) + ' / ' + num(row.fullChars);
+      const envelope = bootstrapObserved && (Number(row.responseChars || 0) > 0 || Number(row.envelopeChars || 0) > 0)
+        ? 'respuesta ' + num(row.responseChars) + ' · envelope ' + num(row.envelopeChars)
+        : '';
       return '<tr>' +
         '<td><code title="' + esc(trace) + '">' + esc(shortTrace) + '</code><div class="recent-detail">' + esc(dateTime(row.latestAt)) + '</div></td>' +
         '<td>' + num(row.skills) + '</td>' +
-        '<td>' + num(row.loadedChars) + ' / ' + num(row.fullChars) + '</td>' +
+        '<td>' + contextBudget + (envelope ? '<div class="recent-detail">' + esc(envelope) + '</div>' : '') + '</td>' +
         '<td>' + pct(row.savingsRate) + '<div class="recent-detail">' + num(row.savedChars) + ' chars</div></td>' +
         '<td>' + (incidents.length ? esc(incidents.join(' · ')) : '<span class="muted">sin incidentes</span>') + '</td>' +
       '</tr>';

@@ -275,8 +275,8 @@ export const dashboardMarkup = `
       </article>
 
       <article class="card span-7">
-        <div class="card-header"><div><div class="card-kicker">Últimas ejecuciones</div><h2 class="card-title">Contexto por traza</h2><p class="card-description">Resume presión, ahorro, skips y overflow por ejecución sin almacenar el texto procedural.</p></div></div>
-        <div class="table-wrap"><table><thead><tr><th>Traza</th><th>Skills</th><th>Cargado / full</th><th>Ahorro</th><th>Incidentes</th></tr></thead><tbody id="mssr-context-traces"><tr><td colspan="5" class="muted">Cargando trazas…</td></tr></tbody></table></div>
+        <div class="card-header"><div><div class="card-kicker">Últimas ejecuciones</div><h2 class="card-title">Contexto por traza</h2><p class="card-description">Resume presión, presupuesto global y continuidad por ejecución sin almacenar contenido procedural ni cursores.</p></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Traza</th><th>Skills</th><th>Contexto / presupuesto</th><th>Ahorro</th><th>Incidentes</th></tr></thead><tbody id="mssr-context-traces"><tr><td colspan="5" class="muted">Cargando trazas…</td></tr></tbody></table></div>
       </article>
 
       <article class="card span-5">

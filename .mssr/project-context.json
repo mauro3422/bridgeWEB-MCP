@@ -33,10 +33,7 @@
       "kind": "memory",
       "description": "Observe-only MSSR learning boundary and activation constraint.",
       "source": {
-        "path": ".mssr/PROJECT_MEMORY.md",
-        "sections": [
-          "## MSSR learning boundary"
-        ]
+        "path": ".mssr/knowledge/decision/bridge-learning-boundary.md"
       },
       "stages": [],
       "domains": [
@@ -61,10 +58,7 @@
       "kind": "memory",
       "description": "Project-memory/changelog consistency decision for maintenance and publication.",
       "source": {
-        "path": ".mssr/PROJECT_MEMORY.md",
-        "sections": [
-          "## Change and memory consistency"
-        ]
+        "path": ".mssr/knowledge/decision/bridge-change-memory-consistency.md"
       },
       "stages": [],
       "domains": [],
@@ -90,10 +84,7 @@
       "kind": "memory",
       "description": "Selective versioned changelog strategy for debugging/recovery.",
       "source": {
-        "path": ".mssr/PROJECT_MEMORY.md",
-        "sections": [
-          "## Debug history strategy"
-        ]
+        "path": ".mssr/knowledge/decision/bridge-debug-history-strategy.md"
       },
       "stages": [],
       "domains": [],
@@ -175,10 +166,7 @@
       "kind": "memory",
       "description": "Portable MSSR ownership and review semantics for project-knowledge drift advisories.",
       "source": {
-        "path": ".mssr/PROJECT_MEMORY.md",
-        "sections": [
-          "## Project knowledge maintenance inheritance"
-        ]
+        "path": ".mssr/knowledge/decision/bridge-project-knowledge-maintenance-inheritance.md"
       },
       "stages": [
         "verify",
@@ -220,10 +208,7 @@
       "kind": "memory",
       "description": "Canonical Bridge decision for delegated tool risk classification and wrapper authorization.",
       "source": {
-        "path": ".mssr/PROJECT_MEMORY.md",
-        "sections": [
-          "## Tool risk classification authority"
-        ]
+        "path": ".mssr/knowledge/decision/bridge-tool-risk-authority.md"
       },
       "stages": [
         "implement",
@@ -265,10 +250,7 @@
       "kind": "memory",
       "description": "Durable diagnosis and recovery invariant for the Bridge HTTP watchdog and bridge-local-http tunnel identity boundary.",
       "source": {
-        "path": ".mssr/PROJECT_MEMORY.md",
-        "sections": [
-          "## HTTP watchdog identity and recovery invariant"
-        ]
+        "path": ".mssr/knowledge/operations/bridge-http-watchdog-recovery-invariant.md"
       },
       "topic": "operations",
       "area": "bridge-runtime",
@@ -308,14 +290,147 @@
       "maxChars": 3000
     },
     {
+      "id": "bridge-host-health-projections",
+      "kind": "context",
+      "description": "Bridge Skill Health and Project Context Health host projection ownership, persistence, notification, and no-auto-edit boundaries.",
+      "source": {
+        "path": ".mssr/knowledge/observability/host-health-projections.md"
+      },
+      "topic": "operations",
+      "area": "project-health",
+      "stages": [
+        "start",
+        "implement",
+        "verify",
+        "close",
+        "resume"
+      ],
+      "domains": [
+        "coding",
+        "agent-orchestration",
+        "skill-system"
+      ],
+      "actions": [
+        "analyze",
+        "review",
+        "verify",
+        "maintain"
+      ],
+      "artifacts": [
+        "project",
+        "mcp"
+      ],
+      "needs": [
+        "integrity-verification"
+      ],
+      "signals": [
+        "warning-observed",
+        "repeated-friction",
+        "reusable-pattern"
+      ],
+      "required": false,
+      "priority": 65,
+      "maxChars": 1800
+    },
+    {
+      "id": "bridge-operational-notice-plane",
+      "kind": "context",
+      "description": "Portable MSSR versus Bridge ownership for Operational Notice, Situation Model, C2b/C2c/C2d/C2e semantics and host delivery.",
+      "source": {
+        "path": ".mssr/knowledge/observability/operational-notice-plane.md"
+      },
+      "topic": "architecture",
+      "area": "operational-notice",
+      "stages": [
+        "implement",
+        "verify",
+        "persist",
+        "close"
+      ],
+      "domains": [
+        "coding",
+        "agent-orchestration",
+        "skill-system"
+      ],
+      "actions": [
+        "analyze",
+        "review",
+        "verify",
+        "maintain"
+      ],
+      "artifacts": [
+        "mcp",
+        "project",
+        "code"
+      ],
+      "needs": [
+        "integrity-verification",
+        "cross-agent"
+      ],
+      "signals": [
+        "warning-observed",
+        "conflicting-evidence",
+        "repeated-friction"
+      ],
+      "required": false,
+      "priority": 70,
+      "maxChars": 2400
+    },
+    {
+      "id": "bridge-architecture-impact-writer-integration",
+      "kind": "context",
+      "description": "Architecture Impact explicit-path writer dispatch, evidence collection, scoped-root recovery, and supported writer coverage.",
+      "source": {
+        "path": ".mssr/knowledge/architecture/architecture-impact-writer-integration.md"
+      },
+      "topic": "architecture",
+      "area": "architecture-impact",
+      "stages": [
+        "implement",
+        "verify",
+        "persist",
+        "close"
+      ],
+      "domains": [
+        "coding",
+        "filesystem",
+        "agent-orchestration"
+      ],
+      "actions": [
+        "edit",
+        "review",
+        "verify",
+        "test",
+        "maintain"
+      ],
+      "artifacts": [
+        "code",
+        "project",
+        "repository",
+        "mcp"
+      ],
+      "needs": [
+        "safe-editing",
+        "unit-tests",
+        "integrity-verification"
+      ],
+      "signals": [
+        "warning-observed",
+        "reusable-pattern"
+      ],
+      "required": false,
+      "priority": 72,
+      "maxChars": 1600
+    },
+    {
       "id": "bridge-architecture-impact-host-boundary",
       "kind": "context",
-      "description": "Bridge C2f-B host filesystem observation boundary for declared Architecture Impact refs.",
+      "description": "Architecture Impact semantic/host ownership boundary, review-receipt policy, and no-auto-rewrite invariants.",
       "source": {
         "path": ".mssr/knowledge/architecture/architecture-impact-observer.md"
       },
       "topic": "architecture",
-      "area": "project-context",
+      "area": "architecture-impact",
       "stages": [
         "implement",
         "verify",
@@ -346,7 +461,7 @@
       "signals": [],
       "required": false,
       "priority": 75,
-      "maxChars": 2200
+      "maxChars": 1600
     },
     {
       "id": "bridge-trace-owner-integrity",

@@ -401,7 +401,7 @@ project_context_audit: read-only recursive workspace health/classification under
 project_change_consistency: Git + package version + changelogs/<version>.md + INDEX + PROJECT_* impact gate
 versioned changelog contract: updated / reviewed-none / pending for PROJECT_CONTEXT, PROJECT_MEMORY and PROJECT_STATE
 selective debugging history: load changelogs/INDEX.md + current release only when MSSR intent requires history/recovery
-all managed repositories discovered in the verified D:\Dev workspace are explicitly initialized; no mass legacy-migration task remains
+all managed repositories discovered in the verified D:\Dev workspace are explicitly initialized; remaining root-backed memory storage debt is reviewed per-project rather than handled by a mass migration
 portable native/Codex/OpenCode/Bridge project-control semantics come from packaged MSSR instead of host-specific copies
 no audit, telemetry, health watcher, notice or learning process auto-writes durable project memory
 ```
@@ -410,6 +410,11 @@ Current follow-up:
 
 ```txt
 keep project_change_consistency as an explicit persistence/publication gate in first-party maintenance workflows
+optional project memory follows core + project-context manifest + reference-backed .mssr/knowledge modules; PROJECT_MEMORY.md is not a general module container
+use scripts/migrate-project-memory-refs.mjs for conservative already-indexed migrations: check-only by default; --apply requires the exact reviewed ids through --expect, plus hash/collision/concurrency gates and selector/payload readback
+Bridge self-migration is complete: six optional memories moved to refs, PROJECT_MEMORY.md 16850 -> 12719 bytes, Project Context Health WATCH -> OK
+workspace migration remains reviewed/per-project: a read-only D:\Dev scan found legacy root-backed memory in other repos, including multi-memory fanout in MyceliumFront, pz-furniture-profiler and zomboid-smartwatch-network; no mass/background mutation
+MSSR 0.2.51 artifact is staged in vendor with verified SHA, but package/node_modules/live-runtime adoption is intentionally deferred until an explicit safe Bridge restart window
 add stronger long-term staleness/receipt semantics only when real post-publication evidence shows the current contract is insufficient
 resolve structural REVIEW through reviewed modularization/capture, never through automatic mass splitting or invented project facts
 keep cross-host project-control conformance green as host adapters evolve

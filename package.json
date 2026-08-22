@@ -1,6 +1,6 @@
 {
   "name": "bridge-mcp",
-  "version": "0.6.110",
+  "version": "0.6.114",
   "description": "Kairos/KChat local MCP bridge for MauroPrime and future laptop agents.",
   "type": "module",
   "bin": {
@@ -19,8 +19,9 @@
     "test:mssr-learning-loop": "npm run build && node scripts/test-mssr-learning-loop.mjs",
     "test:mssr-context-messages": "npm run build && node scripts/test-mssr-context-messages.mjs",
     "test:mssr-context-plane": "npm run build && node scripts/test-mssr-context-plane.mjs",
+    "test:mssr-context-continuation": "npm run build && node scripts/test-mssr-context-continuation.mjs",
     "test:regressions": "node scripts/run-isolated-npm-test.mjs test:regressions:raw",
-    "test:regressions:raw": "powershell -NoProfile -File .\\scripts\\test-bridge-regressions.ps1 && node scripts/test-v060-tools.mjs && node scripts/test-workspace-snapshot-storage-quota.mjs && node scripts/test-godot-tools.mjs && node scripts/test-whiteboard-tools.mjs && node scripts/test-image-file-import.mjs && node scripts/test-media-review-ingest.mjs && node scripts/test-workflow-guide-routing.mjs && node scripts/test-image-persistence.mjs && node scripts/test-git-multi-repo-publication.mjs && node scripts/test-system-hardening.mjs && node scripts/test-path-policy-cross-root-junction.mjs && node scripts/test-mssr-trace-contract.mjs && node scripts/test-mssr-routing-compliance.mjs && node scripts/test-mssr-routing-coverage.mjs && node scripts/test-mssr-http-telemetry.mjs && node scripts/test-mssr-learning-loop.mjs && node scripts/test-mssr-context-messages.mjs && node scripts/test-mssr-context-plane.mjs && node scripts/test-mssr-first-party-skills.mjs && node scripts/test-delegated-mssr-route-project.mjs && node scripts/test-selective-skill-context.mjs && node scripts/test-mssr-system-awareness.mjs && node scripts/test-mssr-intent-normalization.mjs && node scripts/test-project-context-modules.mjs && node scripts/test-project-context-update.mjs && node scripts/test-project-context-lifecycle.mjs && node scripts/test-project-change-consistency.mjs && node scripts/test-blender-viewport-capture.mjs && node scripts/test-blender-session-coordination.mjs && node scripts/test-windows-admin-tools.mjs && node scripts/test-skill-health.mjs && node scripts/test-project-health.mjs && node scripts/test-operational-notices.mjs && node scripts/test-mssr-notice-relay.mjs && node scripts/test-operational-notice-e5-invariants.mjs && node scripts/test-runtime-health.mjs && node scripts/test-mssr-consistency.mjs && node scripts/test-project-situation.mjs && node scripts/test-architecture-impact-observer.mjs",
+    "test:regressions:raw": "powershell -NoProfile -File .\\scripts\\test-bridge-regressions.ps1 && node scripts/test-v060-tools.mjs && node scripts/test-workspace-snapshot-storage-quota.mjs && node scripts/test-godot-tools.mjs && node scripts/test-whiteboard-tools.mjs && node scripts/test-image-file-import.mjs && node scripts/test-media-review-ingest.mjs && node scripts/test-workflow-guide-routing.mjs && node scripts/test-image-persistence.mjs && node scripts/test-git-multi-repo-publication.mjs && node scripts/test-system-hardening.mjs && node scripts/test-path-policy-cross-root-junction.mjs && node scripts/test-mssr-trace-contract.mjs && node scripts/test-mssr-context-continuation.mjs && node scripts/test-mssr-routing-compliance.mjs && node scripts/test-mssr-routing-coverage.mjs && node scripts/test-mssr-http-telemetry.mjs && node scripts/test-mssr-learning-loop.mjs && node scripts/test-mssr-context-messages.mjs && node scripts/test-mssr-context-plane.mjs && node scripts/test-mssr-first-party-skills.mjs && node scripts/test-delegated-mssr-route-project.mjs && node scripts/test-selective-skill-context.mjs && node scripts/test-mssr-system-awareness.mjs && node scripts/test-mssr-intent-normalization.mjs && node scripts/test-project-context-modules.mjs && node scripts/test-project-context-update.mjs && node scripts/test-project-context-lifecycle.mjs && node scripts/test-project-memory-ref-migration.mjs && node scripts/test-project-change-consistency.mjs && node scripts/test-blender-viewport-capture.mjs && node scripts/test-blender-session-coordination.mjs && node scripts/test-windows-admin-tools.mjs && node scripts/test-skill-health.mjs && node scripts/test-project-health.mjs && node scripts/test-operational-notices.mjs && node scripts/test-mssr-notice-relay.mjs && node scripts/test-operational-notice-e5-invariants.mjs && node scripts/test-runtime-health.mjs && node scripts/test-mssr-consistency.mjs && node scripts/test-project-situation.mjs && node scripts/test-architecture-impact-observer.mjs && node scripts/test-architecture-impact-host-adoption.mjs && node scripts/test-remote-node-tools.mjs",
     "test:workspace-snapshot-storage": "npm run build && node scripts/test-workspace-snapshot-storage-quota.mjs",
     "test:mssr-http-telemetry": "npm run build && node scripts/test-mssr-http-telemetry.mjs",
     "test:mssr-routing-coverage": "npm run build && node scripts/test-mssr-routing-coverage.mjs",
@@ -33,11 +34,13 @@
     "test:blender-viewport-capture": "npm run build && node scripts/test-blender-viewport-capture.mjs",
     "test:godot": "npm run build && node scripts/test-godot-tools.mjs",
     "test:mssr-delegated-routing": "npm run build && node scripts/test-delegated-mssr-route-project.mjs",
-    "test:project-context": "npm run build && node scripts/test-project-context-modules.mjs && node scripts/test-project-context-update.mjs && node scripts/test-project-context-lifecycle.mjs && node scripts/test-project-change-consistency.mjs",
+    "test:project-context": "npm run build && node scripts/test-project-context-modules.mjs && node scripts/test-project-context-update.mjs && node scripts/test-project-context-lifecycle.mjs && node scripts/test-project-memory-ref-migration.mjs && node scripts/test-project-change-consistency.mjs",
+    "test:project-memory-refs": "node scripts/test-project-memory-ref-migration.mjs",
     "test:skill-context": "npm run build && node scripts/test-selective-skill-context.mjs",
     "test:skill-routing": "npm run build && node scripts/test-skill-routing.mjs",
     "test:whiteboard": "npm run build && node scripts/test-whiteboard-tools.mjs",
     "test:windows-admin": "npm run build && node scripts/test-windows-admin-tools.mjs",
+    "test:remote-node": "npm run build && node scripts/test-remote-node-tools.mjs",
     "verify:all": "powershell -NoProfile -File .\\scripts\\verify-all.ps1",
     "docs:tools": "npm run build && node scripts/generate-tools-doc.mjs",
     "docs:tools:check": "npm run build && node scripts/generate-tools-doc.mjs --check",
@@ -49,14 +52,16 @@
     "test:runtime-health": "npm run build && node scripts/test-runtime-health.mjs",
     "test:mssr-consistency": "npm run build && node scripts/test-mssr-consistency.mjs",
     "test:project-situation": "npm run build && node scripts/test-project-situation.mjs",
-    "test:architecture-impact-observer": "npm run build && node scripts/test-architecture-impact-observer.mjs"
+    "test:architecture-impact-observer": "npm run build && node scripts/test-architecture-impact-observer.mjs",
+    "test:architecture-impact-host-adoption": "npm run build && node scripts/test-architecture-impact-host-adoption.mjs"
   },
   "dependencies": {
-    "@mauroprime/mssr": "file:vendor/mauroprime-mssr-0.2.45.tgz",
+    "@mauroprime/mssr": "file:vendor/mauroprime-mssr-0.2.53.tgz",
     "@modelcontextprotocol/core": "^2.0.0",
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@modelcontextprotocol/server": "^2.0.0",
+    "ssh2": "^1.17.0",
     "zod": "^3.24.1"
   },
   "overrides": {
@@ -64,6 +69,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.17.24",
+    "@types/ssh2": "^1.15.5",
     "tsx": "^4.21.0",
     "typescript": "^5.3.3"
   }

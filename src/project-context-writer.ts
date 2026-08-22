@@ -93,6 +93,19 @@ export async function updateProjectContextSection(args: {
   const initialized = await requireInitializedManifest(projectRoot);
   const targetPath = resolveMssrProjectWritePath(projectRoot, KIND_FILE[args.kind]);
   const manifestPath = initialized.path;
+
+  if (args.kind === "memory" && args.module?.kind === "memory") {
+    const rootMemorySource = mssrProjectRelativePath(MSSR_PROJECT_AUTHORITY_FILES.memory);
+    const existingModule = initialized.parsed.modules.find((entry) => entry.id === args.module!.id);
+    const existingRootSection = existingModule
+      && existingModule.kind === "memory"
+      && existingModule.source.path.replace(/\\/g, "/") === rootMemorySource
+      && existingModule.source.sections?.length === 1
+      && existingModule.source.sections[0].trim() === args.heading.trim();
+    if (!existingRootSection) {
+      throw new Error("[optional-memory-reference-required] New optional memory modules must be reference-backed under .mssr/knowledge/. Use project_context_capture instead of registering another PROJECT_MEMORY.md section. project_context_update remains available for deliberate root/core memory edits and for maintaining an already-existing legacy root-backed memory module until it is migrated.");
+    }
+  }
   assertPathAllowed(targetPath, "write");
   assertPathAllowed(manifestPath, "write");
 

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "architectures": [
+    {
+      "architectureId": "bridge-architecture-impact-host-adapter",
+      "authorityRef": ".mssr/knowledge/architecture/architecture-impact-observer.md",
+      "contextRef": "bridge-architecture-impact-host-boundary",
+      "impactRefs": [
+        "src/architecture-impact-observer.ts",
+        "src/architecture-impact-host-adapter.ts",
+        "src/bridge-server.ts"
+      ]
+    }
+  ]
+}

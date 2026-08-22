@@ -12,6 +12,8 @@ const DEFAULT_MAX_FILES = 1000;
 const DEFAULT_MAX_FILE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_MAX_TOTAL_BYTES = 25 * 1024 * 1024;
 const DEFAULT_MAX_SNAPSHOT_STORAGE_BYTES = 1024 * 1024 * 1024;
+const COMPLETE_SNAPSHOTS_PER_PROJECT = 2;
+const TRUNCATED_SNAPSHOTS_PER_PROJECT = 1;
 
 function snapshotStorageLimitBytes() {
   const raw = process.env.BRIDGE_MCP_SNAPSHOT_MAX_STORAGE_BYTES?.trim();
@@ -150,8 +152,9 @@ async function gitSnapshot(root: string) {
   return { head: String(head.stdout ?? "").trim() || null, status: String(status.stdout ?? "").trim() || null };
 }
 
-async function snapshotStorageUsage() {
-  await fs.mkdir(SNAPSHOT_ROOT, { recursive: true });
+type StoredSnapshotRecord = { manifest: SnapshotManifest; storageBytes: number };
+
+async function directoryStorageBytes(root: string) {
   let bytes = 0;
   async function measure(current: string) {
     const entries = await fs.readdir(current, { withFileTypes: true });
@@ -161,8 +164,93 @@ async function snapshotStorageUsage() {
       else if (entry.isFile()) bytes += (await fs.stat(full)).size;
     }
   }
-  await measure(SNAPSHOT_ROOT);
-  return { bytes, limitBytes: snapshotStorageLimitBytes() };
+  await measure(root);
+  return bytes;
+}
+
+async function snapshotStorageUsage() {
+  await fs.mkdir(SNAPSHOT_ROOT, { recursive: true });
+  return { bytes: await directoryStorageBytes(SNAPSHOT_ROOT), limitBytes: snapshotStorageLimitBytes() };
+}
+
+async function collectStoredSnapshotRecords() {
+  await fs.mkdir(SNAPSHOT_ROOT, { recursive: true });
+  const entries = await fs.readdir(SNAPSHOT_ROOT, { withFileTypes: true });
+  const records: StoredSnapshotRecord[] = [];
+  let invalidDirectories = 0;
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !/^[A-Za-z0-9_-]{8,100}$/.test(entry.name)) continue;
+    try {
+      const manifest = await readManifest(entry.name);
+      records.push({ manifest, storageBytes: await directoryStorageBytes(snapshotDir(entry.name)) });
+    } catch {
+      invalidDirectories += 1;
+    }
+  }
+  return { records, invalidDirectories };
+}
+
+function planSnapshotRetention(records: StoredSnapshotRecord[]) {
+  const groups = new Map<string, StoredSnapshotRecord[]>();
+  for (const record of records) {
+    const key = normalizePathForCompare(record.manifest.sourceRoot);
+    const group = groups.get(key) ?? [];
+    group.push(record);
+    groups.set(key, group);
+  }
+
+  const retained: StoredSnapshotRecord[] = [];
+  const remove: StoredSnapshotRecord[] = [];
+  for (const group of groups.values()) {
+    group.sort((a, b) => b.manifest.createdAt.localeCompare(a.manifest.createdAt) || b.manifest.id.localeCompare(a.manifest.id));
+    const complete = group.filter((record) => !record.manifest.truncated);
+    const truncated = group.filter((record) => record.manifest.truncated);
+    retained.push(...complete.slice(0, COMPLETE_SNAPSHOTS_PER_PROJECT));
+    retained.push(...truncated.slice(0, TRUNCATED_SNAPSHOTS_PER_PROJECT));
+    remove.push(...complete.slice(COMPLETE_SNAPSHOTS_PER_PROJECT));
+    remove.push(...truncated.slice(TRUNCATED_SNAPSHOTS_PER_PROJECT));
+  }
+  return { retained, remove };
+}
+
+async function applySnapshotRetention() {
+  const collected = await collectStoredSnapshotRecords();
+  const plan = planSnapshotRetention(collected.records);
+  let removedBytes = 0;
+  for (const record of plan.remove) {
+    await fs.rm(snapshotDir(record.manifest.id), { recursive: true, force: true });
+    removedBytes += record.storageBytes;
+  }
+  return {
+    policy: { completePerProject: COMPLETE_SNAPSHOTS_PER_PROJECT, truncatedPerProject: TRUNCATED_SNAPSHOTS_PER_PROJECT },
+    scannedValidSnapshots: collected.records.length,
+    invalidDirectoriesPreserved: collected.invalidDirectories,
+    retainedRecords: plan.retained,
+    removedCount: plan.remove.length,
+    removedBytes,
+    removedIds: plan.remove.map((record) => record.manifest.id),
+  };
+}
+
+function projectedReplacementBytes(records: StoredSnapshotRecord[], sourceRoot: string, incomingTruncated: boolean) {
+  const matching = records
+    .filter((record) => samePath(record.manifest.sourceRoot, sourceRoot) && record.manifest.truncated === incomingTruncated)
+    .sort((a, b) => b.manifest.createdAt.localeCompare(a.manifest.createdAt) || b.manifest.id.localeCompare(a.manifest.id));
+  const limit = incomingTruncated ? TRUNCATED_SNAPSHOTS_PER_PROJECT : COMPLETE_SNAPSHOTS_PER_PROJECT;
+  if (limit <= 0 || matching.length < limit) return 0;
+  return matching[matching.length - 1]?.storageBytes ?? 0;
+}
+
+function compactRetention(result: Awaited<ReturnType<typeof applySnapshotRetention>>) {
+  return {
+    policy: result.policy,
+    scannedValidSnapshots: result.scannedValidSnapshots,
+    invalidDirectoriesPreserved: result.invalidDirectoriesPreserved,
+    removedCount: result.removedCount,
+    removedBytes: result.removedBytes,
+    removedIds: result.removedIds.slice(0, 20),
+    removedIdsTruncated: result.removedIds.length > 20,
+  };
 }
 
 let snapshotCreationTail: Promise<void> = Promise.resolve();
@@ -183,13 +271,17 @@ async function createWorkspaceSnapshot(projectRoot: string | undefined, maxFiles
   const dir = snapshotDir(id);
   const contentDir = path.join(dir, "files");
   try {
-    await fs.mkdir(contentDir, { recursive: true });
     const scan = await scanWorkspace(root, maxFiles, maxFileBytes, maxTotalBytes, true);
+    const retentionBefore = await applySnapshotRetention();
     const storage = await snapshotStorageUsage();
-    const projectedBytes = storage.bytes + scan.totalBytes;
-    if (projectedBytes > storage.limitBytes) {
-      throw new Error(`Workspace snapshot storage quota exceeded: ${storage.bytes} bytes already stored + ${scan.totalBytes} bytes requested > ${storage.limitBytes} byte limit. Existing snapshots were preserved; inspect workspace_snapshot_list and prune only with an explicit reviewed plan, or raise BRIDGE_MCP_SNAPSHOT_MAX_STORAGE_BYTES when disk capacity justifies it.`);
+    const replacementBytes = projectedReplacementBytes(retentionBefore.retainedRecords, root, scan.truncated);
+    const transientProjectedBytes = storage.bytes + scan.totalBytes;
+    const steadyStateProjectedBytes = Math.max(0, transientProjectedBytes - replacementBytes);
+    if (steadyStateProjectedBytes > storage.limitBytes) {
+      throw new Error(`Workspace snapshot storage quota exceeded after automatic retention: ${storage.bytes} bytes retained + ${scan.totalBytes} bytes requested - ${replacementBytes} bytes replaceable = ${steadyStateProjectedBytes} bytes > ${storage.limitBytes} byte limit. The retained per-project fallbacks were preserved; raise BRIDGE_MCP_SNAPSHOT_MAX_STORAGE_BYTES only when disk capacity justifies it.`);
     }
+
+    await fs.mkdir(contentDir, { recursive: true });
     for (const file of scan.files) {
       const destination = snapshotContentPath(contentDir, file.path);
       await fs.mkdir(path.dirname(destination), { recursive: true });
@@ -212,7 +304,24 @@ async function createWorkspaceSnapshot(projectRoot: string | undefined, maxFiles
     await fs.writeFile(temporaryManifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
     await fs.rename(temporaryManifestPath, finalManifestPath);
     const verifiedManifest = await readManifest(id);
-    return { created: true, verified: true, snapshot: verifiedManifest, manifestPath: finalManifestPath, storagePath: dir };
+    const retentionAfter = await applySnapshotRetention();
+    const storageAfter = await snapshotStorageUsage();
+    return {
+      created: true,
+      verified: true,
+      snapshot: verifiedManifest,
+      manifestPath: finalManifestPath,
+      storagePath: dir,
+      retention: {
+        before: compactRetention(retentionBefore),
+        after: compactRetention(retentionAfter),
+        replacementBytes,
+        transientProjectedBytes,
+        steadyStateProjectedBytes,
+        storageAfterBytes: storageAfter.bytes,
+        storageLimitBytes: storageAfter.limitBytes,
+      },
+    };
   } catch (error) {
     await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
     throw error;
@@ -312,6 +421,10 @@ async function listSnapshots(limit: number) {
   return {
     snapshotRoot: SNAPSHOT_ROOT,
     count: manifests.length,
+    retention: {
+      completePerProject: COMPLETE_SNAPSHOTS_PER_PROJECT,
+      truncatedPerProject: TRUNCATED_SNAPSHOTS_PER_PROJECT,
+    },
     storage: {
       bytes: storage.bytes,
       limitBytes: storage.limitBytes,
@@ -325,7 +438,7 @@ async function listSnapshots(limit: number) {
 export const workspaceToolModule: BridgeToolModule = {
   name: "workspace",
   tools: [
-    { name: "workspace_snapshot", description: "Create a bounded content-addressed workspace snapshot outside the project, excluding generated/noisy directories and sensitive denied paths. The manifest is published atomically and read back before created=true is returned; use snapshot.id for later diff or rollback.", inputSchema: { type: "object", properties: { projectRoot: { type: "string" }, label: { type: "string" }, maxFiles: { type: "number", default: DEFAULT_MAX_FILES, minimum: 1, maximum: 5000 }, maxFileBytes: { type: "number", default: DEFAULT_MAX_FILE_BYTES, minimum: 1024, maximum: 10485760 }, maxTotalBytes: { type: "number", default: DEFAULT_MAX_TOTAL_BYTES, minimum: 1024, maximum: 104857600 } }, additionalProperties: false } },
+    { name: "workspace_snapshot", description: "Create a bounded content-addressed workspace snapshot outside the project, excluding generated/noisy directories and sensitive denied paths. Snapshot creation automatically retains only the two newest complete rollback points plus at most one truncated diagnostic snapshot per project root before enforcing the global storage quota. The manifest is published atomically and read back before created=true is returned; use snapshot.id for later diff or rollback.", inputSchema: { type: "object", properties: { projectRoot: { type: "string" }, label: { type: "string" }, maxFiles: { type: "number", default: DEFAULT_MAX_FILES, minimum: 1, maximum: 5000 }, maxFileBytes: { type: "number", default: DEFAULT_MAX_FILE_BYTES, minimum: 1024, maximum: 10485760 }, maxTotalBytes: { type: "number", default: DEFAULT_MAX_TOTAL_BYTES, minimum: 1024, maximum: 104857600 } }, additionalProperties: false } },
     { name: "workspace_diff", description: "Compare the current workspace with a saved snapshot by file hashes. Missing or legacy snapshot ids return actionable lifecycle guidance instead of a raw manifest ENOENT.", inputSchema: { type: "object", properties: { snapshotId: { type: "string" }, projectRoot: { type: "string" }, maxChanges: { type: "number", default: 200, minimum: 1, maximum: 2000 } }, required: ["snapshotId"], additionalProperties: false } },
     { name: "workspace_rollback", description: "Restore files from a complete snapshot after preflight hash/path checks. Requires an exact repeated snapshot id; optional removal affects only newly added files from a complete current scan.", inputSchema: { type: "object", properties: { snapshotId: { type: "string" }, confirmSnapshotId: { type: "string" }, projectRoot: { type: "string" }, removeAddedFiles: { type: "boolean", default: false } }, required: ["snapshotId", "confirmSnapshotId"], additionalProperties: false } },
     { name: "workspace_snapshot_list", description: "List recent workspace snapshots with roots, timestamps, sizes, and Git metadata.", inputSchema: { type: "object", properties: { limit: { type: "number", default: 20, minimum: 1, maximum: 200 } }, additionalProperties: false } },

@@ -1,4 +1,6 @@
+import type { MssrToolFrictionOperationalProjection } from "@mauroprime/mssr";
 import type { ToolAuditMetricRow, ToolAuditMetricSnapshot } from "./metrics.js";
+import type { BridgeToolFrictionProjection } from "./mssr-tool-friction.js";
 import type { BridgeToolMetadata, BridgeToolSchema } from "./tools/types.js";
 
 export const TOOL_AUDIT_VIEWS = ["needs-attention", "tool", "aliases", "fallback-overuse", "unused", "all"] as const;
@@ -170,14 +172,54 @@ function statusPriority(status: ToolAuditStatus): number {
   }[status];
 }
 
-export function buildToolAudit(tools: readonly BridgeToolSchema[], snapshot: ToolAuditMetricSnapshot, args: ToolAuditArgs) {
+function publicFrictionCluster(cluster: MssrToolFrictionOperationalProjection) {
+  return {
+    toolName: cluster.toolName,
+    level: cluster.level,
+    signal: cluster.signal,
+    signature: cluster.signature,
+    occurrenceCount: cluster.occurrenceCount,
+    distinctWorkflowCount: cluster.distinctWorkflowCount,
+    distinctTraceCount: cluster.distinctTraceCount,
+    latestObservedAt: cluster.latestObservedAt,
+    ageHours: cluster.ageHours,
+    severity: cluster.severity,
+    priorityScore: cluster.priorityScore,
+    reasonCodes: cluster.reasonCodes,
+    recommendedActions: cluster.recommendedActions,
+    recommendedOwner: cluster.recommendedOwner,
+    advisoryOnly: cluster.advisoryOnly,
+  };
+}
+
+function actionableFrictionLevel(level: MssrToolFrictionOperationalProjection["level"] | undefined): boolean {
+  return level === "error" || level === "review";
+}
+
+function frictionPriority(level: MssrToolFrictionOperationalProjection["level"] | undefined): number {
+  if (level === "error") return 0;
+  if (level === "review") return 1;
+  return 2;
+}
+
+export function buildToolAudit(
+  tools: readonly BridgeToolSchema[],
+  snapshot: ToolAuditMetricSnapshot,
+  args: ToolAuditArgs,
+  friction?: BridgeToolFrictionProjection,
+) {
   const metricsByTool = new Map(snapshot.rows.map((row) => [row.tool, row]));
+  const frictionByTool = new Map<string, MssrToolFrictionOperationalProjection>();
+  for (const cluster of friction?.clusters ?? []) {
+    if (!frictionByTool.has(cluster.toolName)) frictionByTool.set(cluster.toolName, cluster);
+  }
   const allItems = tools.map((tool) => {
     const metric = metricsByTool.get(tool.name);
     const calls = metricNumber(metric?.calls);
     const okCalls = metricNumber(metric?.okCalls);
     const errorCalls = metricNumber(metric?.errorCalls);
     const recommendation = recommendationFor(tool, metric);
+    const toolFriction = frictionByTool.get(tool.name);
     return {
       tool: tool.name,
       description: tool.description,
@@ -187,6 +229,7 @@ export function buildToolAudit(tools: readonly BridgeToolSchema[], snapshot: Too
       recommendation: recommendation.recommendation,
       reason: recommendation.reason,
       confidence: recommendation.confidence,
+      maintenanceFriction: toolFriction ? publicFrictionCluster(toolFriction) : null,
       evidence: {
         calls,
         okCalls,
@@ -214,19 +257,38 @@ export function buildToolAudit(tools: readonly BridgeToolSchema[], snapshot: Too
     if (args.view === "aliases") return item.metadata.role === "alias";
     if (args.view === "fallback-overuse") return item.metadata.role === "fallback" && item.evidence.calls > 0;
     if (args.view === "unused") return item.evidence.calls === 0;
-    if (args.view === "needs-attention") return !["protect", "maintain"].includes(item.status);
+    if (args.view === "needs-attention") {
+      return actionableFrictionLevel(item.maintenanceFriction?.level)
+        || !["protect", "maintain"].includes(item.status);
+    }
     return true;
   });
 
-  filtered.sort((a, b) => statusPriority(a.status) - statusPriority(b.status)
-    || b.evidence.errorCalls - a.evidence.errorCalls
-    || b.evidence.calls - a.evidence.calls
-    || a.tool.localeCompare(b.tool));
+  if (args.view === "needs-attention") {
+    filtered.sort((a, b) => frictionPriority(a.maintenanceFriction?.level) - frictionPriority(b.maintenanceFriction?.level)
+      || (b.maintenanceFriction?.priorityScore ?? 0) - (a.maintenanceFriction?.priorityScore ?? 0)
+      || statusPriority(a.status) - statusPriority(b.status)
+      || b.evidence.errorCalls - a.evidence.errorCalls
+      || b.evidence.calls - a.evidence.calls
+      || a.tool.localeCompare(b.tool));
+  } else {
+    filtered.sort((a, b) => statusPriority(a.status) - statusPriority(b.status)
+      || b.evidence.errorCalls - a.evidence.errorCalls
+      || b.evidence.calls - a.evidence.calls
+      || a.tool.localeCompare(b.tool));
+  }
 
   const statusCounts = allItems.reduce<Record<string, number>>((counts, item) => {
     counts[item.status] = (counts[item.status] ?? 0) + 1;
     return counts;
   }, {});
+  const registeredToolNames = new Set(tools.map((tool) => tool.name));
+  const registeredFrictionClusters = (friction?.clusters ?? []).filter((cluster) => registeredToolNames.has(cluster.toolName));
+  const returnedItems = filtered.slice(0, args.limit);
+  const returnedToolNames = new Set(returnedItems.map((item) => item.tool));
+  const returnedFrictionClusters = registeredFrictionClusters
+    .filter((cluster) => returnedToolNames.has(cluster.toolName))
+    .map(publicFrictionCluster);
 
   return {
     view: args.view,
@@ -238,14 +300,23 @@ export function buildToolAudit(tools: readonly BridgeToolSchema[], snapshot: Too
       registeredTools: tools.length,
       observedTools: allItems.filter((item) => item.evidence.calls > 0).length,
       toolsWithoutEvidence: allItems.filter((item) => item.evidence.calls === 0).length,
-      returned: Math.min(filtered.length, args.limit),
+      returned: returnedItems.length,
+      actionableRepeatedFrictionClusters: registeredFrictionClusters.filter((cluster) => cluster.signal === "repeated-friction" && actionableFrictionLevel(cluster.level)).length,
       statusCounts,
+    },
+    maintenanceFriction: {
+      metricsAvailable: friction?.metricsAvailable ?? false,
+      observedFailures: friction?.observedFailures ?? 0,
+      classifiedFailures: friction?.classifiedFailures ?? 0,
+      ignoredUnclassifiedFailures: friction?.ignoredUnclassifiedFailures ?? 0,
+      clusters: returnedFrictionClusters,
     },
     privacy: {
       rawArgumentsStored: false,
       rawPromptsStored: false,
-      evidence: "bounded aggregate metrics and redacted error categories",
+      rawErrorTextReturned: false,
+      evidence: "bounded aggregate metrics, redacted error categories, and sanitized stable failure signatures",
     },
-    items: filtered.slice(0, args.limit),
+    items: returnedItems,
   };
 }

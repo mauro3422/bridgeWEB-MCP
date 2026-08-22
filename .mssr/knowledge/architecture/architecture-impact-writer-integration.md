@@ -1,0 +1,5 @@
+# Architecture Impact writer integration
+
+`src/architecture-impact-observer.ts` reads only already-declared project refs and reports available/missing/unavailable evidence inside the canonical root. `src/architecture-impact-host-adapter.ts` feeds that evidence into packaged MSSR `planArchitectureHostAdoption` / `evaluateArchitectureHostAdoption`; optional TS symbols use MSSR's reference analyzer and import/dependency evidence reuses Bridge's existing import graph. Derived edges remain candidate-only unless a repository-declared invariant evaluates them.
+
+The central dispatch prepares Architecture Impact only after lifecycle guards allow an explicit-path writer and evaluates only after that writer succeeds. Writers recover their scoped root from the explicit/current session workflow, so HTTP/MCP instance rotation cannot silently drop Architecture Impact. Coverage is `write_text_file`, `apply_patch`, `edit_lines`, `binary_file_write` and `git_restore_file`, including delegated calls; arbitrary shell mutations remain uncovered without a trustworthy changed-file receipt/diff.

@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "architectures": [
+    {
+      "architectureId": "bridge-architecture-impact-host-adapter",
+      "implementation": [
+        {
+          "ref": "src/architecture-impact-observer.ts",
+          "selectors": [
+            {
+              "kind": "symbol",
+              "language": "typescript",
+              "name": "observeBridgeArchitectureImpactProject",
+              "aspect": "body"
+            }
+          ]
+        },
+        {
+          "ref": "src/architecture-impact-host-adapter.ts",
+          "selectors": [
+            {
+              "kind": "symbol",
+              "language": "typescript",
+              "name": "prepareBridgeArchitectureImpactHostAdoption",
+              "aspect": "body"
+            },
+            {
+              "kind": "symbol",
+              "language": "typescript",
+              "name": "evaluatePreparedBridgeArchitectureImpact",
+              "aspect": "body"
+            },
+            {
+              "kind": "symbol",
+              "language": "typescript",
+              "name": "reviewBridgeArchitectureImpactBaseline",
+              "aspect": "body"
+            }
+          ]
+        },
+        {
+          "ref": "src/bridge-server.ts",
+          "selectors": [
+            {
+              "kind": "symbol",
+              "language": "typescript",
+              "name": "configureBridgeServer",
+              "aspect": "body"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

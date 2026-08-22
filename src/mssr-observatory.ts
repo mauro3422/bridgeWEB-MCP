@@ -89,6 +89,7 @@ const PREPARATION_TOOLS = new Set([
   "skill_route_vocabulary",
   "skill_route_plan",
   "skill_bootstrap",
+  "skill_context_next",
   "skill_load",
   "mssr_observatory_query",
   "mssr_trace_evidence",
@@ -478,7 +479,7 @@ function sanitizeValue(value: unknown, depth = 0): unknown {
   if (!value || typeof value !== "object") return String(value ?? "");
   const output: JsonRecord = {};
   for (const [key, child] of Object.entries(value as JsonRecord).slice(0, 60)) {
-    if (/prompt|transcript|chain.?of.?thought|password|secret|api.?key|token/i.test(key)) continue;
+    if (/prompt|transcript|chain.?of.?thought|password|secret|api.?key|token|cursor/i.test(key)) continue;
     output[key] = sanitizeValue(child, depth + 1);
   }
   return output;
@@ -843,6 +844,59 @@ export function recordMssrSkillLoad(args: {
   });
 }
 
+/**
+ * Record one privacy-safe, bootstrap-level context envelope observation.
+ *
+ * This is intentionally separate from per-skill `skill_loaded` rows: a
+ * bootstrap has one global budget/envelope, while a route can load many skills.
+ * Callers must not put cursor values, selected content, prompts, or transcripts
+ * in this event. Counts describe units only (for example skills or modules),
+ * never their procedural text.
+ */
+export function recordMssrContextAssembly(args: {
+  traceId: string;
+  caller?: string;
+  stage?: string;
+  requestedContextChars?: number;
+  deliveredContextChars?: number;
+  responseChars?: number;
+  envelopeChars?: number;
+  requiredOverflowChars?: number;
+  acceptedOverflowChars?: number;
+  remainingRequiredUnits?: number;
+  remainingAcceptedUnits?: number;
+  continuationIssued?: boolean;
+  continuationConsumed?: boolean;
+  chainCompleted?: boolean;
+}): MssrStoredEvent {
+  const boundedNumber = (value: number | undefined, maximum = 10_000_000) => (
+    typeof value === "number" && Number.isFinite(value)
+      ? Math.min(maximum, Math.max(0, Math.trunc(value)))
+      : undefined
+  );
+  const boundedUnits = (value: number | undefined) => boundedNumber(value, 10_000);
+  return recordMssrEvent({
+    traceId: args.traceId,
+    eventType: "context_assembly",
+    caller: args.caller,
+    stage: args.stage,
+    ok: true,
+    details: {
+      requestedContextChars: boundedNumber(args.requestedContextChars),
+      deliveredContextChars: boundedNumber(args.deliveredContextChars),
+      responseChars: boundedNumber(args.responseChars),
+      envelopeChars: boundedNumber(args.envelopeChars),
+      requiredOverflowChars: boundedNumber(args.requiredOverflowChars),
+      acceptedOverflowChars: boundedNumber(args.acceptedOverflowChars),
+      remainingRequiredUnits: boundedUnits(args.remainingRequiredUnits),
+      remainingAcceptedUnits: boundedUnits(args.remainingAcceptedUnits),
+      continuationIssued: args.continuationIssued === true,
+      continuationConsumed: args.continuationConsumed === true,
+      chainCompleted: args.chainCompleted === true,
+    },
+  });
+}
+
 export function recordMssrSkillDecision(args: {
   traceId: string;
   caller?: string;
@@ -1154,6 +1208,12 @@ function numericDetail(event: MssrStoredEvent, key: string): number {
 function summarizeContextAssembly(events: MssrStoredEvent[]) {
   const loads = events.filter((event) => event.eventType === "skill_loaded"
     && (typeof event.details.totalCharsLoaded === "number" || typeof event.details.fullSkillChars === "number"));
+  // Newer callers emit exactly one context_assembly event per bootstrap. Keep
+  // per-skill observations for historical compatibility, but never use them to
+  // infer bootstrap overflow once the authoritative aggregate exists.
+  const assemblies = events.filter((event) => event.eventType === "context_assembly");
+  const latestAssemblyByTrace = new Map<string, MssrStoredEvent>();
+  for (const event of assemblies) latestAssemblyByTrace.set(event.traceId, event);
   const byTrace = new Map<string, {
     traceId: string;
     latestAt: string;
@@ -1168,6 +1228,18 @@ function summarizeContextAssembly(events: MssrStoredEvent[]) {
     duplicateCharsAvoided: number;
     skillNames: Set<string>;
     planningModes: Set<string>;
+    bootstrapObserved: boolean;
+    requestedContextChars: number;
+    deliveredContextChars: number;
+    responseChars: number;
+    envelopeChars: number;
+    requiredOverflowChars: number;
+    acceptedOverflowChars: number;
+    remainingRequiredUnits: number;
+    remainingAcceptedUnits: number;
+    continuationIssued: boolean;
+    continuationConsumed: boolean;
+    chainCompleted: boolean;
   }>();
   const bySkill = new Map<string, {
     name: string;
@@ -1205,7 +1277,7 @@ function summarizeContextAssembly(events: MssrStoredEvent[]) {
     const saved = numericDetail(event, "estimatedCharsSaved");
     const duplicate = numericDetail(event, "duplicateCharsAvoided");
     const skipped = event.details.skipped === true;
-    const overflow = event.details.budgetExceeded === true;
+    const overflow = !latestAssemblyByTrace.has(event.traceId) && event.details.budgetExceeded === true;
     const skippedForBudget = skipped && event.details.skippedReason === "optional-context-exceeds-budget";
     const requiredOverflow = overflow && event.required === true && !skipped;
     const optionalOverflow = overflow && event.required !== true && !skipped;
@@ -1240,6 +1312,18 @@ function summarizeContextAssembly(events: MssrStoredEvent[]) {
       duplicateCharsAvoided: 0,
       skillNames: new Set<string>(),
       planningModes: new Set<string>(),
+      bootstrapObserved: false,
+      requestedContextChars: 0,
+      deliveredContextChars: 0,
+      responseChars: 0,
+      envelopeChars: 0,
+      requiredOverflowChars: 0,
+      acceptedOverflowChars: 0,
+      remainingRequiredUnits: 0,
+      remainingAcceptedUnits: 0,
+      continuationIssued: false,
+      continuationConsumed: false,
+      chainCompleted: false,
     };
     trace.latestAt = event.occurredAt > trace.latestAt ? event.occurredAt : trace.latestAt;
     trace.loadedChars += loaded;
@@ -1290,6 +1374,74 @@ function summarizeContextAssembly(events: MssrStoredEvent[]) {
     bySkill.set(name, skill);
   }
 
+  let requestedContextChars = 0;
+  let deliveredContextChars = 0;
+  let responseChars = 0;
+  let envelopeChars = 0;
+  let requiredOverflowChars = 0;
+  let acceptedOverflowChars = 0;
+  let remainingRequiredUnits = 0;
+  let remainingAcceptedUnits = 0;
+  let continuationIssued = 0;
+  let continuationConsumed = 0;
+  let chainCompleted = 0;
+  for (const event of assemblies) {
+    requestedContextChars += numericDetail(event, "requestedContextChars");
+    deliveredContextChars += numericDetail(event, "deliveredContextChars");
+    responseChars += numericDetail(event, "responseChars");
+    envelopeChars += numericDetail(event, "envelopeChars");
+    requiredOverflowChars += numericDetail(event, "requiredOverflowChars");
+    acceptedOverflowChars += numericDetail(event, "acceptedOverflowChars");
+    remainingRequiredUnits += numericDetail(event, "remainingRequiredUnits");
+    remainingAcceptedUnits += numericDetail(event, "remainingAcceptedUnits");
+    if (event.details.continuationIssued === true) continuationIssued += 1;
+    if (event.details.continuationConsumed === true) continuationConsumed += 1;
+    if (event.details.chainCompleted === true) chainCompleted += 1;
+  }
+  for (const [traceId, event] of latestAssemblyByTrace) {
+    const trace = byTrace.get(traceId) ?? {
+      traceId,
+      latestAt: event.occurredAt,
+      loadedChars: 0,
+      fullChars: 0,
+      savedChars: 0,
+      skippedLoads: 0,
+      overflowLoads: 0,
+      requiredOverflowLoads: 0,
+      optionalOverflowLoads: 0,
+      skippedForBudgetLoads: 0,
+      duplicateCharsAvoided: 0,
+      skillNames: new Set<string>(),
+      planningModes: new Set<string>(),
+      bootstrapObserved: false,
+      requestedContextChars: 0,
+      deliveredContextChars: 0,
+      responseChars: 0,
+      envelopeChars: 0,
+      requiredOverflowChars: 0,
+      acceptedOverflowChars: 0,
+      remainingRequiredUnits: 0,
+      remainingAcceptedUnits: 0,
+      continuationIssued: false,
+      continuationConsumed: false,
+      chainCompleted: false,
+    };
+    trace.latestAt = event.occurredAt > trace.latestAt ? event.occurredAt : trace.latestAt;
+    trace.bootstrapObserved = true;
+    trace.requestedContextChars = numericDetail(event, "requestedContextChars");
+    trace.deliveredContextChars = numericDetail(event, "deliveredContextChars");
+    trace.responseChars = numericDetail(event, "responseChars");
+    trace.envelopeChars = numericDetail(event, "envelopeChars");
+    trace.requiredOverflowChars = numericDetail(event, "requiredOverflowChars");
+    trace.acceptedOverflowChars = numericDetail(event, "acceptedOverflowChars");
+    trace.remainingRequiredUnits = numericDetail(event, "remainingRequiredUnits");
+    trace.remainingAcceptedUnits = numericDetail(event, "remainingAcceptedUnits");
+    trace.continuationIssued = event.details.continuationIssued === true;
+    trace.continuationConsumed = event.details.continuationConsumed === true;
+    trace.chainCompleted = event.details.chainCompleted === true;
+    byTrace.set(traceId, trace);
+  }
+
   const skillPressure = [...bySkill.values()].map((skill) => {
     const averageCoreChars = skill.loads > 0 ? Math.round(skill.coreChars / skill.loads) : 0;
     const averageLoadedChars = skill.loads > 0 ? Math.round(skill.loadedChars / skill.loads) : 0;
@@ -1322,6 +1474,9 @@ function summarizeContextAssembly(events: MssrStoredEvent[]) {
 
   return {
     loadEvents: loads.length,
+    bootstrapEvents: assemblies.length,
+    bootstrapTelemetryTraces: latestAssemblyByTrace.size,
+    legacySkillLoadOnlyTraces: new Set(loads.filter((event) => !latestAssemblyByTrace.has(event.traceId)).map((event) => event.traceId)).size,
     selectiveLoads: loads.filter((event) => event.details.contentMode === "selective").length,
     fullLoads: loads.filter((event) => event.details.contentMode === "full").length,
     fallbackLoads,
@@ -1336,6 +1491,17 @@ function summarizeContextAssembly(events: MssrStoredEvent[]) {
     savedChars,
     savingsRate: rate(savedChars, fullChars),
     duplicateCharsAvoided,
+    requestedContextChars,
+    deliveredContextChars,
+    responseChars,
+    envelopeChars,
+    requiredOverflowChars,
+    acceptedOverflowChars,
+    remainingRequiredUnits,
+    remainingAcceptedUnits,
+    continuationIssued,
+    continuationConsumed,
+    chainCompleted,
     planningModes: topCounts(planningModes, 8),
     recentTraces: [...byTrace.values()]
       .map((trace) => ({
@@ -1351,6 +1517,18 @@ function summarizeContextAssembly(events: MssrStoredEvent[]) {
         optionalOverflowLoads: trace.optionalOverflowLoads,
         skippedForBudgetLoads: trace.skippedForBudgetLoads,
         duplicateCharsAvoided: trace.duplicateCharsAvoided,
+        bootstrapObserved: trace.bootstrapObserved,
+        requestedContextChars: trace.requestedContextChars,
+        deliveredContextChars: trace.deliveredContextChars,
+        responseChars: trace.responseChars,
+        envelopeChars: trace.envelopeChars,
+        requiredOverflowChars: trace.requiredOverflowChars,
+        acceptedOverflowChars: trace.acceptedOverflowChars,
+        remainingRequiredUnits: trace.remainingRequiredUnits,
+        remainingAcceptedUnits: trace.remainingAcceptedUnits,
+        continuationIssued: trace.continuationIssued,
+        continuationConsumed: trace.continuationConsumed,
+        chainCompleted: trace.chainCompleted,
         skills: trace.skillNames.size,
         planningModes: [...trace.planningModes],
       }))

@@ -16,6 +16,11 @@ import {
   type BridgeNoticeInput,
 } from "./notices.js";
 import { createDefaultToolRegistry } from "./tool-registry.js";
+import {
+  evaluatePreparedBridgeArchitectureImpact,
+  prepareBridgeArchitectureImpactHostAdoption,
+  type BridgeArchitectureImpactEvaluationResult,
+} from "./architecture-impact-host-adapter.js";
 import type { BridgeToolSchema } from "./tools/types.js";
 import { createMssrTraceSessionCoordinator } from "./mssr-trace-context.js";
 import { recordMssrEvent } from "./mssr-observatory.js";
@@ -403,6 +408,90 @@ function emitRoutingComplianceNotice(
   if (projected.notice) emitBridgeNotice(projected.notice);
 }
 
+function architectureImpactErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function emitArchitectureImpactEvaluation(result: BridgeArchitectureImpactEvaluationResult): void {
+  for (const item of result.items) {
+    if (item.state === "baseline-review-required") {
+      emitBridgeNotice({
+        severity: "warning",
+        code: "mssr-architecture-impact-baseline-review-due",
+        source: "bridge-architecture-impact-host-adapter",
+        message: `Architecture Impact requiere baseline revisado para '${item.architectureId}' antes de evaluar cambios automáticamente.`,
+        details: {
+          architectureId: item.architectureId,
+          matchedRefs: item.matchedRefs,
+          ...(item.contextRef ? { contextRef: item.contextRef } : {}),
+          semanticOwner: "mssr",
+          canonicalRewriteAllowed: false,
+        },
+        actions: [{
+          label: "Revisar baseline Architecture Impact",
+          instruction: "Revisa explícitamente la arquitectura declarada y crea el baseline host-local sólo con reviewed=true; no autoactualices ADRs ni autoridad canónica.",
+        }],
+        dedupeKey: `architecture-impact:baseline:${item.architectureId}`,
+      });
+      continue;
+    }
+    const evaluation = item.evaluation;
+    if (evaluation.attentionLevel !== "review") continue;
+    emitBridgeNotice({
+      severity: "warning",
+      code: "mssr-architecture-impact-review",
+      source: "bridge-architecture-impact-host-adapter",
+      message: `Architecture Impact marcó REVIEW para '${item.architectureId}'; replanifica con el contexto/autoridad indicados antes de persistir una decisión arquitectónica.`,
+      details: {
+        architectureId: item.architectureId,
+        matchedRefs: item.matchedRefs,
+        projectionStatus: evaluation.projection.status,
+        projectionReasons: evaluation.projection.reasonCodes,
+        structuralLevel: evaluation.structuralRefinement?.level ?? null,
+        structuralReasons: evaluation.structuralRefinement?.reasonCodes ?? [],
+        invariants: evaluation.invariants.map((invariant) => ({
+          invariantId: invariant.invariantId,
+          status: invariant.status,
+          level: invariant.level,
+          reasonCode: invariant.reasonCode,
+        })),
+        contextRequests: evaluation.contextFeedback?.requests.map((request) => ({
+          role: request.role,
+          ...(request.contextRef ? { contextRef: request.contextRef } : {}),
+          kind: request.request.kind,
+          resolution: request.request.resolution,
+          action: request.request.action,
+          reasonCodes: request.request.reasonCodes,
+        })) ?? [],
+        semanticOwner: evaluation.semanticOwner,
+        canonicalRewriteAllowed: evaluation.canonicalRewriteAllowed,
+      },
+      actions: [{
+        label: "Replanificar Architecture Impact",
+        instruction: "Replanifica MSSR en el mismo workflow y carga sólo los contextRef/authority solicitados por contextRequests; no reescribas autoridad canónica automáticamente.",
+      }],
+      dedupeKey: `architecture-impact:review:${item.architectureId}`,
+    });
+  }
+}
+
+function emitArchitectureImpactFailure(projectRoot: string, toolName: string, error: unknown): void {
+  emitBridgeNotice({
+    severity: "warning",
+    code: "mssr-architecture-impact-host-observation-failed",
+    source: "bridge-architecture-impact-host-adapter",
+    message: `Architecture Impact no pudo completar la observación host para '${toolName}'. La tool autorizada no fue bloqueada; trata esta arquitectura como REVIEW hasta revalidarla.`,
+    details: {
+      projectRoot,
+      toolName,
+      error: architectureImpactErrorMessage(error).slice(0, 600),
+      semanticOwner: "mssr",
+      advisoryOnly: true,
+    },
+    dedupeKey: `architecture-impact:host-failure:${projectRoot}:${toolName}`,
+  });
+}
+
 type BridgeServerSurface = {
   setRequestHandler: (...args: any[]) => void;
   getClientVersion: () => { name?: string; version?: string } | undefined;
@@ -456,11 +545,19 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
       (request.params.arguments ?? {}) as Record<string, unknown>,
       hostProfile,
     );
-    const rootScopeKey = projectRootScopeKey(hostProfile.sessionKey, normalizeWorkflowKey(profiledArgs.workflowKey));
+    const activeTraceBeforeCall = mssrTraceSession.snapshot();
+    const rootWorkflowKey = normalizeWorkflowKey(profiledArgs.workflowKey)
+      ?? (hostProfile.sessionKey ? sessionWorkflowKeys.get(hostProfile.sessionKey) : undefined)
+      ?? (activeTraceBeforeCall.active && !activeTraceBeforeCall.closed
+        ? normalizeWorkflowKey(activeTraceBeforeCall.workflowKey)
+        : undefined)
+      ?? localWorkflowKey;
+    const rootScopeKey = projectRootScopeKey(hostProfile.sessionKey, rootWorkflowKey);
     const inheritedProjectRoot = (rootScopeKey ? sessionProjectRoots.get(rootScopeKey) : undefined)
       ?? (pendingContextRoots.size === 1 ? [...pendingContextRoots][0] : undefined);
     const scopedArgs = withInheritedProjectRoot(name, profiledArgs, inheritedProjectRoot);
     const effectiveCall = delegatedArgs(name, scopedArgs);
+    let architectureImpactPrepared: Awaited<ReturnType<typeof prepareBridgeArchitectureImpactHostAdoption>> = null;
     const observedProject = projectFromArgs(name, scopedArgs);
     if (name === "project_context_load") {
       const nextTaskKey = taskKeyFromText(profiledArgs.task);
@@ -514,7 +611,6 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
         ? [...pendingContextProjects][0]
         : "multi-project"
       : undefined;
-    const activeTraceBeforeCall = mssrTraceSession.snapshot();
     const activeTraceProject = activeTraceBeforeCall.active
       && !activeTraceBeforeCall.closed
       && activeTraceBeforeCall.project
@@ -589,10 +685,15 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
     );
     if (startsNewRoute) {
       localTaskKey = undefined;
-      localWorkflowKey = undefined;
+      localWorkflowKey = explicitWorkflowKey;
       if (hostProfile.sessionKey) {
         sessionTaskKeys.delete(hostProfile.sessionKey);
-        sessionWorkflowKeys.delete(hostProfile.sessionKey);
+        if (explicitWorkflowKey) {
+          sessionWorkflowKeys.delete(hostProfile.sessionKey);
+          sessionWorkflowKeys.set(hostProfile.sessionKey, explicitWorkflowKey);
+        } else {
+          sessionWorkflowKeys.delete(hostProfile.sessionKey);
+        }
       }
     }
     const toolSchema = modularToolRegistry.tools.find((tool) => tool.name === name);
@@ -633,7 +734,25 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
         throw new Error(`${prepared.blocked.code}: ${prepared.blocked.message}`);
       }
       if (!modularToolRegistry.has(name)) throw new Error(`Unknown tool: ${name}`);
+      if (inheritedProjectRoot) {
+        try {
+          architectureImpactPrepared = await prepareBridgeArchitectureImpactHostAdoption({
+            projectRoot: inheritedProjectRoot,
+            toolName: effectivePrepared.toolName,
+            args: effectivePrepared.args,
+          });
+        } catch (error) {
+          emitArchitectureImpactFailure(inheritedProjectRoot, effectivePrepared.toolName, error);
+        }
+      }
       const result = await modularToolRegistry.call(name, args);
+      if (architectureImpactPrepared) {
+        try {
+          emitArchitectureImpactEvaluation(await evaluatePreparedBridgeArchitectureImpact(architectureImpactPrepared));
+        } catch (error) {
+          emitArchitectureImpactFailure(architectureImpactPrepared.projectRoot, effectiveCall.toolName, error);
+        }
+      }
       if (name === "project_context_load") {
         const loadedRoot = typeof profiledArgs.projectRoot === "string" ? profiledArgs.projectRoot.trim() : "";
         if (loadedRoot) {
@@ -681,7 +800,7 @@ function bridgeServerOptions() {
       "When the user asks you to write, explain, diagram, annotate, or place an existing image inside TabletWhiteboard, use whiteboard_add_text for structured prose, whiteboard_add_diagram for safe shapes, arrows, polylines and Bezier paths, whiteboard_add_svg only for sanitized SVG markup, and whiteboard_insert_image only for an existing local PNG, JPEG, or WebP. These tools write to ChatGPT's separate locked layer; do not claim an object exists until the tool confirms it.",
       "Bridge anomaly notices are delivered inside normal tool responses as bridgeNotices and are removed from the pending queue after delivery. Their bounded actions are suggested preflights or recovery steps, never authorization. Delivered notices remain visible in the dashboard recent-history view for 24 hours so unresolved triggers are not lost.",
       "Bridge automatically propagates an MSSR trace inside the current MCP session, through a bounded process-shared lease and, after coordinator-memory loss, from persisted SQLite state. Exact anonymized-session or project matches win; when connector metadata rotates across related repositories, Bridge may adopt only the single open trace for the same caller and never uses a skill name to choose between concurrent tasks. Keep explicit traceId for ambiguous, historical or deliberately selected resumes; treat ambiguous trace, mismatch, orphan load, missing required skill, and outcome-without-route notices as control evidence that may require replanning.",
-      "Use skill_route_plan for inspection. When applying a route, follow its nextAction and call skill_bootstrap so all active-phase skills load automatically on the same trace; use individual skill_load only for focused recovery. Before tools that consume runtime ids, follow metadata.usage preflights and never invent sessions, snapshots, uploads, Studios or provider tool names.",
+      "Use skill_route_plan for inspection. When applying a route, follow its nextAction and call skill_bootstrap. If bootstrap returns mustContinue=true, call its exact skill_context_next action repeatedly on the same trace until status=complete before dependent work; notices are recovery reminders, not context transport. Required obligations and accepted optional roots remain distinct across every page. Use individual skill_load only for focused recovery. Before tools that consume runtime ids, follow metadata.usage preflights and never invent sessions, snapshots, uploads, Studios or provider tool names.",
       "Bridge correlates ChatGPT tool calls with the anonymized openai/session metadata when the host provides it. An mssr-unrouted-tool-call notice means an eligible tool ran without a compatible route; continue safely, but bootstrap MSSR before the next substantial chain. Bootstrap and diagnostic tools are excluded from trace-coverage denominators.",
       "For long or multi-phase chatgpt-web work, keep the user-visible host alive with bounded progress checkpoints at scope/owner resolution, before another opaque tool phase, after material results or delegated handoffs, after classified failures/replans, before persistence, and at closure. Report only observable facts, active phase/owner, and the next gate; never private chain-of-thought. Record an MSSR outcome and return a concise result or concrete blocker when the task ends. Bridge may emit mssr-web-outcome-missing-after-idle after substantive tool activity without an observable outcome; treat it as an in-band lifecycle reminder to communicate before another long chain, not proof that the UI failed to render. Bridge notices cannot interrupt an active opaque tool call or push directly to the user outside a later tool response.",
       "Never claim that a guide, file, image, build, Blender scene, or other side effect exists until a tool result confirms it.",

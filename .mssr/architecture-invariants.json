@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "invariants": [
+    {
+      "invariantId": "bridge-host-adapter-no-project-context-tool-semantic-dependency",
+      "architectureId": "bridge-architecture-impact-host-adapter",
+      "relationshipClass": "declared",
+      "description": "Architecture Impact host adapter must consume portable MSSR context contracts directly, not Bridge project-context tool semantics.",
+      "kind": "forbid-edge",
+      "edgeKind": "import",
+      "sourceRef": "src/architecture-impact-host-adapter.ts",
+      "targetRef": "src/tools/project-context-tools.ts"
+    }
+  ]
+}

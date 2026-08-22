@@ -1,23 +1,12 @@
 # Bridge project memory
 
-## MSSR learning boundary
+## Resumable skill-context invariant
 
-Historical learning is currently `observe-only`. Learning digests and empirical priors may be measured and reviewed, but `routingInfluence=false`: they do not change deterministic routing, scores, context selection, permissions, or required workflow obligations. Activation requires separate replay, calibration, shadow evaluation, and an explicit versioned feature flag.
-
-## Change and memory consistency
-
-Every substantive release should have one versioned `changelogs/X.Y.Z.md` summary and explicitly review PROJECT_CONTEXT, PROJECT_MEMORY, and PROJECT_STATE impact. `project_change_consistency` is a read-only persistence gate: it may report drift or block publish readiness, but it never writes project memory automatically. `reviewed-none` is a deliberate review result; `pending` means persistence is incomplete.
-
-## Debug history strategy
-
-When MSSR intent indicates debugging, recovery, history-recovery, repeated friction, conflicting evidence, or comparable non-nominal history needs, load only `changelogs/INDEX.md` and the current release note first. Load `changelogs/LEGACY.md` or another historical release only when the index/current evidence points to a specific older regression window.
+`maxContextChars` bounds selected procedural text while `maxEnvelopeChars` bounds the complete compact response (32.000 by default); neither may be inferred from the other. When selected context does not fit, `skill_bootstrap`/`skill_context_next` must expose a deterministic partial chain and the caller must reach `status=complete` before dependent work. Opaque cursors contain no prompt, transcript or procedural content, are valid only against the same trace/live selected bytes/order/budget, and are kept only as a fingerprinted RAM continuation lease. An accepted optional root and its exclusive dependencies remain `accepted`, never synthetic required obligations. Notices may recover an abandoned chain but cannot deliver missing context.
 
 ## MSSR Context Plane ack tombstone semantics
 
 `mssr_context_ack` records delivery receipts only in canonical ephemeral `.mssr/runtime/context-inbox.json`. MSSR 0.2.18 never reads `.bridge/mssr-context-inbox.json` as live state; explicit project initialization may remove that known obsolete artifact only after canonical project control is valid. Ack suppresses identical evidence only: same id/content fingerprint remains suppressed, while a changed source revision/content must reappear. Pending messages follow the same subject-vs-content distinction: same subject plus identical fingerprint deduplicates; a newer revision replaces the older pending item. Bridge owns host delivery/runtime integration and must not widen suppression or reinterpret receipts as project truth. Separately, Godot scene lifecycle work now has a native no-click boundary: opening or creating scenes must use provider/editor operations (`open_in_godot`, `create_scene`, `read_scene`, `scene_tree_dump`) through dedicated Bridge tools, reuse the connected intended editor, and treat persistence, editor state, visual review, and runtime behavior as separate evidence layers. The Godot provider may host multiple editor projects concurrently; mutating scene operations must therefore select an exact `projectPath`, `projectId`, or `editorInstanceId` whenever more than one editor is connected, and Bridge must fail closed rather than defaulting to the first editor.
-
-## Tool risk classification authority
-Delegated Bridge dispatch must derive `read-only`, `neutral`, or `destructive` from each tool's final registered safety annotations. Static name sets may provide legacy annotation defaults, but they are not an independent authorization source for `bridge_tool_query` or `bridge_tool_action`. `riskSummary`, schema inspection, and delegated dispatch must agree on the same effective classification. Contradictory final annotations (`readOnlyHint=true` and `destructiveHint=true`) fail closed. A regression must protect both directions: read-only tools are accepted only by the query wrapper, while mutable tools remain rejected there and require the action wrapper.
 
 ## MSSR host inheritance and skill recipe boundary
 
@@ -29,11 +18,6 @@ Bridge workflow-guide discovery is a host convenience layer and must not overrid
 ## Daily structural Skill Health boundary
 
 Bridge may automatically run the structural skill audit once per day and persist only privacy-safe metadata needed for trends: names/sources, line/character counts, manifest/module counts, reference counts/sizes, advisory status/reason codes and deltas. The audit is read-only and advisory: `WATCH`/`REVIEW`, growth, full fallback or unindexed recipes may recommend human maintenance but never authorize automatic edits, routing changes, skill splitting or deletion. Procedural skill/reference content, prompts and transcripts are excluded from the store.
-## Project knowledge maintenance inheritance
-
-Bridge does not own the rules that decide whether durable project knowledge is stale. Packaged MSSR `evaluateMssrProjectKnowledgeMaintenance` classifies bounded observable host metadata into `none`/`watch`/`review`/`required` and names the candidate owner (`AGENTS`, context, memory, state, skill, reference). Bridge contributes host evidence, including observed `projectInitialized` and `projectContextHealth` from the canonical health audit, then renders notices/snapshots. Missing initialization or REVIEW-level structural health can therefore make maintenance due, but never authorizes a write. Operational attention is a second, separate projection: 0.2.20 maps the current maintenance debt into the common notice transition contract, so a fresh maintenance close for the current lifecycle revision emits resolution even though historical advisory evidence can remain in the trace; a later material invalidation increments the lifecycle revision and can reopen attention. Context freshness is current evidence, not a monotonic historical maximum, and unknown-only WATCH must not force durable maintenance. The maintenance pass verifies the diff/source and explicitly records `updated` or `reviewed-none`; no metric, receipt, trace or heuristic auto-writes the authority.
-
-
 ## Privileged Windows operations boundary
 
 Generic shell tools must remain non-elevated and keep their dangerous-command blacklist. When a legitimate local maintenance task needs Windows administrator rights, expose a dedicated tool with a closed semantic profile instead of accepting an arbitrary command or arbitrary target path. The dedicated tool must default to inspection/dry-run when practical, resolve and revalidate its target internally, use a visible UAC elevation boundary, emit an auditable result, and post-verify the observable target state. The first implementation is the `amd-dxc-cache` profile behind `windows_admin_cache_status` / `windows_admin_cache_cleanup`; adding another privileged target requires an explicit new approved profile and regression coverage.
@@ -67,9 +51,6 @@ Bridge owns one general operational notice transport only: `bridgeNotices`. Port
 ## C2e Situation Model watcher boundary
 
 Project knowledge is part of operational context, but Bridge must not treat documents as truth merely because they exist. Packaged MSSR 0.2.26 compares bounded revision/claim evidence while preserving owner and evidence-class metadata. Bridge's Project Situation watcher uses durable Context Plane delivery receipts to know which revision was actually delivered to an agent, compares only operationally active receipts with current canonical repository revisions, and persists metadata-only transition state. Newer/current delivery supersedes older receipts, so reloading current context can resolve the alert. The watcher classifies attention (`noticeClass`, project category, bounded priority) but reuses the existing Operational Notice levels/queue; C2d controls ready/deferred ordering. Free-form memory interpretation, learned priors, notice priority and confidence cannot become canonical authority or autoexecute maintenance.
-
-## HTTP watchdog identity and recovery invariant
-Tunnel admin readiness and tunnel process identity are separate checks. For `bridge-local-http`, command-line identity validation must accept the exact profile token whether unquoted, single-quoted, or double-quoted, while rejecting different or prefixed profile names. A healthy tunnel admin endpoint on `127.0.0.1:8081` plus a missing Bridge HTTP listener on `127.0.0.1:3001` is evidence to inspect the HTTP child/watchdog path before blaming or restarting the tunnel. Recovery verification should restart or terminate only the HTTP child when possible and prove that the watchdog recreates it while the tunnel PID remains unchanged. A 502 or client `ECONNRESET` alone does not establish which layer failed, and the original cause of a vanished watchdog process must remain `No resuelta` unless crash evidence exists.
 
 ## MssrNotice relay boundary
 

@@ -33,6 +33,23 @@ export type ToolAuditMetricSnapshot = {
   since: string;
   rows: ToolAuditMetricRow[];
 };
+
+export type ToolFrictionMetricRow = {
+  toolName: string;
+  error: string;
+  observedAt: string;
+  workflowKey?: string;
+  traceId?: string;
+};
+
+export type ToolFrictionMetricSnapshot = {
+  enabled: boolean;
+  sqliteAvailable: boolean;
+  scope: BridgeMetricsScope;
+  days: number;
+  since: string;
+  rows: ToolFrictionMetricRow[];
+};
 export type BridgeMetricProfile = {
   traceId?: string;
   workflowKey?: string;
@@ -130,6 +147,7 @@ export const MSSR_BOOTSTRAP_TOOL_NAMES = new Set([
   "skill_route_vocabulary",
   "skill_route_plan",
   "skill_bootstrap",
+  "skill_context_next",
   "skill_load",
   "mssr_trace_record",
   "mssr_trace_working_update",
@@ -354,6 +372,7 @@ function operationSubject(tool: string, args: unknown): string | undefined {
     if (tool === "skill_route_plan" || tool === "skill_bootstrap" || tool === "skill_recommend") {
       return record.stage ?? "start";
     }
+    if (tool === "skill_context_next") return record.traceId;
     if (tool === "mssr_trace_record") return record.eventType;
     if (tool === "bridge_tool_query" || tool === "bridge_tool_action") return record.toolName;
     return undefined;
@@ -599,7 +618,7 @@ export function classifyToolAuditError(value: string | null | undefined): string
   if (/head changed|stale file|already exited|worktree changed|excluded paths are already staged/.test(error)) return "stale-file-state";
   if (/remote .*not configured|no remote configured|required git remote/.test(error)) return "no-remote-configured";
   if (/missing upstream|no upstream|has no upstream branch/.test(error)) return "missing-upstream";
-  if (/invalid_type|unrecognized_keys|zod|required|expected .* received|must be a (json object|non-empty string)|invalid .* expected/.test(error)) return "schema-validation";
+  if (/invalid_type|unrecognized_keys|too_big|too_small|zod|required|expected .* received|number must be (less|greater) than or equal|must be a (json object|non-empty string)|invalid .* expected/.test(error)) return "schema-validation";
   if (/confirmtoolname|classified read-only|not classified read-only|destructive action|risk classification/.test(error)) return "permission-or-risk-mismatch";
   if (/process-result:timeout|timed? out|timeout|etimedout/.test(error)) return "timeout";
   if (/process-result:failed:code=/.test(error)) return "process-exit";
@@ -689,6 +708,61 @@ export function getToolAuditMetrics(days = 30, scope: BridgeMetricsScope = "acti
       uniqueProjects: Number(row.unique_projects ?? 0),
       errorCategories: categories,
     };
+  });
+
+  return { enabled: metricsEnabled, sqliteAvailable: true, scope, days: boundedDays, since, rows: mapped };
+}
+
+export function getToolFrictionMetrics(
+  days = 30,
+  scope: BridgeMetricsScope = "active",
+  maxRows = 5000,
+): ToolFrictionMetricSnapshot {
+  const boundedDays = Math.max(1, Math.min(365, Math.trunc(days)));
+  const boundedRows = Math.max(1, Math.min(10_000, Math.trunc(maxRows)));
+  const epoch = getMssrObservabilityEpoch();
+  const windowSince = new Date(Date.now() - boundedDays * 86_400_000).toISOString();
+  const since = scope === "active" && epoch.baselineAt > windowSince ? epoch.baselineAt : windowSince;
+  const database = getDb();
+  if (!database) {
+    return { enabled: metricsEnabled, sqliteAvailable: false, scope, days: boundedDays, since, rows: [] };
+  }
+
+  const filter = metricsFilter(scope);
+  const rows = database.prepare(`
+    WITH projected_failures AS (
+      SELECT tool AS tool_name, started_at AS observed_at,
+        COALESCE(error, 'process-result:' || COALESCE(result_status, 'failed') || ':code=' || COALESCE(CAST(result_code AS TEXT), 'null')) AS failure_error,
+        workflow_key, trace_id
+      FROM tool_calls
+      WHERE COALESCE(result_ok, ok) = 0 AND ${filter.where} AND started_at >= ?
+      UNION ALL
+      SELECT operation_subject AS tool_name, started_at AS observed_at,
+        COALESCE(error, 'process-result:' || COALESCE(result_status, 'failed') || ':code=' || COALESCE(CAST(result_code AS TEXT), 'null')) AS failure_error,
+        workflow_key, trace_id
+      FROM tool_calls
+      WHERE COALESCE(result_ok, ok) = 0 AND ${filter.where} AND started_at >= ?
+        AND tool IN ('bridge_tool_query', 'bridge_tool_action')
+        AND operation_subject IS NOT NULL AND operation_subject <> ''
+    )
+    SELECT tool_name, observed_at, failure_error, workflow_key, trace_id
+    FROM projected_failures
+    ORDER BY observed_at DESC
+    LIMIT ?
+  `).all(...filter.params, since, ...filter.params, since, boundedRows);
+
+  const mapped: ToolFrictionMetricRow[] = rows.flatMap((row) => {
+    const toolName = typeof row.tool_name === "string" ? row.tool_name.trim() : "";
+    const error = typeof row.failure_error === "string" ? row.failure_error : "";
+    const observedAt = typeof row.observed_at === "string" ? row.observed_at : "";
+    if (!toolName || !error || !observedAt) return [];
+    return [{
+      toolName,
+      error,
+      observedAt,
+      ...(typeof row.workflow_key === "string" && row.workflow_key ? { workflowKey: row.workflow_key } : {}),
+      ...(typeof row.trace_id === "string" && row.trace_id ? { traceId: row.trace_id } : {}),
+    }];
   });
 
   return { enabled: metricsEnabled, sqliteAvailable: true, scope, days: boundedDays, since, rows: mapped };

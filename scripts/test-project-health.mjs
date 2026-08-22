@@ -4,7 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import net from "node:net";
 import { spawn } from "node:child_process";
-import { initializeMssrProject } from "@mauroprime/mssr";
+import {
+  auditMssrProjectContextHealth,
+  initializeMssrProject,
+  loadProjectContextModules,
+} from "@mauroprime/mssr";
 import {
   captureProjectHealthIfDue,
   collectProjectHealthSnapshot,
@@ -41,6 +45,81 @@ async function waitForResponse(url, timeoutMs = 15000, child = null, getChildOut
 async function waitForJson(url, timeoutMs = 15000, child = null, getChildOutput = () => "") {
   const response = await waitForResponse(url, timeoutMs, child, getChildOutput);
   return await response.json();
+}
+
+// Guard the repository's own project-context modularization. Optional memories must stay
+// reference-backed, architecture budgets must not regress into pressure, and extracted
+// details must remain semantically selectable instead of becoming unreachable archive text.
+const repositoryHealth = await auditMssrProjectContextHealth(process.cwd());
+assert.equal(repositoryHealth.manifestStatus, "valid");
+const repositoryManifest = JSON.parse(await fs.readFile(path.join(process.cwd(), ".mssr", "project-context.json"), "utf8"));
+const rootBackedOptionalMemories = repositoryManifest.modules.filter((module) =>
+  module.kind === "memory" && String(module.source?.path ?? "").replaceAll("\\", "/").toLowerCase() === ".mssr/project_memory.md".toLowerCase(),
+);
+assert.deepEqual(
+  rootBackedOptionalMemories.map((module) => module.id),
+  [],
+  "Optional project memories must stay reference-backed under .mssr/knowledge instead of rebuilding PROJECT_MEMORY.md fanout",
+);
+for (const module of repositoryManifest.modules.filter((item) => item.kind === "memory")) {
+  const stage = module.stages?.[0] ?? "implement";
+  const probe = await loadProjectContextModules({
+    projectRoot: process.cwd(),
+    stage,
+    includeCore: false,
+    maxChars: 12000,
+    maxModules: 20,
+    intent: {
+      domains: module.domains?.length ? module.domains : ["coding"],
+      actions: module.actions?.length ? module.actions : ["review"],
+      artifacts: module.artifacts ?? [],
+      needs: module.needs ?? [],
+      signals: module.signals?.length ? module.signals : ["warning-observed"],
+      risk: "read-only",
+      ambiguity: "low",
+    },
+  });
+  assert.equal(
+    probe.selected.some((entry) => entry.ref === module.id),
+    true,
+    `Expected reference-backed memory ${module.id} to remain selectable from its own manifest selectors`,
+  );
+}
+assert.equal(
+  repositoryHealth.findings.some((finding) => finding.code === "core-entry-budget-pressure" && finding.target === "bridge-architecture-core"),
+  false,
+  JSON.stringify(repositoryHealth.findings),
+);
+assert.equal(
+  repositoryHealth.findings.some((finding) => finding.code === "module-entry-budget-pressure" && finding.target === "bridge-architecture-impact-host-boundary"),
+  false,
+  JSON.stringify(repositoryHealth.findings),
+);
+
+const modularContext = await loadProjectContextModules({
+  projectRoot: process.cwd(),
+  stage: "implement",
+  includeCore: true,
+  maxChars: 12000,
+  maxModules: 20,
+  intent: {
+    domains: ["coding", "filesystem", "agent-orchestration", "skill-system"],
+    actions: ["analyze", "review", "maintain", "test", "verify"],
+    artifacts: ["project", "repository", "code", "mcp"],
+    needs: ["integrity-verification", "unit-tests", "cross-agent"],
+    signals: ["warning-observed", "reusable-pattern"],
+    risk: "read-only",
+    ambiguity: "low",
+  },
+});
+const selectedRepositoryModules = new Set(modularContext.selected.map((entry) => entry.ref));
+for (const moduleId of [
+  "bridge-host-health-projections",
+  "bridge-operational-notice-plane",
+  "bridge-architecture-impact-host-boundary",
+  "bridge-architecture-impact-writer-integration",
+]) {
+  assert.equal(selectedRepositoryModules.has(moduleId), true, `Expected project-context module ${moduleId} to remain semantically selectable`);
 }
 
 const root = await fs.mkdtemp(path.join(os.tmpdir(), "bridge-project-health-"));
@@ -86,7 +165,7 @@ try {
   assert.equal(snapshot.projects[0].name, "review");
   assert.equal(snapshot.projects[0].level, "review");
   assert.equal(snapshot.projects[0].findingCodes.includes("oversized-authority"), true);
-  assert.equal(snapshot.projects[0].findingCodes.includes("oversized-module"), true);
+  assert.equal(snapshot.projects[0].findingCodes.includes("oversized-module"), false, "Explicit maxChars budget must supersede the legacy generic oversized-module heuristic");
 
   const captured = await captureProjectHealthIfDue({
     force: true,

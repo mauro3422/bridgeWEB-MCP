@@ -18,6 +18,78 @@ Cada incidente debe incluir:
 Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/skills pertenecen a `D:\Dev\mssr\docs\skill-routing\INCIDENTS.md`; los defectos exclusivos de un proyecto pertenecen a su `.mssr/PROJECT_STATE.md`, `docs/INCIDENTS.md` o `BUGS.md`. MSSR project knowledge es canonical-only bajo `.mssr/`; cualquier viejo artefacto MSSR bajo `.bridge/` es sólo evidencia de cleanup/migración y nunca autoridad activa.
 
 ---
+
+## 2026-08-22 — `skill_bootstrap` desbordaba el sobre y omitía contexto aceptado
+
+**Estado:** Corregido y verificado en source/dist; adopción live pendiente de restart coordinado.
+
+**Capa/owner:** MSSR portable posee el orden, las obligaciones y el cursor de paginación; Bridge posee el sobre de respuesta, estado efímero, herramienta `skill_context_next`, observabilidad y contrato ChatGPT Web.
+
+**Síntoma observable:** una selección de varias skills podía superar el contexto útil del host. `maxContextChars` limitaba sólo el texto procedural, mientras la ruta, metadata y contexto de proyecto agrandaban la respuesta total. ChatGPT Web podía recibir una respuesta incompleta sin una obligación determinista de continuar y terminar una tarea habiendo omitido partes aceptadas.
+
+**Reproducción/evidencia:** la regresión crea cuatro skills descubiertas con cores exactos de 5.000, 6.504, 5.298 y 6.508 caracteres: 23.310 seleccionados contra un sobre de 18.000. También altera un cursor, reutiliza uno consumido y cambia bytes seleccionadas para probar stale detection. No se almacena texto procedural ni el cursor en telemetría.
+
+**Causa demostrada:** el planner anterior era one-shot, confundía el presupuesto procedural con el tamaño total serializado y, en `host-gated`, Bridge relabelaba como requeridas todas las skills elegibles. Los notices podían advertir overflow, pero no eran un canal capaz de entregar las unidades faltantes.
+
+**Corrección:** MSSR 0.2.53 aporta páginas deterministas con obligaciones `required|accepted`, cursor opaco ligado a bytes/orden/presupuesto, bloqueo explícito para unidades indivisibles y deduplicación core/módulo preservada. Bridge 0.6.114 adopta ese paquete, devuelve `partial|complete`, `mustContinue`, `remaining`, tamaño exacto de respuesta y `nextAction`; `skill_context_next` consume el cursor en RAM con TTL, revalida fuentes y encadena hasta completar. Los notices quedan como recuperación de una continuación abandonada. El dashboard agrega presupuesto/continuidad por traza sin cursores ni contenido.
+
+**Regresión:** `scripts/test-mssr-context-continuation.mjs` exige respuesta total <=18.000 por página, entrega exacta sin duplicados, separación required/accepted, rechazo tampered/stale/consumed y finalización en una llamada cuando contexto y envelope lo permiten. Las pruebas portables de MSSR cubren además una unidad indivisible mayor que la página.
+
+**Seguimiento:** regenerar catálogo/documentación y ejecutar verificación Bridge completa antes de proponer restart. Un restart o publicación live requiere autorización separada y readback de versión/tools.
+
+## 2026-08-20 — Sesiones MCP legacy rotativas se acumulaban hasta el hard cap
+
+**Estado:** Corrección de source/dist implementada y verificada de forma aislada; adopción live pendiente de una ventana de restart coordinada. El runtime HTTP actualmente cargado no fue reiniciado durante esta corrección.
+
+**Capa/owner:** lifecycle del transporte HTTP legacy de `bridge-mcp` (`src/http.ts`), usado por ChatGPT Web. La continuidad/capacidad de otros hosts como Codex pertenece a MSSR y a sus adapters locales; no se resuelve en este lifecycle HTTP.
+
+**Síntoma observable:** ChatGPT Web inicializaba un transport legacy nuevo por operación y luego no reutilizaba esa sesión. En live se observó `39 requests / 13 sessions`, luego `48 / 16` y `57 / 19`, con casi todas las sesiones inactivas; el patrón era exactamente ~3 requests por sesión. Con `SESSION_IDLE_MS=30 min` el pool terminaba clavado en 64 y el reclaim sólo reaccionaba al hard cap. Durante presión de memoria concurrente el watchdog registró tres timeouts de `/readyz` y reinició correctamente sólo el child HTTP; esa coincidencia no demuestra que las 64 sesiones fueran por sí solas la causa del timeout.
+
+**Causa demostrada:** el lifecycle asumía que una sesión inicializada podía merecer 30 minutos de retención aunque el caller la abandonara. El reclaim de 15 s existía sólo como reacción cuando `MAX_SESSIONS=64` ya estaba lleno: se cerraba una sesión vieja y la siguiente inicialización volvía inmediatamente a 64. Además, inicializaciones concurrentes podían comprobar capacidad antes de reservar `transportsCreating`, dejando una carrera potencial sobre el hard cap.
+
+**Corrección:** política de dos niveles para el adapter HTTP de ChatGPT Web: `BRIDGE_MCP_HTTP_SOFT_SESSION_LIMIT=16` como objetivo estable, `MAX_SESSIONS=64` como margen de ráfaga, y reclaim sólo de sesiones inactivas que superen la gracia existente de 15 s. Sesiones activas o recientes no se recuperan; sin presión se conserva la compatibilidad idle de 30 min. La reserva de capacidad de transports nuevos se serializa sólo durante admisión para que inicializaciones paralelas respeten estrictamente el hard cap. `/status` expone límites y contadores de reclaim. No se añadió ninguna heurística por Edge/Chrome; Codex queda fuera de este contrato y continúa bajo MSSR/adapters locales.
+
+**Regresión:** `npm run check` y `npm run build` pasan. `scripts/test-mcp-dual-era.mjs` conserva el protocolo moderno sessionless, demuestra que una sesión legacy genuinamente reutilizada sigue válida tras superar la gracia bajo baja presión, y que 8 sesiones rotativas se reducen al soft limit de prueba 4 con 5 reclaims preventivos y 0 hard-cap reclaims. Un segundo servidor aislado recibe 12 `initialize` concurrentes con `max=4`: admite exactamente 4, rechaza 8 con `503` y termina con 4 sesiones; el resultado fue repetible. El watchdog PowerShell parsea y `git diff --check` pasa.
+
+**Seguimiento:** en la próxima ventana controlada de adopción, reiniciar sólo el Bridge HTTP y verificar `/status` live: el pool debería mantenerse cerca del soft limit bajo tráfico rotativo en vez de permanecer en 64. Si reaparecen timeouts de readiness con el pool acotado, investigar event-loop/recursos como causa independiente.
+
+---
+
+## 2026-08-20 — Workspace snapshots llenaban el límite global por falta de retención
+
+**Estado:** Resuelto y verificado en Bridge `0.6.112`. El runtime live adoptó la versión mediante restart coordinado del watchdog y la verificación integral cerró con `failedRequired=0`.
+
+**Síntoma observable:** `workspace_snapshot` empezó a fallar repetidamente durante trabajo paralelo en varios proyectos. El almacén real llegó a **125 snapshots** y **1,071,863,843 / 1,073,741,824 bytes (99.83%)**, dejando ~1.8 MiB libres.
+
+**Causa demostrada:** `workspace_snapshot` serializaba creación y aplicaba una cuota global de 1 GiB, pero no existía ninguna política de retención. Cada snapshot guarda copias reales de archivos además del manifiesto, por lo que generaciones históricas válidas se acumulaban indefinidamente entre repositorios.
+
+**Corrección:** la creación de snapshots agrupa historial por `sourceRoot` normalizado y conserva como máximo los **2 snapshots completos más recientes** (rollback-capable) más **1 snapshot truncado diagnóstico**. Los truncados no desplazan fallbacks completos. Sólo manifiestos válidos pueden ser podados automáticamente; directorios inválidos se preservan para revisión. La cuota global se evalúa contra el tamaño estable proyectado tras retención, de modo que un reemplazo nuevo puede verificarse antes de retirar el fallback completo más viejo.
+
+**Regresión:** `scripts/test-workspace-snapshot-storage-quota.mjs` cubre rotación de tercera generación, creación concurrente serializada, reemplazo con pico transitorio sobre cuota pero estado final bajo cuota, aislamiento entre proyectos, truncados y rechazo real de cuota sin pérdida de los fallbacks retenidos. `test-v060-tools` conserva diff/rollback/path-tamper existentes.
+
+**Evidencia live:** la primera creación con la política nueva podó **87 snapshots válidos antiguos**. El almacén pasó de **125 snapshots / 1,071,863,843 bytes (99.83%)** a **39 snapshots / 608,088,558 bytes (56.63%)**, quedó con **465,653,266 bytes libres**, **0 directorios inválidos** y una reducción neta de **463,775,285 bytes (~442 MiB)**. `bridge_verify_all` sobre `0.6.112` pasó doctor, typecheck/build, HTTP smoke, MCP dual-era, regresiones completas, 218 casos de routing, tools-docs, watchdog, métricas y tools/list con `failedRequired=0`.
+
+**Seguimiento:** Git sigue siendo la historia principal de repositorios; los workspace snapshots son fallbacks temporales para working trees, archivos no trackeados y proyectos sin Git. El límite agregado de 1 GiB permanece como última barrera.
+
+---
+
+## 2026-08-19 — Architecture Impact podía omitirse al rotar la instancia MCP de ChatGPT Web
+
+**Estado:** Corregido y verificado en Bridge `0.6.111` con prueba live y regresión cross-instance.
+
+**Capa/owner:** continuidad host de workflow/project root en `bridge-mcp`; las semánticas Architecture Impact siguen perteneciendo a MSSR.
+
+**Síntoma observable:** una mutación estructural real desde ChatGPT Web permanecía en la misma traza/workflow pero no emitía `mssr-architecture-impact-review`. El test original usando una sola instancia MCP pasaba, mientras el flujo HTTP real podía rotar la instancia entre bootstrap y writer.
+
+**Causa demostrada:** `startsNewRoute` borraba `sessionWorkflowKeys` aunque la nueva ruta trajera un `workflowKey` explícito. La misma instancia podía recuperar el workflow desde su traza local y ocultar el defecto; una instancia MCP posterior conservaba la sesión host pero ya no podía resolver el workflow/root scoped, por lo que Architecture Impact no preparaba un plan.
+
+**Corrección:** una ruta nueva conserva su workflow explícito como workflow actual de la sesión; el writer resuelve root en orden `workflow explícito -> workflow process-wide de sesión -> traza activa -> fallback local`. La autorización y la semántica Architecture Impact no cambian.
+
+**Regresión:** `test:architecture-impact-host-adoption` rota deliberadamente entre dos `createBridgeServer()` con la misma host session: la primera instancia hace `project_context_load`/bootstrap y la segunda ejecuta un writer sin `projectRoot`/`workflowKey`; debe emitir REVIEW. Tras revisión explícita del baseline, una restauración exacta no debe emitir un REVIEW nuevo. La misma secuencia fue verificada desde ChatGPT Web vivo.
+
+**Seguimiento:** mantener workflow/root continuity process-wide para rotación HTTP/MCP. Las mutaciones arbitrarias de shell siguen fuera de cobertura hasta disponer de receipts/diffs confiables.
+
+---
 ## 2026-08-19 — Una traza MSSR mezclaba proyectos/workflows independientes por continuidad de sesión
 
 **Estado:** Corregido, adoptado y verificado en runtime `0.6.109`; restart HTTP controlado ack `66c3d781-4c79-466d-82ca-aa7d5ddf056f`, doctor posterior PASS.
