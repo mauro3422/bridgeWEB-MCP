@@ -4,6 +4,7 @@ Versioned release notes are the canonical change-history surface for MSSR debugg
 
 ## Current releases
 
+- [0.6.115](0.6.115.md) - Adopt MSSR 0.2.54, expose review-only Context Plane proposals, and make post-pagination lifecycle closure explicit without inferred success.
 - [0.6.114](0.6.114.md) - Bounded resumable MSSR context delivery with `skill_context_next`, opaque cursor validation, required/accepted preservation, and privacy-safe envelope observability.
 - [0.6.113](0.6.113.md) - Adopt MSSR 0.2.50 and add privacy-safe repeated tool-friction clustering/prioritization to `bridge_tool_audit`, preserving legacy metrics while surfacing recurring cross-workflow maintenance debt.
 - [0.6.112](0.6.112.md) - Workspace snapshot retention: automatically keep two complete rollback points plus one truncated diagnostic generation per project root, prune historical excess before quota evaluation, and keep the 1 GiB cap as the final steady-state guard.

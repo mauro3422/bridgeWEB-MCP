@@ -166,12 +166,12 @@ try {
   if (drainedNotices.length !== 1 || getBridgeNoticeStatus().pendingCount !== 0) throw new Error('Bridge notice one-shot drain failed');
   if (!noticeHistory.some((item) => item.code === 'fixture-warning' && item.actions?.[0]?.toolName === 'terminal_list')) throw new Error('Bridge notice history did not retain actionable reminder after drain');
 
-  if (registry.tools.length !== 161) throw new Error(`expected 161 tools, got ${registry.tools.length}`);
+  if (registry.tools.length !== 162) throw new Error(`expected 162 tools, got ${registry.tools.length}`);
   const catalogComparison = await call('bridge_connector_catalog_compare', {
     exposedToolNames: ['skill_catalog', 'skill_recommend', 'skill_load', 'host_private_tool'],
   });
-  if (catalogComparison.runtime.count !== 161 || catalogComparison.mssr.runtime !== 13) throw new Error('connector catalog comparison runtime baseline failed');
-  if (catalogComparison.mssr.directCoveragePercent !== 23.08) throw new Error(`unexpected MSSR direct coverage: ${catalogComparison.mssr.directCoveragePercent}`);
+  if (catalogComparison.runtime.count !== 162 || catalogComparison.mssr.runtime !== 14) throw new Error('connector catalog comparison runtime baseline failed');
+  if (catalogComparison.mssr.directCoveragePercent !== 21.43) throw new Error(`unexpected MSSR direct coverage: ${catalogComparison.mssr.directCoveragePercent}`);
   if (!catalogComparison.mssr.delegatedViaQuery.includes('skill_bootstrap') || !catalogComparison.mssr.delegatedViaAction.includes('mssr_trace_record') || !catalogComparison.mssr.delegatedViaAction.includes('mssr_trace_working_update')) throw new Error('connector catalog wrapper classification failed');
   if (!catalogComparison.connectorObservation.unrecognized.includes('host_private_tool') || catalogComparison.interpretation.wrapperReachabilityIsDirectExposure !== false) throw new Error('connector catalog boundary classification failed');
   const delegatedQueryTool = registry.tools.find((tool) => tool.name === 'bridge_tool_query');
@@ -392,7 +392,7 @@ try {
   const skillLoadSchema = await call('bridge_tool_schema', {toolName:'skill_load'});
   if (!skillLoadSchema.tool?.metadata?.usage?.recovery?.some((rule) => rule.code === 'mssr-orphan-skill-load' && rule.toolName === 'skill_bootstrap')) throw new Error('skill_load MSSR recovery metadata failed');
   const aliasAudit = await call('bridge_tool_audit', {view:'aliases',scope:'active',days:30,limit:20});
-  if (aliasAudit.summary?.registeredTools !== 161 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
+  if (aliasAudit.summary?.registeredTools !== 162 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
   const delegatedMetric = beginToolMetric('bridge_tool_query', {toolName:'bridge_tool_audit',arguments:{view:'all'}}, {caller:'chatgpt-web',sessionKey:'fixture-session',project:'fixture-project'});
   finishToolMetric(delegatedMetric, true, 128);
   const delegatedSnapshot = getToolAuditMetrics(30, 'active');

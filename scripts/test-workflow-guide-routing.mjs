@@ -39,8 +39,13 @@ for (const task of mediaCases) {
 
   assert.equal(bootstrap.workflowGuideRecommendation.recommendation.action, 'load_existing', `bootstrap did not surface guide recommendation for: ${task}`);
   assert.equal(bootstrap.workflowGuideRecommendation.recommendation.guide, 'narrated-media-review', `bootstrap surfaced wrong guide for: ${task}`);
-  assert.equal(bootstrap.workflowGuide?.guide, 'narrated-media-review', `bootstrap did not auto-load narrated-media-review for: ${task}`);
-  assert.equal(bootstrap.workflowGuide?.recommendedTools?.includes('media_review_ingest'), true, `canonical media tool missing from loaded guide for: ${task}`);
+  assert.equal(bootstrap.workflowGuide, null, `oversized narrated-media guide must not consume the compact bootstrap envelope for: ${task}`);
+  assert.equal(bootstrap.workflowGuideDelivery?.status, 'deferred-explicit-load', `oversized narrated-media guide must be split into an explicit call for: ${task}`);
+  assert.equal(bootstrap.workflowGuideDelivery?.nextAction?.toolName, 'workflow_guide_load', `deferred guide action missing for: ${task}`);
+  assert.equal(bootstrap.lifecycleGate?.postContextAction?.toolName, 'workflow_guide_load', `completed context must retain the deferred guide action for: ${task}`);
+  const loadedGuide = await registry.call('workflow_guide_load', bootstrap.workflowGuideDelivery.nextAction.arguments);
+  assert.equal(loadedGuide.guide, 'narrated-media-review', `deferred narrated-media guide did not load for: ${task}`);
+  assert.equal(loadedGuide.recommendedTools?.includes('media_review_ingest'), true, `canonical media tool missing from deferred guide for: ${task}`);
 }
 
 const plan = await registry.call('skill_route_plan', {

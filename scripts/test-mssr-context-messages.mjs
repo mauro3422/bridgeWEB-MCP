@@ -16,6 +16,7 @@ process.env.BRIDGE_MCP_MSSR_STATE = path.join(sandbox, "mssr-state.json");
 const { skillCatalogToolModule } = await import("../dist/tools/skill-catalog-tools.js");
 const plan = skillCatalogToolModule.handlers.skill_route_plan;
 const bootstrap = skillCatalogToolModule.handlers.skill_bootstrap;
+const reviewProposal = skillCatalogToolModule.handlers.mssr_context_proposal_review;
 const evidence = {
   kind: "project-state",
   ref: ".mssr/PROJECT_STATE.md#Provider",
@@ -71,7 +72,33 @@ assert.equal(plannedNotice.actions, undefined, "portable advisory actions must n
 
 const bootstrapped = await bootstrap({ ...input, traceId: planned.traceId });
 assert.equal(bootstrapped.contextMessages.selected.length, 1);
+assert.equal(bootstrapped.contextMessages.decisions, undefined, "compact bootstrap must not repeat per-candidate context-message decisions");
+assert.equal(bootstrapped.contextMessages.decisionSummary.total, 2);
+assert.equal(bootstrapped.contextMessages.decisionSummary.selected, 1);
 assert.equal(bootstrapped.__bridgeNotices.filter((notice) => notice.source === "mssr-context-message-v1").length, 1);
+
+const proposalEvidence = { ...evidence, freshness: "fresh" };
+const proposal = {
+  id: "proposal-project-state",
+  kind: "persistence-proposal",
+  title: "Review project state persistence",
+  summary: "Keep the proposal reviewable by the canonical repository owner.",
+  evidence: [proposalEvidence],
+  persistenceProposal: {
+    target: "project-state",
+    summary: "Review a bounded project state update.",
+    evidence: [proposalEvidence],
+    reviewRequired: true,
+  },
+};
+const proposalReview = await reviewProposal({ messages: [proposal] });
+assert.equal(proposalReview.reviews[0].disposition, "review-ready");
+assert.equal(proposalReview.reviews[0].reviewRequired, true);
+assert.equal(proposalReview.autoWriteAllowed, false);
+const staleProposalReview = await reviewProposal({
+  messages: [{ ...proposal, id: "proposal-project-state-stale", persistenceProposal: { ...proposal.persistenceProposal, evidence: [{ ...proposalEvidence, freshness: "stale" }] } }],
+});
+assert.equal(staleProposalReview.reviews[0].disposition, "refresh-required");
 
 await assert.rejects(
   () => plan({ ...input, contextMessages: [{ ...messages[0], evidence: [{ ...evidence, unexpected: true }] }] }),

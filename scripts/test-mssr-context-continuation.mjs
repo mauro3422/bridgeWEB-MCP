@@ -104,6 +104,11 @@ function assertComplete(response, label) {
   assert.equal(response.cursor, null, `${label} must clear the consumed cursor`);
   assert.equal(response.nextAction, undefined, `${label} must not emit a continuation action after completion`);
   assert.deepEqual(response.remaining, { required: [], accepted: [], units: [], chars: 0 }, `${label} must not retain pending delivery metadata`);
+  assert.equal(response.lifecycleGate?.contextChain, "complete", `${label} must expose the post-context lifecycle gate`);
+  assert.equal(response.lifecycleGate?.traceId, response.traceId, `${label} lifecycle gate must preserve trace identity`);
+  assert.equal(response.lifecycleGate?.automaticCheckpoint, false, `${label} must not claim that delivered context was used`);
+  assert.equal(response.lifecycleGate?.automaticOutcome, false, `${label} must never infer task success from context completion`);
+  assert.equal(response.lifecycleGate?.phaseCheckpointTemplate?.toolName, "mssr_trace_record", `${label} must name the explicit checkpoint boundary`);
 }
 
 function acceptedOptionalDecisions(route) {

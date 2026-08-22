@@ -43,7 +43,7 @@ const readOnlyToolNames = new Set([
   "path_policy_status", "project_profile", "workspace_diff", "workspace_snapshot_list", "cache_status", "windows_admin_cache_status", "windows_admin_storage_audit",
   "analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code",
   "project_context_load", "project_context_audit", "project_context_health", "project_context_modularization_plan", "project_change_consistency", "workflow_guide_recommend", "workflow_guide_load", "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query",
-  "skill_catalog", "skill_recommend", "skill_route_audit", "skill_route_vocabulary", "skill_route_plan", "skill_bootstrap", "skill_context_next", "skill_load", "roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list", "roblox_mcp_query",
+  "skill_catalog", "skill_recommend", "skill_route_audit", "skill_route_vocabulary", "skill_route_plan", "skill_bootstrap", "skill_context_next", "skill_load", "mssr_context_proposal_review", "roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list", "roblox_mcp_query",
   "binary_file_info", "binary_file_read_chunk", "binary_upload_status", "image_file_attach",
   "blender_status", "blender_scene_info", "blender_validate_reference_pack", "blender_character_loop_status",
   "godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list", "godot_mcp_query",
@@ -84,7 +84,7 @@ const providerProxyToolNames = new Set([
 ]);
 const protectedToolNames = new Set([
   "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query", "bridge_tool_action", "bridge_connector_catalog_compare", "project_context_load", "project_context_audit", "project_context_health", "project_context_modularization_plan", "project_context_initialize", "project_context_update", "project_context_capture",
-  "skill_route_plan", "skill_bootstrap", "skill_context_next", "skill_load", "mssr_trace_record", "mssr_trace_evidence", "bridge_verify_all", "git_multi_repo_publish", "roblox_place_save",
+  "skill_route_plan", "skill_bootstrap", "skill_context_next", "skill_load", "mssr_context_proposal_review", "mssr_trace_record", "mssr_trace_evidence", "bridge_verify_all", "git_multi_repo_publish", "roblox_place_save",
 ]);
 
 const toolUsageGuidance = new Map<string, BridgeToolUsageGuidance>([

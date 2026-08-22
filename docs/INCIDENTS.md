@@ -1475,3 +1475,31 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Regresión / evidencia:** `scripts/test-workflow-guide-routing.mjs` verifies recommendation/bootstrap routing and a nearby unrelated negative; `scripts/verify-narrated-media-workflow.mjs` verifies activation and fallback/evidence contracts. During publication review the verifier itself contained literal `\\n` sequences and failed `node --check`; that defect was corrected before the release gates were run.
 
 **Seguimiento:** keep workflow guides as Bridge-owned orchestration and MSSR skills as portable capability routing. Do not duplicate the narrated-media procedure into a second skill merely to improve activation.
+
+## 2026-08-22 — Compact `skill_bootstrap` starved pagination with metadata
+
+**Estado:** Corregido en Bridge 0.6.115 y verificado en runtime real.
+
+**Capa / owner:** serialización compacta y continuación de contexto de `skill_bootstrap` / `skill_context_next` en Bridge; la selección semántica y el orden de unidades siguen perteneciendo a MSSR.
+
+**Síntoma observable:** una ruta de verificación válida con proyecto inicializado falló antes de entregar la siguiente skill: la metadata compacta ocupó 30.650 de 32.000 caracteres, el cálculo quedó limitado a 256 caracteres y Bridge atribuyó el bloqueo a una supuesta unidad indivisible. La skill requerida `git-change-publication` quedó pendiente aunque su núcleo era pequeño.
+
+**Causa demostrada:** el sobre repetía decisiones completas de selección de Project Context y Context Messages junto al contenido ya seleccionado. Además, una guía Bridge podía cargar hasta 120.000 caracteres dentro de esa misma metadata no paginable. Modularizar `SKILL.md` reducía presión procedural, pero no corregía esta capa host.
+
+**Corrección:** el bootstrap compacto conserva contenido seleccionado, owner/provenance/freshness, overflow y obligaciones, pero resume las decisiones repetitivas por conteos y razones. Las guías que superan 6.000 caracteres se separan como una llamada exacta `workflow_guide_load`; la acción sobrevive hasta `lifecycleGate.postContextAction` y debe ejecutarse después de completar las páginas y antes del trabajo dependiente. No se infiere checkpoint ni outcome.
+
+**Regresión / evidencia:** pasan `test-mssr-context-continuation`, `test-mssr-context-messages` y `test-workflow-guide-routing`. En la traza real `mssr-codex-5c735e66-57ce-4dbc-8ba6-98b9a52b6f3a`, la nueva cadena entregó seis unidades requeridas exactamente una vez: página 1 de 31.427/32.000 caracteres, página 2 de 8.108, cero pendientes y cierre `contextChain=complete`. `narrated-media-review` quedó como `deferred-explicit-load` y la segunda llamada recuperó la guía con `media_review_ingest`.
+
+**Seguimiento:** si el contenido seleccionado de proyecto crece más allá de los caps existentes, convertir también esos documentos en unidades con fingerprint/revisión y cursor propio; nunca resolver la presión bajando el clamp, omitiendo obligaciones o enviando contenido por notices.
+
+## 2026-08-22 — El smoke HTTP de `verify:all` compitió con el reemplazo del watchdog
+
+**Estado:** Corregido y cerrado en Bridge 0.6.115.
+
+**Síntoma observable:** doctor, typecheck y build pasaron, pero el primer `smoke:http` agotó 26 s con conexión rechazada. El resto de la suite, incluidas las regresiones aisladas y el routing, pasó; el runtime volvió a `live/ready` con la misma versión.
+
+**Causa:** el runner invocaba el smoke inmediatamente después de reconstruir `dist`, durante una posible sustitución acotada del proceso HTTP por el watchdog. El smoke asumía disponibilidad instantánea y trataba la ventana de transporte como fallo funcional.
+
+**Corrección / regresión:** `scripts/test-bridge-http.ps1` espera `/readyz=ready` hasta 45 s antes de ejecutar aserciones. El smoke focal pasó sobre Bridge 0.6.115, PID 8136, boot `71184ced-6786-4879-a03b-018a10056f1d`, dashboard y catálogo 162; una segunda ejecución completa de `npm run verify:all` terminó con cero gates requeridos fallidos.
+
+**Seguimiento:** mantener la espera en el smoke reutilizable, no insertar sleeps ciegos en `verify:all`, y correlacionar ack/health antes de repetir una operación con posibles efectos.

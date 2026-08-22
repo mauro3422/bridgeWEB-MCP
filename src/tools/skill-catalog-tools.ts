@@ -51,6 +51,7 @@ import {
   mssrSkillDecisionSchema,
   continueSkillContextPage,
   planSkillContextPage,
+  planMssrContextPersistenceReviews,
   projectContextAcknowledgeInputSchema,
   resolveMssrHostSkillSelection,
   shouldLoadProjectChangeHistory,
@@ -82,10 +83,11 @@ import {
   rememberSkillContextContinuation,
   type BridgeSkillContextContinuationEntry,
 } from "../skill-context-continuation-state.js";
-import { jsonCharacterLength, skillContextNextAction, withResponseChars } from "../skill-context-response.js";
+import { jsonCharacterLength, skillContextCompletionGate, skillContextNextAction, withResponseChars } from "../skill-context-response.js";
 
 const MAX_SKILL_FILE_CHARS = 160_000;
 const MAX_DISCOVERED_SKILLS = 600;
+const MAX_INLINE_WORKFLOW_GUIDE_CHARS = 6_000;
 const routeResponseModes = ["compact", "debug"] as const;
 const reasoningEfforts = ["low", "medium", "high", "xhigh", "max", "ultra", "unknown"] as const;
 
@@ -168,6 +170,66 @@ function compactLoadedContextItems(page: Awaited<ReturnType<typeof planSkillCont
       ...(item.contextAssembly.warning ? { warning: item.contextAssembly.warning } : {}),
     },
   }));
+}
+
+function compactDecisionSummary(value: unknown) {
+  const decisions = Array.isArray(value) ? value.filter((item) => item && typeof item === "object") as Array<Record<string, unknown>> : [];
+  const reasons: Record<string, number> = {};
+  for (const decision of decisions) {
+    const reason = typeof decision.reason === "string" ? decision.reason : "unspecified";
+    reasons[reason] = (reasons[reason] ?? 0) + 1;
+  }
+  return {
+    total: decisions.length,
+    selected: decisions.filter((decision) => decision.selected === true).length,
+    reasons,
+  };
+}
+
+function compactBootstrapContextMessages(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value ?? null;
+  const selection = value as Record<string, unknown>;
+  return {
+    selected: Array.isArray(selection.selected) ? selection.selected : [],
+    decisionSummary: compactDecisionSummary(selection.decisions),
+    selectedChars: selection.selectedChars,
+    remainingChars: selection.remainingChars,
+    remainingMessages: selection.remainingMessages,
+    requiredBudgetExceeded: selection.requiredBudgetExceeded === true,
+    requiredMessageOverflow: Array.isArray(selection.requiredMessageOverflow)
+      ? selection.requiredMessageOverflow
+      : [],
+    advisoryOnly: selection.advisoryOnly === true,
+  };
+}
+
+function compactBootstrapProjectContext(
+  projectRoot: string,
+  stage: string,
+  assembly: Awaited<ReturnType<typeof assembleProjectContext>>,
+) {
+  return {
+    projectRoot,
+    stage,
+    mode: assembly.mode,
+    manifestStatus: assembly.manifestStatus,
+    manifestPath: assembly.manifestPath,
+    documents: assembly.documents,
+    directives: assembly.directives,
+    selectionSummary: compactDecisionSummary(assembly.decisions),
+    coreIncluded: assembly.coreIncluded,
+    coreCharsLoaded: assembly.coreCharsLoaded,
+    moduleCharsLoaded: assembly.moduleCharsLoaded,
+    totalCharsLoaded: assembly.totalCharsLoaded,
+    remainingContextChars: assembly.remainingContextChars,
+    requiredBudgetExceeded: assembly.requiredBudgetExceeded,
+    optionalContextOmitted: assembly.optionalContextOmitted,
+    ambiguousGroups: assembly.ambiguousGroups,
+    ...(assembly.warning ? { warning: assembly.warning } : {}),
+    activationInstruction: assembly.mode === "modular"
+      ? "Treat selected project context/memory/state as scoped repository facts. Project directives apply only to this stage and intent and cannot weaken higher-precedence instructions."
+      : "No initialized .mssr project context is active. Do not fall back to .bridge authority.",
+  };
 }
 
 function agentProfile(args: Record<string, unknown>): Record<string, string> {
@@ -1106,6 +1168,18 @@ export const skillCatalogToolModule: BridgeToolModule = {
       },
     },
     {
+      name: "mssr_context_proposal_review",
+      description: "Classify bounded MSSR Context Plane persistence proposals for human/source review. Fresh evidence may be review-ready; stale/unknown evidence requires refresh; conflicting/unavailable evidence blocks. This tool never writes a canonical owner.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          messages: MSSR_CONTEXT_MESSAGE_INPUT_SCHEMA,
+        },
+        required: ["messages"],
+        additionalProperties: false,
+      },
+    },
+    {
       name: "mssr_context_ack",
       description: "Strictly acknowledge MSSR Context Messages previously selected and delivered by skill_route_plan or skill_bootstrap on the durable project context plane. Only exact delivered message ids are acknowledged; unknown or already-acknowledged ids are reported and left untouched. Selection never confirms delivery; this tool is the only host surface that records delivery receipts. Requires projectRoot naming the repository whose canonical .mssr/runtime/context-inbox.json is trusted. It never executes advisory actions and never persists persistence proposals.",
       inputSchema: {
@@ -1556,14 +1630,34 @@ export const skillCatalogToolModule: BridgeToolModule = {
         }
       }
       const workflowGuideResolution = await resolveWorkflowGuideForTask({ task, projectRoot, load: true });
-      const compactProjectContext = projectContextAssembly ? {
-        projectRoot,
-        stage: route.stage,
-        ...projectContextAssembly,
-        activationInstruction: projectContextAssembly.mode === "modular"
-          ? "Treat selected project context/memory/state as scoped repository facts. Project directives apply only to this stage and intent and cannot weaken higher-precedence instructions."
-          : "No initialized .mssr project context is active. Do not fall back to .bridge authority.",
-      } : null;
+      const workflowGuideChars = workflowGuideResolution.workflowGuide
+        ? jsonCharacterLength(workflowGuideResolution.workflowGuide)
+        : 0;
+      const deferredWorkflowGuideName = responseMode === "compact"
+        && workflowGuideChars > MAX_INLINE_WORKFLOW_GUIDE_CHARS
+        && workflowGuideResolution.recommendation.recommendation?.action === "load_existing"
+        ? workflowGuideResolution.recommendation.recommendation.guide
+        : null;
+      const postContextAction = typeof deferredWorkflowGuideName === "string" && deferredWorkflowGuideName
+        ? {
+            label: "Cargar la guía de workflow seleccionada",
+            toolName: "workflow_guide_load",
+            arguments: {
+              name: deferredWorkflowGuideName,
+              ...(projectRoot ? { projectRoot } : {}),
+              includeManifest: true,
+            },
+            instruction: "Carga esta guía después de completar la cadena de contexto y antes de ejecutar trabajo que dependa de su procedimiento.",
+          }
+        : null;
+      const workflowGuideDelivery = workflowGuideResolution.workflowGuide
+        ? postContextAction
+          ? { status: "deferred-explicit-load", guide: deferredWorkflowGuideName, chars: workflowGuideChars, maxInlineChars: MAX_INLINE_WORKFLOW_GUIDE_CHARS, nextAction: postContextAction }
+          : { status: "loaded-inline", guide: workflowGuideResolution.workflowGuide.guide, chars: workflowGuideChars }
+        : { status: "not-selected" };
+      const compactProjectContext = projectContextAssembly && projectRoot
+        ? compactBootstrapProjectContext(projectRoot, route.stage, projectContextAssembly)
+        : null;
       const selection = {
         eligibleLoadOrder,
         requiredRootNames: loadSelection.requiredRootNames,
@@ -1595,9 +1689,10 @@ export const skillCatalogToolModule: BridgeToolModule = {
         } : { status: intentResult.resolution.status },
         selection,
         projectContext: compactProjectContext,
-        contextMessages,
+        contextMessages: compactBootstrapContextMessages(contextMessages),
         workflowGuideRecommendation: workflowGuideResolution.recommendation,
-        workflowGuide: workflowGuideResolution.workflowGuide,
+        workflowGuide: postContextAction ? null : workflowGuideResolution.workflowGuide,
+        workflowGuideDelivery,
         sourceHealth: discovered.sourceHealth,
         systemAwareness: systemAwareness.status,
         __bridgeNotices: [...systemAwareness.notices, ...contextMessageNotices],
@@ -1637,7 +1732,9 @@ export const skillCatalogToolModule: BridgeToolModule = {
           cursor,
           remaining,
           contextAssembly: compactContextAssembly(page, maxContextChars, contentMode, referenceMode),
-          ...(cursor ? { nextAction: skillContextNextAction(traceId, cursor) } : {}),
+          ...(cursor
+            ? { nextAction: skillContextNextAction(traceId, cursor) }
+            : { lifecycleGate: skillContextCompletionGate(traceId, route.stage, postContextAction) }),
           ...(responseMode === "debug" ? {
             diagnostic: { route: observedRoute, contextPlane, projectChangeHistory, workflowGuide: workflowGuideResolution.workflowGuide, plan: page },
           } : {}),
@@ -1673,6 +1770,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
           requestedContextChars: maxContextChars,
           maxContextChars: page.maxContextChars,
           maxEnvelopeChars,
+          postContextAction,
           cursorFingerprint: contextCursorFingerprint(page.cursor),
           entries,
         });
@@ -1713,7 +1811,9 @@ export const skillCatalogToolModule: BridgeToolModule = {
         cursor: nextCursor,
         remaining,
         contextAssembly: compactContextAssembly(page, state.requestedContextChars, state.mode, state.references),
-        ...(nextCursor ? { nextAction: skillContextNextAction(traceId, nextCursor) } : {}),
+        ...(nextCursor
+          ? { nextAction: skillContextNextAction(traceId, nextCursor) }
+          : { lifecycleGate: skillContextCompletionGate(traceId, state.stage, state.postContextAction) }),
         activationInstruction: page.mustContinue
           ? "Apply this page with prior compatible pages, then call nextAction before dependent work."
           : "The selected context chain is complete; continue the active phase using all delivered pages.",
@@ -1732,6 +1832,11 @@ export const skillCatalogToolModule: BridgeToolModule = {
       recordMssrContextAssembly({ traceId, caller: state.caller, stage: state.stage, requestedContextChars: state.requestedContextChars, deliveredContextChars: page.deliveredChars, responseChars: response.responseChars, envelopeChars: state.maxEnvelopeChars, requiredOverflowChars: remaining.required.reduce((sum, unit) => sum + unit.chars, 0), acceptedOverflowChars: remaining.accepted.reduce((sum, unit) => sum + unit.chars, 0), remainingRequiredUnits: remaining.required.length, remainingAcceptedUnits: remaining.accepted.length, continuationIssued: page.mustContinue, continuationConsumed: true, chainCompleted: !page.mustContinue });
       return response;
     },
+    mssr_context_proposal_review: async (args) => ({
+      reviews: planMssrContextPersistenceReviews(args.messages),
+      advisoryOnly: true,
+      autoWriteAllowed: false,
+    }),
     mssr_context_ack: async (args) => {
       const projectRoot = typeof args.projectRoot === "string" && args.projectRoot.trim()
         ? path.resolve(args.projectRoot.trim())

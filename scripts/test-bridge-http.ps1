@@ -5,6 +5,29 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Wait-BridgeReady {
+  param([int]$TimeoutSeconds = 45)
+
+  $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+  $lastError = "not attempted"
+  do {
+    try {
+      $ready = Invoke-RestMethod "$BaseUrl/readyz" -TimeoutSec 2
+      if ($ready -eq "ready") {
+        Write-Host "[bridge-http-test] readiness"
+        Write-Host "  OK ready"
+        return
+      }
+      $lastError = "readyz returned '$ready'"
+    } catch {
+      $lastError = $_.Exception.Message
+    }
+    Start-Sleep -Milliseconds 500
+  } while ([DateTime]::UtcNow -lt $deadline)
+
+  throw "Bridge HTTP did not become ready within ${TimeoutSeconds}s: $lastError"
+}
+
 function Invoke-Check {
   param(
     [string]$Name,
@@ -29,6 +52,10 @@ function New-InitializeBody {
     }
   } | ConvertTo-Json -Depth 10 -Compress
 }
+
+# A preceding build may overlap the watchdog's bounded runtime replacement.
+# Readiness is a precondition; a transient connection refusal is not test evidence.
+Wait-BridgeReady
 
 Invoke-Check "healthz" {
   $health = Invoke-RestMethod "$BaseUrl/healthz"

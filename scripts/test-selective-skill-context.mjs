@@ -37,10 +37,12 @@ const selective = await assembleCodexSkillContext({
 });
 assert.equal(selective.contextAssembly.manifestStatus, "loaded");
 assert.equal(selective.contextAssembly.fallbackFull, false);
-assert.equal(selective.contextAssembly.totalCharsLoaded < selective.contextAssembly.fullSkillChars, true);
-assert.equal(selective.content.includes("## Maintain autoregistry and skills"), true);
-assert.equal(selective.content.includes("## Keep long work visibly alive"), false);
-assert.equal(selective.contextAssembly.selectedModules.includes("routing-maintenance"), true);
+const allModularChars = selective.contextAssembly.coreCharsLoaded
+  + selective.contextAssembly.moduleDecisions.reduce((sum, decision) => sum + decision.chars, 0);
+assert.equal(selective.contextAssembly.totalCharsLoaded < allModularChars, true);
+assert.equal(selective.content.includes("# Context and lifecycle"), true);
+assert.equal(selective.content.includes("# Signals and recovery"), false);
+assert.deepEqual(selective.contextAssembly.selectedModules, ["context-and-lifecycle"]);
 
 const coreOnly = await assembleCodexSkillContext({
   skill: skill("mssr-agent-routing"),

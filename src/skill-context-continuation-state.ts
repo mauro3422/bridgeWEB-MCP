@@ -25,6 +25,7 @@ export type BridgeSkillContextContinuationState = Readonly<{
   requestedContextChars: number;
   maxContextChars: number;
   maxEnvelopeChars: number;
+  postContextAction?: Readonly<Record<string, unknown>> | null;
   cursorFingerprint: string;
   entries: readonly BridgeSkillContextContinuationEntry[];
   createdAt: number;
@@ -53,6 +54,7 @@ export function rememberSkillContextContinuation(
   const state: BridgeSkillContextContinuationState = {
     ...input,
     entries: input.entries.map((entry) => ({ ...entry })),
+    postContextAction: input.postContextAction ? { ...input.postContextAction } : null,
     createdAt: previous?.createdAt ?? now,
     updatedAt: now,
   };
