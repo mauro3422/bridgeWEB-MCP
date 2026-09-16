@@ -287,14 +287,24 @@ try {
   const expiredOldestResponse = await legacyRequest(rotatingSessions[0], 300, "tools/list");
   assert.equal(expiredOldestResponse.status, 404, "Oldest inactive rotating session should be reclaimable under pressure");
 
-  const status = await (await fetch(`${baseUrl}/status`)).json();
+  const statusResponse = await fetch(`${baseUrl}/status`);
+  const status = await statusResponse.json();
   assert.equal(status.transport, "streamable-http-dual-era");
+  assert.match(statusResponse.headers.get("keep-alive") || "", /timeout=120/, "Bridge should advertise the long keep-alive window used by the tunnel client");
   assert.equal(status.protocols.modern.revision, "2026-07-28");
   assert.equal(status.protocols.modern.requests, 3);
   assert.equal(status.limits.softSessionLimit, 4);
+  assert.equal(status.limits.httpKeepAliveTimeoutMs, 120000);
+  assert.equal(status.limits.httpKeepAliveTimeoutBufferMs, 5000);
+  assert.ok(status.limits.httpHeadersTimeoutMs > status.limits.httpKeepAliveTimeoutMs + status.limits.httpKeepAliveTimeoutBufferMs);
   assert.ok(status.sessions <= 4, `Expected steady-state sessions <= 4, got ${status.sessions}`);
   assert.ok(status.sessionLifecycle.steadyStateReclaims >= 1, "Expected at least one pressure reclaim");
   assert.equal(status.sessionLifecycle.hardCapacityReclaims, 0, "Soft pressure handling should avoid the hard ceiling in this regression");
+  assert.ok(status.sessionLifecycle.sessionNotFoundResponses >= 1, "Expired/reclaimed session responses should be counted");
+  assert.equal(typeof status.sessionLifecycle.lastSessionNotFoundAt, "string", "Last session-not-found timestamp should be observable without storing session ids");
+  assert.equal(typeof status.runtimeDiagnostics.eventLoop.maxLagMs, "number", "Event-loop max lag should be observable for transport incident correlation");
+  assert.equal(typeof status.runtimeDiagnostics.eventLoop.stallCount, "number", "Event-loop stall count should be observable");
+  assert.equal(status.runtimeDiagnostics.http.clientErrors, 0, "Nominal dual-era traffic should not produce HTTP client errors");
 
   const capacityRace = await runConcurrentCapacityTest();
 

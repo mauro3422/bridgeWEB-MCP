@@ -285,10 +285,10 @@ async function loadProjectContext(args: {
     recommendedTools: guide.manifest.recommendedTools,
     manifestPath: guide.manifestPath,
   }));
-  const recommendation = args.task
+  const recommendation = args.task && args.includeGuides
     ? await measure("workflow.guide.recommend", () => recommendGuide(
         { task: args.task!, projectRoot, maxResults: 5 },
-        args.includeGuides ? discovery : undefined,
+        discovery,
       ))
     : null;
 

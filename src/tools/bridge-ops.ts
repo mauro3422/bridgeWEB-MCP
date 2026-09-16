@@ -16,6 +16,168 @@ import { terminalList } from "./process-tools.js";
 
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
+type TunnelMetricsSummary = {
+  processStartTimeSeconds: number | null;
+  endToEnd: {
+    initialize: Record<string, number>;
+    toolsCall: Record<string, number>;
+    notificationsInitialized: Record<string, number>;
+  };
+  localMcpPost: {
+    noStatus: number;
+    statuses: Record<string, number>;
+  };
+  controlPlane: {
+    commandsEnqueued: number | null;
+    commandsPolled: number | null;
+    queueLength: number | null;
+    queueCapacity: number | null;
+    workerOccupancy: number | null;
+    workerCapacity: number | null;
+    lastSuccessfulPollTimestampSeconds: number | null;
+  };
+  transportFailures: {
+    tunnelService502: number;
+    localPostNoStatus: number;
+    countsMatch: boolean;
+  };
+};
+
+type TunnelFailureBaseline = {
+  processStartTimeSeconds: number | null;
+  capturedAt: string;
+  tunnelService502: number;
+  localPostNoStatus: number;
+};
+
+const tunnelFailureBaselines = new Map<string, TunnelFailureBaseline>();
+
+function parsePrometheusLabels(raw = ""): Record<string, string> {
+  const labels: Record<string, string> = {};
+  const pattern = /([A-Za-z_][A-Za-z0-9_]*)="((?:\\.|[^"])*)"/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(raw)) !== null) {
+    labels[match[1]] = match[2].replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+  }
+  return labels;
+}
+
+export function parseTunnelMetricsSummary(text: string): TunnelMetricsSummary {
+  const summary: TunnelMetricsSummary = {
+    processStartTimeSeconds: null,
+    endToEnd: { initialize: {}, toolsCall: {}, notificationsInitialized: {} },
+    localMcpPost: { noStatus: 0, statuses: {} },
+    controlPlane: {
+      commandsEnqueued: null,
+      commandsPolled: null,
+      queueLength: null,
+      queueCapacity: null,
+      workerOccupancy: null,
+      workerCapacity: null,
+      lastSuccessfulPollTimestampSeconds: null,
+    },
+    transportFailures: { tunnelService502: 0, localPostNoStatus: 0, countsMatch: true },
+  };
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const match = /^([A-Za-z_:][A-Za-z0-9_:]*)(?:\{([^}]*)\})?\s+([^\s]+)$/.exec(line);
+    if (!match) continue;
+    const value = Number(match[3]);
+    if (!Number.isFinite(value)) continue;
+    const metric = match[1];
+    const labels = parsePrometheusLabels(match[2]);
+
+    if (metric === "process_start_time_seconds") {
+      summary.processStartTimeSeconds = value;
+      continue;
+    }
+
+    if (metric === "command_end_to_end_latency_milliseconds_count" && labels.latency_type === "enqueue_to_response") {
+      const status = labels.tunnel_service_status;
+      if (!status) continue;
+      const target = labels.request_method === "initialize"
+        ? summary.endToEnd.initialize
+        : labels.request_method === "tools/call"
+          ? summary.endToEnd.toolsCall
+          : labels.request_method === "notifications/initialized"
+            ? summary.endToEnd.notificationsInitialized
+            : null;
+      if (target) target[status] = (target[status] || 0) + value;
+      continue;
+    }
+
+    if (
+      metric === "http_client_request_duration_seconds_count"
+      && labels.http_request_method === "POST"
+      && labels.http_route === "/mcp"
+      && labels.server_address === "127.0.0.1"
+      && labels.server_port === "3001"
+    ) {
+      const status = labels.http_response_status_code;
+      if (status) summary.localMcpPost.statuses[status] = (summary.localMcpPost.statuses[status] || 0) + value;
+      else summary.localMcpPost.noStatus += value;
+      continue;
+    }
+
+    const controlPlaneKey = metric === "commands_enqueued_total" ? "commandsEnqueued"
+      : metric === "commands_polled_total" ? "commandsPolled"
+        : metric === "commands_queue_length" ? "queueLength"
+          : metric === "commands_queue_capacity" ? "queueCapacity"
+            : metric === "dispatcher_worker_pool_occupancy" ? "workerOccupancy"
+              : metric === "dispatcher_worker_pool_capacity" ? "workerCapacity"
+                : metric === "commands_poll_last_successful_timestamp_seconds" ? "lastSuccessfulPollTimestampSeconds"
+                  : null;
+    if (controlPlaneKey) summary.controlPlane[controlPlaneKey] = value;
+  }
+
+  const tunnelService502 = [
+    summary.endToEnd.initialize["502"] || 0,
+    summary.endToEnd.toolsCall["502"] || 0,
+    summary.endToEnd.notificationsInitialized["502"] || 0,
+  ].reduce((total, value) => total + value, 0);
+  summary.transportFailures = {
+    tunnelService502,
+    localPostNoStatus: summary.localMcpPost.noStatus,
+    countsMatch: tunnelService502 === summary.localMcpPost.noStatus,
+  };
+  return summary;
+}
+
+function withTunnelFailureBaseline(baseUrl: string, summary: TunnelMetricsSummary) {
+  const observedAt = new Date().toISOString();
+  const previousBaseline = tunnelFailureBaselines.get(baseUrl) || null;
+  const sameTunnelProcess = previousBaseline
+    && previousBaseline.processStartTimeSeconds === summary.processStartTimeSeconds;
+  const resetReason = !previousBaseline
+    ? "initial-sample"
+    : sameTunnelProcess
+      ? null
+      : "tunnel-restarted";
+  if (!sameTunnelProcess) {
+    tunnelFailureBaselines.set(baseUrl, {
+      processStartTimeSeconds: summary.processStartTimeSeconds,
+      capturedAt: observedAt,
+      tunnelService502: summary.transportFailures.tunnelService502,
+      localPostNoStatus: summary.transportFailures.localPostNoStatus,
+    });
+  }
+  const baseline = tunnelFailureBaselines.get(baseUrl)!;
+  return {
+    observedAt,
+    ...summary,
+    baseline: {
+      capturedAt: baseline.capturedAt,
+      resetReason,
+      sinceBaseline: {
+        tunnelService502: Math.max(0, summary.transportFailures.tunnelService502 - baseline.tunnelService502),
+        localPostNoStatus: Math.max(0, summary.transportFailures.localPostNoStatus - baseline.localPostNoStatus),
+      },
+    },
+  };
+}
+
 export async function tunnelHealth(baseUrl = DEFAULT_TUNNEL_ADMIN_BASE_URL) {
   const fetchEndpoint = async (name: string) => {
     const url = `${baseUrl}/${name}`;
@@ -27,7 +189,22 @@ export async function tunnelHealth(baseUrl = DEFAULT_TUNNEL_ADMIN_BASE_URL) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
   };
-  return { baseUrl, healthz: await fetchEndpoint("healthz"), readyz: await fetchEndpoint("readyz") };
+  const fetchMetrics = async () => {
+    try {
+      const response = await fetch(`${baseUrl}/metrics`);
+      if (!response.ok) return { ok: false, status: response.status };
+      const text = await response.text();
+      return { ok: true, status: response.status, summary: withTunnelFailureBaseline(baseUrl, parseTunnelMetricsSummary(text)) };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  };
+  const [healthz, readyz, metrics] = await Promise.all([
+    fetchEndpoint("healthz"),
+    fetchEndpoint("readyz"),
+    fetchMetrics(),
+  ]);
+  return { baseUrl, healthz, readyz, metrics };
 }
 
 async function getRuntimeToolCatalog() {
@@ -212,8 +389,8 @@ async function bridgeSelfCheck(cwd?: string) {
 export const bridgeOpsToolModule: BridgeToolModule = {
   name: "bridge-ops",
   tools: [
-    { name: "tunnel_health", description: "Check tunnel-client local healthz and readyz endpoints using the configured tunnel admin URL by default.", inputSchema: { type: "object", properties: { baseUrl: { type: "string", default: DEFAULT_TUNNEL_ADMIN_BASE_URL } }, additionalProperties: false } },
-    { name: "bridge_health", description: "Compact read-only bridge health query for tunnel, restart status, runtime tool catalog, or all lightweight checks.", inputSchema: { type: "object", properties: { check: { type: "string", enum: ["all", "tunnel", "restart", "catalog"], default: "all" }, cwd: { type: "string" } }, additionalProperties: false } },
+    { name: "tunnel_health", description: "Check tunnel-client health/readiness plus a bounded transport diagnostic summary from its local metrics, including MCP 502/no-status correlation and deltas since the first sample for the current tunnel process.", inputSchema: { type: "object", properties: { baseUrl: { type: "string", default: DEFAULT_TUNNEL_ADMIN_BASE_URL } }, additionalProperties: false } },
+    { name: "bridge_health", description: "Compact read-only bridge health query for tunnel diagnostics, restart status, runtime tool catalog, or all lightweight checks.", inputSchema: { type: "object", properties: { check: { type: "string", enum: ["all", "tunnel", "restart", "catalog"], default: "all" }, cwd: { type: "string" } }, additionalProperties: false } },
     { name: "bridge_connector_catalog_compare", description: "Compare the exact dedicated tool names observable in the current connector with the live Bridge runtime catalog. Use this to distinguish direct schema exposure from wrapper reachability; Bridge cannot inspect or force the host catalog, so exposedToolNames must come from the caller's observable catalog search.", inputSchema: { type: "object", properties: { exposedToolNames: { type: "array", items: { type: "string", minLength: 1, maxLength: 120 }, minItems: 1, maxItems: 256 } }, required: ["exposedToolNames"], additionalProperties: false } },
     { name: "bridge_self_check", description: "Run typecheck, build, Git status, configured tunnel health, and terminal inventory.", inputSchema: { type: "object", properties: { cwd: { type: "string" } }, additionalProperties: false } },
     { name: "bridge_request_restart", description: "Request a bridge restart by writing a restart-request file for the external watchdog. This tool does not restart or kill processes directly.", inputSchema: { type: "object", properties: { reason: { type: "string" }, mode: { type: "string", enum: ["http", "tunnel", "full"], default: "http" }, cwd: { type: "string" } }, required: ["reason"], additionalProperties: false } },

@@ -89,6 +89,9 @@ const projectContext = await registry.call("project_context_load", {
   includeGuides: false,
 });
 assertTimingEnvelope(projectContext.bridgeTiming, "project_context_load", ["project.load", "project.health", "project.context.assemble"]);
+assert.equal(projectContext.recommendation, null, "includeGuides=false must skip workflow guide recommendation entirely");
+assert.deepEqual(projectContext.guides, [], "includeGuides=false must not expose discovered guides");
+assert.equal(projectContext.bridgeTiming.phases.some((phase) => phase.name === "workflow.guide.recommend"), false, "includeGuides=false must not pay recommendation latency");
 
 console.log("Bridge routing latency instrumentation PASS", {
   coldMs: cold.bridgeTiming.totalMs,

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import fsPromises from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -168,6 +169,96 @@ function deniedNameInPath(target: string, deniedNames: string[]): string | null 
     if (deniedNames.includes(part)) return part;
   }
   return null;
+}
+
+export type PreparedToolPathPolicy = {
+  policy: ReturnType<typeof getPathPolicy>;
+  canonicalAllowedRoots: string[];
+  canonicalReadOnlyRoots: string[];
+  canonicalDeniedPaths: string[];
+};
+
+async function canonicalizePotentialPathAsync(target: string): Promise<string> {
+  let current = path.resolve(target);
+  const suffix: string[] = [];
+
+  while (true) {
+    try {
+      const realBase = await fsPromises.realpath(current);
+      return path.resolve(realBase, ...suffix);
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return path.resolve(target);
+      suffix.unshift(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+export async function prepareToolPathPolicy(env: NodeJS.ProcessEnv = process.env): Promise<PreparedToolPathPolicy> {
+  const policy = getPathPolicy(env);
+  if (!policy.enabled) {
+    return { policy, canonicalAllowedRoots: [], canonicalReadOnlyRoots: [], canonicalDeniedPaths: [] };
+  }
+  const [canonicalAllowedRoots, canonicalReadOnlyRoots, canonicalDeniedPaths] = await Promise.all([
+    Promise.all(policy.allowedRoots.map((root) => canonicalizePotentialPathAsync(root))),
+    Promise.all(policy.readOnlyRoots.map((root) => canonicalizePotentialPathAsync(root))),
+    Promise.all(policy.deniedPaths.map((item) => canonicalizePotentialPathAsync(item))),
+  ]);
+  return { policy, canonicalAllowedRoots, canonicalReadOnlyRoots, canonicalDeniedPaths };
+}
+
+export async function assertPathAllowedAsync(
+  target: string,
+  access: ToolPathAccess = "read",
+  prepared?: PreparedToolPathPolicy,
+): Promise<string> {
+  const resolved = path.resolve(target);
+  const state = prepared ?? await prepareToolPathPolicy();
+  const { policy } = state;
+  if (!policy.enabled || access === "internal") return resolved;
+  const canonical = await canonicalizePotentialPathAsync(resolved);
+
+  const allowedByRoots = (roots: string[], canonicalRoots: string[]) => {
+    const resolvedAllowed = roots.some((root) =>
+      isWithin(normalizeForCompare(root), normalizeForCompare(resolved)),
+    );
+    const canonicalAllowed = canonicalRoots.some((root) =>
+      isWithin(normalizeForCompare(root), normalizeForCompare(canonical)),
+    );
+    return resolvedAllowed && canonicalAllowed;
+  };
+  const allowed = allowedByRoots(policy.allowedRoots, state.canonicalAllowedRoots)
+    || (access === "read" && allowedByRoots(policy.readOnlyRoots, state.canonicalReadOnlyRoots));
+  if (!allowed) {
+    const readOnlyHint = access === "read" && policy.readOnlyRoots.length > 0
+      ? ` Read-only roots: ${policy.readOnlyRoots.join(", ")}`
+      : "";
+    throw new Error(`Path is outside bridge-mcp allowed roots for ${access}: ${resolved}. Allowed roots: ${policy.allowedRoots.join(", ")}.${readOnlyHint}`);
+  }
+
+  const deniedIndex = policy.deniedPaths.findIndex((item, index) =>
+    isWithin(normalizeForCompare(item), normalizeForCompare(resolved))
+      || isWithin(normalizeForCompare(state.canonicalDeniedPaths[index] ?? item), normalizeForCompare(canonical)),
+  );
+  if (deniedIndex >= 0) {
+    throw new Error(`Path is denied by bridge-mcp policy: ${resolved} (matched ${policy.deniedPaths[deniedIndex]})`);
+  }
+
+  const deniedName = deniedNameInPath(resolved, policy.deniedNames) ?? deniedNameInPath(canonical, policy.deniedNames);
+  if (deniedName) throw new Error(`Path contains a denied sensitive filename '${deniedName}': ${resolved}`);
+  return resolved;
+}
+
+export async function resolveToolPathAsync(
+  inputPath: string,
+  options: ResolveToolPathOptions = {},
+  prepared?: PreparedToolPathPolicy,
+): Promise<string> {
+  if (!inputPath || typeof inputPath !== "string") throw new Error("Path must be a non-empty string.");
+  const baseDir = options.baseDir ? path.resolve(options.baseDir) : process.cwd();
+  const resolved = path.resolve(baseDir, inputPath);
+  return assertPathAllowedAsync(resolved, options.access ?? "read", prepared);
 }
 
 export function assertPathAllowed(target: string, access: ToolPathAccess = "read"): string {

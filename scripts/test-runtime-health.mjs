@@ -8,6 +8,39 @@ import {
   captureRuntimeHealth,
   getRuntimeHealthReport,
 } from "../dist/runtime-health.js";
+import { parseTunnelMetricsSummary } from "../dist/tools/bridge-ops.js";
+
+const tunnelMetrics = parseTunnelMetricsSummary(`
+process_start_time_seconds 123
+command_end_to_end_latency_milliseconds_count{request_method="initialize",tunnel_service_status="200",latency_type="enqueue_to_response"} 9
+command_end_to_end_latency_milliseconds_count{latency_type="enqueue_to_response",request_method="initialize",tunnel_service_status="502"} 2
+command_end_to_end_latency_milliseconds_count{channel="secondary",request_method="initialize",latency_type="enqueue_to_response",tunnel_service_status="502"} 1
+command_end_to_end_latency_milliseconds_count{request_method="tools/call",latency_type="enqueue_to_response",tunnel_service_status="200"} 8
+command_end_to_end_latency_milliseconds_count{request_method="tools/call",latency_type="enqueue_to_response",tunnel_service_status="400"} 1
+command_end_to_end_latency_milliseconds_count{request_method="tools/call",latency_type="enqueue_to_response",tunnel_service_status="502"} 3
+command_end_to_end_latency_milliseconds_count{request_method="notifications/initialized",latency_type="enqueue_to_response",tunnel_service_status="202"} 7
+command_end_to_end_latency_milliseconds_count{request_method="notifications/initialized",latency_type="enqueue_to_response",tunnel_service_status="502"} 1
+http_client_request_duration_seconds_count{http_request_method="POST",http_route="/mcp",server_address="127.0.0.1",server_port="3001"} 6
+http_client_request_duration_seconds_count{network_protocol_version="2",http_request_method="POST",http_route="/mcp",server_address="127.0.0.1",server_port="3001"} 1
+http_client_request_duration_seconds_count{http_request_method="POST",http_response_status_code="200",http_route="/mcp",server_address="127.0.0.1",server_port="3001"} 17
+http_client_request_duration_seconds_count{http_request_method="POST",http_route="/mcp",server_address="api.openai.com"} 999
+commands_enqueued_total 44
+commands_polled_total 44
+commands_queue_length 0
+commands_queue_capacity 20
+dispatcher_worker_pool_occupancy 1
+dispatcher_worker_pool_capacity 10
+commands_poll_last_successful_timestamp_seconds 122.5
+`);
+assert.equal(tunnelMetrics.processStartTimeSeconds, 123);
+assert.equal(tunnelMetrics.endToEnd.initialize["502"], 3);
+assert.equal(tunnelMetrics.endToEnd.toolsCall["502"], 3);
+assert.equal(tunnelMetrics.localMcpPost.noStatus, 7);
+assert.equal(tunnelMetrics.localMcpPost.statuses["200"], 17);
+assert.equal(tunnelMetrics.transportFailures.tunnelService502, 7);
+assert.equal(tunnelMetrics.transportFailures.countsMatch, true);
+assert.equal(tunnelMetrics.controlPlane.queueLength, 0);
+assert.equal(tunnelMetrics.controlPlane.workerCapacity, 10);
 
 const healthyObservation = {
   tunnel: { healthzOk: true, readyzOk: true },

@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { resolveToolPath } from "./shared/path.js";
+import { prepareToolPathPolicy, resolveToolPathAsync, type PreparedToolPathPolicy } from "./shared/path.js";
 import { splitTextLines } from "./shared/text-files.js";
 
 const MAX_ANALYZE_BYTES = 512 * 1024;
@@ -42,8 +42,8 @@ export type SearchFilesArgs = {
 };
 export type ListFilesSmartArgs = { path: string; depth?: number; pattern?: string; showImports?: boolean };
 
-function resolveInputPath(inputPath: string): string {
-  return resolveToolPath(inputPath, { access: "read" });
+async function resolveInputPath(inputPath: string, prepared?: PreparedToolPathPolicy): Promise<string> {
+  return await resolveToolPathAsync(inputPath, { access: "read" }, prepared);
 }
 
 function clampInt(value: unknown, fallback: number, min: number, max: number): number {
@@ -60,8 +60,11 @@ function isBinaryPath(filePath: string): boolean {
   return BINARY_EXTS.has(path.extname(filePath).toLowerCase());
 }
 
-async function assertReadableTextFile(filePath: string): Promise<{ resolved: string; size: number }> {
-  const resolved = resolveInputPath(filePath);
+async function assertReadableTextFile(
+  filePath: string,
+  prepared?: PreparedToolPathPolicy,
+): Promise<{ resolved: string; size: number }> {
+  const resolved = await resolveInputPath(filePath, prepared);
   const stat = await fs.stat(resolved);
   if (!stat.isFile()) throw new Error(`Path is not a file: ${resolved}`);
   if (stat.size > MAX_ANALYZE_BYTES) throw new Error(`File too large for line tools: ${stat.size} bytes > ${MAX_ANALYZE_BYTES}`);
@@ -73,8 +76,11 @@ async function assertReadableTextFile(filePath: string): Promise<{ resolved: str
   return { resolved, size: stat.size };
 }
 
-async function readTextFileSafe(filePath: string): Promise<{ resolved: string; size: number; lines: string[] }> {
-  const { resolved, size } = await assertReadableTextFile(filePath);
+async function readTextFileSafe(
+  filePath: string,
+  prepared?: PreparedToolPathPolicy,
+): Promise<{ resolved: string; size: number; lines: string[] }> {
+  const { resolved, size } = await assertReadableTextFile(filePath, prepared);
   const text = await fs.readFile(resolved, "utf8");
   return { resolved, size, lines: splitLinesPreserveText(text) };
 }
@@ -186,10 +192,11 @@ function findContainer(lines: string[], lineNumber: number): string | null {
   return null;
 }
 
-export async function readFileLines(args: ReadFileLinesArgs) {
+export async function readFileLines(args: ReadFileLinesArgs, prepared?: PreparedToolPathPolicy) {
+  const policy = prepared ?? await prepareToolPathPolicy();
   const maxLines = clampInt(args.maxLines, 250, 1, 500);
   const startLine = clampInt(args.startLine, 1, 1, Number.MAX_SAFE_INTEGER);
-  const { resolved, size, lines } = await readTextFileSafe(args.path);
+  const { resolved, size, lines } = await readTextFileSafe(args.path, policy);
   const totalLines = lines.length;
   const requestedEnd = args.endLine === undefined
     ? Math.min(totalLines, startLine + maxLines - 1)
@@ -226,10 +233,11 @@ function parseFileSpec(spec: string): ReadFileLinesArgs {
 export async function readManyFiles(args: ReadManyFilesArgs) {
   const files = args.files.slice(0, 10);
   if (args.files.length > 10) throw new Error(`read_many_files accepts at most 10 files, got ${args.files.length}.`);
+  const prepared = await prepareToolPathPolicy();
   const maxLinesPerFile = clampInt(args.maxLinesPerFile, 250, 1, 500);
   const results = await Promise.all(files.map(async (spec) => {
     try {
-      return { spec, ok: true, result: await readFileLines({ ...parseFileSpec(spec), maxLines: maxLinesPerFile }) };
+      return { spec, ok: true, result: await readFileLines({ ...parseFileSpec(spec), maxLines: maxLinesPerFile }, prepared) };
     } catch (error) {
       return { spec, ok: false, error: error instanceof Error ? error.message : String(error) };
     }
@@ -257,7 +265,8 @@ async function collectFiles(root: string, depth: number, pattern?: string): Prom
 }
 
 export async function listFilesSmart(args: ListFilesSmartArgs) {
-  const root = resolveInputPath(args.path);
+  const prepared = await prepareToolPathPolicy();
+  const root = await resolveInputPath(args.path, prepared);
   const depth = clampInt(args.depth, 1, 0, 3);
   const stat = await fs.stat(root);
   if (!stat.isDirectory()) throw new Error(`Path is not a directory: ${root}`);
@@ -291,7 +300,8 @@ export async function listFilesSmart(args: ListFilesSmartArgs) {
 
 export async function searchFiles(args: SearchFilesArgs) {
   if (!args.pattern) throw new Error("pattern is required.");
-  const root = resolveInputPath(args.path);
+  const prepared = await prepareToolPathPolicy();
+  const root = await resolveInputPath(args.path, prepared);
   const stat = await fs.stat(root);
   const contextLines = clampInt(args.contextLines, 2, 0, 10);
   const maxResults = clampInt(args.maxResults, 50, 1, 200);
@@ -305,7 +315,7 @@ export async function searchFiles(args: SearchFilesArgs) {
     if (totalMatches >= maxResults || files.length >= MAX_SEARCH_OUTPUT_FILES) break;
     let read;
     try {
-      read = await readTextFileSafe(filePath);
+      read = await readTextFileSafe(filePath, prepared);
     } catch {
       continue;
     }

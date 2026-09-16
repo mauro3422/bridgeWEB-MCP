@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import type { BridgeToolModule } from "./types.js";
-import { assertPathAllowed } from "./shared/path.js";
+import { assertPathAllowedAsync, prepareToolPathPolicy } from "./shared/path.js";
 import { BridgeTimingCollector, compactBridgeTimingEnvelope } from "./shared/timing.js";
 import {
   callRobloxMcpTool,
@@ -649,6 +649,7 @@ async function walkSkillFiles(root: string, source: SkillSource, maxDepth: numbe
   const results: SkillEntry[] = [];
   const warnings: string[] = [];
   const visitedDirectories = new Set<string>();
+  const preparedPathPolicy = source === "codex-plugin" ? undefined : await prepareToolPathPolicy();
   let canonicalRoot: string;
   try {
     canonicalRoot = await fs.realpath(root);
@@ -667,7 +668,7 @@ async function walkSkillFiles(root: string, source: SkillSource, maxDepth: numbe
       if (source === "codex-plugin") {
         if (!isWithinRoot(canonicalRoot, realDirectory)) throw new Error(`plugin directory resolves outside cache root: ${realDirectory}`);
       } else {
-        assertPathAllowed(realDirectory, "read");
+        await assertPathAllowedAsync(realDirectory, "read", preparedPathPolicy);
       }
       const visitKey = process.platform === "win32" ? realDirectory.toLowerCase() : realDirectory;
       if (visitedDirectories.has(visitKey)) return;
@@ -1574,7 +1575,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const projectRoot = typeof args.projectRoot === "string" && args.projectRoot.trim()
         ? path.resolve(args.projectRoot.trim())
         : null;
-      if (projectRoot) assertPathAllowed(projectRoot, "read");
+      if (projectRoot) await assertPathAllowedAsync(projectRoot, "read");
       const contextPlane = projectRoot
         ? await timing.measure("context.plane", () => prepareMssrContextPlane({
             projectRoot,
@@ -1708,7 +1709,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const projectRoot = typeof args.projectRoot === "string" && args.projectRoot.trim()
         ? path.resolve(args.projectRoot.trim())
         : null;
-      if (projectRoot) assertPathAllowed(projectRoot, "read");
+      if (projectRoot) await assertPathAllowedAsync(projectRoot, "read");
       const contextPlane = projectRoot
         ? await timing.measure("context.plane", () => prepareMssrContextPlane({
             projectRoot,
@@ -2069,7 +2070,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         ? path.resolve(args.projectRoot.trim())
         : null;
       if (!projectRoot) throw new Error("mssr_context_ack requires a projectRoot naming the repository whose durable context inbox is trusted.");
-      assertPathAllowed(projectRoot, "read");
+      await assertPathAllowedAsync(projectRoot, "read");
       return await acknowledgeMssrContextPlane({
         projectRoot,
         messageIds: args.messageIds,

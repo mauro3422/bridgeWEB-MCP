@@ -559,6 +559,50 @@
       "required": false,
       "priority": 80,
       "maxChars": 2200
+    },
+    {
+      "id": "bridge-http-transport-readiness-contract",
+      "kind": "memory",
+      "description": "HTTP keep-alive/tunnel correlation and sustained-readiness recovery contract for Bridge runtime stability.",
+      "source": {
+        "path": ".mssr/knowledge/operations/bridge-http-transport-readiness-contract.md"
+      },
+      "topic": "operations",
+      "area": "bridge-runtime",
+      "stages": [
+        "start",
+        "verify",
+        "close",
+        "resume"
+      ],
+      "domains": [
+        "coding",
+        "filesystem",
+        "other"
+      ],
+      "actions": [
+        "debug",
+        "recover",
+        "verify",
+        "maintain"
+      ],
+      "artifacts": [
+        "mcp",
+        "code",
+        "repository"
+      ],
+      "needs": [
+        "integrity-verification",
+        "safe-editing"
+      ],
+      "signals": [
+        "error-observed",
+        "recovery-needed",
+        "conflicting-evidence"
+      ],
+      "required": false,
+      "priority": 45,
+      "maxChars": 2400
     }
   ]
 }

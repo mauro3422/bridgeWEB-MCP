@@ -39,6 +39,14 @@ const CLEANUP_INTERVAL_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_CLEANUP_INTERVAL_
 const MAX_REQUEST_BODY_BYTES = getPositiveIntEnv("BRIDGE_MCP_HTTP_MAX_BODY_BYTES", 16 * 1024 * 1024);
 const DASHBOARD_CACHE_MS = getPositiveIntEnv("BRIDGE_MCP_DASHBOARD_CACHE_MS", 15 * 1000);
 const DASHBOARD_WORKER_TIMEOUT_MS = getPositiveIntEnv("BRIDGE_MCP_DASHBOARD_WORKER_TIMEOUT_MS", 120 * 1000);
+const EVENT_LOOP_PROBE_INTERVAL_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_EVENT_LOOP_PROBE_MS", 100);
+const EVENT_LOOP_STALL_THRESHOLD_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_EVENT_LOOP_STALL_MS", 250);
+const HTTP_KEEP_ALIVE_TIMEOUT_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_KEEP_ALIVE_TIMEOUT_MS", 120_000);
+const HTTP_KEEP_ALIVE_TIMEOUT_BUFFER_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_KEEP_ALIVE_BUFFER_MS", 5_000);
+const HTTP_HEADERS_TIMEOUT_MS = Math.max(
+  getPositiveIntEnv("BRIDGE_MCP_HTTP_HEADERS_TIMEOUT_MS", 130_000),
+  HTTP_KEEP_ALIVE_TIMEOUT_MS + HTTP_KEEP_ALIVE_TIMEOUT_BUFFER_MS + 1_000,
+);
 
 let ready = false;
 let closing = false;
@@ -48,6 +56,15 @@ let modernProtocolRequests = 0;
 let modernProtocolErrors = 0;
 let steadyStateSessionReclaims = 0;
 let hardCapacitySessionReclaims = 0;
+let sessionNotFoundResponses = 0;
+let lastSessionNotFoundAt: string | null = null;
+let eventLoopProbeLastTickMs = Date.now();
+let eventLoopMaxLagMs = 0;
+let eventLoopStallCount = 0;
+let lastEventLoopStallAt: string | null = null;
+let lastEventLoopStallLagMs = 0;
+let httpClientErrorCount = 0;
+let lastHttpClientErrorAt: string | null = null;
 let capacityAdmissionTail: Promise<void> = Promise.resolve();
 let dashboardSnapshotCache: { expiresAtMs: number; value: Record<string, unknown> } | null = null;
 let dashboardSnapshotInFlight: Promise<Record<string, unknown>> | null = null;
@@ -90,6 +107,19 @@ function getPositiveIntEnv(name: string, fallback: number): number {
 function nowIso() {
   return new Date().toISOString();
 }
+
+const eventLoopProbeTimer = setInterval(() => {
+  const nowMs = Date.now();
+  const lagMs = Math.max(0, nowMs - eventLoopProbeLastTickMs - EVENT_LOOP_PROBE_INTERVAL_MS);
+  eventLoopProbeLastTickMs = nowMs;
+  eventLoopMaxLagMs = Math.max(eventLoopMaxLagMs, lagMs);
+  if (lagMs >= EVENT_LOOP_STALL_THRESHOLD_MS) {
+    eventLoopStallCount += 1;
+    lastEventLoopStallAt = new Date(nowMs).toISOString();
+    lastEventLoopStallLagMs = lagMs;
+  }
+}, EVENT_LOOP_PROBE_INTERVAL_MS);
+eventLoopProbeTimer.unref();
 
 function log(level: "info" | "warn" | "error", message: string, extra: Record<string, unknown> = {}) {
   const event = { ts: nowIso(), level, component: "bridge-http", message, ...extra };
@@ -201,6 +231,22 @@ function getStatus() {
     sessionLifecycle: {
       steadyStateReclaims: steadyStateSessionReclaims,
       hardCapacityReclaims: hardCapacitySessionReclaims,
+      sessionNotFoundResponses,
+      lastSessionNotFoundAt,
+    },
+    runtimeDiagnostics: {
+      eventLoop: {
+        probeIntervalMs: EVENT_LOOP_PROBE_INTERVAL_MS,
+        stallThresholdMs: EVENT_LOOP_STALL_THRESHOLD_MS,
+        maxLagMs: eventLoopMaxLagMs,
+        stallCount: eventLoopStallCount,
+        lastStallAt: lastEventLoopStallAt,
+        lastStallLagMs: lastEventLoopStallLagMs,
+      },
+      http: {
+        clientErrors: httpClientErrorCount,
+        lastClientErrorAt: lastHttpClientErrorAt,
+      },
     },
     limits: {
       maxSessions: MAX_SESSIONS,
@@ -210,6 +256,9 @@ function getStatus() {
       anonymousTransportTtlMs: ANONYMOUS_TRANSPORT_TTL_MS,
       cleanupIntervalMs: CLEANUP_INTERVAL_MS,
       maxRequestBodyBytes: MAX_REQUEST_BODY_BYTES,
+      httpKeepAliveTimeoutMs: HTTP_KEEP_ALIVE_TIMEOUT_MS,
+      httpKeepAliveTimeoutBufferMs: HTTP_KEEP_ALIVE_TIMEOUT_BUFFER_MS,
+      httpHeadersTimeoutMs: HTTP_HEADERS_TIMEOUT_MS,
     },
     startedAt: startedAt.toISOString(),
     uptimeSeconds: Math.round(process.uptime()),
@@ -469,6 +518,8 @@ async function handleMcpRequest(
   if (sessionId) {
     const record = sessions.get(sessionId);
     if (!record) {
+      sessionNotFoundResponses += 1;
+      lastSessionNotFoundAt = nowIso();
       sendJson(res, 404, {
         error: "mcp_session_not_found",
         requestId,
@@ -803,11 +854,16 @@ async function main() {
     }
   });
 
+  httpServer.keepAliveTimeout = HTTP_KEEP_ALIVE_TIMEOUT_MS;
+  (httpServer as typeof httpServer & { keepAliveTimeoutBuffer: number }).keepAliveTimeoutBuffer = HTTP_KEEP_ALIVE_TIMEOUT_BUFFER_MS;
+  httpServer.headersTimeout = HTTP_HEADERS_TIMEOUT_MS;
+
   const shutdown = async (signal: NodeJS.Signals) => {
     if (closing) return;
     closing = true;
     ready = false;
     clearInterval(cleanupTimer);
+    clearInterval(eventLoopProbeTimer);
     skillHealthScheduler.stop();
     projectHealthScheduler.stop();
     projectSituationScheduler.stop();
@@ -848,7 +904,9 @@ async function main() {
   });
 
   httpServer.on("clientError", (error, socket) => {
-    log("warn", "client error", { error: error.message });
+    httpClientErrorCount += 1;
+    lastHttpClientErrorAt = nowIso();
+    log("warn", "client error", { error: error.message, clientErrorCount: httpClientErrorCount });
     socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
   });
 
@@ -874,6 +932,9 @@ async function main() {
         sessionIdleMs: SESSION_IDLE_MS,
         capacityReclaimIdleMs: SESSION_CAPACITY_RECLAIM_IDLE_MS,
         anonymousTransportTtlMs: ANONYMOUS_TRANSPORT_TTL_MS,
+        httpKeepAliveTimeoutMs: HTTP_KEEP_ALIVE_TIMEOUT_MS,
+        httpKeepAliveTimeoutBufferMs: HTTP_KEEP_ALIVE_TIMEOUT_BUFFER_MS,
+        httpHeadersTimeoutMs: HTTP_HEADERS_TIMEOUT_MS,
       },
     });
   });

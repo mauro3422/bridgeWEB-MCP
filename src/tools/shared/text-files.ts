@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { resolveToolPath } from "./path.js";
+import { prepareToolPathPolicy, resolveToolPathAsync, type PreparedToolPathPolicy } from "./path.js";
 
 export const DEFAULT_TEXT_FILE_MAX_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_EDIT_FILE_MAX_BYTES = 512 * 1024;
@@ -51,8 +51,12 @@ export function isLikelyBinaryPath(filePath: string): boolean {
   return BINARY_EXTS.has(path.extname(filePath).toLowerCase());
 }
 
-export async function readTextSnapshot(filePath: string, maxBytes = DEFAULT_TEXT_FILE_MAX_BYTES): Promise<TextFileSnapshot> {
-  const resolved = resolveToolPath(filePath);
+export async function readTextSnapshot(
+  filePath: string,
+  maxBytes = DEFAULT_TEXT_FILE_MAX_BYTES,
+  prepared?: PreparedToolPathPolicy,
+): Promise<TextFileSnapshot> {
+  const resolved = await resolveToolPathAsync(filePath, { access: "read" }, prepared);
   const stat = await fs.stat(resolved);
   if (!stat.isFile()) throw new Error(`Path is not a file: ${resolved}`);
   if (stat.size > maxBytes) throw new Error(`File too large: ${stat.size} bytes > ${maxBytes} bytes.`);
@@ -75,17 +79,18 @@ export async function readTextSnapshot(filePath: string, maxBytes = DEFAULT_TEXT
 }
 
 export async function writeTextAndVerify(filePath: string, content: string, append = false) {
-  const resolved = resolveToolPath(filePath, { access: "write" });
+  const prepared = await prepareToolPathPolicy();
+  const resolved = await resolveToolPathAsync(filePath, { access: "write" }, prepared);
   await fs.mkdir(path.dirname(resolved), { recursive: true });
   const before = await fs.stat(resolved).then(
-    async () => await readTextSnapshot(resolved),
+    async () => await readTextSnapshot(resolved, DEFAULT_TEXT_FILE_MAX_BYTES, prepared),
     () => null,
   );
 
   if (append) await fs.appendFile(resolved, content, "utf8");
   else await fs.writeFile(resolved, content, "utf8");
 
-  const after = await readTextSnapshot(resolved);
+  const after = await readTextSnapshot(resolved, DEFAULT_TEXT_FILE_MAX_BYTES, prepared);
   return {
     path: resolved,
     append,

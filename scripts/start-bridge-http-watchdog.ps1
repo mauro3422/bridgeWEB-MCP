@@ -14,6 +14,8 @@ param(
   [int]$ProbeTimeoutSeconds = 8,
   [ValidateRange(2, 12)]
   [int]$ConsecutiveFailureThreshold = 3,
+  [ValidateRange(15, 600)]
+  [int]$AliveReadinessGraceSeconds = 90,
   [int]$RestartDelaySeconds = 2,
   [int]$SessionIdleMs = 1800000,
   [int]$CapacityReclaimIdleMs = 15000,
@@ -340,7 +342,7 @@ function Start-TunnelClient {
 }
 
 function Write-RestartAck {
-  param([object]$Request, [string]$Action)
+  param([object]$Request, [string]$Action, [object]$Evidence = $null)
 
   $ackPath = Join-Path $ProjectRoot $RestartAckFile
   $ack = [ordered]@{
@@ -352,8 +354,53 @@ function Write-RestartAck {
     bridgeBaseUrl = "http://$BridgeHost`:$BridgePort"
     tunnelBaseUrl = $TunnelBaseUrl
     request = $Request
+    evidence = $Evidence
   }
   $ack | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $ackPath -Encoding UTF8
+}
+
+function Get-BridgeRecoveryEvidence {
+  param(
+    [int]$ReadinessFailures,
+    [bool]$ProcessAlive,
+    [int]$ReadinessFailureAgeSeconds = 0,
+    [int]$AliveGraceSeconds = 0
+  )
+
+  $statusSnapshot = $null
+  $statusError = $null
+  try {
+    $status = Invoke-RestMethod -Uri "http://$BridgeHost`:$BridgePort/status" -TimeoutSec 2
+    $statusSnapshot = [ordered]@{
+      server = $status.server
+      ready = $status.ready
+      closing = $status.closing
+      pid = $status.pid
+      runtimeBootId = $status.runtimeBootId
+      uptimeSeconds = $status.uptimeSeconds
+      sessions = $status.sessions
+      activeSessions = $status.activeSessions
+      idleSessions = $status.idleSessions
+      transportsCreating = $status.transportsCreating
+      sessionLifecycle = $status.sessionLifecycle
+      runtimeDiagnostics = $status.runtimeDiagnostics
+      limits = $status.limits
+    }
+  }
+  catch {
+    $statusError = $_.Exception.Message
+  }
+
+  return [ordered]@{
+    observedAt = (Get-Date).ToUniversalTime().ToString("o")
+    readinessFailures = $ReadinessFailures
+    threshold = $ConsecutiveFailureThreshold
+    readinessFailureAgeSeconds = $ReadinessFailureAgeSeconds
+    aliveReadinessGraceSeconds = $AliveGraceSeconds
+    processAlive = $ProcessAlive
+    status = $statusSnapshot
+    statusError = $statusError
+  }
 }
 
 function Read-RestartRequest {
@@ -405,12 +452,14 @@ Write-BridgeLog "ProjectRoot=$ProjectRoot"
 Write-BridgeLog "Bridge HTTP=$bridgeBaseUrl$McpPath"
 Write-BridgeLog "Tunnel profile=$Profile profileDir=$TunnelProfileDir admin=$TunnelBaseUrl"
 Write-BridgeLog "Session limits: max=$MaxSessions soft=$SoftSessionLimit idleMs=$SessionIdleMs reclaimIdleMs=$CapacityReclaimIdleMs anonymousTtlMs=$AnonymousTransportTtlMs cleanupMs=$CleanupIntervalMs maxBodyBytes=$MaxBodyBytes"
+Write-BridgeLog "Readiness policy: probeTimeoutSeconds=$ProbeTimeoutSeconds failureThreshold=$ConsecutiveFailureThreshold aliveGraceSeconds=$AliveReadinessGraceSeconds checkIntervalSeconds=$CheckIntervalSeconds"
 Write-BridgeLog "Restart request file=$(Join-Path $ProjectRoot $RestartRequestFile)"
 
 $bridgeProcess = $null
 $tunnelProcess = $null
 $watchdogMutex = $null
 $bridgeReadinessFailures = 0
+$bridgeReadinessFailureStartedAt = $null
 $tunnelReadinessFailures = 0
 
 try {
@@ -429,7 +478,14 @@ try {
   do {
     $bridgeReady = Test-HttpText -Url "$bridgeBaseUrl/readyz" -Expected "ready"
     $tunnelReady = if ($NoTunnel) { $true } else { Test-HttpText -Url "$TunnelBaseUrl/readyz" -Expected "ready" }
-    if ($bridgeReady) { $bridgeReadinessFailures = 0 } else { $bridgeReadinessFailures += 1 }
+    if ($bridgeReady) {
+      $bridgeReadinessFailures = 0
+      $bridgeReadinessFailureStartedAt = $null
+    }
+    else {
+      $bridgeReadinessFailures += 1
+      if (-not $bridgeReadinessFailureStartedAt) { $bridgeReadinessFailureStartedAt = Get-Date }
+    }
     if ($tunnelReady) { $tunnelReadinessFailures = 0 } else { $tunnelReadinessFailures += 1 }
 
     $bridgeProcessAlive = $false
@@ -471,22 +527,31 @@ try {
       }
 
       $bridgeReadinessFailures = 0
+      $bridgeReadinessFailureStartedAt = $null
       $tunnelReadinessFailures = 0
       Write-RestartAck -Request $request -Action "restart-$mode"
     }
     elseif (-not $bridgeReady) {
-      if (-not $bridgeProcessAlive -or $bridgeReadinessFailures -ge $ConsecutiveFailureThreshold) {
-        $bridgeRecoveryReason = if (-not $bridgeProcessAlive) { "process-exited" } else { "readiness-threshold" }
-        Write-BridgeLog "Bridge HTTP recovery triggered reason=$bridgeRecoveryReason readinessFailures=$bridgeReadinessFailures threshold=$ConsecutiveFailureThreshold" "warn"
+      $bridgeReadinessFailureAgeSeconds = if ($bridgeReadinessFailureStartedAt) {
+        [int][math]::Floor(((Get-Date) - $bridgeReadinessFailureStartedAt).TotalSeconds)
+      } else { 0 }
+      $bridgeReadinessSustained = $bridgeProcessAlive -and
+        $bridgeReadinessFailures -ge $ConsecutiveFailureThreshold -and
+        $bridgeReadinessFailureAgeSeconds -ge $AliveReadinessGraceSeconds
+      if (-not $bridgeProcessAlive -or $bridgeReadinessSustained) {
+        $bridgeRecoveryReason = if (-not $bridgeProcessAlive) { "process-exited" } else { "readiness-sustained" }
+        $bridgeRecoveryEvidence = Get-BridgeRecoveryEvidence -ReadinessFailures $bridgeReadinessFailures -ProcessAlive $bridgeProcessAlive -ReadinessFailureAgeSeconds $bridgeReadinessFailureAgeSeconds -AliveGraceSeconds $AliveReadinessGraceSeconds
+        Write-BridgeLog "Bridge HTTP recovery triggered reason=$bridgeRecoveryReason readinessFailures=$bridgeReadinessFailures threshold=$ConsecutiveFailureThreshold ageSeconds=$bridgeReadinessFailureAgeSeconds graceSeconds=$AliveReadinessGraceSeconds" "warn"
         Stop-ProcessState -State $bridgeProcess -Name "bridge HTTP" -ForceExternal
         Stop-PortOwner -Port $BridgePort -Name "bridge HTTP" -ExpectedCommandPattern $bridgeCommandPattern
         Start-Sleep -Seconds $RestartDelaySeconds
         $bridgeProcess = Start-BridgeHttp
         $bridgeReadinessFailures = 0
-        Write-RestartAck -Request $null -Action "auto-restart-http-$bridgeRecoveryReason"
+        $bridgeReadinessFailureStartedAt = $null
+        Write-RestartAck -Request $null -Action "auto-restart-http-$bridgeRecoveryReason" -Evidence $bridgeRecoveryEvidence
       }
       else {
-        Write-BridgeLog "Bridge HTTP readiness probe failed ($bridgeReadinessFailures/$ConsecutiveFailureThreshold) while process is alive; deferring restart" "warn"
+        Write-BridgeLog "Bridge HTTP readiness probe failed ($bridgeReadinessFailures/$ConsecutiveFailureThreshold) while process is alive; ageSeconds=$bridgeReadinessFailureAgeSeconds graceSeconds=$AliveReadinessGraceSeconds; deferring restart" "warn"
       }
     }
     elseif (-not $tunnelReady) {

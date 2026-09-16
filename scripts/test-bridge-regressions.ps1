@@ -30,6 +30,26 @@ Invoke-Check "version sources are consistent" {
   Write-Host "  OK $expectedVersion"
 }
 
+Invoke-Check "watchdog requires sustained unreadiness before restarting a live Bridge" {
+  $watchdogText = Get-Content -LiteralPath "scripts\start-bridge-http-watchdog.ps1" -Raw
+  $requiredFragments = @(
+    '[int]$AliveReadinessGraceSeconds = 90',
+    '$bridgeReadinessFailureStartedAt = $null',
+    '$bridgeReadinessSustained = $bridgeProcessAlive -and',
+    '$bridgeReadinessFailureAgeSeconds -ge $AliveReadinessGraceSeconds',
+    'if (-not $bridgeProcessAlive -or $bridgeReadinessSustained)',
+    'auto-restart-http-$bridgeRecoveryReason',
+    'readinessFailureAgeSeconds = $ReadinessFailureAgeSeconds',
+    'aliveReadinessGraceSeconds = $AliveGraceSeconds'
+  )
+  foreach ($fragment in $requiredFragments) {
+    if (-not $watchdogText.Contains($fragment)) { throw "watchdog sustained-readiness contract missing: $fragment" }
+  }
+  $legacyImmediateThreshold = 'if (-not $bridgeProcessAlive -or $bridgeReadinessFailures -ge $ConsecutiveFailureThreshold)'
+  if ($watchdogText.Contains($legacyImmediateThreshold)) { throw "watchdog still restarts a live Bridge immediately at the raw failure threshold" }
+  Write-Host "  OK live Bridge readiness stalls use sustained grace before restart"
+}
+
 Invoke-Check "tunnel admin default stays on HTTP profile port" {
   $configText = Get-Content -LiteralPath "src\config.ts" -Raw
   $expectedLine = 'DEFAULT_TUNNEL_ADMIN_BASE_URL = "' + $ExpectedTunnelAdminBaseUrl + '"'
