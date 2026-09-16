@@ -159,7 +159,7 @@ Current bridge assumptions:
 
 ```txt
 Project root: D:\Dev\bridge-mcp
-Server: bridge-mcp v0.6.124
+Server: bridge-mcp v0.6.125
 Installed MSSR: @mauroprime/mssr 0.2.61
 Runtime tools: 162
 Active profile: bridge-local-http

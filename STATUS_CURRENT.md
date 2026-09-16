@@ -1,19 +1,20 @@
 # bridge-mcp current status
 
-Bridge `0.6.124` is the current verified source/dist/live release on vendored and installed `@mauroprime/mssr 0.2.61`.
+Bridge `0.6.125` is the current source/dist/live release on the canonical final `@mauroprime/mssr 0.2.61` artifact.
 
 ```text
 Project root:       D:\Dev\bridge-mcp
-Source version:     bridge-mcp 0.6.124
-Runtime version:    bridge-mcp 0.6.124
+Source version:     bridge-mcp 0.6.125
+Runtime version:    bridge-mcp 0.6.125
 Installed MSSR:     @mauroprime/mssr 0.2.61
+MSSR vendor SHA256: 946ba46fbcbb9f7faf712dd0421a0ccffdf85f3c611fa133bd55f3ee3c03ca8a
 Runtime tools:      162
 Transport:          streamable-http-dual-era
 Bridge MCP:         http://127.0.0.1:3001/mcp
 Tunnel admin:       http://127.0.0.1:8081
 Tunnel profile:     bridge-local-http (live/ready)
-Runtime PID/boot:   18368 / f37449a7-4ad8-4b8c-bd09-290e34bf3fe0
-Last runtime ack:   2c2f029b-fa4b-4938-b032-7a5e6b62010c (restart-http)
+Runtime PID/boot:   20104 / 9ceced40-a835-4248-a793-3b3b35c5cd2a
+Last runtime ack:   8718ff71-e018-4016-b5b7-cf467d44e6a1 (restart-http)
 Git branch:         main
 ```
 
@@ -27,6 +28,27 @@ Git branch:         main
 - Routing latency is attributed by layer: caller ingress/egress, Bridge dispatch, skill discovery, deterministic routing/context, persistence/WAL and downstream execution must not be collapsed into one “MSSR latency” number.
 - Transport/readiness/routing-latency attention is Bridge-native Notice. A host latency warning does not become an MSSR semantic notice merely because MSSR work was active.
 - Background work timeout remains an attention deadline unless explicit terminate behavior was requested. Exact process-tree evidence is inspected before killing work.
+
+## Final 0.6.125 verification
+
+```text
+bridge_verify_all                     PASS (ok=true, failedRequired=0, ~191 s)
+npm run check                         PASS
+npm run build                         PASS
+scripts/test-bridge-http.ps1          PASS (live runtime 0.6.125)
+test:mcp-dual-era                     PASS
+test:regressions                      PASS (~116.6 s)
+test:routing-latency                  PASS (warm 32.8 ms; discovery 2.23 ms)
+test:metrics-wal-maintenance          PASS (busy=0, 63/63)
+test:observability-http-liveness      PASS (64/64 writes, 123 probes)
+readyz p95 / max                      4.39 ms / 55.29 ms
+test:skill-routing                    PASS (240 canonical effective cases)
+docs:tools:check                      PASS (162 tools)
+Tunnel healthz / readyz               live / ready
+Restart pending                       no
+```
+
+The 0.6.125 patch changes release/vendor identity rather than Bridge runtime semantics: the installed MSSR package is the canonical final 0.2.61 artifact (`946ba46fbcbb9f7faf712dd0421a0ccffdf85f3c611fa133bd55f3ee3c03ca8a`).
 
 ## Final 0.6.124 verification
 

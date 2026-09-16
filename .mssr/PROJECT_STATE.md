@@ -2,13 +2,13 @@
 
 ## Current release
 
-Bridge `0.6.124` is source/dist/live current on exact vendored and installed `@mauroprime/mssr 0.2.61`. The final controlled HTTP-only restart ack `2c2f029b-fa4b-4938-b032-7a5e6b62010c` adopted PID `18368`, boot `f37449a7-4ad8-4b8c-bd09-290e34bf3fe0`; the Secure MCP tunnel remained `live/ready`. Runtime catalog is 162 tools. No Git commit, push, or public package publication is claimed by this state file.
+Bridge `0.6.125` is source/dist/live current on the canonical final vendored and installed `@mauroprime/mssr 0.2.61` artifact (688166 bytes, SHA-256 `946ba46fbcbb9f7faf712dd0421a0ccffdf85f3c611fa133bd55f3ee3c03ca8a`). Controlled HTTP-only restart ack `8718ff71-e018-4016-b5b7-cf467d44e6a1` adopted PID `20104`, boot `9ceced40-a835-4248-a793-3b3b35c5cd2a`; the Secure MCP tunnel remained `live/ready`. Runtime catalog is 162 tools. MSSR 0.2.61 Git source is published at `0c3d9c58c073aea746394387532496bdca474fe4`; no public npm-registry publication is claimed.
 
 ## Liveness and observability
 
 Durable MSSR events and Bridge tool metrics use the shared single-writer observability worker instead of synchronous JSONL/SQLite request-path writes. A bounded in-memory overlay preserves immediate read-your-writes semantics for active trace/recent/routing projections while durable persistence catches up. WAL maintenance is separate from receipt durability: passive checkpoints run outside the HTTP/MCP event loop after a true quiet-period debounce.
 
-Final verification passed `npm run check`, `npm run build`, full `npm run test:regressions` (exit 0, about 160.5 s), `scripts/test-bridge-http.ps1`, and WAL maintenance. The liveness regression persisted 64/64 writes while probing `/readyz` 115 times with p95 6.45 ms and max 97.15 ms; the fixture boot remained stable. WAL verification completed with `busy=0`, 57/57 frames checkpointed. Live read-after-write was confirmed after the final restart.
+Bridge `0.6.125` full verification completed with `ok=true` / `failedRequired=0` in about 191 s. It passed check/build, live HTTP smoke, dual-era MCP, full regressions (about 116.6 s), routing latency, WAL maintenance, observability liveness, skill routing and tools-doc checks. The liveness regression persisted 64/64 writes while probing `/readyz` 123 times with p95 4.39 ms and max 55.29 ms; WAL completed `busy=0` with 63/63 frames checkpointed. The live runtime remained 0.6.125 on PID `20104` / boot `9ceced40-a835-4248-a793-3b3b35c5cd2a`.
 
 Routing latency is attributed by layer. `bridgeTiming` reports instrumented internal phases and `bridgeMeta.latency.dispatchMs` reports time inside Bridge dispatch; caller-to-Bridge ingress and Bridge-to-caller egress remain outside that boundary. Host latency/readiness/transport warnings, including `bridge-routing-latency`, are Bridge-native Notices and do not become MSSR semantic notices.
 

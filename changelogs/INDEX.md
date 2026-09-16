@@ -4,6 +4,7 @@ Versioned release notes are the canonical change-history surface for MSSR debugg
 
 ## Current releases
 
+- [0.6.125](0.6.125.md) - Align Bridge with the canonical final MSSR 0.2.61 release artifact while preserving the 0.6.124 runtime behavior.
 - [0.6.124](0.6.124.md) - Observe long-running Bridge jobs before termination with timeout-alive state, sanitized process-tree progress, and Bridge-native attention notices.
 - [0.6.123](0.6.123.md) - Keep long Bridge work non-blocking and ID-addressable with advisory terminal lifecycle notices, and adopt packaged MSSR 0.2.61 routing.
 - [0.6.122](0.6.122.md) - Attribute MSSR receipt persistence latency by JSONL/DB/insert/scheduling subphase and close route-plan timing coverage.
