@@ -63,7 +63,8 @@ const input = {
 const planned = await plan(input);
 assert.equal(planned.contextMessages.advisoryOnly, true);
 assert.equal(planned.contextMessages.selected.length, 1);
-assert.equal(planned.contextMessages.decisions.find((item) => item.id === "provider-stale-duplicate")?.reason, "deduplicated");
+assert.equal(planned.contextMessages.decisions, undefined, "compact route plan must not repeat per-candidate context-message decisions");
+assert.equal(planned.contextMessages.decisionSummary.reasons.deduplicated, 1);
 assert.equal(planned.__bridgeNotices.filter((notice) => notice.source === "mssr-context-message-v1").length, 1);
 assert.equal(planned.__bridgeNotices.find((notice) => notice.source === "mssr-context-message-v1")?.severity, "info", "attention must not be elevated");
 const plannedNotice = planned.__bridgeNotices.find((notice) => notice.source === "mssr-context-message-v1");

@@ -129,7 +129,7 @@ function acceptedOptionalDecisions(route) {
   }));
 }
 
-const [{ skillCatalogToolModule }, { closeMssrObservatoryForTests }, { closeMetricsForTests }] = await Promise.all([
+const [{ skillCatalogToolModule, closeCodexSkillDiscoveryForTests }, { closeMssrObservatoryForTests }, { closeMetricsForTests }] = await Promise.all([
   import("../dist/tools/skill-catalog-tools.js"),
   import("../dist/mssr-observatory.js"),
   import("../dist/metrics.js"),
@@ -190,5 +190,6 @@ try {
 } finally {
   closeMssrObservatoryForTests();
   closeMetricsForTests();
-  fs.rmSync(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  closeCodexSkillDiscoveryForTests();
+  await fs.promises.rm(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 }

@@ -28,7 +28,13 @@ import {
   type MssrTelemetryEnvelope,
 } from "@mauroprime/mssr";
 import { SERVER_NAME, SERVER_VERSION } from "./config.js";
-import { getTraceToolEvidence } from "./metrics.js";
+import { getPendingTraceToolRowsSince, getTraceToolEvidence, resolveObservedTraceContext } from "./metrics.js";
+import {
+  closeObservabilityPersistenceForTests,
+  enqueueObservabilityPersistence,
+  getObservabilityPersistenceStatus,
+  onObservabilityPersistenceAck,
+} from "./observability-persistence.js";
 import { normalizeModelIdentifier, RUNTIME_BOOT_ID } from "./runtime-identity.js";
 import {
   getMssrObservabilityEpoch,
@@ -166,8 +172,65 @@ const sqlitePath = path.resolve(process.env.BRIDGE_MCP_METRICS_SQLITE || path.jo
 const jsonlPath = path.resolve(process.env.BRIDGE_MCP_MSSR_EVENTS_JSONL || path.join(logsDir, "mssr-events.jsonl"));
 
 let db: DatabaseSync | null | undefined;
+
+type MssrPersistenceTiming = {
+  eventType: string;
+  occurredAt: string;
+  totalMs: number;
+  eventBuildMs: number;
+  jsonlMs: number;
+  databaseMs: number;
+  insertMs: number;
+  scheduleMs: number;
+};
+const recentMssrPersistenceTimings: MssrPersistenceTiming[] = [];
+
+function persistenceMs(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function rememberMssrPersistenceTiming(timing: MssrPersistenceTiming): void {
+  recentMssrPersistenceTimings.push(timing);
+  if (recentMssrPersistenceTimings.length > 20) recentMssrPersistenceTimings.splice(0, recentMssrPersistenceTimings.length - 20);
+}
 let insertEvent: StatementSync | null = null;
+const recentMssrEventOverlay: MssrStoredEvent[] = [];
+const RECENT_MSSR_EVENT_OVERLAY_LIMIT = 2_000;
 const ephemeralTraceWorkingMemory = new Map<string, MssrTraceWorkingMemory>();
+
+function rememberRecentMssrEvent(event: MssrStoredEvent): void {
+  recentMssrEventOverlay.push(event);
+  if (recentMssrEventOverlay.length > RECENT_MSSR_EVENT_OVERLAY_LIMIT) {
+    recentMssrEventOverlay.splice(0, recentMssrEventOverlay.length - RECENT_MSSR_EVENT_OVERLAY_LIMIT);
+  }
+}
+
+onObservabilityPersistenceAck((timing) => {
+  if (timing.kind !== "mssr" || !timing.ok) return;
+  const index = recentMssrEventOverlay.findIndex((event) => event.id === timing.id);
+  if (index >= 0) recentMssrEventOverlay.splice(index, 1);
+});
+
+function mergeStoredEvents(persisted: MssrStoredEvent[], overlay: MssrStoredEvent[], limit: number): MssrStoredEvent[] {
+  const byId = new Map<string, { event: MssrStoredEvent; order: number }>();
+  let order = 0;
+  for (const event of persisted) byId.set(event.id, { event, order: order++ });
+  for (const event of overlay) byId.set(event.id, { event, order: order++ });
+  return [...byId.values()]
+    .sort((a, b) => a.event.occurredAt.localeCompare(b.event.occurredAt) || a.order - b.order)
+    .map(({ event }) => event)
+    .slice(0, Math.max(1, Math.trunc(limit)));
+}
+
+function mergeRecentStoredEvents(persisted: MssrStoredEvent[], overlay: MssrStoredEvent[]): MssrStoredEvent[] {
+  const byId = new Map<string, { event: MssrStoredEvent; order: number }>();
+  let order = 0;
+  for (const event of persisted) byId.set(event.id, { event, order: order++ });
+  for (const event of overlay) byId.set(event.id, { event, order: order++ });
+  return [...byId.values()]
+    .sort((a, b) => b.event.occurredAt.localeCompare(a.event.occurredAt) || b.order - a.order)
+    .map(({ event }) => event);
+}
 
 export function updateMssrTraceWorkingMemory(traceId: string, input: unknown): MssrTraceWorkingMemory {
   if (!validTraceId(traceId)) throw new Error("Invalid MSSR traceId for working memory.");
@@ -191,16 +254,21 @@ function learningContextReason(value: unknown): MssrLearningContextSelection["re
 }
 
 function readMssrStoredTraceEvents(traceId: string, limit = 2_000): MssrStoredEvent[] {
+  if (!validTraceId(traceId)) return [];
+  const boundedLimit = Math.max(1, Math.min(2_000, Math.trunc(limit)));
   const database = getDb();
-  if (!database || !validTraceId(traceId)) return [];
-  return database.prepare(`
-    SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
-           skill_name, required, ok, task_hash, details_json
-    FROM mssr_events
-    WHERE trace_id = ?
-    ORDER BY occurred_at ASC
-    LIMIT ?
-  `).all(traceId, Math.max(1, Math.min(2_000, Math.trunc(limit)))).map(decodeRow);
+  const persisted = database
+    ? database.prepare(`
+        SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
+               skill_name, required, ok, task_hash, details_json
+        FROM mssr_events
+        WHERE trace_id = ?
+        ORDER BY occurred_at ASC
+        LIMIT ?
+      `).all(traceId, boundedLimit).map(decodeRow)
+    : [];
+  const overlay = recentMssrEventOverlay.filter((event) => event.traceId === traceId);
+  return mergeStoredEvents(persisted, overlay, boundedLimit);
 }
 
 export function recordMssrProjectContextSelection(args: {
@@ -428,8 +496,10 @@ function getDb(): DatabaseSync | null {
   }
   db = new sqlite.DatabaseSync(sqlitePath);
   db.exec(`
+    PRAGMA busy_timeout = 100;
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = NORMAL;
+    PRAGMA wal_autocheckpoint = 0;
     CREATE TABLE IF NOT EXISTS mssr_events (
       id TEXT PRIMARY KEY,
       occurred_at TEXT NOT NULL,
@@ -533,48 +603,69 @@ export function recordMssrEvent(input: MssrEventInput): MssrStoredEvent {
       contractVersion: epoch.contractVersion,
     }),
   };
-  writeJsonl(event);
+  rememberRecentMssrEvent(event);
+
+  // Initialize the read-side schema once, but never perform durable event I/O on
+  // the HTTP/MCP event loop. The worker is the only steady-state writer.
   const database = getDb();
   if (!database || !insertEvent) return event;
-  insertEvent.run(
-    event.id,
-    event.occurredAt,
-    event.traceId,
-    event.eventType,
-    event.caller ?? null,
-    event.stage ?? null,
-    event.classificationMode ?? null,
-    event.skillName ?? null,
-    event.required === undefined ? null : Number(event.required),
-    event.ok === undefined ? null : Number(event.ok),
-    event.taskHash ?? null,
-    JSON.stringify(event.details),
-    SERVER_NAME,
-    SERVER_VERSION,
-    process.pid,
-    os.hostname(),
-    os.platform(),
-  );
+  enqueueObservabilityPersistence({
+    kind: "mssr",
+    id: event.id,
+    eventType: event.eventType,
+    sqlitePath,
+    jsonlPath,
+    jsonLine: JSON.stringify({ type: "mssr_event", ...event }),
+    values: [
+      event.id,
+      event.occurredAt,
+      event.traceId,
+      event.eventType,
+      event.caller ?? null,
+      event.stage ?? null,
+      event.classificationMode ?? null,
+      event.skillName ?? null,
+      event.required === undefined ? null : Number(event.required),
+      event.ok === undefined ? null : Number(event.ok),
+      event.taskHash ?? null,
+      JSON.stringify(event.details),
+      SERVER_NAME,
+      SERVER_VERSION,
+      process.pid,
+      os.hostname(),
+      os.platform(),
+    ],
+  });
   return event;
 }
 
 function hasMssrEvent(eventId: string): boolean {
+  if (recentMssrEventOverlay.some((event) => event.id === eventId)) return true;
   const database = getDb();
   if (!database) return false;
   return Boolean(database.prepare("SELECT id FROM mssr_events WHERE id = ? LIMIT 1").get(eventId));
+}
+
+function findMssrEventById(eventId: string): MssrStoredEvent | null {
+  const overlay = recentMssrEventOverlay.find((event) => event.id === eventId);
+  if (overlay) return overlay;
+  const database = getDb();
+  if (!database) return null;
+  const row = database.prepare(`
+    SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
+           skill_name, required, ok, task_hash, details_json
+    FROM mssr_events WHERE id = ? LIMIT 1
+  `).get(eventId);
+  return row ? decodeRow(row) : null;
 }
 
 /** Persist one authenticated, privacy-bounded event emitted by an external MSSR host adapter. */
 export function recordExternalMssrTelemetry(input: unknown): { event: MssrStoredEvent; duplicate: boolean } {
   const envelope = mssrTelemetryEnvelopeSchema.parse(input) as MssrTelemetryEnvelope;
   if (hasMssrEvent(envelope.eventId)) {
-    const existing = getDb()?.prepare(`
-      SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
-             skill_name, required, ok, task_hash, details_json
-      FROM mssr_events WHERE id = ? LIMIT 1
-    `).get(envelope.eventId);
+    const existing = findMssrEventById(envelope.eventId);
     if (!existing) throw new Error("External MSSR event deduplication readback failed.");
-    return { event: decodeRow(existing), duplicate: true };
+    return { event: existing, duplicate: true };
   }
 
   if (envelope.event.kind === "route") {
@@ -1028,16 +1119,7 @@ function decodeRow(row: JsonRecord): MssrStoredEvent {
 
 export function readPersistedMssrTraceState(traceId: string): PersistedMssrTraceState | null {
   if (!validTraceId(traceId)) return null;
-  const database = getDb();
-  if (!database) return null;
-  const events = database.prepare(`
-    SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
-           skill_name, required, ok, task_hash, details_json
-    FROM mssr_events
-    WHERE trace_id = ?
-    ORDER BY occurred_at ASC
-    LIMIT 1000
-  `).all(traceId).map(decodeRow);
+  const events = readMssrStoredTraceEvents(traceId, 1000);
   const routes = events.filter((event) => event.eventType === "route_planned");
   if (routes.length === 0) return null;
   const latestRoute = routes[routes.length - 1];
@@ -1103,30 +1185,19 @@ export function readPersistedMssrTraceState(traceId: string): PersistedMssrTrace
   const profile = latestRoute.details.agentProfile && typeof latestRoute.details.agentProfile === "object"
     ? latestRoute.details.agentProfile as JsonRecord
     : {};
-  let metricContext: JsonRecord = {};
-  try {
-    metricContext = database.prepare(`
-      SELECT session_key, project, workflow_key
-      FROM tool_calls
-      WHERE trace_id = ?
-      ORDER BY started_at DESC
-      LIMIT 1
-    `).get(traceId) ?? {};
-  } catch {
-    metricContext = {};
-  }
+  const observedTraceContext = resolveObservedTraceContext(traceId);
   return {
     traceId,
     workflowKey: typeof latestRoute.details.workflowKey === "string"
       ? latestRoute.details.workflowKey
-      : typeof metricContext.workflow_key === "string" ? metricContext.workflow_key : "unscoped",
+      : observedTraceContext.workflowKey ?? "unscoped",
     stage: latestRoute.stage ?? "start",
     taskHash: latestRoute.taskHash ?? "",
     caller: latestRoute.caller ?? "other",
     model: typeof profile.model === "string" ? profile.model : "unknown",
     reasoningEffort: typeof profile.reasoningEffort === "string" ? profile.reasoningEffort : "unknown",
-    sessionKey: typeof metricContext.session_key === "string" ? metricContext.session_key : "unknown",
-    project: typeof metricContext.project === "string" ? metricContext.project : "unknown",
+    sessionKey: observedTraceContext.sessionKey ?? "unknown",
+    project: observedTraceContext.project ?? "unknown",
     requiredSkills: [...requiredSkills].sort(),
     selectedSkills: [...selectedSkills].sort(),
     loadedSkills: [...loadedSkills].sort(),
@@ -1152,7 +1223,6 @@ export function findPersistedMssrTraceCandidates(args: {
   limit?: number;
 }): PersistedMssrTraceState[] {
   const database = getDb();
-  if (!database) return [];
   const maxAgeMs = Math.max(60_000, Math.min(24 * 60 * 60 * 1_000, args.maxAgeMs ?? 2 * 60 * 60 * 1_000));
   const limit = Math.max(1, Math.min(32, args.limit ?? 8));
   const since = new Date(Date.now() - maxAgeMs).toISOString();
@@ -1161,7 +1231,7 @@ export function findPersistedMssrTraceCandidates(args: {
   const project = typeof args.project === "string" ? args.project.trim().toLowerCase() : "";
   const workflowKey = typeof args.workflowKey === "string" ? args.workflowKey.trim().toLowerCase() : "";
   const skillName = typeof args.skillName === "string" ? args.skillName.trim() : "";
-  const rows = database.prepare(`
+  const persistedRows = database ? database.prepare(`
     SELECT trace_id, MAX(occurred_at) AS latest_route_at
     FROM mssr_events
     WHERE event_type = 'route_planned'
@@ -1169,7 +1239,21 @@ export function findPersistedMssrTraceCandidates(args: {
     GROUP BY trace_id
     ORDER BY latest_route_at DESC
     LIMIT 64
-  `).all(since);
+  `).all(since) : [];
+  const latestByTrace = new Map<string, string>();
+  for (const row of persistedRows) {
+    if (typeof row.trace_id !== "string" || typeof row.latest_route_at !== "string") continue;
+    latestByTrace.set(row.trace_id, row.latest_route_at);
+  }
+  for (const event of recentMssrEventOverlay) {
+    if (event.eventType !== "route_planned" || event.occurredAt < since) continue;
+    const previous = latestByTrace.get(event.traceId);
+    if (!previous || event.occurredAt > previous) latestByTrace.set(event.traceId, event.occurredAt);
+  }
+  const rows = [...latestByTrace.entries()]
+    .map(([trace_id, latest_route_at]) => ({ trace_id, latest_route_at }))
+    .sort((a, b) => b.latest_route_at.localeCompare(a.latest_route_at))
+    .slice(0, 64);
   const candidates: PersistedMssrTraceState[] = [];
   for (const row of rows) {
     if (typeof row.trace_id !== "string") continue;
@@ -1548,7 +1632,7 @@ function observatoryStatus() {
     FROM mssr_events
     WHERE trace_id NOT LIKE '__test_%'
   `).get() ?? { events: 0, traces: 0, latest: null };
-  const activeEvents = database?.prepare(`
+  const persistedActiveEvents = database?.prepare(`
     SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
            skill_name, required, ok, task_hash, details_json
     FROM mssr_events
@@ -1556,6 +1640,15 @@ function observatoryStatus() {
     ORDER BY occurred_at ASC
   `).all(epoch.baselineAt).map(decodeRow)
     .filter((event) => event.details.observabilityEpoch === epoch.activeEpoch) ?? [];
+  const overlayActiveEvents = recentMssrEventOverlay.filter((event) =>
+    event.occurredAt >= epoch.baselineAt
+    && !event.traceId.startsWith("__test_")
+    && event.details.observabilityEpoch === epoch.activeEpoch);
+  const activeEvents = mergeStoredEvents(
+    persistedActiveEvents,
+    overlayActiveEvents,
+    Math.max(1, persistedActiveEvents.length + overlayActiveEvents.length),
+  );
   const activeTotals = {
     events: activeEvents.length,
     traces: new Set(activeEvents.map((event) => event.traceId)).size,
@@ -1579,6 +1672,12 @@ function observatoryStatus() {
       transcriptsStored: false,
       taskStorage: "sha256 fingerprint only",
       details: "bounded structured metadata with sensitive-key filtering",
+    },
+    persistenceTiming: {
+      ...getObservabilityPersistenceStatus(),
+      recent: getObservabilityPersistenceStatus().recent.filter((item) => item.kind === "mssr").slice(-12),
+      recentOverlayEvents: recentMssrEventOverlay.length,
+      note: "Durable MSSR persistence runs in the shared observability worker; aggregate SQLite counts can lag the in-process overlay while writes are pending.",
     },
     totals,
     activeTotals,
@@ -1700,19 +1799,25 @@ function summary(days: number, scope: MssrObservatoryScope) {
   if (!database) return { ...observatoryStatus(), scope, days, benchmark: null, top: {} };
   const windowSince = new Date(Date.now() - days * 86_400_000).toISOString();
   const since = scope === "active" && epoch.baselineAt > windowSince ? epoch.baselineAt : windowSince;
-  const decoded = database.prepare(`
+  const persistedEvents = database.prepare(`
     SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
            skill_name, required, ok, task_hash, details_json
     FROM mssr_events
     WHERE occurred_at >= ? AND trace_id NOT LIKE '__test_%'
     ORDER BY occurred_at ASC
   `).all(since).map(decodeRow);
+  const overlayEvents = recentMssrEventOverlay.filter((event) => event.occurredAt >= since && !event.traceId.startsWith("__test_"));
+  const decoded = mergeStoredEvents(
+    persistedEvents,
+    overlayEvents,
+    Math.max(1, persistedEvents.length + overlayEvents.length),
+  );
   const events = scope === "active"
     ? decoded.filter((event) => event.details.observabilityEpoch === epoch.activeEpoch)
     : decoded;
   const intentAnalysis = portableIntentAnalysis(events);
-  const decodedToolCalls = database.prepare(`
-    SELECT trace_id, started_at, ended_at, duration_ms, tool, operation_subject,
+  const persistedToolCalls = database.prepare(`
+    SELECT id, trace_id, started_at, ended_at, duration_ms, tool, operation_subject,
            observability_epoch, ok, caller, client_name, session_key,
            model, reasoning_effort, host_agent, host_variant, host_parent_session_key
     FROM tool_calls
@@ -1720,6 +1825,12 @@ function summary(days: number, scope: MssrObservatoryScope) {
       AND trace_id NOT LIKE '__test_%'
     ORDER BY started_at ASC
   `).all(since);
+  const pendingToolCalls = getPendingTraceToolRowsSince(since);
+  const toolCallsById = new Map<string, JsonRecord>();
+  for (const row of persistedToolCalls) toolCallsById.set(String(row.id ?? `${row.started_at}:${row.tool}`), row);
+  for (const row of pendingToolCalls) toolCallsById.set(String(row.id ?? `${row.started_at}:${row.tool}`), row);
+  const decodedToolCalls = [...toolCallsById.values()]
+    .sort((a, b) => String(a.started_at ?? "").localeCompare(String(b.started_at ?? "")));
   const toolCalls = scope === "active"
     ? decodedToolCalls.filter((row) => row.observability_epoch === epoch.activeEpoch)
     : decodedToolCalls;
@@ -2312,29 +2423,28 @@ export function queryMssrObservatory(args: {
   if (kind === "status") return { ...observatoryStatus(), scope };
   if (kind === "summary" || kind === "benchmark") return summary(days, scope);
   const database = getDb();
-  if (!database) return { ...observatoryStatus(), scope, [kind]: [] };
   if (kind === "trace") {
     if (!args.traceId || !validTraceId(args.traceId)) throw new Error("traceId is required for kind=trace and must contain only letters, numbers, dot, underscore, colon, or hyphen.");
-    const decoded = database.prepare(`
-      SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
-             skill_name, required, ok, task_hash, details_json
-      FROM mssr_events WHERE trace_id = ? ORDER BY occurred_at ASC LIMIT ?
-    `).all(args.traceId, limit).map(decodeRow);
+    const decoded = readMssrStoredTraceEvents(args.traceId, limit);
     const trace = scope === "active"
       ? decoded.filter((event) => event.details.observabilityEpoch === epoch.activeEpoch)
       : decoded;
     return { ...observatoryStatus(), scope, traceId: args.traceId, trace };
   }
-  const decoded = database.prepare(`
-    SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
-           skill_name, required, ok, task_hash, details_json
-    FROM mssr_events
-    WHERE trace_id NOT LIKE '__test_%'
-    ORDER BY occurred_at DESC LIMIT ?
-  `).all(scope === "active" ? Math.min(1_000, limit * 10) : limit).map(decodeRow);
+  const persisted = database
+    ? database.prepare(`
+        SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
+               skill_name, required, ok, task_hash, details_json
+        FROM mssr_events
+        WHERE trace_id NOT LIKE '__test_%'
+        ORDER BY occurred_at DESC LIMIT ?
+      `).all(scope === "active" ? Math.min(1_000, limit * 10) : limit).map(decodeRow)
+    : [];
+  const overlay = recentMssrEventOverlay.filter((event) => !event.traceId.startsWith("__test_"));
+  const merged = mergeRecentStoredEvents(persisted, overlay);
   const recent = (scope === "active"
-    ? decoded.filter((event) => event.details.observabilityEpoch === epoch.activeEpoch)
-    : decoded).slice(0, limit);
+    ? merged.filter((event) => event.details.observabilityEpoch === epoch.activeEpoch)
+    : merged).slice(0, limit);
   return { ...observatoryStatus(), scope, recent };
 }
 export function getMssrTraceEvidence(traceId: string, limit = 500) {
@@ -2342,17 +2452,7 @@ export function getMssrTraceEvidence(traceId: string, limit = 500) {
     throw new Error("traceId must contain only letters, numbers, dot, underscore, colon, or hyphen.");
   }
   const boundedLimit = Math.max(1, Math.min(2_000, Math.trunc(limit)));
-  const database = getDb();
-  const events = database
-    ? database.prepare(`
-        SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
-               skill_name, required, ok, task_hash, details_json
-        FROM mssr_events
-        WHERE trace_id = ?
-        ORDER BY occurred_at ASC
-        LIMIT ?
-      `).all(traceId, boundedLimit).map(decodeRow)
-    : [];
+  const events = readMssrStoredTraceEvents(traceId, boundedLimit);
   const state = readPersistedMssrTraceState(traceId);
   const portableState: MssrTraceLifecycleState | null = state ? {
     stage: state.stage as MssrTraceLifecycleState["stage"],
@@ -2465,8 +2565,10 @@ export function getMssrTraceEvidence(traceId: string, limit = 500) {
 
 
 export function closeMssrObservatoryForTests(): void {
+  closeObservabilityPersistenceForTests();
   if (db) db.close();
   db = undefined;
   insertEvent = null;
+  recentMssrEventOverlay.length = 0;
   resetMssrObservabilityEpochForTests();
 }

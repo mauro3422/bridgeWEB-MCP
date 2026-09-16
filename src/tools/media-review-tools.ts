@@ -1,11 +1,19 @@
 import crypto from "node:crypto";
+import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import type { BridgeToolModule } from "./types.js";
 import { resolveToolPath, runProcess } from "./shared/process.js";
 
-const MAX_MEDIA_BYTES = 128 * 1024 * 1024;
+const DEFAULT_MAX_REMOTE_MEDIA_BYTES = 128 * 1024 * 1024;
+const DEFAULT_MAX_LOCAL_MEDIA_BYTES = 2 * 1024 * 1024 * 1024;
+const envByteLimit = (name: string, fallback: number) => {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+};
+const MAX_REMOTE_MEDIA_BYTES = envByteLimit("BRIDGE_MCP_MAX_REMOTE_MEDIA_BYTES", DEFAULT_MAX_REMOTE_MEDIA_BYTES);
+const MAX_LOCAL_MEDIA_BYTES = envByteLimit("BRIDGE_MCP_MAX_LOCAL_MEDIA_BYTES", DEFAULT_MAX_LOCAL_MEDIA_BYTES);
 const MAX_ATTACH_FRAMES = 8;
 const MAX_ATTACH_FRAME_BYTES = 3 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 240_000;
@@ -29,6 +37,12 @@ function sha256(bytes: Buffer): string {
   return crypto.createHash("sha256").update(bytes).digest("hex");
 }
 
+async function sha256File(filePath: string): Promise<string> {
+  const hash = crypto.createHash("sha256");
+  for await (const chunk of createReadStream(filePath)) hash.update(chunk as Buffer);
+  return hash.digest("hex");
+}
+
 function isLoopbackUrl(url: URL): boolean {
   return url.protocol === "http:" && (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]");
 }
@@ -42,8 +56,8 @@ function assertAuthorizedDownloadUrl(url: URL, fileId: string): void {
 async function readBoundedResponse(response: Response, label: string): Promise<Buffer> {
   if (!response.body) throw new Error(`Media download returned no body: ${label}`);
   const declaredLength = Number(response.headers.get("content-length") ?? "0");
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_MEDIA_BYTES) {
-    throw new Error(`Media download exceeds ${MAX_MEDIA_BYTES} bytes: ${label}`);
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_REMOTE_MEDIA_BYTES) {
+    throw new Error(`Media download exceeds ${MAX_REMOTE_MEDIA_BYTES} bytes: ${label}`);
   }
 
   const reader = response.body.getReader();
@@ -54,9 +68,9 @@ async function readBoundedResponse(response: Response, label: string): Promise<B
     if (done) break;
     if (!value?.length) continue;
     total += value.length;
-    if (total > MAX_MEDIA_BYTES) {
+    if (total > MAX_REMOTE_MEDIA_BYTES) {
       await reader.cancel().catch(() => undefined);
-      throw new Error(`Media download exceeds ${MAX_MEDIA_BYTES} bytes: ${label}`);
+      throw new Error(`Media download exceeds ${MAX_REMOTE_MEDIA_BYTES} bytes: ${label}`);
     }
     chunks.push(Buffer.from(value));
   }
@@ -126,21 +140,25 @@ async function downloadAuthorizedMedia(file: OpenAIFileInput): Promise<{ bytes: 
   return { bytes, measured };
 }
 
-async function readLocalMedia(localPathRaw: string): Promise<{ bytes: Buffer; measured: MediaContainer; resolvedPath: string }> {
+async function readLocalMedia(localPathRaw: string): Promise<{ measured: MediaContainer; resolvedPath: string; size: number; mtimeMs: number; digest: string }> {
   const resolvedPath = resolveToolPath(localPathRaw, { access: "read" });
   const stats = await fs.stat(resolvedPath).catch((error) => {
     throw new Error(`[source-file-unavailable] Unable to read local media ${resolvedPath}: ${error instanceof Error ? error.message : String(error)}`);
   });
   if (!stats.isFile()) throw new Error(`[source-file-unavailable] Local media path is not a file: ${resolvedPath}`);
   if (!stats.size) throw new Error(`[source-file-unavailable] Local media is empty: ${resolvedPath}`);
-  if (stats.size > MAX_MEDIA_BYTES) throw new Error(`Local media exceeds ${MAX_MEDIA_BYTES} bytes: ${resolvedPath}`);
-  const bytes = await fs.readFile(resolvedPath);
+  if (stats.size > MAX_LOCAL_MEDIA_BYTES) throw new Error(`Local media exceeds ${MAX_LOCAL_MEDIA_BYTES} bytes: ${resolvedPath}`);
+  const handle = await fs.open(resolvedPath, "r");
+  const header = Buffer.alloc(64);
+  const { bytesRead } = await handle.read(header, 0, header.length, 0);
+  await handle.close();
+  const measured = detectMediaContainer(header.subarray(0, bytesRead));
+  const digest = await sha256File(resolvedPath);
   const afterStats = await fs.stat(resolvedPath);
-  if (bytes.length !== stats.size || afterStats.size !== stats.size || afterStats.mtimeMs !== stats.mtimeMs) {
-    throw new Error(`[expected-integrity-mismatch] Local media changed while it was being read: ${resolvedPath}`);
+  if (afterStats.size !== stats.size || afterStats.mtimeMs !== stats.mtimeMs) {
+    throw new Error(`[expected-integrity-mismatch] Local media changed while it was being hashed: ${resolvedPath}`);
   }
-  const measured = detectMediaContainer(bytes);
-  return { bytes, measured, resolvedPath };
+  return { measured, resolvedPath, size: stats.size, mtimeMs: stats.mtimeMs, digest };
 }
 
 function stringArray(value: unknown): string[] {
@@ -225,25 +243,35 @@ async function ingestMediaReview(args: {
   }
 
   const acquired = file
-    ? {
-        sourceKind: "chatgpt-file" as const,
-        ...(await downloadAuthorizedMedia(file)),
-        fileId: file.file_id,
-        fileName: file.file_name ?? null,
-        declaredMime: file.mime_type ?? null,
-        originPath: null as string | null,
-        identity: file.file_id,
-      }
+    ? await (async () => {
+        const downloaded = await downloadAuthorizedMedia(file);
+        return {
+          sourceKind: "chatgpt-file" as const,
+          bytes: downloaded.bytes as Buffer | null,
+          byteLength: downloaded.bytes.length,
+          digest: sha256(downloaded.bytes),
+          measured: downloaded.measured,
+          fileId: file.file_id,
+          fileName: file.file_name ?? null,
+          declaredMime: file.mime_type ?? null,
+          originPath: null as string | null,
+          originMtimeMs: null as number | null,
+          identity: file.file_id,
+        };
+      })()
     : await (async () => {
         const local = await readLocalMedia(args.localPath!);
         return {
           sourceKind: "local-path" as const,
-          bytes: local.bytes,
+          bytes: null as Buffer | null,
+          byteLength: local.size,
+          digest: local.digest,
           measured: local.measured,
           fileId: null as string | null,
           fileName: path.basename(local.resolvedPath),
           declaredMime: null as string | null,
           originPath: local.resolvedPath,
+          originMtimeMs: local.mtimeMs,
           identity: path.basename(local.resolvedPath),
         };
       })();
@@ -253,8 +281,24 @@ async function ingestMediaReview(args: {
   await fs.mkdir(outputDir, { recursive: true });
 
   const sourcePath = resolveToolPath(path.join(outputDir, `source${acquired.measured.extension}`), { access: "write" });
-  await fs.writeFile(sourcePath, acquired.bytes);
-  const sourceDigest = sha256(acquired.bytes);
+  const sourceDigest = acquired.digest;
+  if (acquired.bytes) {
+    await fs.writeFile(sourcePath, acquired.bytes);
+  } else {
+    await fs.copyFile(acquired.originPath!, sourcePath);
+    const originAfterCopy = await fs.stat(acquired.originPath!);
+    if (originAfterCopy.size !== acquired.byteLength || originAfterCopy.mtimeMs !== acquired.originMtimeMs) {
+      throw new Error(`[expected-integrity-mismatch] Local media changed while its working copy was created: ${acquired.originPath}`);
+    }
+  }
+  const workingStats = await fs.stat(sourcePath);
+  if (workingStats.size !== acquired.byteLength) {
+    throw new Error(`[expected-integrity-mismatch] Media working copy size mismatch: ${sourcePath}`);
+  }
+  const workingDigest = await sha256File(sourcePath);
+  if (workingDigest !== sourceDigest) {
+    throw new Error(`[expected-integrity-mismatch] Media working copy hash mismatch: ${sourcePath}`);
+  }
   const configPath = resolveToolPath(path.join(outputDir, "review-config.json"), { access: "write" });
   const reviewPath = resolveToolPath(path.join(outputDir, "review.json"), { access: "write" });
   const helperPath = resolveToolPath(path.join(process.cwd(), "integrations", "media", "review_media.py"), { access: "read" });
@@ -296,7 +340,7 @@ async function ingestMediaReview(args: {
       originPath: acquired.originPath,
       detectedContainer: acquired.measured.kind,
       canonicalMime: acquired.measured.canonicalMime,
-      bytes: acquired.bytes.length,
+      bytes: acquired.byteLength,
       sha256: sourceDigest,
       originalBytesPreserved: true,
       workingCopyUsed: true,
@@ -355,7 +399,7 @@ export const mediaReviewToolModule: BridgeToolModule = {
         },
         properties: {
           files: { type: "array", minItems: 1, maxItems: 1, items: { $ref: "#/$defs/OpenAIFile" }, description: "ChatGPT-authorized attachment source." },
-          localPath: { type: "string", description: "Allowed local audio/video file path. Use this for Codex or files already present on MauroPrime." },
+          localPath: { type: "string", description: "Allowed local audio/video file path. MauroPrime's user Videos folder is a default media source; local files are copied and hash-verified without loading the full recording into memory." },
           outputDir: { type: "string", description: "Optional allowed local review directory. Defaults to .tmp/media-reviews/<review-id>." },
           segmentSeconds: { type: "number", minimum: 4, maximum: 30, default: 10, description: "Maximum ASR group duration. Speech-aware mode preserves finer voice/silence windows separately." },
           frameIntervalSeconds: { type: "number", minimum: 1, maximum: 30, default: 12, description: "Sparse coverage-frame interval. Adaptive visual events are detected separately and are the primary review evidence." },

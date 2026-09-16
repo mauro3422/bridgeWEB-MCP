@@ -3,8 +3,6 @@ const numberFormat = new Intl.NumberFormat('es-AR');
 const decimalFormat = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 });
 let refreshing = false;
 let toolAuditData = null;
-let toolAuditFetchedAt = 0;
-const TOOL_AUDIT_REFRESH_MS = 30000;
 
 const byId = (id) => document.getElementById(id);
 const num = (value) => numberFormat.format(Number(value || 0));
@@ -709,13 +707,6 @@ function setupToolPortfolioFilters() {
   });
 }
 
-async function getToolAudit() {
-  if (toolAuditData && Date.now() - toolAuditFetchedAt < TOOL_AUDIT_REFRESH_MS) return toolAuditData;
-  const audit = await getJson('/api/tools/audit?view=all&limit=200&days=30&scope=active');
-  toolAuditFetchedAt = Date.now();
-  return audit;
-}
-
 function updateHealth(status, overview, mssr) {
   const bridgeOk = Boolean(status.ready) && !Boolean(status.closing);
   const sqliteOk = Boolean(overview.enabled) && Boolean(overview.sqliteAvailable);
@@ -981,20 +972,8 @@ async function refresh() {
   if (refreshing) return;
   refreshing = true;
   try {
-    const [status, overview, summary, recent, errors, timeline, mssr, skillHealth, projectHealth, runtimeHealth, toolAudit, toolNotices] = await Promise.all([
-      getJson('/status'),
-      getJson('/api/metrics/overview?scope=active'),
-      getJson('/api/metrics/summary?limit=12&scope=active'),
-      getJson('/api/metrics/recent?limit=20&scope=active'),
-      getJson('/api/metrics/errors?limit=20&scope=active'),
-      getJson('/api/metrics/timeline?limit=500&scope=active'),
-      getJson('/api/mssr/summary?days=30&scope=active'),
-      getJson('/api/mssr/skill-health'),
-      getJson('/api/mssr/project-health'),
-      getJson('/api/mssr/runtime-health'),
-      getToolAudit(),
-      getJson('/api/notices?limit=20')
-    ]);
+    const snapshot = await getJson('/api/dashboard/snapshot');
+    const { status, overview, summary, recent, errors, timeline, mssr, skillHealth, projectHealth, runtimeHealth, toolAudit, toolNotices } = snapshot;
 
     updateHealth(status, overview, mssr);
     updateSummary(status, overview, summary, recent, timeline, mssr);

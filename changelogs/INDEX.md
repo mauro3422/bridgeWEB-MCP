@@ -4,6 +4,13 @@ Versioned release notes are the canonical change-history surface for MSSR debugg
 
 ## Current releases
 
+- [0.6.124](0.6.124.md) - Observe long-running Bridge jobs before termination with timeout-alive state, sanitized process-tree progress, and Bridge-native attention notices.
+- [0.6.123](0.6.123.md) - Keep long Bridge work non-blocking and ID-addressable with advisory terminal lifecycle notices, and adopt packaged MSSR 0.2.61 routing.
+- [0.6.122](0.6.122.md) - Attribute MSSR receipt persistence latency by JSONL/DB/insert/scheduling subphase and close route-plan timing coverage.
+- [0.6.121](0.6.121.md) - Debounce metrics WAL checkpoints to real idle periods and keep Codex skill discovery watcher-driven across the TTL boundary.
+- [0.6.120](0.6.120.md) - Keep specialized routing warm and observable while moving metrics WAL checkpoints off the MCP request path.
+- [0.6.119](0.6.119.md) - Keep dashboard analytics off the HTTP/MCP event loop and prevent false watchdog restarts.
+- [0.6.118](0.6.118.md) - Adopt MSSR 0.2.60 and compact diagnostic route/context projections while preserving evidence and overflow.
 - [0.6.117](0.6.117.md) - Adopt measured Context Message budgets and bound automatic notice delivery so real Web bootstraps retain room for paged skills.
 - [0.6.116](0.6.116.md) - Adopt MSSR 0.2.55 so generic maintenance warnings load a compact friction index instead of one indivisible 20 KB unit.
 - [0.6.115](0.6.115.md) - Adopt MSSR 0.2.54, expose review-only Context Plane proposals, and make post-pagination lifecycle closure explicit without inferred success.

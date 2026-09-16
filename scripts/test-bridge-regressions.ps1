@@ -562,6 +562,39 @@ console.log("  OK metrics input key storage and redaction");
   finally { Remove-Item -LiteralPath $tmpScript -Force -ErrorAction SilentlyContinue }
 }
 
+Invoke-Check "dashboard snapshot stays bounded and uses one refresh request" {
+  $nodeScript = @'
+import { compactMssrSummaryForDashboard } from "./dist/dashboard-snapshot.js";
+import { dashboardScript } from "./dist/dashboard/script.js";
+
+const skillPriors = Array.from({ length: 3000 }, (_, index) => ({ skill: `skill-${index}`, observations: index }));
+const transitions = Array.from({ length: 3000 }, (_, index) => ({ from: `a-${index}`, to: `b-${index}` }));
+const contextPriors = Array.from({ length: 6000 }, (_, index) => ({ context: `context-${index}`, count: index }));
+const selectionFeedback = Array.from({ length: 100 }, (_, index) => ({ skill: `feedback-${index}`, count: index }));
+const compact = compactMssrSummaryForDashboard({
+  enabled: true,
+  intentAnalysis: { learning: { skillPriors, transitions, contextPriors, selectionFeedback } },
+});
+const learning = compact.intentAnalysis.learning;
+const encoded = JSON.stringify(compact);
+if (learning.skillPriors.length !== 40) process.exit(110);
+if (learning.selectionFeedback.length !== 30) process.exit(111);
+if (learning.transitions !== undefined || learning.contextPriors !== undefined) process.exit(112);
+if (learning.totals.transitions !== 3000 || learning.totals.contextPriors !== 6000) process.exit(113);
+if (!learning.truncated || encoded.length >= 100000) process.exit(114);
+if ((dashboardScript.match(/getJson\('/g) || []).length !== 1) process.exit(115);
+if (!dashboardScript.includes("getJson('/api/dashboard/snapshot')")) process.exit(116);
+console.log(`  OK bounded dashboard projection (${encoded.length} chars) and single-request refresh`);
+'@
+  $tmpScript = Join-Path (Get-Location) (".tmp-dashboard-snapshot-regression-" + [Guid]::NewGuid().ToString("N") + ".mjs")
+  try {
+    Set-Content -LiteralPath $tmpScript -Value $nodeScript -Encoding utf8
+    node $tmpScript
+    if ($LASTEXITCODE -ne 0) { throw "dashboard snapshot regression failed with exit code $LASTEXITCODE" }
+  }
+  finally { Remove-Item -LiteralPath $tmpScript -Force -ErrorAction SilentlyContinue }
+}
+
 Invoke-Check "Roblox place save targets only the exact Studio title and keeps bounded foreground fallback" {
   $saveScript = Get-Content -LiteralPath "scripts\roblox-studio-save.ps1" -Raw
   $requiredFragments = @(

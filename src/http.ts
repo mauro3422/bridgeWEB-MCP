@@ -2,6 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { Worker } from "node:worker_threads";
 import { createMcpHandler, isLegacyRequest } from "@modelcontextprotocol/server";
 import { toNodeHandler, toWebRequest } from "@modelcontextprotocol/node";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -36,6 +37,8 @@ const SOFT_SESSION_LIMIT = Math.min(
 );
 const CLEANUP_INTERVAL_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_CLEANUP_INTERVAL_MS", 60 * 1000);
 const MAX_REQUEST_BODY_BYTES = getPositiveIntEnv("BRIDGE_MCP_HTTP_MAX_BODY_BYTES", 16 * 1024 * 1024);
+const DASHBOARD_CACHE_MS = getPositiveIntEnv("BRIDGE_MCP_DASHBOARD_CACHE_MS", 15 * 1000);
+const DASHBOARD_WORKER_TIMEOUT_MS = getPositiveIntEnv("BRIDGE_MCP_DASHBOARD_WORKER_TIMEOUT_MS", 120 * 1000);
 
 let ready = false;
 let closing = false;
@@ -46,6 +49,8 @@ let modernProtocolErrors = 0;
 let steadyStateSessionReclaims = 0;
 let hardCapacitySessionReclaims = 0;
 let capacityAdmissionTail: Promise<void> = Promise.resolve();
+let dashboardSnapshotCache: { expiresAtMs: number; value: Record<string, unknown> } | null = null;
+let dashboardSnapshotInFlight: Promise<Record<string, unknown>> | null = null;
 
 const modernMcpHandler = createMcpHandler(
   () => createModernBridgeServer(),
@@ -212,6 +217,72 @@ function getStatus() {
     runtimeBootId: RUNTIME_BOOT_ID,
     node: process.version,
   };
+}
+
+function getDashboardWorkerSnapshot(): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL("./dashboard-mssr-worker.js", import.meta.url));
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      callback();
+      void worker.terminate();
+    };
+    const timeout = setTimeout(() => {
+      finish(() => reject(new Error(`dashboard worker exceeded ${DASHBOARD_WORKER_TIMEOUT_MS}ms`)));
+    }, DASHBOARD_WORKER_TIMEOUT_MS);
+
+    worker.once("message", (message: unknown) => {
+      const payload = message && typeof message === "object" ? message as Record<string, unknown> : {};
+      if (payload.ok === true && payload.value && typeof payload.value === "object") {
+        finish(() => resolve(payload.value as Record<string, unknown>));
+        return;
+      }
+      finish(() => reject(new Error(typeof payload.error === "string" ? payload.error : "dashboard worker failed")));
+    });
+    worker.once("error", (error) => finish(() => reject(error)));
+    worker.once("exit", (code) => {
+      if (!settled) finish(() => reject(new Error(`dashboard worker exited before producing a snapshot (code ${code})`)));
+    });
+  });
+}
+
+async function getDashboardSnapshot(): Promise<Record<string, unknown>> {
+  const now = Date.now();
+  if (dashboardSnapshotCache && dashboardSnapshotCache.expiresAtMs > now) {
+    return { ...dashboardSnapshotCache.value, cache: { hit: true, ttlMs: DASHBOARD_CACHE_MS } };
+  }
+  if (dashboardSnapshotInFlight) return dashboardSnapshotInFlight;
+
+  dashboardSnapshotInFlight = (async () => {
+    const generatedAt = new Date().toISOString();
+    const dashboardData = await getDashboardWorkerSnapshot();
+    const noticeItems = peekBridgeNoticeHistory(20);
+    const value: Record<string, unknown> = {
+      generatedAt,
+      cache: { hit: false, ttlMs: DASHBOARD_CACHE_MS },
+      status: getStatus(),
+      ...dashboardData,
+      toolNotices: {
+        delivery: "recent-history",
+        count: noticeItems.length,
+        items: noticeItems,
+        privacy: {
+          rawArgumentsStored: false,
+          rawPromptsStored: false,
+          evidence: "ephemeral bounded notices with redacted details and suggested recovery actions",
+        },
+      },
+    };
+    dashboardSnapshotCache = { expiresAtMs: Date.now() + DASHBOARD_CACHE_MS, value };
+    return value;
+  })().finally(() => {
+    dashboardSnapshotInFlight = null;
+  });
+
+  return dashboardSnapshotInFlight;
 }
 
 async function closeTransport(transport: BridgeHttpTransport, reason: string, sessionId?: string) {
@@ -576,6 +647,11 @@ async function main() {
         return;
       }
 
+      if (req.method === "GET" && url.pathname === "/api/dashboard/snapshot") {
+        sendJson(res, 200, await getDashboardSnapshot());
+        return;
+      }
+
       if (req.method === "GET" && url.pathname === "/api/mssr/summary") {
         sendJson(res, 200, queryMssrObservatory({
           kind: "summary",
@@ -703,7 +779,7 @@ async function main() {
       sendJson(res, 404, {
         error: "not_found",
         requestId,
-        routes: ["GET /healthz", "GET /readyz", "GET /status", "GET /dashboard", "GET /api/mssr/summary", "GET /api/mssr/skill-health", "GET /api/mssr/project-health", "GET /api/mssr/project-situation", "GET /api/mssr/runtime-health", "GET /api/mssr/release-consistency", "GET /api/notices", "GET /api/tools/audit", "GET /api/metrics/*", "POST /api/mssr/events (Bearer token)", `${config.mcpPath} MCP Streamable HTTP`],
+        routes: ["GET /healthz", "GET /readyz", "GET /status", "GET /dashboard", "GET /api/dashboard/snapshot", "GET /api/mssr/summary", "GET /api/mssr/skill-health", "GET /api/mssr/project-health", "GET /api/mssr/project-situation", "GET /api/mssr/runtime-health", "GET /api/mssr/release-consistency", "GET /api/notices", "GET /api/tools/audit", "GET /api/metrics/*", "POST /api/mssr/events (Bearer token)", `${config.mcpPath} MCP Streamable HTTP`],
       });
     } catch (error) {
       const candidateStatus = error && typeof error === "object" && "statusCode" in error

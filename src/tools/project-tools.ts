@@ -132,7 +132,7 @@ async function saveProjectProfile(projectRoot: string | undefined, overrides: Re
 export const projectToolModule: BridgeToolModule = {
   name: "project",
   tools: [
-    { name: "path_policy_status", description: "Show active allowed roots, denied paths, denied sensitive filenames, and path-policy guidance.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
+    { name: "path_policy_status", description: "Show active writable/cwd roots, read-only roots, denied paths, denied sensitive filenames, and path-policy guidance.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
     { name: "project_profile", description: "Detect a project's languages, frameworks, package manager, scripts, commands, important files, Git state, and saved Bridge profile.", inputSchema: { type: "object", properties: { projectRoot: { type: "string" } }, additionalProperties: false } },
     { name: "project_profile_save", description: "Save a .bridge-project.json profile containing detected project commands plus explicit overrides.", inputSchema: { type: "object", properties: { projectRoot: { type: "string" }, overrides: { type: "object", additionalProperties: true, default: {} } }, additionalProperties: false } },
   ],

@@ -46,13 +46,14 @@ fs.appendFileSync(
 fs.mkdirSync(projectRoot, { recursive: true });
 fs.writeFileSync(path.join(projectRoot, "fixture.txt"), "delegated-route-fixture\n", "utf8");
 
-const [{ Client }, { InMemoryTransport }, { createBridgeServer }, metrics, observatory, traceContext] = await Promise.all([
+const [{ Client }, { InMemoryTransport }, { createBridgeServer }, metrics, observatory, traceContext, skillCatalog] = await Promise.all([
   import("@modelcontextprotocol/sdk/client/index.js"),
   import("@modelcontextprotocol/sdk/inMemory.js"),
   import("../dist/bridge-server.js"),
   import("../dist/metrics.js"),
   import("../dist/mssr-observatory.js"),
   import("../dist/mssr-trace-context.js"),
+  import("../dist/tools/skill-catalog-tools.js"),
 ]);
 
 function payload(result) {
@@ -410,6 +411,7 @@ try {
   traceContext.resetSharedMssrTraceRegistryForTests();
   metrics.closeMetricsForTests();
   observatory.closeMssrObservatoryForTests();
+  skillCatalog.closeCodexSkillDiscoveryForTests();
   fs.rmSync(sandbox, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 }
 

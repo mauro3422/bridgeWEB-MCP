@@ -759,20 +759,20 @@ errores en write/git/restart/check son mas preocupantes
 
 #### 39. Revisar latencias
 
-Proceso:
+Primero separar capas; no llamar “latencia de conexión” a todo el tiempo de una tool.
 
 ```txt
-bridge_visualize_metrics kind=avg_duration_by_tool
+bridge_metrics_recent / avg_duration_by_tool -> tendencia histórica por tool
+bridgeMeta.latency.dispatchMs                -> tiempo dentro del dispatch de Bridge
+bridgeTiming.phases                          -> fases internas de tools instrumentadas
+tunnel / caller ingress-egress               -> fuera de dispatch; requiere medición del caller para cerrarlo
 ```
 
-Esperado:
+Para routing/bootstrap, mirar especialmente `skill.discovery`, `routing.plan`, `context.plane`, `workflow.guide` y persistencia/WAL antes de atribuir el costo a MSSR. Un comando o read local de decenas de ms no implica que el round-trip ChatGPT↔MauroPrime completo mida lo mismo.
 
-```txt
-bridge_verify_all mas lento
-bridge_self_check medio
-read/apply/write muy rapidos
-semantic analysis puede ser medio/lento
-```
+Si `skill_bootstrap` cruza el umbral interactivo, Bridge puede emitir `bridge-routing-latency`. Esa alerta es Bridge-native: describe rendimiento/host/transporte y no debe convertirse en un `MssrNotice` semántico.
+
+Si el síntoma incluye 502/readiness, correlacionar `bridge_health`, runtime boot id, restart ack y liveness antes de repetir o culpar a la operación. Observabilidad pesada debe ejecutarse en worker/snapshot; persistencia durable usa single-writer async + overlay read-your-writes y WAL maintenance diferido.
 
 #### 40. Ver actividad reciente
 
@@ -804,15 +804,17 @@ Run npm run docs:tools after schema/tool changes.
 Treat tunnel admin 8081 as current; 8080 is stale unless profile changed intentionally.
 ```
 
-## Que falta despues de este playbook
+## Siguiente capa de performance/control
 
-Sacando seguridad/permisos/cache, lo mas util seria:
+No acelerar saltándose MSSR. La dirección recomendada es reducir trabajo repetido después de que la autoridad ya fue validada:
 
 ```txt
-1. RELEASE.md con checklist de version
-2. ejemplos reales por receta en EXAMPLES.md
-3. tests fixture para tsconfig paths/barrels
-4. script que compare TOOLS.md contra registry y falle si esta desactualizado
-5. tool profile docs: minimal/read-only/coding/full-ops
-6. guias de recuperacion por sintoma: 502, stale catalog, tunnel down, dirty git
+1. Project/Trace Lease: bootstrap completo una vez; fast local ops bajo lease validado.
+2. Invalidar lease en restart, owner/authority change o replan material.
+3. terminal_start/work_begin opcionalmente devuelven primer chunk + TTFB + sessionId para evitar un read inmediato.
+4. Agregar probe caller↔Bridge cuando el cliente lo permita; server timing no mide ingress/egress externo.
+5. Mantener analytics/persistencia/WAL fuera del event loop interactivo.
+6. Continuar modularizando PROJECT_MEMORY cuando una lección sea topic-specific; no crecer el root por comodidad.
 ```
+
+El objetivo es combinar un data plane rápido estilo Desktop Commander con el control plane/trace/ownership de Bridge, no reemplazar uno por el otro.

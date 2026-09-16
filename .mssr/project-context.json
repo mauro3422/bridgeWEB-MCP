@@ -290,6 +290,56 @@
       "maxChars": 3000
     },
     {
+      "id": "bridge-background-job-observability",
+      "kind": "memory",
+      "description": "Durable timeout, progress, process-tree and privacy invariant for Bridge background work.",
+      "source": {
+        "path": ".mssr/knowledge/operations/background-job-observability.md"
+      },
+      "topic": "operations",
+      "area": "background-work",
+      "stages": [
+        "start",
+        "implement",
+        "verify",
+        "close",
+        "resume"
+      ],
+      "domains": [
+        "agent-orchestration",
+        "coding",
+        "filesystem"
+      ],
+      "actions": [
+        "analyze",
+        "debug",
+        "test",
+        "verify",
+        "recover",
+        "maintain"
+      ],
+      "artifacts": [
+        "mcp",
+        "code",
+        "project"
+      ],
+      "needs": [
+        "performance",
+        "safe-editing",
+        "integrity-verification"
+      ],
+      "signals": [
+        "error-observed",
+        "warning-observed",
+        "repeated-friction",
+        "recovery-needed",
+        "reusable-pattern"
+      ],
+      "required": false,
+      "priority": 70,
+      "maxChars": 2600
+    },
+    {
       "id": "bridge-host-health-projections",
       "kind": "context",
       "description": "Bridge Skill Health and Project Context Health host projection ownership, persistence, notification, and no-auto-edit boundaries.",

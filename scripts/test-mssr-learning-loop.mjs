@@ -36,10 +36,11 @@ for (const name of skillNames) {
   fs.writeFileSync(path.join(dir, "SKILL.md"), `---\nname: ${name}\ndescription: Fixture ${name} for MSSR learning-loop regression.\n---\n# ${name}\n\nFixture procedural guidance.\n`, "utf8");
 }
 
-const [{ skillCatalogToolModule }, { mssrObservatoryToolModule }, observatory] = await Promise.all([
+const [{ skillCatalogToolModule, closeCodexSkillDiscoveryForTests }, { mssrObservatoryToolModule }, observatory, { closeMetricsForTests }] = await Promise.all([
   import("../dist/tools/skill-catalog-tools.js"),
   import("../dist/tools/mssr-observatory-tools.js"),
   import("../dist/mssr-observatory.js"),
+  import("../dist/metrics.js"),
 ]);
 
 const bootstrap = skillCatalogToolModule.handlers.skill_bootstrap;
@@ -194,9 +195,7 @@ assert.equal(closeEvidence.lifecycle.closure.canCloseSuccess, false);
 assert.notEqual(closeEvidence.lifecycle.closure.nextRequiredAction, "record-outcome");
 
 observatory.closeMssrObservatoryForTests();
-try {
-  fs.rmSync(sandbox, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
-} catch (error) {
-  if (process.platform !== "win32" || error?.code !== "EPERM") throw error;
-}
+closeMetricsForTests();
+closeCodexSkillDiscoveryForTests();
+await fs.promises.rm(sandbox, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
 console.log("MSSR learning-loop Bridge regression passed.");

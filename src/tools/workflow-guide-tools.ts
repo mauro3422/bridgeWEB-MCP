@@ -19,6 +19,7 @@ import {
 import type { BridgeToolModule } from "./types.js";
 import { assembleProjectContext } from "../project-context-assembler.js";
 import { resolveToolPath } from "./shared/process.js";
+import { BridgeTimingCollector } from "./shared/timing.js";
 
 import { findExistingSkillCoverage, isSkillCoverageMetaTask } from "./skill-catalog-tools.js";
 const GUIDE_SCHEMA_VERSION = 1;
@@ -189,9 +190,10 @@ async function loadProjectContext(args: {
   includeAgents: boolean;
   includeProjectContext: boolean;
   includeGuides: boolean;
-}) {
+}, timing?: BridgeTimingCollector) {
+  const measure = <T>(name: string, operation: () => Promise<T>) => timing ? timing.measure(name, operation) : operation();
   const projectRoot = resolveToolPath(args.projectRoot, { access: "read" });
-  const rootStat = await fs.stat(projectRoot);
+  const rootStat = await measure("project.root", () => fs.stat(projectRoot));
   if (!rootStat.isDirectory()) throw new Error(`projectRoot is not a directory: ${projectRoot}`);
 
   const documents: Array<{ kind: string; path: string; text: string; id?: string; source?: string }> = [];
@@ -201,18 +203,20 @@ async function loadProjectContext(args: {
   };
 
   if (args.includeAgents) {
-    const overridePath = path.join(projectRoot, "AGENTS.override.md");
-    const agentsPath = path.join(projectRoot, "AGENTS.md");
-    await addDocument("agents", await pathExists(overridePath) ? overridePath : agentsPath);
+    await measure("project.agents", async () => {
+      const overridePath = path.join(projectRoot, "AGENTS.override.md");
+      const agentsPath = path.join(projectRoot, "AGENTS.md");
+      await addDocument("agents", await pathExists(overridePath) ? overridePath : agentsPath);
+    });
   }
 
   const projectContextAssembly = args.includeProjectContext
-    ? await assembleProjectContext({
+    ? await measure("project.context.assemble", () => assembleProjectContext({
         projectRoot,
         intent: args.intent,
         stage: args.stage,
         maxContextChars: args.maxProjectContextChars,
-      })
+      }))
     : null;
 
   if (args.includeProjectContext && projectContextAssembly?.mode === "modular") {
@@ -270,7 +274,7 @@ async function loadProjectContext(args: {
   }
 
   const discovery = args.includeGuides
-    ? await discoverGuides(projectRoot)
+    ? await measure("workflow.guide.discovery", () => discoverGuides(projectRoot))
     : { guides: [], warnings: [] } satisfies GuideDiscoveryResult;
   const guides = discovery.guides.map((guide) => ({
     name: guide.manifest.name,
@@ -282,10 +286,10 @@ async function loadProjectContext(args: {
     manifestPath: guide.manifestPath,
   }));
   const recommendation = args.task
-    ? await recommendGuide(
-        { task: args.task, projectRoot, maxResults: 5 },
+    ? await measure("workflow.guide.recommend", () => recommendGuide(
+        { task: args.task!, projectRoot, maxResults: 5 },
         args.includeGuides ? discovery : undefined,
-      )
+      ))
     : null;
 
   return {
@@ -395,6 +399,7 @@ function reusablePattern(task: string) {
 export async function recommendGuide(
   args: { task: string; projectRoot?: string; maxResults: number },
   existingDiscovery?: GuideDiscoveryResult,
+  existingSkillCoverage?: Awaited<ReturnType<typeof findExistingSkillCoverage>>,
 ) {
   const discovery = existingDiscovery ?? await discoverGuides(args.projectRoot);
   const guides = discovery.guides;
@@ -416,7 +421,7 @@ export async function recommendGuide(
     .slice(0, args.maxResults);
 
   const pattern = reusablePattern(args.task);
-  const skillCoverage = await findExistingSkillCoverage(args.task, args.maxResults);
+  const skillCoverage = existingSkillCoverage ?? await findExistingSkillCoverage(args.task, args.maxResults);
   const ownershipMetaTask = isSkillCoverageMetaTask(args.task);
   const bestDomainGuide = ranked.find((item) => item.name !== "workflow-guide-builder") ?? null;
   const builderGuide = ranked.find((item) => item.name === "workflow-guide-builder") ?? null;
@@ -729,7 +734,8 @@ export const workflowGuideToolModule: BridgeToolModule = {
   ],
   handlers: {
     project_context_load: async (raw) => {
-      const parsed = z.object({
+      const timing = new BridgeTimingCollector("project_context_load");
+      const parsed = timing.measureSync("request.parse", () => z.object({
         projectRoot: z.string().min(1),
         task: z.string().min(1).max(10_000).optional(),
         intent: structuredSkillIntentSchema.optional(),
@@ -739,12 +745,12 @@ export const workflowGuideToolModule: BridgeToolModule = {
         includeAgents: z.boolean().default(true),
         includeProjectContext: z.boolean().default(true),
         includeGuides: z.boolean().default(true),
-      }).parse(raw);
+      }).parse(raw));
       const [context, projectContextHealth] = await Promise.all([
-        loadProjectContext(parsed),
-        auditMssrProjectContextHealth(path.resolve(parsed.projectRoot)),
+        timing.measure("project.load", () => loadProjectContext(parsed, timing)),
+        timing.measure("project.health", () => auditMssrProjectContextHealth(path.resolve(parsed.projectRoot))),
       ]);
-      return { ...context, projectContextHealth, workflowKey: parsed.workflowKey ?? null };
+      return { ...context, projectContextHealth, workflowKey: parsed.workflowKey ?? null, bridgeTiming: timing.finish() };
     },
     workflow_guide_recommend: async (raw) => {
       const parsed = z.object({

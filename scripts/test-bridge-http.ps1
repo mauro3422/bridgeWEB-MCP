@@ -138,7 +138,7 @@ Invoke-Check "authenticated external MSSR telemetry" {
 }
 Invoke-Check "Tools portfolio dashboard" {
   $dashboard = Invoke-WebRequest -UseBasicParsing "$BaseUrl/dashboard"
-  if ($dashboard.Content -notmatch 'id="panel-tools"' -or $dashboard.Content -notmatch 'id="tools-portfolio-body"' -or $dashboard.Content -notmatch '/api/tools/audit' -or $dashboard.Content -notmatch 'Tool Portfolio') {
+  if ($dashboard.Content -notmatch 'id="panel-tools"' -or $dashboard.Content -notmatch 'id="tools-portfolio-body"' -or $dashboard.Content -notmatch '/api/dashboard/snapshot' -or $dashboard.Content -notmatch 'Tool Portfolio') {
     throw "Dashboard does not expose the tools portfolio contract"
   }
 
@@ -161,7 +161,7 @@ Invoke-Check "Tools portfolio dashboard" {
     $invalidStatus = [int]$_.Exception.Response.StatusCode
   }
   if ($invalidStatus -ne 400) { throw "Invalid tools audit view must return HTTP 400, got $invalidStatus" }
-  if ($dashboard.Content -notmatch 'id="tools-notices"' -or $dashboard.Content -notmatch '/api/notices') {
+  if ($dashboard.Content -notmatch 'id="tools-notices"' -or $dashboard.Content -notmatch '/api/dashboard/snapshot') {
     throw "Dashboard does not expose actionable notice reminders"
   }
   $notices = Invoke-RestMethod "$BaseUrl/api/notices?limit=20"

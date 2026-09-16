@@ -13,10 +13,11 @@ process.env.BRIDGE_MCP_LOG_DIR = logDir;
 process.env.BRIDGE_MCP_MSSR_EVENTS_JSONL = path.join(process.env.BRIDGE_MCP_LOG_DIR, "mssr-events.jsonl");
 process.env.BRIDGE_MCP_MSSR_STATE = path.join(metricsDir, "mssr-observability-state.json");
 
-const [{ normalizeMssrIntent }, { skillCatalogToolModule }, observatory] = await Promise.all([
+const [{ normalizeMssrIntent }, { skillCatalogToolModule, closeCodexSkillDiscoveryForTests }, observatory, { closeMetricsForTests }] = await Promise.all([
   import("@mauroprime/mssr"),
   import("../dist/tools/skill-catalog-tools.js"),
   import("../dist/mssr-observatory.js"),
+  import("../dist/metrics.js"),
 ]);
 
 const canonical = normalizeMssrIntent({
@@ -113,5 +114,7 @@ assert.deepEqual(correction.details.unresolvedFields, ["actions"]);
 assert.equal(JSON.stringify(correction).includes(sentinel), false);
 
 observatory.closeMssrObservatoryForTests();
-fs.rmSync(sandbox, { recursive: true, force: true });
+closeMetricsForTests();
+closeCodexSkillDiscoveryForTests();
+await fs.promises.rm(sandbox, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
 console.log("MSSR intent normalization regression passed.");

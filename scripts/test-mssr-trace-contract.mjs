@@ -31,7 +31,7 @@ writeSkill('skill-routing-maintainer', 'Maintain MSSR routing metadata and fixtu
 writeSkill('skill-maintenance-loop', 'Close routed work after the latest persistence and convert reusable friction into durable maintenance.');
 writeSkill('mauroprime-bridge-tool-authoring', 'Author and verify Bridge MCP tools.');
 
-const [{ Client }, { InMemoryTransport }, { createBridgeServer }, observatory, traceContext, metrics, robloxClient, runtimeIdentity] = await Promise.all([
+const [{ Client }, { InMemoryTransport }, { createBridgeServer }, observatory, traceContext, metrics, robloxClient, runtimeIdentity, skillCatalog] = await Promise.all([
   import('@modelcontextprotocol/sdk/client/index.js'),
   import('@modelcontextprotocol/sdk/inMemory.js'),
   import('../dist/bridge-server.js'),
@@ -40,6 +40,7 @@ const [{ Client }, { InMemoryTransport }, { createBridgeServer }, observatory, t
   import('../dist/metrics.js'),
   import('../dist/integrations/roblox-mcp-client.js'),
   import('../dist/runtime-identity.js'),
+  import('../dist/tools/skill-catalog-tools.js'),
 ]);
 
 function payload(result) {
@@ -261,6 +262,7 @@ try {
   assert.equal(terraProfile?.userCorrections, 0);
 
   const legacyDb = new DatabaseSync(path.join(metricsDir, 'bridge-metrics.sqlite'));
+  legacyDb.exec('PRAGMA busy_timeout = 1000;');
   try {
     legacyDb.prepare(`
       INSERT INTO mssr_events (
@@ -1638,5 +1640,6 @@ try {
   await robloxClient.closeRobloxMcpConnection().catch(() => {});
   observatory.closeMssrObservatoryForTests();
   metrics.closeMetricsForTests();
+  skillCatalog.closeCodexSkillDiscoveryForTests();
   fs.rmSync(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 }

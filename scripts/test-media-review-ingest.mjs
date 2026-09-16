@@ -36,6 +36,8 @@ const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-media-review-'));
 const projectRoot = path.join(sandbox, 'project');
 fs.mkdirSync(projectRoot, { recursive: true });
 process.env.BRIDGE_MCP_ALLOWED_ROOTS = [projectRoot, process.cwd()].join(path.delimiter);
+process.env.BRIDGE_MCP_MAX_REMOTE_MEDIA_BYTES = String(64 * 1024);
+process.env.BRIDGE_MCP_MAX_LOCAL_MEDIA_BYTES = String(1024 * 1024);
 
 const { createDefaultToolRegistry } = await import('../dist/tool-registry.js');
 const registry = createDefaultToolRegistry();
@@ -126,6 +128,8 @@ try {
   assert.equal(localResult.source.sourceKind, 'local-path');
   assert.equal(localResult.source.originPath, localSourcePath);
   assert.equal(localResult.source.fileId, null);
+  assert.equal(localResult.source.bytes > Number(process.env.BRIDGE_MCP_MAX_REMOTE_MEDIA_BYTES), true);
+  assert.equal(localResult.source.sha256, crypto.createHash('sha256').update(activityBytes).digest('hex'));
   assert.equal(localResult.schemaVersion, 4);
   assert.equal(localResult.audio.activity.available, true);
   assert.equal(localResult.audio.activity.speechWindows.length >= 1, true);

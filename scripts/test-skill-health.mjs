@@ -105,7 +105,7 @@ try {
     assert.equal(dashboardResponse.ok, true);
     const dashboard = await dashboardResponse.text();
     assert.equal(dashboard.includes('id="mssr-skill-health"'), true);
-    assert.equal(dashboard.includes('/api/mssr/skill-health'), true);
+    assert.equal(dashboard.includes('/api/dashboard/snapshot'), true);
   } finally {
     if (!child.killed) child.kill("SIGTERM");
     await Promise.race([

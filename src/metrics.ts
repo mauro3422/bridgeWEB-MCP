@@ -4,6 +4,13 @@ import os from "node:os";
 import { createRequire } from "node:module";
 import { SERVER_NAME, SERVER_VERSION } from "./config.js";
 import { getMssrObservabilityEpoch } from "./mssr-observability-epoch.js";
+import { closeMetricsWalMaintenanceForTests, getMetricsWalMaintenanceStatus } from "./metrics-wal-maintenance.js";
+import {
+  closeObservabilityPersistenceForTests,
+  enqueueObservabilityPersistence,
+  getObservabilityPersistenceStatus,
+  onObservabilityPersistenceAck,
+} from "./observability-persistence.js";
 import { normalizeModelIdentifier, RUNTIME_BOOT_ID, RUNTIME_STARTED_AT } from "./runtime-identity.js";
 
 type JsonRecord = Record<string, unknown>;
@@ -189,6 +196,21 @@ export function classifyMssrRoutingStatus(tool: string, traceId?: string | null)
 
 let db: DatabaseSync | null | undefined;
 let insertToolCall: StatementSync | null = null;
+const recentToolMetricOverlay: BridgeMetricEnd[] = [];
+const RECENT_TOOL_METRIC_OVERLAY_LIMIT = 2_000;
+
+function rememberRecentToolMetric(event: BridgeMetricEnd): void {
+  recentToolMetricOverlay.push(event);
+  if (recentToolMetricOverlay.length > RECENT_TOOL_METRIC_OVERLAY_LIMIT) {
+    recentToolMetricOverlay.splice(0, recentToolMetricOverlay.length - RECENT_TOOL_METRIC_OVERLAY_LIMIT);
+  }
+}
+
+onObservabilityPersistenceAck((timing) => {
+  if (timing.kind !== "metric" || !timing.ok) return;
+  const index = recentToolMetricOverlay.findIndex((event) => event.id === timing.id);
+  if (index >= 0) recentToolMetricOverlay.splice(index, 1);
+});
 
 function tableColumns(database: DatabaseSync, table: string): Set<string> {
   return new Set(database.prepare(`PRAGMA table_info(${table})`).all()
@@ -254,8 +276,10 @@ function getDb(): DatabaseSync | null {
 
   db = new sqlite.DatabaseSync(sqlitePath);
   db.exec(`
+    PRAGMA busy_timeout = 100;
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = NORMAL;
+    PRAGMA wal_autocheckpoint = 0;
     CREATE TABLE IF NOT EXISTS tool_calls (
       id TEXT PRIMARY KEY,
       started_at TEXT NOT NULL,
@@ -469,44 +493,52 @@ export function finishToolMetric(
   };
 
   if (!metricsEnabled) return event;
+  rememberRecentToolMetric(event);
 
-  writeJsonl({
-    type: "tool_call",
-    ...event,
-    endedAtIso: endedAt.toISOString(),
-    server: { name: SERVER_NAME, version: SERVER_VERSION, pid: process.pid, runtimeBootId: metric.runtimeBootId },
-    host: { hostname: os.hostname(), platform: os.platform(), cwd: process.cwd() },
-    observability: {
-      epoch: metric.observabilityEpoch,
-      traceId: metric.traceId,
-      workflowKey: metric.workflowKey,
-      taskKey: metric.taskKey,
-      caller: metric.caller,
-      model: metric.model,
-      reasoningEffort: metric.reasoningEffort,
-      clientName: metric.clientName,
-      sessionKey: metric.sessionKey,
-      parentSessionKey: metric.parentSessionKey,
-      project: metric.project,
-      relatedProject: metric.relatedProject,
-      hostAgent: metric.hostAgent,
-      hostVariant: metric.hostVariant,
-      messageKey: metric.messageKey,
-      callKey: metric.callKey,
-      projectKey: metric.projectKey,
-      routingStatus: metric.routingStatus,
-      mssrEligible: metric.mssrEligible,
-    },
-  });
-
+  // Initialize the read-side schema once. Durable JSONL/SQLite writes are
+  // delegated to the shared single-writer worker so transport liveness never
+  // waits on disk or a SQLite writer lock.
   const database = getDb();
   if (!database || !insertToolCall) return event;
-
-  try {
-    insertToolCall.run(
+  const endedAtIso = endedAt.toISOString();
+  enqueueObservabilityPersistence({
+    kind: "metric",
+    id: metric.id,
+    eventType: metric.tool,
+    sqlitePath,
+    jsonlPath,
+    jsonLine: JSON.stringify({
+      type: "tool_call",
+      ...event,
+      endedAtIso,
+      server: { name: SERVER_NAME, version: SERVER_VERSION, pid: process.pid, runtimeBootId: metric.runtimeBootId },
+      host: { hostname: os.hostname(), platform: os.platform(), cwd: process.cwd() },
+      observability: {
+        epoch: metric.observabilityEpoch,
+        traceId: metric.traceId,
+        workflowKey: metric.workflowKey,
+        taskKey: metric.taskKey,
+        caller: metric.caller,
+        model: metric.model,
+        reasoningEffort: metric.reasoningEffort,
+        clientName: metric.clientName,
+        sessionKey: metric.sessionKey,
+        parentSessionKey: metric.parentSessionKey,
+        project: metric.project,
+        relatedProject: metric.relatedProject,
+        hostAgent: metric.hostAgent,
+        hostVariant: metric.hostVariant,
+        messageKey: metric.messageKey,
+        callKey: metric.callKey,
+        projectKey: metric.projectKey,
+        routingStatus: metric.routingStatus,
+        mssrEligible: metric.mssrEligible,
+      },
+    }),
+    values: [
       metric.id,
       metric.startedAtIso,
-      endedAt.toISOString(),
+      endedAtIso,
       durationMs,
       metric.tool,
       ok ? 1 : 0,
@@ -543,24 +575,21 @@ export function finishToolMetric(
       metric.messageKey,
       metric.callKey,
       metric.projectKey,
-    );
-  } catch (sqliteError) {
-    writeJsonl({
-      type: "metrics_sqlite_error",
-      at: endedAt.toISOString(),
-      error: sqliteError instanceof Error ? redactText(sqliteError.message) : String(sqliteError),
-    });
-  }
+    ],
+  });
   return event;
 }
 
 export function hasObservedToolCall(callKey: string): boolean {
+  if (recentToolMetricOverlay.some((event) => event.callKey === callKey)) return true;
   const database = getDb();
   if (!database) return false;
   return Boolean(database.prepare("SELECT id FROM tool_calls WHERE call_key = ? LIMIT 1").get(callKey));
 }
 
 export function resolveObservedSessionTrace(sessionKey: string): string | undefined {
+  const recent = [...recentToolMetricOverlay].reverse().find((event) => event.sessionKey === sessionKey && event.traceId);
+  if (recent?.traceId) return recent.traceId;
   const database = getDb();
   if (!database) return undefined;
   const row = database.prepare(`
@@ -569,6 +598,35 @@ export function resolveObservedSessionTrace(sessionKey: string): string | undefi
     ORDER BY started_at DESC LIMIT 1
   `).get(sessionKey);
   return typeof row?.trace_id === "string" ? row.trace_id : undefined;
+}
+
+export function resolveObservedTraceContext(traceId: string): {
+  sessionKey?: string;
+  project?: string;
+  workflowKey?: string;
+} {
+  const recent = [...recentToolMetricOverlay].reverse().find((event) => event.traceId === traceId);
+  if (recent) {
+    return {
+      sessionKey: recent.sessionKey !== "unknown" ? recent.sessionKey : undefined,
+      project: recent.project !== "unknown" ? recent.project : undefined,
+      workflowKey: recent.workflowKey !== "unscoped" && recent.workflowKey !== "unknown" ? recent.workflowKey : undefined,
+    };
+  }
+  const database = getDb();
+  if (!database) return {};
+  const row = database.prepare(`
+    SELECT session_key, project, workflow_key
+    FROM tool_calls
+    WHERE trace_id = ?
+    ORDER BY started_at DESC
+    LIMIT 1
+  `).get(traceId);
+  return {
+    sessionKey: typeof row?.session_key === "string" && row.session_key !== "unknown" ? row.session_key : undefined,
+    project: typeof row?.project === "string" && row.project !== "unknown" ? row.project : undefined,
+    workflowKey: typeof row?.workflow_key === "string" && row.workflow_key !== "unscoped" && row.workflow_key !== "unknown" ? row.workflow_key : undefined,
+  };
 }
 
 export function getMetricsStatus() {
@@ -580,6 +638,12 @@ export function getMetricsStatus() {
     sqlitePath,
     jsonlPath,
     metricsDir,
+    persistence: {
+      ...getObservabilityPersistenceStatus(),
+      recent: getObservabilityPersistenceStatus().recent.filter((item) => item.kind === "metric").slice(-12),
+      recentOverlayCalls: recentToolMetricOverlay.length,
+    },
+    walMaintenance: getMetricsWalMaintenanceStatus(),
     logsDir,
     runtime: {
       bootId: RUNTIME_BOOT_ID,
@@ -658,12 +722,15 @@ export function getToolAuditMetrics(days = 30, scope: BridgeMetricsScope = "acti
       SUM(CASE WHEN effective_ok = 1 THEN 1 ELSE 0 END) AS ok_calls,
       SUM(CASE WHEN effective_ok = 0 THEN 1 ELSE 0 END) AS error_calls,
       ROUND(AVG(duration_ms), 2) AS avg_duration_ms,
+      SUM(duration_ms) AS total_duration_ms,
       MAX(duration_ms) AS max_duration_ms,
       MAX(started_at) AS last_started_at,
       MAX(CASE WHEN effective_ok = 1 THEN started_at END) AS last_success_at,
       MAX(CASE WHEN effective_ok = 0 THEN started_at END) AS last_error_at,
       COUNT(DISTINCT CASE WHEN session_key IS NOT NULL AND session_key <> 'unknown' THEN session_key END) AS unique_sessions,
-      COUNT(DISTINCT CASE WHEN project IS NOT NULL AND project <> 'unknown' THEN project END) AS unique_projects
+      COUNT(DISTINCT CASE WHEN project IS NOT NULL AND project <> 'unknown' THEN project END) AS unique_projects,
+      GROUP_CONCAT(DISTINCT CASE WHEN session_key IS NOT NULL AND session_key <> 'unknown' THEN session_key END) AS session_keys,
+      GROUP_CONCAT(DISTINCT CASE WHEN project IS NOT NULL AND project <> 'unknown' THEN project END) AS project_keys
     FROM projected_calls
     GROUP BY audited_tool
     ORDER BY calls DESC, audited_tool ASC
@@ -681,34 +748,107 @@ export function getToolAuditMetrics(days = 30, scope: BridgeMetricsScope = "acti
       AND operation_subject IS NOT NULL AND operation_subject <> ''
   `).all(...filter.params, since, ...filter.params, since);
   const categoriesByTool = new Map<string, Map<string, number>>();
-  for (const row of errors) {
-    const tool = typeof row.tool === "string" ? row.tool : "unknown";
-    const category = classifyToolAuditError(typeof row.error === "string" ? row.error : null);
+  const rememberErrorCategory = (tool: string, error: string | null) => {
+    const category = classifyToolAuditError(error);
     const categories = categoriesByTool.get(tool) ?? new Map<string, number>();
     categories.set(category, (categories.get(category) ?? 0) + 1);
     categoriesByTool.set(tool, categories);
+  };
+  for (const row of errors) {
+    rememberErrorCategory(typeof row.tool === "string" ? row.tool : "unknown", typeof row.error === "string" ? row.error : null);
   }
 
-  const mapped: ToolAuditMetricRow[] = rows.map((row) => {
+  type AuditAccumulator = {
+    tool: string;
+    calls: number;
+    okCalls: number;
+    errorCalls: number;
+    totalDurationMs: number;
+    maxDurationMs: number | null;
+    lastStartedAt: string | null;
+    lastSuccessAt: string | null;
+    lastErrorAt: string | null;
+    sessions: Set<string>;
+    projects: Set<string>;
+  };
+  const accumulated = new Map<string, AuditAccumulator>();
+  for (const row of rows) {
     const tool = typeof row.tool === "string" ? row.tool : "unknown";
-    const categories = [...(categoriesByTool.get(tool)?.entries() ?? [])]
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-    return {
+    const calls = Number(row.calls ?? 0);
+    accumulated.set(tool, {
       tool,
-      calls: Number(row.calls ?? 0),
+      calls,
       okCalls: Number(row.ok_calls ?? 0),
       errorCalls: Number(row.error_calls ?? 0),
-      avgDurationMs: row.avg_duration_ms === null || row.avg_duration_ms === undefined ? null : Number(row.avg_duration_ms),
+      totalDurationMs: Number(row.total_duration_ms ?? 0),
       maxDurationMs: row.max_duration_ms === null || row.max_duration_ms === undefined ? null : Number(row.max_duration_ms),
       lastStartedAt: typeof row.last_started_at === "string" ? row.last_started_at : null,
       lastSuccessAt: typeof row.last_success_at === "string" ? row.last_success_at : null,
       lastErrorAt: typeof row.last_error_at === "string" ? row.last_error_at : null,
-      uniqueSessions: Number(row.unique_sessions ?? 0),
-      uniqueProjects: Number(row.unique_projects ?? 0),
-      errorCategories: categories,
+      sessions: new Set(typeof row.session_keys === "string" ? row.session_keys.split(",").filter(Boolean) : []),
+      projects: new Set(typeof row.project_keys === "string" ? row.project_keys.split(",").filter(Boolean) : []),
+    });
+  }
+  const addPending = (tool: string, event: BridgeMetricEnd) => {
+    if (!tool) return;
+    const effectiveOk = event.resultOk ?? event.ok;
+    const current = accumulated.get(tool) ?? {
+      tool,
+      calls: 0,
+      okCalls: 0,
+      errorCalls: 0,
+      totalDurationMs: 0,
+      maxDurationMs: null,
+      lastStartedAt: null,
+      lastSuccessAt: null,
+      lastErrorAt: null,
+      sessions: new Set<string>(),
+      projects: new Set<string>(),
     };
-  });
+    current.calls += 1;
+    if (effectiveOk) current.okCalls += 1;
+    else current.errorCalls += 1;
+    current.totalDurationMs += event.durationMs;
+    current.maxDurationMs = current.maxDurationMs === null ? event.durationMs : Math.max(current.maxDurationMs, event.durationMs);
+    if (!current.lastStartedAt || event.startedAtIso > current.lastStartedAt) current.lastStartedAt = event.startedAtIso;
+    if (effectiveOk && (!current.lastSuccessAt || event.startedAtIso > current.lastSuccessAt)) current.lastSuccessAt = event.startedAtIso;
+    if (!effectiveOk && (!current.lastErrorAt || event.startedAtIso > current.lastErrorAt)) current.lastErrorAt = event.startedAtIso;
+    if (event.sessionKey && event.sessionKey !== "unknown") current.sessions.add(event.sessionKey);
+    if (event.project && event.project !== "unknown") current.projects.add(event.project);
+    accumulated.set(tool, current);
+    if (!effectiveOk) {
+      const fallback = event.resultOk === false
+        ? `process-result:${event.resultStatus ?? "failed"}:code=${event.resultCode ?? "null"}`
+        : null;
+      rememberErrorCategory(tool, event.error ?? fallback);
+    }
+  };
+  for (const event of pendingMetricEvents(scope)) {
+    if (event.startedAtIso < since) continue;
+    addPending(event.tool, event);
+    if ((event.tool === "bridge_tool_query" || event.tool === "bridge_tool_action") && event.operationSubject) {
+      addPending(event.operationSubject, event);
+    }
+  }
+
+  const mapped: ToolAuditMetricRow[] = [...accumulated.values()]
+    .map((value) => ({
+      tool: value.tool,
+      calls: value.calls,
+      okCalls: value.okCalls,
+      errorCalls: value.errorCalls,
+      avgDurationMs: value.calls > 0 ? Math.round((value.totalDurationMs / value.calls) * 100) / 100 : null,
+      maxDurationMs: value.maxDurationMs,
+      lastStartedAt: value.lastStartedAt,
+      lastSuccessAt: value.lastSuccessAt,
+      lastErrorAt: value.lastErrorAt,
+      uniqueSessions: value.sessions.size,
+      uniqueProjects: value.projects.size,
+      errorCategories: [...(categoriesByTool.get(value.tool)?.entries() ?? [])]
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+    }))
+    .sort((a, b) => b.calls - a.calls || a.tool.localeCompare(b.tool));
 
   return { enabled: metricsEnabled, sqliteAvailable: true, scope, days: boundedDays, since, rows: mapped };
 }
@@ -788,13 +928,121 @@ function metricProfileKey(row: JsonRecord, detailed: boolean): string {
     text("project"), text("session_key"), text("task_key"),
   ].join("\u0000");
 }
+function metricProfileIdentityFromEvent(event: BridgeMetricEnd, detailed: boolean): JsonRecord {
+  return detailed ? {
+    caller: event.caller || "other",
+    model: event.model || "unknown",
+    reasoning_effort: event.reasoningEffort || "unknown",
+    host_agent: event.hostAgent || "unknown",
+    host_variant: event.hostVariant || "unknown",
+    project: event.project || "unknown",
+    related_project: event.relatedProject || "none",
+    session_key: event.sessionKey || "unknown",
+    task_key: event.taskKey || "unknown",
+  } : { caller: event.caller || "other" };
+}
 
-function routingCoverage(rows: JsonRecord[], detailed: boolean): Map<string, RoutingCoverage> {
+function emptyRoutingCoverage(): RoutingCoverage {
+  return {
+    exempt_calls: 0,
+    bootstrap_calls: 0,
+    substantive_chains: 0,
+    routed_chains: 0,
+    unrouted_chains: 0,
+    chains_without_route_hook: 0,
+    mssr_routed_chain_coverage: null,
+  };
+}
+
+function metricRoutingChainKey(event: BridgeMetricEnd): string {
+  if (event.traceId) return `trace:${event.traceId}`;
+  return [
+    "unrouted",
+    event.caller || "other",
+    event.sessionKey || "unknown",
+    event.taskKey || "unknown",
+    event.project || "unknown",
+    event.workflowKey || "unscoped",
+  ].join("\u0000");
+}
+
+
+function routingCoverageFromDatabase(database: DatabaseSync, scope: BridgeMetricsScope, detailed: boolean): Map<string, RoutingCoverage> {
+  const filter = metricsFilter(scope);
+  const profileColumns = detailed
+    ? ["caller", "model", "reasoning_effort", "host_agent", "host_variant", "project", "session_key", "task_key"]
+    : ["caller"];
+  const profileSql = profileColumns.join(", ");
+  const prefixedProfileSql = (prefix: string) => profileColumns.map((column) => `${prefix}.${column}`).join(", ");
+  const profileJoinSql = profileColumns.map((column) => `h.${column} = s.${column}`).join(" AND ");
+  const baseSql = `
+    SELECT
+      COALESCE(caller, 'other') AS caller,
+      COALESCE(model, 'unknown') AS model,
+      COALESCE(reasoning_effort, 'unknown') AS reasoning_effort,
+      COALESCE(host_agent, 'unknown') AS host_agent,
+      COALESCE(host_variant, 'unknown') AS host_variant,
+      COALESCE(project, 'unknown') AS project,
+      COALESCE(session_key, 'unknown') AS session_key,
+      COALESCE(task_key, 'unknown') AS task_key,
+      COALESCE(workflow_key, 'unscoped') AS workflow_key,
+      trace_id,
+      COALESCE(routing_status, CASE WHEN trace_id IS NOT NULL AND trace_id <> '' THEN 'traced' ELSE 'unrouted' END) AS routing_status,
+      COALESCE(mssr_eligible, 0) AS mssr_eligible,
+      CASE
+        WHEN trace_id IS NOT NULL AND trace_id <> '' THEN 'trace:' || trace_id
+        ELSE 'unrouted' || char(0) || COALESCE(caller, 'other') || char(0) || COALESCE(session_key, 'unknown') || char(0)
+          || COALESCE(task_key, 'unknown') || char(0) || COALESCE(project, 'unknown') || char(0) || COALESCE(workflow_key, 'unscoped')
+      END AS chain_key
+    FROM tool_calls
+    WHERE ${filter.where}
+  `;
+
   const coverage = new Map<string, RoutingCoverage>();
-  const chains = new Map<string, Map<string, { hasSubstantiveCall: boolean; hasRouteHook: boolean }>>();
-  for (const row of rows) {
-    const profileKey = metricProfileKey(row, detailed);
-    const current = coverage.get(profileKey) ?? {
+  const countRows = database.prepare(`
+    WITH base AS (${baseSql})
+    SELECT ${profileSql},
+      SUM(CASE WHEN routing_status = 'exempt' THEN 1 ELSE 0 END) AS exempt_calls,
+      SUM(CASE WHEN routing_status = 'bootstrap' THEN 1 ELSE 0 END) AS bootstrap_calls
+    FROM base
+    GROUP BY ${profileSql}
+  `).all(...filter.params);
+  for (const row of countRows) {
+    coverage.set(metricProfileKey(row, detailed), {
+      exempt_calls: Number(row.exempt_calls ?? 0),
+      bootstrap_calls: Number(row.bootstrap_calls ?? 0),
+      substantive_chains: 0,
+      routed_chains: 0,
+      unrouted_chains: 0,
+      chains_without_route_hook: 0,
+      mssr_routed_chain_coverage: null,
+    });
+  }
+
+  const chainRows = database.prepare(`
+    WITH base AS (${baseSql}),
+    substantive AS (
+      SELECT ${profileSql}, chain_key
+      FROM base
+      WHERE mssr_eligible = 1
+      GROUP BY ${profileSql}, chain_key
+    ),
+    hooks AS (
+      SELECT ${profileSql}, chain_key
+      FROM base
+      WHERE routing_status = 'bootstrap'
+      GROUP BY ${profileSql}, chain_key
+    )
+    SELECT ${prefixedProfileSql("s")},
+      COUNT(*) AS substantive_chains,
+      SUM(CASE WHEN h.chain_key IS NOT NULL THEN 1 ELSE 0 END) AS routed_chains
+    FROM substantive s
+    LEFT JOIN hooks h ON h.chain_key = s.chain_key AND ${profileJoinSql}
+    GROUP BY ${prefixedProfileSql("s")}
+  `).all(...filter.params);
+  for (const row of chainRows) {
+    const key = metricProfileKey(row, detailed);
+    const current = coverage.get(key) ?? {
       exempt_calls: 0,
       bootstrap_calls: 0,
       substantive_chains: 0,
@@ -803,56 +1051,143 @@ function routingCoverage(rows: JsonRecord[], detailed: boolean): Map<string, Rou
       chains_without_route_hook: 0,
       mssr_routed_chain_coverage: null,
     };
-    const status = typeof row.routing_status === "string"
-      ? row.routing_status
-      : typeof row.trace_id === "string" && row.trace_id ? "traced" : "unrouted";
-    if (status === "exempt") current.exempt_calls += 1;
-    if (status === "bootstrap") current.bootstrap_calls += 1;
-    coverage.set(profileKey, current);
-    if (Number(row.mssr_eligible) !== 1) continue;
-
-    const traceId = typeof row.trace_id === "string" && row.trace_id ? row.trace_id : undefined;
-    const chainScope = traceId
-      ? `trace:${traceId}`
-      : ["unrouted", row.caller ?? "other", row.session_key ?? "unknown", row.task_key ?? "unknown", row.project ?? "unknown", row.workflow_key ?? "unscoped"].join("\u0000");
-    const profileChains = chains.get(profileKey) ?? new Map();
-    const chain = profileChains.get(chainScope) ?? { hasSubstantiveCall: false, hasRouteHook: false };
-    chain.hasSubstantiveCall = true;
-    profileChains.set(chainScope, chain);
-    chains.set(profileKey, profileChains);
-  }
-  // Route/bootstrap/hook calls are excluded from the substantive denominator,
-  // so inspect them in a second pass and attach their evidence to the same
-  // trace or bounded anonymous scope.
-  for (const row of rows) {
-    const profileKey = metricProfileKey(row, detailed);
-    const status = typeof row.routing_status === "string" ? row.routing_status : "";
-    if (status !== "bootstrap") continue;
-    const traceId = typeof row.trace_id === "string" && row.trace_id ? row.trace_id : undefined;
-    const chainScope = traceId
-      ? `trace:${traceId}`
-      : ["unrouted", row.caller ?? "other", row.session_key ?? "unknown", row.task_key ?? "unknown", row.project ?? "unknown", row.workflow_key ?? "unscoped"].join("\u0000");
-    const chain = chains.get(profileKey)?.get(chainScope);
-    if (chain) chain.hasRouteHook = true;
-  }
-  for (const [profileKey, profileChains] of chains) {
-    const current = coverage.get(profileKey);
-    if (!current) continue;
-    for (const chain of profileChains.values()) {
-      if (!chain.hasSubstantiveCall) continue;
-      current.substantive_chains += 1;
-      if (chain.hasRouteHook) current.routed_chains += 1;
-      else {
-        current.unrouted_chains += 1;
-        current.chains_without_route_hook += 1;
-      }
-    }
+    current.substantive_chains = Number(row.substantive_chains ?? 0);
+    current.routed_chains = Number(row.routed_chains ?? 0);
+    current.unrouted_chains = Math.max(0, current.substantive_chains - current.routed_chains);
+    current.chains_without_route_hook = current.unrouted_chains;
     current.mssr_routed_chain_coverage = current.substantive_chains > 0
       ? Math.round((100 * current.routed_chains / current.substantive_chains) * 100) / 100
       : null;
+    coverage.set(key, current);
   }
   return coverage;
 }
+function routingCoverageWithPending(database: DatabaseSync, scope: BridgeMetricsScope, detailed: boolean): Map<string, RoutingCoverage> {
+  const coverage = routingCoverageFromDatabase(database, scope, detailed);
+  const pending = pendingMetricEvents(scope);
+  if (pending.length === 0) return coverage;
+
+  const filter = metricsFilter(scope);
+  const traceDetailedSql = detailed ? `
+      AND COALESCE(model, 'unknown') = ?
+      AND COALESCE(reasoning_effort, 'unknown') = ?
+      AND COALESCE(host_agent, 'unknown') = ?
+      AND COALESCE(host_variant, 'unknown') = ?
+      AND COALESCE(project, 'unknown') = ?
+      AND COALESCE(session_key, 'unknown') = ?
+      AND COALESCE(task_key, 'unknown') = ?` : "";
+  const untracedDetailedSql = detailed ? `
+      AND COALESCE(model, 'unknown') = ?
+      AND COALESCE(reasoning_effort, 'unknown') = ?
+      AND COALESCE(host_agent, 'unknown') = ?
+      AND COALESCE(host_variant, 'unknown') = ?` : "";
+  const stateProjectionSql = `
+      MAX(CASE WHEN COALESCE(mssr_eligible, 0) = 1 THEN 1 ELSE 0 END) AS substantive,
+      MAX(CASE WHEN COALESCE(
+        routing_status,
+        CASE WHEN trace_id IS NOT NULL AND trace_id <> '' THEN 'traced' ELSE 'unrouted' END
+      ) = 'bootstrap' THEN 1 ELSE 0 END) AS hook`;
+  const traceState = database.prepare(`
+    SELECT ${stateProjectionSql}
+    FROM tool_calls
+    WHERE ${filter.where}
+      AND trace_id = ?
+      AND COALESCE(caller, 'other') = ?${traceDetailedSql}
+  `);
+  const untracedState = database.prepare(`
+    SELECT ${stateProjectionSql}
+    FROM tool_calls
+    WHERE ${filter.where}
+      AND (trace_id IS NULL OR trace_id = '')
+      AND COALESCE(caller, 'other') = ?
+      AND COALESCE(session_key, 'unknown') = ?
+      AND COALESCE(task_key, 'unknown') = ?
+      AND COALESCE(project, 'unknown') = ?
+      AND COALESCE(workflow_key, 'unscoped') = ?${untracedDetailedSql}
+  `);
+
+  type PendingChainState = {
+    event: BridgeMetricEnd;
+    profileKey: string;
+    substantive: boolean;
+    hook: boolean;
+  };
+  const pendingChains = new Map<string, PendingChainState>();
+
+  for (const event of pending) {
+    const identity = metricProfileIdentityFromEvent(event, detailed);
+    const profileKey = metricProfileKey(identity, detailed);
+    const current = coverage.get(profileKey) ?? emptyRoutingCoverage();
+    if (event.routingStatus === "exempt") current.exempt_calls += 1;
+    if (event.routingStatus === "bootstrap") current.bootstrap_calls += 1;
+    coverage.set(profileKey, current);
+
+    if (!event.mssrEligible && event.routingStatus !== "bootstrap") continue;
+    const chainKey = metricRoutingChainKey(event);
+    const stateKey = JSON.stringify([profileKey, chainKey]);
+    const chain = pendingChains.get(stateKey) ?? {
+      event,
+      profileKey,
+      substantive: false,
+      hook: false,
+    };
+    chain.substantive ||= event.mssrEligible;
+    chain.hook ||= event.routingStatus === "bootstrap";
+    pendingChains.set(stateKey, chain);
+  }
+
+  for (const chain of pendingChains.values()) {
+    const event = chain.event;
+    const caller = event.caller || "other";
+    const row = event.traceId
+      ? traceState.get(
+          ...filter.params,
+          event.traceId,
+          caller,
+          ...(detailed ? [
+            event.model || "unknown",
+            event.reasoningEffort || "unknown",
+            event.hostAgent || "unknown",
+            event.hostVariant || "unknown",
+            event.project || "unknown",
+            event.sessionKey || "unknown",
+            event.taskKey || "unknown",
+          ] : []),
+        )
+      : untracedState.get(
+          ...filter.params,
+          caller,
+          event.sessionKey || "unknown",
+          event.taskKey || "unknown",
+          event.project || "unknown",
+          event.workflowKey || "unscoped",
+          ...(detailed ? [
+            event.model || "unknown",
+            event.reasoningEffort || "unknown",
+            event.hostAgent || "unknown",
+            event.hostVariant || "unknown",
+          ] : []),
+        );
+    const persistedSubstantive = Number(row?.substantive ?? 0) > 0;
+    const persistedHook = Number(row?.hook ?? 0) > 0;
+    const mergedSubstantive = persistedSubstantive || chain.substantive;
+    const mergedHook = persistedHook || chain.hook;
+    const persistedRouted = persistedSubstantive && persistedHook;
+    const mergedRouted = mergedSubstantive && mergedHook;
+    const current = coverage.get(chain.profileKey) ?? emptyRoutingCoverage();
+    current.substantive_chains += Number(mergedSubstantive) - Number(persistedSubstantive);
+    current.routed_chains += Number(mergedRouted) - Number(persistedRouted);
+    current.unrouted_chains = Math.max(0, current.substantive_chains - current.routed_chains);
+    current.chains_without_route_hook = current.unrouted_chains;
+    current.mssr_routed_chain_coverage = current.substantive_chains > 0
+      ? Math.round((100 * current.routed_chains / current.substantive_chains) * 100) / 100
+      : null;
+    coverage.set(chain.profileKey, current);
+  }
+
+  return coverage;
+}
+
 
 function withRoutingCoverage(rows: JsonRecord[], coverage: Map<string, RoutingCoverage>, detailed: boolean): JsonRecord[] {
   return rows.map((row) => ({
@@ -867,6 +1202,109 @@ function withRoutingCoverage(rows: JsonRecord[], coverage: Map<string, RoutingCo
       mssr_routed_chain_coverage: null,
     }),
   }));
+}
+
+function pendingMetricEvents(scope: BridgeMetricsScope): BridgeMetricEnd[] {
+  const epoch = getMssrObservabilityEpoch();
+  return recentToolMetricOverlay.filter((event) => {
+    if (event.tool.startsWith("__test_") || event.tool === "metrics_regression") return false;
+    if (scope === "all") return true;
+    return event.observabilityEpoch === epoch.activeEpoch && event.startedAtIso >= epoch.baselineAt;
+  });
+}
+export function getPendingTraceToolRowsSince(sinceIso: string): Array<Record<string, unknown>> {
+  return recentToolMetricOverlay
+    .filter((event) => Boolean(event.traceId) && event.startedAtIso >= sinceIso && !String(event.traceId).startsWith("__test_"))
+    .map((event) => ({
+      id: event.id,
+      trace_id: event.traceId ?? null,
+      started_at: event.startedAtIso,
+      ended_at: new Date(event.startedAtMs + event.durationMs).toISOString(),
+      duration_ms: event.durationMs,
+      tool: event.tool,
+      operation_subject: event.operationSubject ?? null,
+      observability_epoch: event.observabilityEpoch,
+      ok: event.ok ? 1 : 0,
+      caller: event.caller,
+      client_name: event.clientName,
+      session_key: event.sessionKey,
+      model: event.model,
+      reasoning_effort: event.reasoningEffort,
+      host_agent: event.hostAgent,
+      host_variant: event.hostVariant,
+      host_parent_session_key: event.parentSessionKey,
+    }));
+}
+
+function mergePendingMetricSummary(rows: JsonRecord[], scope: BridgeMetricsScope, limit: number): JsonRecord[] {
+  const byTool = new Map<string, JsonRecord>();
+  for (const row of rows) byTool.set(String(row.tool ?? "unknown"), { ...row });
+  for (const event of pendingMetricEvents(scope)) {
+    const current = byTool.get(event.tool) ?? {
+      tool: event.tool,
+      calls: 0,
+      ok_calls: 0,
+      error_calls: 0,
+      avg_duration_ms: 0,
+      max_duration_ms: 0,
+      last_started_at: null,
+    };
+    const previousCalls = Number(current.calls ?? 0);
+    const nextCalls = previousCalls + 1;
+    const previousAverage = Number(current.avg_duration_ms ?? 0);
+    current.calls = nextCalls;
+    current.ok_calls = Number(current.ok_calls ?? 0) + (event.ok ? 1 : 0);
+    current.error_calls = Number(current.error_calls ?? 0) + (event.ok ? 0 : 1);
+    current.avg_duration_ms = Math.round((((previousAverage * previousCalls) + event.durationMs) / nextCalls) * 100) / 100;
+    current.max_duration_ms = Math.max(Number(current.max_duration_ms ?? 0), event.durationMs);
+    if (typeof current.last_started_at !== "string" || event.startedAtIso > current.last_started_at) current.last_started_at = event.startedAtIso;
+    byTool.set(event.tool, current);
+  }
+  return [...byTool.values()]
+    .sort((a, b) => Number(b.calls ?? 0) - Number(a.calls ?? 0) || String(a.tool ?? "").localeCompare(String(b.tool ?? "")))
+    .slice(0, Math.max(1, Math.trunc(limit)));
+}
+
+function mergePendingMetricProfiles(rows: JsonRecord[], scope: BridgeMetricsScope, detailed: boolean, limit?: number): JsonRecord[] {
+  const byKey = new Map<string, JsonRecord>();
+  for (const row of rows) byKey.set(metricProfileKey(row, detailed), { ...row });
+  for (const event of pendingMetricEvents(scope)) {
+    const identity = metricProfileIdentityFromEvent(event, detailed);
+    const key = metricProfileKey(identity, detailed);
+    const current = byKey.get(key) ?? {
+      ...identity,
+      calls: 0,
+      error_calls: 0,
+      avg_duration_ms: 0,
+      eligible_calls: 0,
+      traced_calls: 0,
+      untraced_calls: 0,
+      mssr_trace_coverage: null,
+    };
+    const previousCalls = Number(current.calls ?? 0);
+    const nextCalls = previousCalls + 1;
+    const previousAverage = Number(current.avg_duration_ms ?? 0);
+    current.calls = nextCalls;
+    current.error_calls = Number(current.error_calls ?? 0) + (event.ok ? 0 : 1);
+    current.avg_duration_ms = Math.round((((previousAverage * previousCalls) + event.durationMs) / nextCalls) * 100) / 100;
+    if (event.mssrEligible) {
+      current.eligible_calls = Number(current.eligible_calls ?? 0) + 1;
+      if (event.traceId) current.traced_calls = Number(current.traced_calls ?? 0) + 1;
+      else current.untraced_calls = Number(current.untraced_calls ?? 0) + 1;
+    }
+    const eligible = Number(current.eligible_calls ?? 0);
+    current.mssr_trace_coverage = eligible > 0
+      ? Math.round((100 * Number(current.traced_calls ?? 0) / eligible) * 100) / 100
+      : null;
+    if (detailed && event.relatedProject && event.relatedProject !== "none") {
+      const related = new Set(String(current.related_project ?? "none").split(",").filter((value) => value && value !== "none"));
+      related.add(event.relatedProject);
+      current.related_project = [...related].sort().join(",") || "none";
+    }
+    byKey.set(key, current);
+  }
+  const merged = [...byKey.values()].sort((a, b) => Number(b.calls ?? 0) - Number(a.calls ?? 0) || metricProfileKey(a, detailed).localeCompare(metricProfileKey(b, detailed)));
+  return limit === undefined ? merged : merged.slice(0, Math.max(1, Math.trunc(limit)));
 }
 
 function getMetricsProfiles(database: DatabaseSync, scope: BridgeMetricsScope, agentProfileLimit = 50) {
@@ -922,15 +1360,11 @@ function getMetricsProfiles(database: DatabaseSync, scope: BridgeMetricsScope, a
     ORDER BY calls DESC, caller ASC, model ASC, reasoning_effort ASC, project ASC, session_key ASC, task_key ASC
     LIMIT ?
   `).all(...filter.params, Math.max(1, Math.min(200, agentProfileLimit)));
-  const routingRows = database.prepare(`
-    SELECT caller, model, reasoning_effort, host_agent, host_variant, project, session_key, task_key, workflow_key,
-      trace_id, routing_status, mssr_eligible
-    FROM tool_calls
-    WHERE ${filter.where}
-  `).all(...filter.params);
+  const mergedSurfaces = mergePendingMetricProfiles(surfaces, scope, false);
+  const mergedAgentProfiles = mergePendingMetricProfiles(agentProfiles, scope, true, agentProfileLimit);
   return {
-    surfaces: withRoutingCoverage(surfaces, routingCoverage(routingRows, false), false),
-    agentProfiles: withRoutingCoverage(agentProfiles, routingCoverage(routingRows, true), true),
+    surfaces: withRoutingCoverage(mergedSurfaces, routingCoverageWithPending(database, scope, false), false),
+    agentProfiles: withRoutingCoverage(mergedAgentProfiles, routingCoverageWithPending(database, scope, true), true),
   };
 }
 
@@ -952,15 +1386,15 @@ export function getMetricsSummary(limit = 50, scope: BridgeMetricsScope = "activ
     ORDER BY calls DESC, tool ASC
     LIMIT ?
   `).all(...filter.params, limit);
-  return { ...getMetricsStatus(), scope, summary: rows, ...getMetricsProfiles(sqlite, scope, limit) };
+  return { ...getMetricsStatus(), scope, summary: mergePendingMetricSummary(rows, scope, limit), ...getMetricsProfiles(sqlite, scope, limit) };
 }
 
 export function getRecentMetrics(limit = 25, scope: BridgeMetricsScope = "active") {
+  const boundedLimit = Math.max(1, Math.min(200, Math.trunc(limit)));
   const sqlite = getDb();
-  if (!sqlite) return { ...getMetricsStatus(), scope, recent: [] };
   const filter = metricsFilter(scope);
-  const rows = sqlite.prepare(`
-    SELECT started_at, duration_ms, tool, ok, error, input_keys, operation_subject, output_chars, pid,
+  const persisted = sqlite ? sqlite.prepare(`
+    SELECT id, started_at, duration_ms, tool, ok, error, input_keys, operation_subject, output_chars, pid,
       result_ok, result_code, result_status,
       runtime_boot_id, trace_id, workflow_key, task_key, caller, model, reasoning_effort, client_name, session_key, project, related_project,
       host_parent_session_key, host_agent, host_variant, message_key, call_key, project_key,
@@ -969,7 +1403,29 @@ export function getRecentMetrics(limit = 25, scope: BridgeMetricsScope = "active
     WHERE ${filter.where}
     ORDER BY started_at DESC
     LIMIT ?
-  `).all(...filter.params, limit);
+  `).all(...filter.params, boundedLimit) : [];
+  const epoch = getMssrObservabilityEpoch();
+  const overlay: JsonRecord[] = recentToolMetricOverlay
+    .filter((event) => scope === "all" || (event.observabilityEpoch === epoch.activeEpoch && event.startedAtIso >= epoch.baselineAt))
+    .map((event) => ({
+      id: event.id, started_at: event.startedAtIso, duration_ms: event.durationMs, tool: event.tool,
+      ok: event.ok ? 1 : 0, error: event.error ?? null, input_keys: event.inputKeys,
+      operation_subject: event.operationSubject ?? null, output_chars: event.outputChars, pid: process.pid,
+      result_ok: event.resultOk === undefined ? null : event.resultOk ? 1 : 0,
+      result_code: event.resultCode ?? null, result_status: event.resultStatus ?? null,
+      runtime_boot_id: event.runtimeBootId, trace_id: event.traceId ?? null, workflow_key: event.workflowKey,
+      task_key: event.taskKey, caller: event.caller, model: event.model, reasoning_effort: event.reasoningEffort,
+      client_name: event.clientName, session_key: event.sessionKey, project: event.project, related_project: event.relatedProject,
+      host_parent_session_key: event.parentSessionKey, host_agent: event.hostAgent, host_variant: event.hostVariant,
+      message_key: event.messageKey, call_key: event.callKey, project_key: event.projectKey,
+      routing_status: event.routingStatus, mssr_eligible: event.mssrEligible ? 1 : 0,
+    }));
+  const byId = new Map<string, JsonRecord>();
+  for (const row of persisted) byId.set(String(row.id ?? `${row.started_at}:${row.tool}`), row);
+  for (const row of overlay) byId.set(String(row.id ?? `${row.started_at}:${row.tool}`), row);
+  const rows = [...byId.values()]
+    .sort((a, b) => String(b.started_at ?? "").localeCompare(String(a.started_at ?? "")))
+    .slice(0, boundedLimit);
   return { ...getMetricsStatus(), scope, recent: rows };
 }
 
@@ -1026,6 +1482,44 @@ export function getMetricsOverview(scope: BridgeMetricsScope = "active") {
   return { ...getMetricsStatus(), scope, totals, slowest, ...getMetricsProfiles(sqlite, scope, 20) };
 }
 
+export function getMetricsDashboardSnapshot(limit = 12, scope: BridgeMetricsScope = "active") {
+  const overview = getMetricsOverview(scope);
+  const sqlite = getDb();
+  if (!sqlite) {
+    return {
+      overview,
+      summary: { ...getMetricsStatus(), scope, summary: [], surfaces: [], agentProfiles: [] },
+    };
+  }
+
+  const filter = metricsFilter(scope);
+  const rows = sqlite.prepare(`
+    SELECT tool,
+      COUNT(*) AS calls,
+      SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END) AS ok_calls,
+      SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS error_calls,
+      ROUND(AVG(duration_ms), 2) AS avg_duration_ms,
+      MAX(duration_ms) AS max_duration_ms,
+      MAX(started_at) AS last_started_at
+    FROM tool_calls
+    WHERE ${filter.where}
+    GROUP BY tool
+    ORDER BY calls DESC, tool ASC
+    LIMIT ?
+  `).all(...filter.params, Math.max(1, Math.min(200, limit)));
+
+  return {
+    overview,
+    summary: {
+      ...getMetricsStatus(),
+      scope,
+      summary: rows,
+      surfaces: overview.surfaces,
+      agentProfiles: overview.agentProfiles,
+    },
+  };
+}
+
 export function getMetricsTimeline(limit = 500, scope: BridgeMetricsScope = "active") {
   const sqlite = getDb();
   if (!sqlite) return { ...getMetricsStatus(), scope, timeline: [] };
@@ -1071,31 +1565,47 @@ export function getTraceToolEvidence(traceId: string, limit = 500) {
   }
   const boundedLimit = Math.max(1, Math.min(2_000, Math.trunc(limit)));
   const sqlite = getDb();
-  if (!sqlite) {
-    return {
-      ...getMetricsStatus(),
-      traceId: normalizedTraceId,
-      truncated: false,
-      calls: [],
-      summary: { calls: 0, okCalls: 0, errorCalls: 0, firstStartedAt: null, lastStartedAt: null },
-      toolCounts: [],
-      runtimeGenerations: [],
-      workflowKeys: [],
-      taskKeys: [],
-      sessionKeys: [],
-      projects: [],
-    };
-  }
-  const calls = sqlite.prepare(`
-    SELECT started_at, ended_at, duration_ms, tool, ok, error, operation_subject,
+  const persistedCalls = sqlite ? sqlite.prepare(`
+    SELECT id, started_at, ended_at, duration_ms, tool, ok, error, operation_subject,
       server_version, pid, runtime_boot_id, trace_id, workflow_key, task_key,
-      caller, client_name, session_key, project, related_project, routing_status
-      , host_parent_session_key
+      caller, client_name, session_key, project, related_project, routing_status,
+      host_parent_session_key
     FROM tool_calls
     WHERE trace_id = ?
     ORDER BY started_at ASC
     LIMIT ?
-  `).all(normalizedTraceId, boundedLimit);
+  `).all(normalizedTraceId, boundedLimit) : [];
+  const overlayCalls: JsonRecord[] = recentToolMetricOverlay
+    .filter((event) => event.traceId === normalizedTraceId)
+    .map((event) => ({
+      id: event.id,
+      started_at: event.startedAtIso,
+      ended_at: new Date(event.startedAtMs + event.durationMs).toISOString(),
+      duration_ms: event.durationMs,
+      tool: event.tool,
+      ok: event.ok ? 1 : 0,
+      error: event.error ?? null,
+      operation_subject: event.operationSubject ?? null,
+      server_version: SERVER_VERSION,
+      pid: process.pid,
+      runtime_boot_id: event.runtimeBootId,
+      trace_id: event.traceId ?? null,
+      workflow_key: event.workflowKey,
+      task_key: event.taskKey,
+      caller: event.caller,
+      client_name: event.clientName,
+      session_key: event.sessionKey,
+      host_parent_session_key: event.parentSessionKey,
+      project: event.project,
+      related_project: event.relatedProject,
+      routing_status: event.routingStatus,
+    }));
+  const byId = new Map<string, JsonRecord>();
+  for (const row of persistedCalls) byId.set(String(row.id ?? `${row.started_at}:${row.tool}`), row);
+  for (const row of overlayCalls) byId.set(String(row.id ?? `${row.started_at}:${row.tool}`), row);
+  const calls = [...byId.values()]
+    .sort((a, b) => String(a.started_at ?? "").localeCompare(String(b.started_at ?? "")))
+    .slice(0, boundedLimit);
   const distinct = (field: string) => [...new Set(calls.flatMap((row) => {
     const value = row[field];
     return typeof value === "string" && value && value !== "unknown" && value !== "none" && value !== "unscoped" ? [value] : [];
@@ -1166,7 +1676,10 @@ export function getTraceToolEvidence(traceId: string, limit = 500) {
 
 
 export function closeMetricsForTests(): void {
+  closeMetricsWalMaintenanceForTests();
+  closeObservabilityPersistenceForTests();
   if (db) db.close();
   db = undefined;
   insertToolCall = null;
+  recentToolMetricOverlay.length = 0;
 }

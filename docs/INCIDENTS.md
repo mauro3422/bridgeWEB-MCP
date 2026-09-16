@@ -19,6 +19,25 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-09-16 — `bridge_verify_all` dejó descendientes vivos tras timeout y restart
+
+**Estado:** Lifecycle de background jobs corregido en source/dist 0.6.124; adopción live y gates finales pendientes. La inestabilidad HTTP/readiness recurrente observada durante la investigación permanece como incidente separado no resuelto.
+
+**Capa/owner:** Bridge posee procesos, terminal/job manager, timeout/termination, host observability y Bridge Notices. MSSR no posee ni debe reinterpretar estado de procesos del host.
+
+**Síntoma observable:** un `bridge_verify_all` cruzó `timeoutMs=600000` y quedó `timedOut=true` mientras un descendiente `node scripts/test-delegated-mssr-route-project.mjs` continuaba consumiendo CPU. Tras un auto-restart HTTP por readiness, el job manager en RAM desapareció pero el árbol de regresiones sobrevivió como huérfano. Se observaron además 502/restarts posteriores sin ese huérfano, por lo que no se atribuye toda la inestabilidad HTTP a este incidente.
+
+**Evidencia:** se reconstruyó la ascendencia exacta del viejo árbol desde el leaf PID 7716 hasta el subtree de regressions y se cerró sólo ese árbol con readback de cero procesos restantes. El mismo `test-delegated-mssr-route-project.mjs`, ejecutado luego de forma aislada, pasó en ~4 s con exit 0.
+
+**Causa demostrada:** el timeout de `bridge_verify_all` marcaba `timedOut` y enviaba `SIGTERM` sólo al wrapper/root. En Windows eso no prueba terminación del árbol. Además, un restart del runtime pierde el registry de jobs en memoria, por lo que descendientes supervivientes dejan de ser direccionables por `jobId`.
+
+**Corrección:** 0.6.124 separa deadline de terminación. `bridge_verify_all` y `work_begin` usan `timeoutAction=observe` por defecto; el deadline emite Notice y conserva el proceso para inspección. `terminal_start` conserva `terminate` por compatibilidad. `work_peek`/`terminal_read` exponen progreso, contadores y árbol sanitizado; stop/terminate explícito usa terminación de árbol. Notices/telemetría no guardan command-lines crudas ni output.
+
+**Regresión:** `scripts/test-background-job-observability.mjs` prueba timeout-alive, árbol sanitizado, finalización exit 0 después del deadline y timeout duro explícito. `scripts/test-v060-tools.mjs` y el delegated-route fixture aislado pasan.
+
+**Seguimiento:** investigar por separado los reinicios HTTP/readiness recurrentes que continúan ocurriendo sin el árbol huérfano; no asumir causa por correlación.
+
+---
 ## 2026-08-22 — `skill_bootstrap` desbordaba el sobre y omitía contexto aceptado
 
 **Estado:** Corregido y verificado en source/dist; adopción live pendiente de restart coordinado.
@@ -1515,3 +1534,22 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Corrección:** MSSR 0.2.56 usa tamaño serializado real como piso presupuestario. La reproducción posterior demostró dos capas adicionales: los defaults independientes de proyecto/mensajes todavía competían con el envelope completo y el cursor ligaba la continuación al presupuesto reducido de la primera página. MSSR 0.2.57 conserva identidad por selección/orden/bytes pero permite presupuesto por página. Bridge deriva los caps compactos de proyecto/mensajes del envelope, resume metadata repetida, separa notices internos del conteo público y drena como máximo cuatro notices bajo un objetivo de 4.000 caracteres, reducido a 1.500 en bootstrap/continuación compactos; overflow o un notice indivisible permanece en cola con `remainingPending` para inspección explícita.
 
 **Regresión / evidencia:** MSSR prueba cambio de presupuesto 18.000 → 10.000 sobre una misma cadena, entrega exacta, tamper y stale bytes. Bridge prueba envelope, continuación adaptable, un Context Message subestimado, estimaciones medidas del provider, lote automático acotado, notice indivisible retenido, Project Health y REVIEW automático de Architecture Impact. `npm run verify:all` pasa con `failedRequired=0`. Tras restart ack `70b3ca79-c6f2-45c2-a18c-7a622b4b1a3c`, runtime 0.6.117 quedó en PID `37868`, boot `bbf6cf53-1166-4f7a-89b2-d3f8507728fe`, dashboard HTTP 200. La traza original completó a 32.000 en cuatro páginas 31.180 / 28.149 / 31.716 / 14.943, sin blockers y con `contextChain=complete`; seis notices mayores quedaron pendientes para inspección explícita en vez de invadir el contexto.
+
+
+## 2026-09-16 — Observabilidad síncrona bloqueaba el event loop HTTP/MCP y provocaba readiness restarts
+
+**Estado:** Corregido y cerrado en Bridge 0.6.124; runtime live adoptado y smoke post-restart verificado.
+
+**Capa / owner:** persistencia host de métricas/MSSR (`src/metrics.ts`, `src/mssr-observatory.ts`, `src/observability-persistence*.ts`) y mantenimiento WAL. MSSR sigue siendo owner semántico del routing; este incidente pertenece al runtime Bridge.
+
+**Síntoma observable:** llamadas de routing válidas podían tardar decenas de segundos y coincidir con `/readyz` perdido, 502 y `auto-restart-http-readiness-threshold` mientras el túnel seguía sano. En una muestra real `skill_bootstrap` tardó ~28,7 s y `observability.route` consumió ~19,3 s; dentro de esa persistencia, un `INSERT` SQLite síncrono tomó ~18,2 s y el append JSONL ~1,1 s. El proceso estaba vivo pero el mismo event loop que debía responder health/readiness estaba bloqueado por su propia observabilidad.
+
+**Causa demostrada:** los receipts MSSR y tool metrics persistían JSONL/SQLite de forma síncrona en el request path mediante APIs sync, compartiendo el event loop de MCP/HTTP. El WAL/checkpoint y lecturas agregadas pesadas podían sumar contención adicional. Varios fixtures además asumían persistencia inmediata y algunos dejaban watchers/workers vivos durante cleanup de sandboxes Windows, produciendo ruido secundario (`EPERM` o procesos post-PASS).
+
+**Corrección:** la durabilidad MSSR/métricas usa un single-writer Worker compartido con cola acotada; el request sólo encola trabajo durable. Un overlay RAM bounded conserva read-your-writes para `trace`, `recent`, routing profiles/coverage y proyecciones activas hasta el ACK de persistencia, con dedupe por event id y semántica estable de orden/chain. Los writers deshabilitan `wal_autocheckpoint`; el checkpoint `PASSIVE` corre fuera del request path tras un quiet-period debounce real. La cobertura/routing pesada usa agregaciones SQL bounded en lugar de materializar todo `tool_calls`. Fixtures que poseen observatory/metrics/skill discovery cierran recursos explícitamente antes de borrar sandboxes.
+
+**Regresión / evidencia:** `npm run test:regressions` completo terminó exit 0 en ~160,5 s. `test-observability-http-liveness` persistió 64/64 writes mientras tomó 115 muestras de `/readyz`, con p95 6,45 ms y máximo 97,15 ms, sin cambio del runtime boot del fixture. `test-metrics-wal-maintenance` terminó `busy=0`, 57/57 frames checkpointed. `scripts/test-bridge-http.ps1`, `npm run check` y `npm run build` pasaron. Restart HTTP-only ack `2c2f029b-fa4b-4938-b032-7a5e6b62010c` adoptó 0.6.124 en PID 18368 / boot `f37449a7-4ad8-4b8c-bd09-290e34bf3fe0`; el Secure MCP tunnel permaneció live/ready. Un evento MSSR registrado post-restart fue visible inmediatamente mediante `recent`, confirmando read-your-writes live.
+
+**Invariante:** observabilidad no puede definir la salud del transporte que observa. Durabilidad lenta debe atrasar telemetría, no bloquear `/readyz`. Latencia/readiness/transporte son Bridge-native Notice; no se atribuyen a MSSR ni se convierten en `MssrNotice` sólo porque el routing estaba activo. Antes de cambiar routing, separar caller ingress/egress, Bridge dispatch, discovery, deterministic routing/context, persistencia/WAL y downstream execution.
+
+**Seguimiento:** continuar con Project/Trace Lease y first-output/TTFB sólo como optimizaciones de fast path controlado. Medir caller↔Bridge round-trip cuando el cliente lo permita; `bridgeMeta.latency.dispatchMs` no incluye ingress/egress externo. Mantener retention/rotation de stores y logs como trabajo separado de esta corrección de liveness.

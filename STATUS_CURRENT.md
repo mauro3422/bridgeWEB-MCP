@@ -1,111 +1,104 @@
 # bridge-mcp current status
 
-Bridge `0.6.105` is the current live C2e Situation Model release with packaged MSSR `0.2.26`; focused verification and the clean full post-adoption regression are green.
+Bridge `0.6.124` is the current verified source/dist/live release on vendored and installed `@mauroprime/mssr 0.2.61`.
 
 ```text
 Project root:       D:\Dev\bridge-mcp
-Source version:     bridge-mcp 0.6.105
-Compiled version:   bridge-mcp 0.6.105
-Runtime version:    bridge-mcp 0.6.105
-Source MSSR:        @mauroprime/mssr 0.2.26
-Installed MSSR:     @mauroprime/mssr 0.2.26
-Runtime tools:      156
-Mode:               Streamable HTTP + C2e Situation watcher live
+Source version:     bridge-mcp 0.6.124
+Runtime version:    bridge-mcp 0.6.124
+Installed MSSR:     @mauroprime/mssr 0.2.61
+Runtime tools:      162
+Transport:          streamable-http-dual-era
 Bridge MCP:         http://127.0.0.1:3001/mcp
-Situation API:      http://127.0.0.1:3001/api/mssr/project-situation
 Tunnel admin:       http://127.0.0.1:8081
 Tunnel profile:     bridge-local-http (live/ready)
-Last runtime ack:   2641d44f-17c3-48db-b33a-2d54877df705 (auto-restart-http-readiness-threshold)
+Runtime PID/boot:   18368 / f37449a7-4ad8-4b8c-bd09-290e34bf3fe0
+Last runtime ack:   2c2f029b-fa4b-4938-b032-7a5e6b62010c (restart-http)
 Git branch:         main
 ```
 
-## Current source/runtime contract
+## Current runtime/observability contract
 
-- MSSR `0.2.26` owns portable project-control plus C2b routing compliance, C2c consistency diagnosis, C2d `evidence-first-v1` planning, and C2e Situation Model evidence normalization/classification.
-- Bridge consumes C2c/C2d/C2e; it owns host observation, metadata-only watcher persistence and action rendering, not semantic ownership or recommendation order. Only C2d `ready` recommendations become immediate notice actions.
-- `src/project-situation.ts` compares operationally active Context Plane delivery receipts with current canonical repository revisions and exposes `/api/mssr/project-situation`; newest/current delivery supersedes older receipts and stable REVIEW is suppressed across restarts.
-- Evidence class (`observed`/`declared`/`inferred`/`learned`) and priority are advisory metadata. They do not override repository ownership, and free-form project memory is not parsed into canonical truth.
-- `src/release-consistency.ts` continues to compare package/source/dist/live and declared/installed MSSR through C2c/C2d. Build parity is proven before runtime adoption; a watchdog ack alone does not prove intended bytes are live.
-- `bridgeNotices` remains the only general notice transport; Situation classes/categories/priority are orthogonal routing metadata over the existing OK/WATCH/REVIEW/ERROR transition contract.
-- MSSR learning remains `observe-only` with `routingInfluence=false`; learned recommendation weights/priors require replay/calibration/shadow/feature-flag/rollback gates before any influence.
+- Bridge owns host/runtime integration, tools, persistence, transport, health and Notice delivery; portable MSSR owns semantic routing/project-control policies and semantic notice payloads.
+- Dashboard analytics remain isolated behind one bounded cached snapshot so dashboard aggregation does not define HTTP/MCP liveness.
+- MSSR/metrics durability uses a shared single-writer worker. Request-path events are queued rather than synchronously forcing durable SQLite work on the HTTP/MCP event loop.
+- Immediate evidence is preserved with a bounded read-your-writes overlay. Live `trace`, `recent`, routing coverage/profile projections merge durable rows with pending events using stable event-id dedupe and domain ordering/chain rules.
+- SQLite WAL maintenance is separate from receipt durability. Writers disable automatic checkpoints; passive checkpoints run after a true quiet-period debounce outside normal request work.
+- Routing latency is attributed by layer: caller ingress/egress, Bridge dispatch, skill discovery, deterministic routing/context, persistence/WAL and downstream execution must not be collapsed into one “MSSR latency” number.
+- Transport/readiness/routing-latency attention is Bridge-native Notice. A host latency warning does not become an MSSR semantic notice merely because MSSR work was active.
+- Background work timeout remains an attention deadline unless explicit terminate behavior was requested. Exact process-tree evidence is inspected before killing work.
+
+## Final 0.6.124 verification
+
+```text
+npm run check                         PASS
+npm run build                         PASS
+npm run test:regressions              PASS (exit 0, ~160.5 s)
+test-observability-http-liveness      PASS (64/64 writes)
+readyz samples                        115
+readyz p95 / max                      6.45 ms / 97.15 ms
+WAL maintenance                       PASS (busy=0, 57/57)
+scripts/test-bridge-http.ps1          PASS
+MCP initialize/session/delete         PASS
+Live read-after-write post restart    PASS
+Tunnel healthz / readyz               live / ready
+Restart pending                       no
+```
+
+The controlled HTTP-only restart adopted the final verified build without restarting the Secure MCP tunnel. After adoption the infrastructure notice transitioned from `runtime-restarted` to resolved/stable. A live `skill_bootstrap` observed at 1791 ms triggered the Bridge-native `bridge-routing-latency` threshold at 1500 ms, proving the new attention path is active.
 
 ## Project knowledge rules
 
-`AGENTS.md` is broad repository instruction authority. `.mssr/PROJECT_CONTEXT.md` stores stable architecture/facts/ownership; `.mssr/PROJECT_MEMORY.md` stores durable decisions/lessons; `.mssr/PROJECT_STATE.md` stores mutable current state; `.mssr/knowledge/<topic>/...` stores conditional durable modules; `.mssr/project-context.json` indexes/selects only relevant content. A release changelog declares each PROJECT_* authority as `updated`, `reviewed-none`, or `pending`; `pending` blocks persistence.
+`AGENTS.md` is repository instruction authority. `.mssr/PROJECT_CONTEXT.md` stores stable architecture/ownership; `.mssr/PROJECT_MEMORY.md` stores durable decisions/lessons; `.mssr/PROJECT_STATE.md` stores mutable current state; `.mssr/knowledge/<topic>/...` stores conditional durable modules; `.mssr/project-context.json` is the selectable manifest. Telemetry and notices may request review but never auto-author these authorities.
 
-Audits, telemetry, Context Plane receipts, trace metadata and learning may detect drift or propose maintenance. They are evidence only and do not synthesize or silently rewrite durable project memory, AGENTS, skills, references or routing. `project_context_update` is the explicit stable-section writer; `project_context_capture` is the explicit reviewed topic/area module writer. Both require an initialized canonical manifest.
+For release persistence, `changelogs/X.Y.Z.md` must declare `PROJECT_CONTEXT`, `PROJECT_MEMORY` and `PROJECT_STATE` as `updated`, `reviewed-none` or `pending`. Run `project_change_consistency(mode=persist)` before publication. A green build is not a replacement for project-knowledge review.
 
-Workspace project-authority audit after the 0.2.18 canonical-only initialization pass:
+Current Project Context Health is WATCH because root `PROJECT_MEMORY.md` is approaching monolithic size. This is advisory, not a release blocker; new topic-specific durable knowledge should prefer indexed `.mssr/knowledge/` modules where appropriate.
 
-```text
-Managed Git repositories:    22
-Initialized/valid:           22
-Health OK / modular:         16
-Health WATCH:                 2
-Health REVIEW:                4
-Initialization blocked:       0
-```
+## Operating rules
 
-All 22 managed Git repositories now have valid canonical MSSR initialization. Portable discovery excludes generated migration-backup/audit/vendor/snapshot trees; the second workspace pass changed 0 and blocked 0, proving idempotence. Structural health remains advisory: REVIEW currently names `electronics-repair-simulator`, `GodotAtlas`, `MyceliumFront`, and `TabletWhiteboard`; WATCH names `LLM-Rig` and `mauroprime-godot-mcp`. The daily Project Context Health scheduler persists metadata-only snapshots and surfaces this worklist without autoediting it.
+- Use `project_context_load` once when entering/resuming substantial repo work, then structured `skill_bootstrap` with bounded continuation context.
+- Inspect Git state before mutation; concurrent work exists in this worktree and unrelated changes must not be restored, committed or rewritten.
+- Prefer explicit Bridge tools over shell for file edits, Git, process inspection and restart coordination.
+- Use `bridge_request_restart`; do not kill the production Bridge/tunnel directly from an MCP call.
+- After a restart, re-establish project root/trace explicitly before assuming RAM continuity.
+- Do not claim side effects from a lost/502 response without correlating runtime/transport and durable evidence.
 
-## Live health
+## Performance work worth continuing
 
-```text
-Bridge live:          0.6.105 (verified)
-MSSR live package:    0.2.26
-Runtime PID/boot:     36416 / f9130047-23e0-4f4e-84df-6a0e87b1e7cd
-Project home:         .mssr (canonical-only)
-Tunnel healthz:       live
-Tunnel readyz:        ready
-Runtime tools:        156
-C2c/C2d parity:       OK / evidenceComplete=true / 0 mismatches / evidence-first-v1 / nextAction=null
-C2e Situation:        live; revision/receipt mismatch transitions feed existing bridgeNotices
-Restart pending:      no
-```
+The next useful performance layer is a controlled fast path, not removal of MSSR governance:
 
-The watchdog owns restart coordination. Do not kill the active Node/tunnel processes from an MCP call. Use `bridge_request_restart` only when executable/package state actually changed, then verify health/readiness/version/tools.
+1. Project/Trace Lease: perform full routing/bootstrap once, bind fast local operations to a validated project/trace/freshness lease, and invalidate on restart, owner/authority changes or material replan boundaries.
+2. First-output/TTFB terminal start: optionally wait a small bounded interval and return initial stdout/stderr plus persistent session id, avoiding the immediate second MCP read round-trip for short commands.
+3. Caller-to-Bridge latency probe: server-side timing already separates Bridge dispatch from unknown external ingress/egress; add a caller-visible round-trip probe if the connector/client contract permits it so cloud/tunnel latency can be measured rather than inferred.
+4. Continue keeping heavy observability/dashboard aggregation off the HTTP/MCP event loop and use bounded SQL/worker snapshots instead of unbounded synchronous scans.
 
-## Required verification
-
-For Bridge source changes:
+## Verification for future source changes
 
 ```powershell
 npm run check
 npm run build
 npm run test:regressions
-npm run test:skill-routing
-npm run docs:tools
-npm run docs:tools:check
+powershell -NoProfile -File .\scripts\test-bridge-http.ps1
+node .\scripts\test-metrics-wal-maintenance.mjs
 ```
 
-For MSSR portable changes:
-
-```powershell
-cd D:\Dev\mssr
-npm run verify
-```
-
-Before persistence/publication, run `project_change_consistency` in `persist` mode. A clean build does not prove PROJECT_CONTEXT/MEMORY/STATE impact was reviewed. Runtime-sensitive 0.6.100 adoption is proven by watchdog restart/readback plus authoritative `bridge_verify_all(expectedServerVersion="0.6.100", strictGit=false)` job `bridge_verify_1786837082102_2`; strict Git cleanliness remains a separate publication-policy gate because this workspace intentionally contains unrelated in-progress changes.
-
-## Current maintenance priorities
-
-1. Accumulate strict learning digests without routing influence; evaluate dataset quality, replay/holdout, calibration and shadow predictions before any activation discussion.
-2. Operational Notice Plane C2: migrate provider/tunnel/runtime/restart health onto the shared transition evaluator with bounded semantic fingerprints, stable-state negative tests and explicit resolution behavior.
-3. After provider/runtime health, migrate routing-compliance / required-skill anomalies only where a stable portable evidence contract is defined.
-4. Continue structural Skill Health review of remaining WATCH/REVIEW skills without turning references into routing nodes or autoediting skills.
-5. Preserve `.bridge` only for Bridge-owned project surfaces or explicit legacy-compatibility tests/history; new MSSR project authorities and runtime Context Plane state belong under `.mssr`. Preserve `changelogs/INDEX.md` as the selective history entry point.
+Run `npm run docs:tools` / `npm run docs:tools:check` when tool descriptions or schemas change. For portable MSSR changes, verify in `D:\Dev\mssr` under that repository's own contract.
 
 ## Authoritative references
 
-- `README.md`
 - `AGENTS.md`
 - `.mssr/project-context.json`
 - `.mssr/PROJECT_CONTEXT.md`
 - `.mssr/PROJECT_MEMORY.md`
 - `.mssr/PROJECT_STATE.md`
 - `changelogs/INDEX.md`
-- `ROADMAP.md`
+- `changelogs/0.6.124.md`
+- `docs/INCIDENTS.md`
 - `TOOLS.md`
+- `CONNECTOR_CONTEXT.md`
 - `CONNECTOR_PLAYBOOK.md`
 - `RESTART_FLOW.md`
 - `BRIDGE_WATCHDOG.md`
+
+No commit, push, or public package publication is implied by this status file; verify Git separately.

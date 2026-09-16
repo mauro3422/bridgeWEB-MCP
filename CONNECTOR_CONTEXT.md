@@ -158,8 +158,10 @@ trusted shell tools remain outside an operating-system sandbox
 Current bridge assumptions:
 
 ```txt
-Project root: C:\dev\bridge-mcp
-Server: bridge-mcp v0.6.6
+Project root: D:\Dev\bridge-mcp
+Server: bridge-mcp v0.6.124
+Installed MSSR: @mauroprime/mssr 0.2.61
+Runtime tools: 162
 Active profile: bridge-local-http
 Bridge MCP: http://127.0.0.1:3001/mcp
 Tunnel admin: http://127.0.0.1:8081
@@ -167,6 +169,22 @@ Rollback: stdio watchdog
 ```
 
 Important: the connector executes tools on the machine where the bridge and tunnel run. If ChatGPT is opened from a laptop but the tunnel points to MauroPrime, tools execute on MauroPrime.
+
+## Latency model
+
+Do not treat one duration as “the connection latency”. Bridge 0.6.124 separates at least these layers:
+
+```txt
+caller/client -> Secure MCP Tunnel -> Bridge ingress
+Bridge dispatch / tool handler
+routing/context/skill discovery when applicable
+local filesystem/process/provider work
+Bridge egress -> caller/client
+```
+
+Local MauroPrime work can be tens of milliseconds while a specialized bootstrap takes longer because discovery/routing/context are additional software work. `bridgeMeta.latency.dispatchMs` and `bridgeTiming` measure work after Bridge receives the request; they explicitly do not measure caller-to-Bridge ingress or Bridge-to-caller egress. Transport/readiness/routing-latency regressions are Bridge-native operational concerns. MSSR should receive only semantic/project-maintenance notices that it actually owns.
+
+Observability persistence must not trade correctness for transport health: bounded events are persisted asynchronously by a single writer, while immediate live projections merge a bounded pending overlay with durable rows so callers retain read-your-writes semantics.
 
 ## References to keep in mind
 

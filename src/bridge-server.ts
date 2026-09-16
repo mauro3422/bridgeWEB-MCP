@@ -25,7 +25,7 @@ import type { BridgeToolSchema } from "./tools/types.js";
 import { createMssrTraceSessionCoordinator } from "./mssr-trace-context.js";
 import { recordMssrEvent } from "./mssr-observatory.js";
 import { createMssrRoutingComplianceNoticeTracker } from "./mssr-routing-compliance.js";
-import { normalizeModelIdentifier, normalizeWorkflowKey, resolveMetricTaskKey, resolveMetricWorkflowKey } from "./runtime-identity.js";
+import { RUNTIME_BOOT_ID, normalizeModelIdentifier, normalizeWorkflowKey, resolveMetricTaskKey, resolveMetricWorkflowKey } from "./runtime-identity.js";
 
 export { SERVER_NAME, SERVER_VERSION } from "./config.js";
 export { bridgeRestartStatus } from "./tools/bridge-ops.js";
@@ -35,6 +35,7 @@ type BridgeImageAttachment = { type: "image"; data: string; mimeType: string };
 type ToolContentPart = { type: "text"; text: string } | BridgeImageAttachment;
 
 const slowToolThresholdMs = Math.max(1000, Number(process.env.BRIDGE_MCP_NOTICE_SLOW_TOOL_MS || 45_000));
+const slowRoutingThresholdMs = Math.max(250, Number(process.env.BRIDGE_MCP_NOTICE_SLOW_ROUTING_MS || 1_500));
 const largeOutputThresholdChars = Math.max(10_000, Number(process.env.BRIDGE_MCP_NOTICE_LARGE_OUTPUT_CHARS || 250_000));
 const largeOutputExemptTools = new Set([
   "image_file_attach",
@@ -47,6 +48,14 @@ const mssrRouteTools = new Set([
   "skill_recommend",
   "skill_route_plan",
   "skill_bootstrap",
+]);
+const latencyMetadataTools = new Set([
+  "project_context_load",
+  "workflow_guide_recommend",
+  "skill_recommend",
+  "skill_route_plan",
+  "skill_bootstrap",
+  "skill_context_next",
 ]);
 const compactContextEnvelopeTools = new Set(["skill_bootstrap", "skill_context_next"]);
 const sessionProjects = new Map<string, string>();
@@ -144,6 +153,7 @@ function emitAutomaticMetricNotices(
   event: ReturnType<typeof finishToolMetric>,
   toolSchema?: BridgeToolSchema,
   hasImages = false,
+  bridgeTiming?: unknown,
 ) {
   if (noticeInspectionTools.has(toolName)) return;
   if (!event.ok) {
@@ -165,14 +175,21 @@ function emitAutomaticMetricNotices(
       dedupeKey: `${toolName}:tool-call-failed:${errorCategory}:${event.error || "unknown"}`,
     });
   }
-  if (event.durationMs >= slowToolThresholdMs) {
+  const latencyThresholdMs = latencyMetadataTools.has(toolName) ? slowRoutingThresholdMs : slowToolThresholdMs;
+  if (event.durationMs >= latencyThresholdMs) {
+    const routingCall = latencyMetadataTools.has(toolName);
     emitBridgeNotice({
       severity: "warning",
-      code: "slow-tool-call",
+      code: routingCall ? "bridge-routing-latency" : "slow-tool-call",
       source: toolName,
-      message: `${toolName} tardó ${event.durationMs} ms, por encima del umbral de ${slowToolThresholdMs} ms.`,
-      details: { durationMs: event.durationMs, thresholdMs: slowToolThresholdMs },
-      dedupeKey: `${toolName}:slow-tool-call`,
+      message: `${toolName} tardó ${event.durationMs} ms, por encima del umbral de ${latencyThresholdMs} ms.`,
+      details: {
+        durationMs: event.durationMs,
+        thresholdMs: latencyThresholdMs,
+        runtimeBootId: RUNTIME_BOOT_ID,
+        ...(bridgeTiming && typeof bridgeTiming === "object" && !Array.isArray(bridgeTiming) ? { bridgeTiming } : {}),
+      },
+      dedupeKey: `${toolName}:${routingCall ? "bridge-routing-latency" : "slow-tool-call"}`,
     });
   }
   if (!hasImages && event.outputChars >= largeOutputThresholdChars && !largeOutputExemptTools.has(toolName)) {
@@ -185,6 +202,33 @@ function emitAutomaticMetricNotices(
       dedupeKey: `${toolName}:large-tool-response`,
     });
   }
+}
+
+function bridgeTimingFromResult(data: unknown): unknown {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+  return (data as Record<string, unknown>).bridgeTiming;
+}
+
+function withBridgeLatencyMetadata(toolName: string, payload: unknown, dispatchMs: number): unknown {
+  if (!latencyMetadataTools.has(toolName) || !payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  const record = payload as Record<string, unknown>;
+  const existingMeta = record.bridgeMeta && typeof record.bridgeMeta === "object" && !Array.isArray(record.bridgeMeta)
+    ? record.bridgeMeta as Record<string, unknown>
+    : {};
+  return {
+    ...record,
+    bridgeMeta: {
+      ...existingMeta,
+      latency: {
+        schemaVersion: 1,
+        boundary: "bridge-dispatch",
+        runtimeBootId: RUNTIME_BOOT_ID,
+        tool: toolName,
+        dispatchMs,
+        excludes: ["caller-to-bridge-ingress", "bridge-to-caller-egress"],
+      },
+    },
+  };
 }
 
 const profiledMssrTools = new Set([
@@ -726,11 +770,13 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
         return total + (part.type === "text" ? part.text.length : part.data.length);
       }, 0);
       const event = finishToolMetric(metric, ok, outputChars, error, extractToolResultMetric(name, rawData));
-      emitAutomaticMetricNotices(name, event, toolSchema, hasImages);
+      const bridgeTiming = bridgeTimingFromResult(rawData);
+      emitAutomaticMetricNotices(name, event, toolSchema, hasImages, bridgeTiming);
       const delivery = noticeInspectionTools.has(name)
         ? { items: [] as BridgeNotice[], remaining: 0 }
         : drainBridgeNoticesWithinBudget(4, compactContextEnvelopeTools.has(name) ? 1_500 : 4_000);
-      return toolContent(extracted.payload, delivery.items, delivery.remaining);
+      const deliveredPayload = withBridgeLatencyMetadata(name, extracted.payload, event.durationMs);
+      return toolContent(deliveredPayload, delivery.items, delivery.remaining);
     };
 
     try {

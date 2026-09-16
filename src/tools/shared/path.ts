@@ -74,6 +74,20 @@ function existingDirectoryCandidates(values: string[]): string[] {
   return Array.from(unique.values());
 }
 
+function existingPathCandidates(values: string[]): string[] {
+  const unique = new Map<string, string>();
+  for (const value of values) {
+    const resolved = path.resolve(value);
+    try {
+      fs.statSync(resolved);
+    } catch {
+      continue;
+    }
+    unique.set(normalizeForCompare(resolved), resolved);
+  }
+  return Array.from(unique.values());
+}
+
 function defaultAllowedRoots(): string[] {
   const home = os.homedir();
   return existingDirectoryCandidates([
@@ -84,8 +98,18 @@ function defaultAllowedRoots(): string[] {
     path.resolve("D:\\ai-models"),
     path.resolve("D:\\ai-runtime"),
     os.tmpdir(),
+    path.join(home, "Videos"),
     path.join(home, "Documents", "Proyectos"),
     path.join(home, "Desktop", "Proyectos"),
+  ]);
+}
+
+function defaultReadOnlyRoots(): string[] {
+  const home = os.homedir();
+  return existingPathCandidates([
+    path.join(home, ".codex", "sessions"),
+    path.join(home, ".codex", "archived_sessions"),
+    path.join(home, ".codex", "history.jsonl"),
   ]);
 }
 
@@ -112,6 +136,7 @@ function defaultDeniedPaths(): string[] {
 
 export function getPathPolicy(env: NodeJS.ProcessEnv = process.env) {
   const configuredRoots = envList(env.BRIDGE_MCP_ALLOWED_ROOTS);
+  const configuredReadOnlyRoots = envList(env.BRIDGE_MCP_READONLY_ROOTS);
   const configuredDeniedPaths = envList(env.BRIDGE_MCP_DENIED_PATHS);
   const configuredDeniedNames = String(env.BRIDGE_MCP_DENIED_NAMES ?? "")
     .split(",")
@@ -119,13 +144,16 @@ export function getPathPolicy(env: NodeJS.ProcessEnv = process.env) {
     .filter(Boolean);
 
   const allowedRoots = existingDirectoryCandidates(configuredRoots.length > 0 ? configuredRoots : defaultAllowedRoots());
+  const readOnlyRoots = existingPathCandidates(configuredReadOnlyRoots.length > 0 ? configuredReadOnlyRoots : defaultReadOnlyRoots());
   const deniedPaths = [...defaultDeniedPaths(), ...configuredDeniedPaths.map((item) => path.resolve(item))];
   const deniedNames = Array.from(new Set([...DEFAULT_DENIED_NAMES, ...configuredDeniedNames].map((item) => item.toLowerCase())));
 
   return {
     enabled: env.BRIDGE_MCP_PATH_POLICY_DISABLED !== "1",
     source: configuredRoots.length > 0 ? "BRIDGE_MCP_ALLOWED_ROOTS" : "safe defaults",
+    readOnlySource: configuredReadOnlyRoots.length > 0 ? "BRIDGE_MCP_READONLY_ROOTS" : "safe defaults",
     allowedRoots,
+    readOnlyRoots,
     deniedPaths,
     deniedNames,
   };
@@ -148,16 +176,23 @@ export function assertPathAllowed(target: string, access: ToolPathAccess = "read
   const policy = getPathPolicy();
   if (!policy.enabled || access === "internal") return resolved;
 
-  const resolvedAllowed = policy.allowedRoots.some((root) =>
-    isWithin(normalizeForCompare(root), normalizeForCompare(resolved)),
-  );
-  const canonicalAllowed = policy.allowedRoots.some((root) => {
-    const canonicalRoot = canonicalizePotentialPath(root);
-    return isWithin(normalizeForCompare(canonicalRoot), normalizeForCompare(canonical));
-  });
-  const allowed = resolvedAllowed && canonicalAllowed;
+  const allowedByRoots = (roots: string[]) => {
+    const resolvedAllowed = roots.some((root) =>
+      isWithin(normalizeForCompare(root), normalizeForCompare(resolved)),
+    );
+    const canonicalAllowed = roots.some((root) => {
+      const canonicalRoot = canonicalizePotentialPath(root);
+      return isWithin(normalizeForCompare(canonicalRoot), normalizeForCompare(canonical));
+    });
+    return resolvedAllowed && canonicalAllowed;
+  };
+  const allowed = allowedByRoots(policy.allowedRoots)
+    || (access === "read" && allowedByRoots(policy.readOnlyRoots));
   if (!allowed) {
-    throw new Error(`Path is outside bridge-mcp allowed roots: ${resolved}. Allowed roots: ${policy.allowedRoots.join(", ")}`);
+    const readOnlyHint = access === "read" && policy.readOnlyRoots.length > 0
+      ? ` Read-only roots: ${policy.readOnlyRoots.join(", ")}`
+      : "";
+    throw new Error(`Path is outside bridge-mcp allowed roots for ${access}: ${resolved}. Allowed roots: ${policy.allowedRoots.join(", ")}.${readOnlyHint}`);
   }
 
   const deniedPath = policy.deniedPaths.find((item) => {
@@ -189,7 +224,8 @@ export function pathPolicyStatus() {
     notes: [
       "The policy constrains paths and working directories used by explicit Bridge tools.",
       "run_command and terminal tools still execute a trusted shell inside an allowed cwd; this is not an operating-system sandbox.",
-      "Set BRIDGE_MCP_ALLOWED_ROOTS using the platform path delimiter to replace the default allowed roots.",
+      "Set BRIDGE_MCP_ALLOWED_ROOTS using the platform path delimiter to replace the default writable/cwd allowed roots.",
+      "BRIDGE_MCP_READONLY_ROOTS adds paths that explicit read tools may inspect but write/cwd access may not use.",
     ],
   };
 }

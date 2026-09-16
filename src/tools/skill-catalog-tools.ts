@@ -1,11 +1,13 @@
+import { compactRouteContextPlane } from "../compact-route-context.js";
 import { createHash } from "node:crypto";
-import type { Dirent } from "node:fs";
+import { watch, type Dirent, type FSWatcher } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import type { BridgeToolModule } from "./types.js";
 import { assertPathAllowed } from "./shared/path.js";
+import { BridgeTimingCollector, compactBridgeTimingEnvelope } from "./shared/timing.js";
 import {
   callRobloxMcpTool,
   callRobloxMcpToolForStudio,
@@ -90,6 +92,120 @@ const MAX_DISCOVERED_SKILLS = 600;
 const MAX_INLINE_WORKFLOW_GUIDE_CHARS = 6_000;
 const routeResponseModes = ["compact", "debug"] as const;
 const reasoningEfforts = ["low", "medium", "high", "xhigh", "max", "ultra", "unknown"] as const;
+
+type SkillEntryCacheRecord = {
+  size: number;
+  mtimeMs: number;
+  ctimeMs: number;
+  entry: SkillEntry;
+};
+
+const skillEntryCache = new Map<string, SkillEntryCacheRecord>();
+const MAX_SKILL_ENTRY_CACHE = 1_024;
+
+function skillEntryCacheKey(skillPath: string, source: SkillSource, origin?: string): string {
+  return `${source}\u0000${origin ?? ""}\u0000${path.resolve(skillPath)}`;
+}
+
+function rememberSkillEntryCache(key: string, record: SkillEntryCacheRecord): void {
+  skillEntryCache.delete(key);
+  skillEntryCache.set(key, record);
+  while (skillEntryCache.size > MAX_SKILL_ENTRY_CACHE) {
+    const oldest = skillEntryCache.keys().next().value;
+    if (typeof oldest !== "string") break;
+    skillEntryCache.delete(oldest);
+  }
+}
+
+type CodexSkillDiscoveryCacheRecord = {
+  capturedAtMs: number;
+  skills: SkillEntry[];
+  warnings: string[];
+};
+
+const CODEX_SKILL_DISCOVERY_TTL_MS = Math.max(1_000, Number(process.env.BRIDGE_MCP_SKILL_CATALOG_TTL_MS || 30_000));
+let codexSkillDiscoveryCache: CodexSkillDiscoveryCacheRecord | null = null;
+const codexSkillWatchers: FSWatcher[] = [];
+const codexSkillWatchedRoots = new Set<string>();
+const codexSkillWatcherFallbackRoots = new Set<string>();
+let codexSkillDiscoveryScanCount = 0;
+let codexSkillDiscoveryCacheHitCount = 0;
+let codexSkillWatcherInvalidationCount = 0;
+
+function codexSkillWatcherRootKey(root: string): string {
+  const resolved = path.resolve(root);
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+function invalidateCodexSkillDiscoveryCache(): void {
+  codexSkillWatcherInvalidationCount += 1;
+  codexSkillDiscoveryCache = null;
+  skillEntryCache.clear();
+}
+
+function registerCodexSkillWatcher(rootKey: string, watcher: FSWatcher): void {
+  codexSkillWatchedRoots.add(rootKey);
+  codexSkillWatcherFallbackRoots.delete(rootKey);
+  watcher.on("error", () => {
+    codexSkillWatchedRoots.delete(rootKey);
+    codexSkillWatcherFallbackRoots.add(rootKey);
+    try { watcher.close(); } catch { /* best effort */ }
+    invalidateCodexSkillDiscoveryCache();
+  });
+  codexSkillWatchers.push(watcher);
+}
+
+function cloneCodexSkillDiscovery(record: CodexSkillDiscoveryCacheRecord): { skills: SkillEntry[]; warnings: string[] } {
+  return {
+    skills: record.skills.map((skill) => ({ ...skill })),
+    warnings: [...record.warnings],
+  };
+}
+
+async function ensureCodexSkillWatchers(roots: string[]): Promise<void> {
+  for (const root of roots) {
+    const rootKey = codexSkillWatcherRootKey(root);
+    if (codexSkillWatchedRoots.has(rootKey)) continue;
+    if (!(await pathExists(root))) {
+      codexSkillWatcherFallbackRoots.add(rootKey);
+      continue;
+    }
+    try {
+      const watcher = watch(root, { recursive: true, persistent: false }, () => invalidateCodexSkillDiscoveryCache());
+      registerCodexSkillWatcher(rootKey, watcher);
+    } catch {
+      try {
+        const watcher = watch(root, { persistent: false }, () => invalidateCodexSkillDiscoveryCache());
+        registerCodexSkillWatcher(rootKey, watcher);
+      } catch {
+        codexSkillWatcherFallbackRoots.add(rootKey);
+      }
+    }
+  }
+}
+
+function codexSkillDiscoveryCacheStatus() {
+  return {
+    mode: codexSkillWatcherFallbackRoots.size > 0 ? "ttl-fallback" as const : "watcher" as const,
+    ttlMs: CODEX_SKILL_DISCOVERY_TTL_MS,
+    watchedRootCount: codexSkillWatchedRoots.size,
+    fallbackRootCount: codexSkillWatcherFallbackRoots.size,
+    scanCount: codexSkillDiscoveryScanCount,
+    cacheHitCount: codexSkillDiscoveryCacheHitCount,
+    invalidationCount: codexSkillWatcherInvalidationCount,
+    cacheAgeMs: codexSkillDiscoveryCache ? Math.max(0, Date.now() - codexSkillDiscoveryCache.capturedAtMs) : null,
+  };
+}
+
+export function closeCodexSkillDiscoveryForTests(): void {
+  for (const watcher of codexSkillWatchers.splice(0)) {
+    try { watcher.close(); } catch { /* best effort test cleanup */ }
+  }
+  codexSkillWatchedRoots.clear();
+  codexSkillWatcherFallbackRoots.clear();
+  codexSkillDiscoveryCache = null;
+  skillEntryCache.clear();
+}
 
 function contextCursorFingerprint(cursor: string): string {
   return createHash("sha256").update(cursor).digest("base64url");
@@ -322,6 +438,15 @@ function compactRoutedSkill(value: unknown): Record<string, unknown> | null {
   };
 }
 
+
+function compactSkillSourceHealth(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const health = value as Record<string, unknown>;
+  const codexValue = health.codex;
+  if (!codexValue || typeof codexValue !== "object" || Array.isArray(codexValue)) return health;
+  const { discoveryCache: _discoveryCache, ...compactCodex } = codexValue as Record<string, unknown>;
+  return { ...health, codex: compactCodex };
+}
 function compactSkillRoute<T extends Record<string, unknown>>(route: T): Record<string, unknown> {
   const compactSkills = (value: unknown) => Array.isArray(value)
     ? value.map(compactRoutedSkill).filter((item): item is Record<string, unknown> => Boolean(item))
@@ -354,12 +479,13 @@ function compactSkillRoute<T extends Record<string, unknown>>(route: T): Record<
     nextAction: route.nextAction,
     warnings: route.warnings,
     activationInstruction: route.activationInstruction,
-    sourceHealth: route.sourceHealth,
+    sourceHealth: compactSkillSourceHealth(route.sourceHealth),
     systemAwareness: route.systemAwareness,
-    contextPlane: route.contextPlane,
-    contextMessages: route.contextMessages,
+    contextPlane: compactRouteContextPlane(route.contextPlane),
+    contextMessages: compactBootstrapContextMessages(route.contextMessages),
     workflowGuideRecommendation: route.workflowGuideRecommendation,
     workflowGuide: route.workflowGuide,
+    bridgeTiming: route.bridgeTiming,
     __bridgeNotices: route.__bridgeNotices,
   };
 }
@@ -391,16 +517,21 @@ async function resolveWorkflowGuideForTask(args: {
   task: string;
   projectRoot?: string | null;
   load: boolean;
+  skillEntries?: SkillEntry[];
+  skillWarnings?: string[];
 }) {
   // Workflow guides are Bridge-owned orchestration, separate from MSSR skill routing.
   // Load lazily to avoid a static module cycle: workflow-guide-tools uses
   // findExistingSkillCoverage from this module when ranking guide-vs-skill ownership.
   const { recommendGuide, loadGuide } = await import("./workflow-guide-tools.js");
+  const existingSkillCoverage = args.skillEntries
+    ? findExistingSkillCoverageFromEntries(args.task, args.skillEntries, 5, args.skillWarnings ?? [])
+    : undefined;
   const recommendation = await recommendGuide({
     task: args.task,
     projectRoot: args.projectRoot ?? undefined,
     maxResults: 5,
-  });
+  }, undefined, existingSkillCoverage);
   const selectedGuideName = recommendation.recommendation?.action === "load_existing"
     ? recommendation.recommendation.guide
     : null;
@@ -478,15 +609,30 @@ function frontmatterValue(text: string, key: string): string {
 }
 
 async function readSkillEntry(skillPath: string, source: SkillSource, origin?: string): Promise<SkillEntry | null> {
+  const cacheKey = skillEntryCacheKey(skillPath, source, origin);
   try {
     const stat = await fs.stat(skillPath);
-    if (!stat.isFile() || stat.size > MAX_SKILL_FILE_CHARS * 4) return null;
+    if (!stat.isFile() || stat.size > MAX_SKILL_FILE_CHARS * 4) {
+      skillEntryCache.delete(cacheKey);
+      return null;
+    }
+    const cached = skillEntryCache.get(cacheKey);
+    if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs && cached.ctimeMs === stat.ctimeMs) {
+      rememberSkillEntryCache(cacheKey, cached);
+      return cached.entry;
+    }
     const text = await fs.readFile(skillPath, "utf8");
     const name = frontmatterValue(text, "name") || path.basename(path.dirname(skillPath));
     const description = frontmatterValue(text, "description");
-    if (!name) return null;
-    return { name, description, source, path: skillPath, origin, contentHash: createHash("sha256").update(text).digest("hex") };
+    if (!name) {
+      skillEntryCache.delete(cacheKey);
+      return null;
+    }
+    const entry = { name, description, source, path: skillPath, origin, contentHash: createHash("sha256").update(text).digest("hex") } satisfies SkillEntry;
+    rememberSkillEntryCache(cacheKey, { size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, entry });
+    return entry;
   } catch {
+    skillEntryCache.delete(cacheKey);
     return null;
   }
 }
@@ -555,14 +701,30 @@ async function walkSkillFiles(root: string, source: SkillSource, maxDepth: numbe
 async function discoverCodexSkills(): Promise<{ skills: SkillEntry[]; warnings: string[] }> {
   const home = codexHome();
   const normalRoot = path.join(home, "skills");
-  const normal = await walkSkillFiles(normalRoot, "codex-local", 5, "Codex skills directory");
+  const pluginRoot = path.join(home, "plugins", "cache");
+  await ensureCodexSkillWatchers([normalRoot, pluginRoot]);
+  const now = Date.now();
+  const cacheAgeMs = codexSkillDiscoveryCache ? now - codexSkillDiscoveryCache.capturedAtMs : Number.POSITIVE_INFINITY;
+  const ttlRefreshRequired = codexSkillWatcherFallbackRoots.size > 0 && cacheAgeMs > CODEX_SKILL_DISCOVERY_TTL_MS;
+  if (codexSkillDiscoveryCache && !ttlRefreshRequired) {
+    codexSkillDiscoveryCacheHitCount += 1;
+    return cloneCodexSkillDiscovery(codexSkillDiscoveryCache);
+  }
+  codexSkillDiscoveryScanCount += 1;
+  const [normal, plugins] = await Promise.all([
+    walkSkillFiles(normalRoot, "codex-local", 5, "Codex skills directory"),
+    walkSkillFiles(pluginRoot, "codex-plugin", 8, "Codex plugin cache"),
+  ]);
   for (const skill of normal.skills) {
     const normalized = skill.path?.split(path.sep).map((part) => part.toLowerCase()) ?? [];
     if (normalized.includes(".system")) skill.source = "codex-system";
   }
-  const pluginRoot = path.join(home, "plugins", "cache");
-  const plugins = await walkSkillFiles(pluginRoot, "codex-plugin", 8, "Codex plugin cache");
-  return { skills: [...normal.skills, ...plugins.skills], warnings: [...normal.warnings, ...plugins.warnings] };
+  codexSkillDiscoveryCache = {
+    capturedAtMs: Date.now(),
+    skills: [...normal.skills, ...plugins.skills].map((skill) => ({ ...skill })),
+    warnings: [...normal.warnings, ...plugins.warnings],
+  };
+  return cloneCodexSkillDiscovery(codexSkillDiscoveryCache);
 }
 
 type MssrFirstPartySkillDiscovery = {
@@ -666,6 +828,7 @@ type SkillSourceHealth = {
     status: "healthy" | "degraded";
     skillCount: number;
     warningCount: number;
+    discoveryCache: ReturnType<typeof codexSkillDiscoveryCacheStatus>;
   };
   roblox?: {
     status: RobloxMcpToolCatalogHealth["status"];
@@ -721,6 +884,7 @@ async function discoverAllSkills(includeRoblox = true): Promise<{ skills: SkillE
       status: local.codex.warnings.length > 0 ? "degraded" : "healthy",
       skillCount: local.codex.skills.length,
       warningCount: local.codex.warnings.length,
+      discoveryCache: codexSkillDiscoveryCacheStatus(),
     },
   };
   if (includeRoblox) {
@@ -853,9 +1017,13 @@ function skillScore(
   return { score, reasons };
 }
 
-export async function findExistingSkillCoverage(task: string, maxResults = 5) {
-  const discovered = await discoverLocalSkills();
-  const skills = canonicalizeSkillEntries(discovered.skills).entries;
+export function findExistingSkillCoverageFromEntries(
+  task: string,
+  entries: SkillEntry[],
+  maxResults = 5,
+  warnings: string[] = [],
+) {
+  const skills = canonicalizeSkillEntries(entries).entries;
   const metaCoverageTask = isSkillCoverageMetaTask(task);
   const scoringTask = metaCoverageTask ? removeKnownSkillReferences(task, skills) : task;
   const ranked = skills
@@ -872,8 +1040,13 @@ export async function findExistingSkillCoverage(task: string, maxResults = 5) {
     covered: ranked.length > 0,
     threshold: 12,
     matches: ranked,
-    warnings: discovered.warnings,
+    warnings,
   };
+}
+
+export async function findExistingSkillCoverage(task: string, maxResults = 5) {
+  const discovered = await discoverLocalSkills();
+  return findExistingSkillCoverageFromEntries(task, discovered.skills, maxResults, discovered.warnings);
 }
 
 function sourceFilter(value: unknown): SkillSource[] | null {
@@ -1370,14 +1543,15 @@ export const skillCatalogToolModule: BridgeToolModule = {
       note: "These values are closed vocabulary. Reuse them exactly in structured intents and routing fixtures.",
     }),
     skill_route_plan: async (args) => {
-      const task = z.string().min(1).parse(args.task);
-      const intentResult = resolveIntentOrRecovery(args, "skill_route_plan", task);
-      if (intentResult.recovery) return intentResult.recovery;
+      const timing = new BridgeTimingCollector("skill_route_plan");
+      const task = timing.measureSync("request.parse", () => z.string().min(1).parse(args.task));
+      const intentResult = timing.measureSync("intent.resolve", () => resolveIntentOrRecovery(args, "skill_route_plan", task));
+      if (intentResult.recovery) return { ...intentResult.recovery, bridgeTiming: timing.finish() };
       const selectedSources = sourceFilter(args.sources);
       const responseMode = z.enum(routeResponseModes).catch("compact").parse(args.responseMode ?? "compact");
-      const discovered = await discoverAllSkills(shouldDiscoverRoblox(args, selectedSources, intentResult.intent));
+      const discovered = await timing.measure("skill.discovery", () => discoverAllSkills(shouldDiscoverRoblox(args, selectedSources, intentResult.intent)));
       const skills = discovered.skills.filter((skill) => !selectedSources || selectedSources.includes(skill.source));
-      const route = await planSkillRoute({
+      const route = await timing.measure("routing.plan", () => planSkillRoute({
         task,
         context: z.string().max(4_000).catch("").parse(args.context ?? ""),
         skills,
@@ -1386,23 +1560,23 @@ export const skillCatalogToolModule: BridgeToolModule = {
         stage: z.enum(SKILL_STAGES).catch("start").parse(args.stage ?? "start"),
         completedPhases: z.array(z.enum(SKILL_PHASES)).catch([]).parse(args.completedPhases ?? []),
         maxSkills: z.number().int().min(1).max(16).catch(8).parse(args.maxSkills ?? 8),
-      });
+      }));
       const traceId = intentResult.traceId;
       const profile = agentProfile(args);
       const workflowKey = requireWorkflowKey(args.workflowKey);
       const observedRoute = { ...route, agentProfile: profile, workflowKey: workflowKey ?? null };
-      const systemAwareness = await buildMssrSystemAwareness({
+      const systemAwareness = await timing.measure("system.awareness", () => buildMssrSystemAwareness({
         intent: route.intent,
         workflows: route.workflows,
         robloxHealth: discovered.sourceHealth.roblox,
-      });
+      }));
       const routedIntent = structuredSkillIntentSchema.parse(route.intent);
       const projectRoot = typeof args.projectRoot === "string" && args.projectRoot.trim()
         ? path.resolve(args.projectRoot.trim())
         : null;
       if (projectRoot) assertPathAllowed(projectRoot, "read");
       const contextPlane = projectRoot
-        ? await prepareMssrContextPlane({
+        ? await timing.measure("context.plane", () => prepareMssrContextPlane({
             projectRoot,
             intent: routedIntent,
             stage: route.stage,
@@ -1413,7 +1587,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
             maxContextMessageChars: z.number().int().min(0).max(20_000).catch(6_000).parse(args.maxContextMessageChars ?? 6_000),
             inboxConfig: args.inboxConfig,
             contextMessages: args.contextMessages,
-          })
+          }))
         : null;
       const inlineContextMessages = selectBridgeMssrContextMessages({
         messages: args.contextMessages,
@@ -1426,8 +1600,14 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const contextMessageNotices = contextPlane
         ? contextPlane.contextMessages.selected.map(mssrContextMessageToBridgeNotice)
         : (inlineContextMessages?.notices ?? []);
-      recordMssrRoute({ traceId, action: "plan", task, route: observedRoute as unknown as Record<string, unknown> });
-      const workflowGuideResolution = await resolveWorkflowGuideForTask({ task, projectRoot, load: false });
+      timing.measureSync("observability.route", () => recordMssrRoute({ traceId, action: "plan", task, route: observedRoute as unknown as Record<string, unknown> }));
+      const workflowGuideResolution = await timing.measure("workflow.guide", () => resolveWorkflowGuideForTask({
+        task,
+        projectRoot,
+        load: false,
+        skillEntries: discovered.skills.filter((skill) => skill.source !== "roblox"),
+        skillWarnings: discovered.warnings,
+      }));
       const bootstrapArguments = {
         task,
         projectRoot: args.projectRoot,
@@ -1470,6 +1650,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         contextMessages,
         workflowGuideRecommendation: workflowGuideResolution.recommendation,
         workflowGuide: null,
+        bridgeTiming: timing.finish(),
         __bridgeNotices: [...systemAwareness.notices, ...contextMessageNotices],
         warnings: [...discovered.warnings, ...route.warnings],
         connectorExecution: connectorFallback("skill_bootstrap", bootstrapArguments, traceId),
@@ -1484,14 +1665,15 @@ export const skillCatalogToolModule: BridgeToolModule = {
       return responseMode === "debug" ? { ...response, responseMode } : compactSkillRoute(response);
     },
     skill_bootstrap: async (args) => {
-      const task = z.string().min(1).parse(args.task);
-      const intentResult = resolveIntentOrRecovery(args, "skill_bootstrap", task);
-      if (intentResult.recovery) return intentResult.recovery;
+      const timing = new BridgeTimingCollector("skill_bootstrap");
+      const task = timing.measureSync("request.parse", () => z.string().min(1).parse(args.task));
+      const intentResult = timing.measureSync("intent.resolve", () => resolveIntentOrRecovery(args, "skill_bootstrap", task));
+      if (intentResult.recovery) return { ...intentResult.recovery, bridgeTiming: timing.finish() };
       const caller = z.enum(SKILL_CALLERS).catch("other").parse(args.caller ?? "other");
       const selectedSources = sourceFilter(args.sources);
-      const discovered = await discoverAllSkills(shouldDiscoverRoblox(args, selectedSources, intentResult.intent));
+      const discovered = await timing.measure("skill.discovery", () => discoverAllSkills(shouldDiscoverRoblox(args, selectedSources, intentResult.intent)));
       const skills = discovered.skills.filter((skill) => !selectedSources || selectedSources.includes(skill.source));
-      const route = await planSkillRoute({
+      const route = await timing.measure("routing.plan", () => planSkillRoute({
         task,
         context: z.string().max(4_000).catch("").parse(args.context ?? ""),
         skills,
@@ -1500,15 +1682,15 @@ export const skillCatalogToolModule: BridgeToolModule = {
         stage: z.enum(SKILL_STAGES).catch("start").parse(args.stage ?? "start"),
         completedPhases: z.array(z.enum(SKILL_PHASES)).catch([]).parse(args.completedPhases ?? []),
         maxSkills: z.number().int().min(1).max(16).catch(8).parse(args.maxSkills ?? 8),
-      });
+      }));
       const traceId = intentResult.traceId;
       const profile = agentProfile(args);
       const workflowKey = requireWorkflowKey(args.workflowKey);
-      const systemAwareness = await buildMssrSystemAwareness({
+      const systemAwareness = await timing.measure("system.awareness", () => buildMssrSystemAwareness({
         intent: route.intent,
         workflows: route.workflows,
         robloxHealth: discovered.sourceHealth.roblox,
-      });
+      }));
       const contentMode = z.enum(["selective", "full"]).catch("selective").parse(args.contentMode ?? "selective") as SkillContextMode;
       const referenceMode = z.enum(["auto", "none"]).catch("auto").parse(args.includeReferences ?? "auto") as SkillReferenceMode;
       const maxContextChars = z.number().int().min(4_000).max(100_000).catch(24_000).parse(args.maxContextChars ?? 24_000);
@@ -1528,7 +1710,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         : null;
       if (projectRoot) assertPathAllowed(projectRoot, "read");
       const contextPlane = projectRoot
-        ? await prepareMssrContextPlane({
+        ? await timing.measure("context.plane", () => prepareMssrContextPlane({
             projectRoot,
             intent: routedIntent,
             stage: route.stage,
@@ -1539,7 +1721,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
             maxContextMessageChars,
             inboxConfig: args.inboxConfig,
             contextMessages: args.contextMessages,
-          })
+          }))
         : null;
       const inlineContextMessages = selectBridgeMssrContextMessages({
         messages: args.contextMessages,
@@ -1553,13 +1735,13 @@ export const skillCatalogToolModule: BridgeToolModule = {
         ? contextPlane.contextMessages.selected.map(mssrContextMessageToBridgeNotice)
         : (inlineContextMessages?.notices ?? []);
       const projectContextAssembly = projectRoot
-        ? await assembleProjectContext({
+        ? await timing.measure("project.context.modules", () => assembleProjectContext({
             projectRoot,
             intent: routedIntent,
             stage: route.stage,
             maxContextChars: maxProjectContextChars,
             includeCore: false,
-          })
+          }))
         : null;
       const changeHistorySelection = shouldLoadProjectChangeHistory({ intent: routedIntent, stage: route.stage });
       const projectChangeHistory: {
@@ -1586,22 +1768,22 @@ export const skillCatalogToolModule: BridgeToolModule = {
         }
       }
       const observedRoute = { ...route, agentProfile: profile, workflowKey: workflowKey ?? null, projectRoot };
-      recordMssrRoute({ traceId, action: "bootstrap", task, route: observedRoute as unknown as Record<string, unknown> });
+      timing.measureSync("observability.route", () => recordMssrRoute({ traceId, action: "bootstrap", task, route: observedRoute as unknown as Record<string, unknown> }));
       if (projectRoot && projectContextAssembly?.decisions.length) {
-        recordMssrProjectContextSelection({
+        timing.measureSync("observability.project-context", () => recordMssrProjectContextSelection({
           traceId,
           caller,
           stage: route.stage,
           projectName: path.basename(projectRoot),
           decisions: projectContextAssembly.decisions,
-        });
+        }));
       }
       const activeByName = new Map(route.activeSkills.map((skill) => [skill.name, skill]));
       const selectionMode = z.enum(["auto", "host-gated"]).parse(args.selectionMode ?? "host-gated");
       const suppliedDecisions = z.array(mssrSkillDecisionSchema).max(32).parse(args.skillDecisions ?? []);
-      const hostSelection = resolveMssrHostSkillSelection(route, selectionMode, suppliedDecisions);
+      const hostSelection = timing.measureSync("selection.resolve", () => resolveMssrHostSkillSelection(route, selectionMode, suppliedDecisions));
       const { decisions, loadSelection, skippedCandidates, pendingCandidates } = hostSelection;
-      for (const decision of decisions) recordMssrSkillDecision({ traceId, caller, decision });
+      timing.measureSync("observability.skill-decisions", () => { for (const decision of decisions) recordMssrSkillDecision({ traceId, caller, decision }); });
       const eligibleLoadOrder = [...loadSelection.eligibleLoadOrder];
       const requiredNames = new Set<string>();
       const visitRequired = (name: string) => {
@@ -1639,7 +1821,13 @@ export const skillCatalogToolModule: BridgeToolModule = {
           throw error;
         }
       }
-      const workflowGuideResolution = await resolveWorkflowGuideForTask({ task, projectRoot, load: true });
+      const workflowGuideResolution = await timing.measure("workflow.guide", () => resolveWorkflowGuideForTask({
+        task,
+        projectRoot,
+        load: true,
+        skillEntries: discovered.skills.filter((skill) => skill.source !== "roblox"),
+        skillWarnings: discovered.warnings,
+      }));
       const workflowGuideChars = workflowGuideResolution.workflowGuide
         ? jsonCharacterLength(workflowGuideResolution.workflowGuide)
         : 0;
@@ -1705,7 +1893,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         workflowGuideRecommendation: workflowGuideResolution.recommendation,
         workflowGuide: postContextAction ? null : workflowGuideResolution.workflowGuide,
         workflowGuideDelivery,
-        sourceHealth: discovered.sourceHealth,
+        sourceHealth: compactSkillSourceHealth(discovered.sourceHealth),
         systemAwareness: systemAwareness.status,
         warnings: [
           ...discovered.warnings,
@@ -1724,14 +1912,14 @@ export const skillCatalogToolModule: BridgeToolModule = {
       let pageBudget = responseMode === "debug"
         ? maxContextChars
         : Math.max(256, Math.min(maxContextChars, maxEnvelopeChars - jsonCharacterLength(baseResponse) - automaticNoticeEnvelopeReserveChars - 2_000));
-      let page = await planSkillContextPage({
+      let page = await timing.measure("skill.context.plan", () => planSkillContextPage({
         skills: codexMatches.map(({ match, routeIndex, obligation }) => ({ skill: match, obligation, routeIndex, routeScore: Number((match as { score?: number }).score ?? 0) })),
         intent: routedIntent,
         stage: route.stage,
         mode: contentMode,
         references: referenceMode,
         maxContextChars: pageBudget,
-      });
+      }));
       const buildResponse = () => {
         const remaining = remainingContextSummary(page);
         const cursor = page.cursor ?? null;
@@ -1755,18 +1943,18 @@ export const skillCatalogToolModule: BridgeToolModule = {
           __bridgeNotices: internalBridgeNotices,
         };
       };
-      let response = buildResponse();
+      let response = timing.measureSync("response.build", buildResponse);
       for (let attempt = 0; responseMode === "compact" && response.responseChars > maxEnvelopeChars && pageBudget > 256 && attempt < 12; attempt += 1) {
         pageBudget = Math.max(256, pageBudget - (response.responseChars - maxEnvelopeChars) - 256);
-        page = await planSkillContextPage({
+        page = await timing.measure("skill.context.replan", () => planSkillContextPage({
           skills: codexMatches.map(({ match, routeIndex, obligation }) => ({ skill: match, obligation, routeIndex, routeScore: Number((match as { score?: number }).score ?? 0) })),
           intent: routedIntent,
           stage: route.stage,
           mode: contentMode,
           references: referenceMode,
           maxContextChars: pageBudget,
-        });
-        response = buildResponse();
+        }));
+        response = timing.measureSync("response.rebuild", buildResponse);
       }
       if (page.mustContinue && !page.cursor) {
         throw new Error(`Selected skill context contains an indivisible unit that cannot fit the ${maxEnvelopeChars}-character response envelope (page budget ${pageBudget}, compact metadata ${jsonCharacterLength(baseResponse)}). Increase maxEnvelopeChars or modularize the owning skill.`);
@@ -1775,7 +1963,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         throw new Error(`Compact skill_bootstrap response requires ${response.responseChars} characters, above maxEnvelopeChars=${maxEnvelopeChars}. Reduce project/context-message caps or increase maxEnvelopeChars.`);
       }
       if (page.cursor) {
-        rememberSkillContextContinuation({
+        timing.measureSync("continuation.state", () => rememberSkillContextContinuation({
           traceId,
           caller,
           stage: route.stage,
@@ -1786,19 +1974,36 @@ export const skillCatalogToolModule: BridgeToolModule = {
           maxContextChars,
           maxEnvelopeChars,
           postContextAction,
-          cursorFingerprint: contextCursorFingerprint(page.cursor),
+          cursorFingerprint: contextCursorFingerprint(page.cursor!),
           entries,
-        });
+        }));
       } else {
-        clearSkillContextContinuation(traceId);
+        timing.measureSync("continuation.state", () => clearSkillContextContinuation(traceId));
       }
-      for (const planned of loadedContextItems(page)) {
-        const info = planned.contextAssembly;
-        recordMssrSkillLoad({ traceId, skillName: planned.skill.name, source: planned.skill.source, stage: route.stage, required: planned.obligation === "required", loaded: true, via: "skill_bootstrap", warning: info.warning, contentMode: info.mode, coreCharsLoaded: info.coreCharsLoaded, moduleCharsLoaded: info.moduleCharsLoaded, totalCharsLoaded: info.totalCharsLoaded, fullSkillChars: info.fullSkillChars, estimatedCharsSaved: info.estimatedCharsSaved, selectedModules: info.selectedModules, moduleDecisions: info.moduleDecisions, manifestStatus: info.manifestStatus, ambiguousGroups: info.ambiguousGroups, budgetExceeded: info.budgetExceeded, planningMode: info.planningMode, allocationTiers: info.allocationTiers, duplicateCharsAvoided: info.duplicateCharsAvoided });
-      }
+      timing.measureSync("observability.skill-loads", () => {
+        for (const planned of loadedContextItems(page)) {
+          const info = planned.contextAssembly;
+          recordMssrSkillLoad({ traceId, skillName: planned.skill.name, source: planned.skill.source, stage: route.stage, required: planned.obligation === "required", loaded: true, via: "skill_bootstrap", warning: info.warning, contentMode: info.mode, coreCharsLoaded: info.coreCharsLoaded, moduleCharsLoaded: info.moduleCharsLoaded, totalCharsLoaded: info.totalCharsLoaded, fullSkillChars: info.fullSkillChars, estimatedCharsSaved: info.estimatedCharsSaved, selectedModules: info.selectedModules, moduleDecisions: info.moduleDecisions, manifestStatus: info.manifestStatus, ambiguousGroups: info.ambiguousGroups, budgetExceeded: info.budgetExceeded, planningMode: info.planningMode, allocationTiers: info.allocationTiers, duplicateCharsAvoided: info.duplicateCharsAvoided });
+        }
+      });
       const remaining = remainingContextSummary(page);
-      recordMssrContextAssembly({ traceId, caller, stage: route.stage, requestedContextChars: maxContextChars, deliveredContextChars: page.deliveredChars, responseChars: response.responseChars, envelopeChars: maxEnvelopeChars, requiredOverflowChars: page.remaining.required.reduce((sum, unit) => sum + unit.chars, 0), acceptedOverflowChars: page.remaining.accepted.reduce((sum, unit) => sum + unit.chars, 0), remainingRequiredUnits: page.remaining.required.length, remainingAcceptedUnits: page.remaining.accepted.length, continuationIssued: page.mustContinue, chainCompleted: !page.mustContinue });
-      return response;
+      const bridgeTiming = timing.finish();
+      const { __bridgeNotices, ...responsePayload } = response;
+      let timedResponse = {
+        ...withResponseChars({ ...responsePayload, bridgeTiming }),
+        __bridgeNotices,
+      };
+      if (timedResponse.responseChars > maxEnvelopeChars && responseMode === "compact") {
+        timedResponse = {
+          ...withResponseChars({ ...responsePayload, bridgeTiming: compactBridgeTimingEnvelope(bridgeTiming) }),
+          __bridgeNotices,
+        };
+      }
+      if (timedResponse.responseChars > maxEnvelopeChars && responseMode === "compact") {
+        throw new Error(`Compact skill_bootstrap response with compact bridgeTiming requires ${timedResponse.responseChars} characters, above maxEnvelopeChars=${maxEnvelopeChars}.`);
+      }
+      recordMssrContextAssembly({ traceId, caller, stage: route.stage, requestedContextChars: maxContextChars, deliveredContextChars: page.deliveredChars, responseChars: timedResponse.responseChars, envelopeChars: maxEnvelopeChars, requiredOverflowChars: page.remaining.required.reduce((sum, unit) => sum + unit.chars, 0), acceptedOverflowChars: page.remaining.accepted.reduce((sum, unit) => sum + unit.chars, 0), remainingRequiredUnits: page.remaining.required.length, remainingAcceptedUnits: page.remaining.accepted.length, continuationIssued: page.mustContinue, chainCompleted: !page.mustContinue });
+      return timedResponse;
     },
     skill_context_next: async (args) => {
       const traceId = z.string().min(6).max(128).parse(args.traceId);

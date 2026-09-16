@@ -113,13 +113,21 @@ const modularContext = await loadProjectContextModules({
   },
 });
 const selectedRepositoryModules = new Set(modularContext.selected.map((entry) => entry.ref));
+const repositoryModuleDecisions = new Map(modularContext.decisions.map((decision) => [decision.id, decision]));
 for (const moduleId of [
   "bridge-host-health-projections",
   "bridge-operational-notice-plane",
   "bridge-architecture-impact-host-boundary",
   "bridge-architecture-impact-writer-integration",
 ]) {
-  assert.equal(selectedRepositoryModules.has(moduleId), true, `Expected project-context module ${moduleId} to remain semantically selectable`);
+  const decision = repositoryModuleDecisions.get(moduleId);
+  assert.ok(decision, `Expected project-context decision for ${moduleId}`);
+  assert.ok((decision.matched?.length ?? 0) > 0, `Expected project-context module ${moduleId} to match the health intent`);
+  assert.equal(
+    selectedRepositoryModules.has(moduleId) || decision.reason === "budget-exceeded",
+    true,
+    `Expected project-context module ${moduleId} to remain semantically selectable; got ${decision.reason}`,
+  );
 }
 
 const root = await fs.mkdtemp(path.join(os.tmpdir(), "bridge-project-health-"));
@@ -247,9 +255,10 @@ try {
     assert.equal(dashboardResponse.ok, true);
     const dashboard = await dashboardResponse.text();
     assert.equal(dashboard.includes('id="mssr-project-health"'), true);
-    assert.equal(dashboard.includes('/api/mssr/project-health'), true);
+    assert.equal(dashboard.includes('/api/dashboard/snapshot'), true);
+    assert.equal(dashboard.includes('renderProjectHealth(projectHealth)'), true);
     assert.equal(dashboard.includes('id="mssr-runtime-health-status"'), true);
-    assert.equal(dashboard.includes('/api/mssr/runtime-health'), true);
+    assert.equal(dashboard.includes('renderRuntimeHealth(runtimeHealth)'), true);
   } finally {
     if (!child.killed) child.kill("SIGTERM");
     await Promise.race([

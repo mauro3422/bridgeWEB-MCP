@@ -26,7 +26,7 @@ async function cleanupTelemetry() {
   await closeRobloxMcpConnection().catch(() => {});
   closeMssrObservatoryForTests();
   closeMetricsForTests();
-  fs.rmSync(telemetrySandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  await fs.promises.rm(telemetrySandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 }
 const failures = [];
 const results = [];

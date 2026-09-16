@@ -623,7 +623,7 @@ sandbox local
 
 Mantener secretos como variables de entorno de Windows o perfiles locales fuera de Git.
 
-La politica de rutas limita las tools explicitas a roots permitidos y bloquea rutas sensibles, enlaces simbolicos que escapen y archivos como `.env*`, credenciales de Git, claves SSH y tokens. Se configura con `BRIDGE_MCP_ALLOWED_ROOTS`, `BRIDGE_MCP_DENIED_PATHS` y `BRIDGE_MCP_DENIED_NAMES`; `path_policy_status` muestra la politica efectiva.
+La politica de rutas limita las tools explicitas a roots permitidos y bloquea rutas sensibles, enlaces simbolicos que escapen y archivos como `.env*`, credenciales de Git, claves SSH y tokens. Se configura con `BRIDGE_MCP_ALLOWED_ROOTS`, `BRIDGE_MCP_READONLY_ROOTS`, `BRIDGE_MCP_DENIED_PATHS` y `BRIDGE_MCP_DENIED_NAMES`; `path_policy_status` muestra la politica efectiva. Los roots de `BRIDGE_MCP_READONLY_ROOTS` sólo autorizan tools con acceso `read`: no habilitan escrituras ni se aceptan como `cwd` de shell. Por defecto se exponen de esa forma `~/.codex/sessions`, `~/.codex/archived_sessions` y `~/.codex/history.jsonl` cuando existen, sin abrir el resto del perfil de Codex.
 
 Las tools Git filtran archivos sensibles de diffs y commits mostrados. `git_commit_all` se niega a stagear o commitear si detecta una ruta sensible pendiente. Esta politica reduce el blast radius, pero `run_command` y las terminales siguen siendo shell confiable dentro de un cwd permitido, no una sandbox del sistema operativo.
 
@@ -646,3 +646,16 @@ NEXT_CHAT_PROMPT.md
 ```
 
 Nota: ChatGPT puede cachear el catalogo de tools. Si una tool nueva no aparece en una conversacion ya abierta, refrescar/reabrir el conector o iniciar un chat nuevo.
+
+## Modulo Blender: alcance (2026-09-05)
+
+El modulo `blender` de este bridge (`src/tools/blender-tools.ts`, addon Mauro
+Blender Bridge en puerto 9877, con `blender_execute_code` / `blender_batch_script`)
+queda reservado al uso via ChatGPT Web / Codex a traves de este bridge.
+
+El modelado tipado y curado vive en **mcpBlender** (`D:\Dev\mcpBlender`, addon
+MCP Blender Bridge en puerto 9876, tools `blender_*` sin codigo arbitrario).
+Las tools acotadas ya migradas ahi: viewport screenshot, review bundle,
+reference packs/sheets, focus review (con guards), character references
+(store/status/setup). `execute_code` / `batch_script` no se migran por diseno.
+Ver `D:\Dev\mcpBlender\docs\HANDOFF-bridge-blender-migration.md`.

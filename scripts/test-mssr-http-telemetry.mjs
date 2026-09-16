@@ -16,6 +16,22 @@ const port = await new Promise((resolve, reject) => {
     server.close((error) => error ? reject(error) : resolve(address.port));
   });
 });
+const mssrEventsPath = path.join(temp, "logs", "mssr-events.jsonl");
+
+async function waitForJsonlEvent(filePath, predicate, timeoutMs = 4_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const text = await fs.readFile(filePath, "utf8");
+      const match = text.trim().split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line)).find(predicate);
+      if (match) return match;
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`timed out waiting for persisted MSSR event in ${filePath}`);
+}
 const base = `http://127.0.0.1:${port}`;
 const child = spawn(process.execPath, [path.join(root, "dist", "http.js")], {
   cwd: root,
@@ -94,9 +110,7 @@ try {
   assert.equal(accepted.status, 202);
   const acceptedBody = await accepted.json();
   assert.equal(acceptedBody.duplicate, false);
-  const persistedRoute = (await fs.readFile(path.join(temp, "logs", "mssr-events.jsonl"), "utf8"))
-    .trim().split(/\r?\n/).map((line) => JSON.parse(line))
-    .find((event) => event.id === envelope.eventId);
+  const persistedRoute = await waitForJsonlEvent(mssrEventsPath, (event) => event.id === envelope.eventId);
   assert.deepEqual(persistedRoute?.details?.intent, envelope.event.route.intent,
     "Bridge must preserve the bounded structured intent projection");
   const decisionEnvelope = {

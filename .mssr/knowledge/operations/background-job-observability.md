@@ -1,0 +1,7 @@
+# Background job observability and timeout invariant
+
+A background-work timeout is an attention deadline, not proof that the process is hung and not permission to kill it. Inspectable project work should default to `observe`: mark the deadline crossing, emit a Bridge-native Notice, retain the exact session/job id, and expose bounded output counters plus observable progress before any stop decision. A hard timeout remains an explicit `terminate` policy. Terminal/process state is authoritative; notices are advisory.
+
+On Windows, terminating only the wrapper/root process is insufficient because descendants may survive. Explicit stop/terminate paths must close the process tree and verify the result. A Bridge HTTP restart also destroys the in-memory job registry, so descendants from a prior runtime can become orphans; cleanup after restart requires bounded process identity/ancestry evidence rather than killing by executable name. `idle` means no recent observable progress, not necessarily hung; `stalled` is an attention classification, not an automatic kill trigger.
+
+Deep inspection may use stdout/stderr growth and sampled aggregate CPU as progress evidence and may report PID/parent, process count, working set, and a sanitized activity hint. It must not expose or persist raw command lines, prompts, output, credentials, tokens, or arbitrary process arguments in notices/telemetry. Transport/readiness degradation remains a separate Bridge-runtime symptom and must not be attributed to one job without correlated evidence.

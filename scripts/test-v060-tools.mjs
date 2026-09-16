@@ -89,6 +89,7 @@ process.env.BRIDGE_MCP_SKILL_ROUTING_PATH = path.join(fixtureSkillRoot, '_dashbo
 process.env.BRIDGE_MCP_SKILL_ROUTING_FIXTURES_PATH = path.join(fixtureSkillRoot, '_dashboard', 'skill-routing-fixtures.json');
 
 const { createDefaultToolRegistry } = await import('../dist/tool-registry.js');
+const { closeCodexSkillDiscoveryForTests } = await import('../dist/tools/skill-catalog-tools.js');
 const { writePersistentCache } = await import('../dist/tools/shared/persistent-cache.js');
 const { asRobloxMcpDiscoveryHealth, classifyRobloxMcpToolCatalog, getRobloxMcpToolRequestOptions, parseRobloxStudios } = await import('../dist/integrations/roblox-mcp-client.js');
 const { extractRobloxMcpImage, validateRobloxCaptureImage } = await import('../dist/tools/roblox-studio-tools.js');
@@ -173,6 +174,23 @@ try {
   emitBridgeNotice({severity:'warning',code:'oversized-automatic-notice',source:'fixture',message:'Inspect explicitly',details:{payload:'x'.repeat(6_000)}});
   const oversizedDelivery = drainBridgeNoticesWithinBudget(4, 2_000);
   if (oversizedDelivery.items.length !== 0 || oversizedDelivery.remaining !== 1) throw new Error('Bridge automatic notice delivery must leave an indivisible oversized notice for explicit inspection');
+  clearBridgeNotices();
+
+  const backgroundA = await call('work_begin',{command:'node -e "setTimeout(() => console.log(\'BG_A\'), 120)"',cwd:root,name:'fixture-bg-a',timeoutMs:5_000,cleanupAfterMs:5_000,traceId:'mssr-fixture-background'});
+  const backgroundB = await call('work_begin',{command:'node -e "setTimeout(() => console.log(\'BG_B\'), 180)"',cwd:root,name:'fixture-bg-b',timeoutMs:5_000,cleanupAfterMs:5_000,traceId:'mssr-fixture-background'});
+  if (!backgroundA.id || !backgroundB.id || backgroundA.id === backgroundB.id) throw new Error('parallel work_begin session identity failed');
+  const backgroundList = await call('work_show',{traceId:'mssr-fixture-background'});
+  if (!backgroundList.some((item) => item.id === backgroundA.id && item.traceId === 'mssr-fixture-background') || !backgroundList.some((item) => item.id === backgroundB.id && item.traceId === 'mssr-fixture-background')) throw new Error('parallel work_show session/trace visibility failed');
+  const startNotices = drainBridgeNotices().filter((item) => item.code === 'terminal-session-started');
+  if (startNotices.length !== 2 || startNotices.some((item) => item.actions?.[0]?.toolName !== 'work_peek' || item.details?.commandStored !== false || item.details?.outputStored !== false)) throw new Error('background terminal start notices failed');
+  await new Promise((resolve) => setTimeout(resolve, 450));
+  const backgroundAResult = await call('work_peek',{sessionId:backgroundA.id,traceId:'mssr-fixture-background'});
+  const backgroundBResult = await call('work_peek',{sessionId:backgroundB.id,traceId:'mssr-fixture-background'});
+  if (backgroundAResult.running || backgroundBResult.running || !backgroundAResult.stdout.includes('BG_A') || !backgroundBResult.stdout.includes('BG_B')) throw new Error('parallel background work completion/readback failed');
+  const completionNotices = drainBridgeNotices().filter((item) => item.code === 'terminal-session-completed');
+  if (completionNotices.length !== 2 || completionNotices.some((item) => item.severity !== 'info' || item.actions?.[0]?.toolName !== 'work_peek')) throw new Error('background terminal completion notices failed');
+  await call('work_finish',{sessionId:backgroundA.id,traceId:'mssr-fixture-background'});
+  await call('work_finish',{sessionId:backgroundB.id,traceId:'mssr-fixture-background'});
   clearBridgeNotices();
 
   if (registry.tools.length !== 162) throw new Error(`expected 162 tools, got ${registry.tools.length}`);
@@ -922,5 +940,6 @@ try {
 } finally {
   closeMssrObservatoryForTests();
   closeMetricsForTests();
+  closeCodexSkillDiscoveryForTests();
   fs.rmSync(sandbox,{recursive:true,force:true});
 }

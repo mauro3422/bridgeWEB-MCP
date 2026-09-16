@@ -10,6 +10,8 @@ param(
   [string]$RestartRequestFile = ".bridge-restart-request",
   [string]$RestartAckFile = ".bridge-restart-ack",
   [int]$CheckIntervalSeconds = 5,
+  [ValidateRange(2, 30)]
+  [int]$ProbeTimeoutSeconds = 8,
   [ValidateRange(2, 12)]
   [int]$ConsecutiveFailureThreshold = 3,
   [int]$RestartDelaySeconds = 2,
@@ -38,7 +40,7 @@ function Write-BridgeLog {
 function Test-HttpText {
   param([string]$Url, [string]$Expected)
   try {
-    $value = Invoke-RestMethod -Uri $Url -TimeoutSec 3
+    $value = Invoke-RestMethod -Uri $Url -TimeoutSec $ProbeTimeoutSeconds
     return [string]$value -eq $Expected
   }
   catch {
@@ -49,7 +51,7 @@ function Test-HttpText {
 function Get-BridgeStatus {
   param([string]$BaseUrl)
   try {
-    return Invoke-RestMethod -Uri "$BaseUrl/status" -TimeoutSec 3
+    return Invoke-RestMethod -Uri "$BaseUrl/status" -TimeoutSec $ProbeTimeoutSeconds
   }
   catch {
     return $null

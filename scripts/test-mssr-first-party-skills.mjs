@@ -33,8 +33,7 @@ for (const { name } of MSSR_FIRST_PARTY_SKILL_MANIFEST.skills) {
 // This deliberately divergent catalog entry must remain visible as an audit
 // error, but never become the auto-loaded implementation of the reserved name.
 writeSkill(path.join(codexHome, "skills"), "mssr-agent-routing", "Divergent external shadow fixture.", "EXTERNAL_SHADOW_PAYLOAD");
-
-const [{ skillCatalogToolModule }, { closeMssrObservatoryForTests }, { closeMetricsForTests }] = await Promise.all([
+const [{ skillCatalogToolModule, closeCodexSkillDiscoveryForTests }, { closeMssrObservatoryForTests }, { closeMetricsForTests }] = await Promise.all([
   import("../dist/tools/skill-catalog-tools.js"),
   import("../dist/mssr-observatory.js"),
   import("../dist/metrics.js"),
@@ -97,5 +96,6 @@ try {
 } finally {
   closeMssrObservatoryForTests();
   closeMetricsForTests();
-  fs.rmSync(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  closeCodexSkillDiscoveryForTests();
+  await fs.promises.rm(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 }
