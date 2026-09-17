@@ -561,6 +561,53 @@
       "maxChars": 2200
     },
     {
+      "id": "bridge-trace-lifecycle-reconciliation",
+      "kind": "memory",
+      "description": "Bridge MSSR shared-RAM versus persisted lifecycle freshness and reconciliation invariant.",
+      "source": {
+        "path": ".mssr/knowledge/observability/trace-lifecycle-reconciliation.md"
+      },
+      "topic": "operations",
+      "area": "trace-lifecycle",
+      "stages": [
+        "implement",
+        "verify",
+        "persist",
+        "close",
+        "resume"
+      ],
+      "domains": [
+        "coding",
+        "agent-orchestration",
+        "skill-system"
+      ],
+      "actions": [
+        "debug",
+        "recover",
+        "verify",
+        "maintain",
+        "analyze"
+      ],
+      "artifacts": [
+        "mcp",
+        "code",
+        "repository"
+      ],
+      "needs": [
+        "integrity-verification",
+        "cross-agent"
+      ],
+      "signals": [
+        "error-observed",
+        "conflicting-evidence",
+        "recovery-needed",
+        "reusable-pattern"
+      ],
+      "required": false,
+      "priority": 82,
+      "maxChars": 1900
+    },
+    {
       "id": "bridge-http-transport-readiness-contract",
       "kind": "memory",
       "description": "HTTP keep-alive/tunnel correlation and sustained-readiness recovery contract for Bridge runtime stability.",

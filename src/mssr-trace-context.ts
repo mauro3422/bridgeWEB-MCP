@@ -849,6 +849,46 @@ export function createMssrTraceSessionCoordinator(
     sharedTraces.set(traceId, state);
     return state;
   }
+
+  function reconcilePersistedLifecycle(state: ActiveTraceState): ActiveTraceState {
+    const persisted = readPersistedMssrTraceState(state.traceId);
+    if (!persisted) return state;
+
+    const persistedIsFresher = persisted.lifecycleRevision > state.lifecycleRevision
+      || (persisted.lifecycleRevision === state.lifecycleRevision && persisted.routeCount > state.routeCount)
+      || (persisted.lifecycleRevision === state.lifecycleRevision
+        && persisted.routeCount === state.routeCount
+        && persisted.closeRevision > state.closeRevision)
+      || (persisted.lifecycleRevision === state.lifecycleRevision
+        && persisted.routeCount === state.routeCount
+        && persisted.closeRevision === state.closeRevision
+        && persisted.maintenanceRevision > state.maintenanceRevision)
+      || (persisted.closed && !state.closed);
+    if (!persistedIsFresher) return state;
+
+    const previousRouteCount = state.routeCount;
+    const loadedSkills = new Set([...state.loadedSkills, ...persisted.loadedSkills]);
+    const completedPhases = new Set<MssrTraceLifecycleState["completedPhases"][number]>([
+      ...state.completedPhases,
+      ...(persisted.completedPhases as MssrTraceLifecycleState["completedPhases"]),
+    ]);
+    applyPortableLifecycle(state, {
+      stage: persisted.stage as MssrTraceLifecycleState["stage"],
+      requiredSkills: persisted.requiredSkills,
+      selectedSkills: persisted.selectedSkills,
+      loadedSkills: [...loadedSkills],
+      requiredPhases: persisted.requiredPhases as MssrTraceLifecycleState["requiredPhases"],
+      completedPhases: [...completedPhases],
+      routeCount: persisted.routeCount,
+      closed: persisted.closed || state.closed,
+      maintenanceRequired: persisted.maintenanceRequired,
+      lifecycleRevision: persisted.lifecycleRevision,
+      closeRevision: persisted.closeRevision,
+      maintenanceRevision: persisted.maintenanceRevision,
+    });
+    if (persisted.routeCount > previousRouteCount) state.lastRoutePlannedAt = Math.max(state.lastRoutePlannedAt, persisted.updatedAt);
+    return state;
+  }
   function dominantExactHostCandidate(candidates: ActiveTraceState[]): ActiveTraceState[] {
     const compatible = candidates.filter(traceOwnerCompatible);
     if (compatible.length <= 1 || hostContext.sessionKey === "unknown") return dominantFreshRouteCandidate(compatible);
@@ -1133,7 +1173,11 @@ export function createMssrTraceSessionCoordinator(
 
     const explicitTrace = validTraceId(args.traceId) ? String(args.traceId).trim() : null;
     if (explicitTrace) {
-      const state = sharedTraces.get(explicitTrace) ?? restore(explicitTrace);
+      const sharedState = sharedTraces.get(explicitTrace);
+      const lifecycleSensitiveCall = ROUTE_TOOLS.has(toolName) || toolName === "skill_load" || toolName === "mssr_trace_record";
+      const state = sharedState && lifecycleSensitiveCall
+        ? reconcilePersistedLifecycle(sharedState)
+        : sharedState ?? restore(explicitTrace);
       if (state) adopt(state);
     }
     const activeBeforeCall = localState(toolName === "mssr_trace_record", !explicitTrace);

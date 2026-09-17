@@ -89,14 +89,18 @@ Invoke-Check "MSSR dashboard" {
     throw "Dashboard error compaction regex lost its whitespace escape in the served HTML"
   }
   $mssr = Invoke-RestMethod "$BaseUrl/api/mssr/summary?days=30&scope=active"
-  $all = Invoke-RestMethod "$BaseUrl/api/mssr/summary?days=30&scope=all"
+  # The two live requests compute rolling cutoffs independently. Give the all-scope
+  # query a one-day cushion so its window is a true temporal superset even when
+  # the active epoch predates the 30-day window and the first summary is slow.
+  $all = Invoke-RestMethod "$BaseUrl/api/mssr/summary?days=31&scope=all"
   if ($null -eq $mssr.benchmark -or $null -eq $mssr.top.skillOutcomes) {
     throw "MSSR summary endpoint is missing benchmark or per-skill outcomes"
   }
   if ($mssr.scope -ne "active" -or $mssr.observability.contractVersion -ne "trace-contract-v1") {
     throw "MSSR active scope or trace contract is invalid"
   }
-  if ([int]$all.eventCount -lt [int]$mssr.eventCount) { throw "All-history scope cannot contain fewer events than active scope" }
+  if ([DateTime]$all.since -gt [DateTime]$mssr.since) { throw "All-scope comparison window must start no later than the active window" }
+  if ([int]$all.eventCount -lt [int]$mssr.eventCount) { throw "Wider all-scope window cannot contain fewer events than active scope" }
   Write-Host "  OK epoch=$($mssr.observability.activeEpoch) routes=$($mssr.benchmark.routeEvents) outcomes=$($mssr.benchmark.attributedOutcomeTraces) allEvents=$($all.eventCount)"
 }
 

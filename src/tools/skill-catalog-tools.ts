@@ -85,7 +85,7 @@ import {
   rememberSkillContextContinuation,
   type BridgeSkillContextContinuationEntry,
 } from "../skill-context-continuation-state.js";
-import { jsonCharacterLength, skillContextCompletionGate, skillContextNextAction, withResponseChars } from "../skill-context-response.js";
+import { jsonCharacterLength, skillContextCompletionGate, skillContextNextAction, withBestEffortOptionalResponseField, withResponseChars } from "../skill-context-response.js";
 
 const MAX_SKILL_FILE_CHARS = 160_000;
 const MAX_DISCOVERED_SKILLS = 600;
@@ -1990,18 +1990,17 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const remaining = remainingContextSummary(page);
       const bridgeTiming = timing.finish();
       const { __bridgeNotices, ...responsePayload } = response;
-      let timedResponse = {
-        ...withResponseChars({ ...responsePayload, bridgeTiming }),
-        __bridgeNotices,
-      };
+      const timedPayload = responseMode === "compact"
+        ? withBestEffortOptionalResponseField(
+            responsePayload,
+            "bridgeTiming",
+            [bridgeTiming, compactBridgeTimingEnvelope(bridgeTiming)],
+            maxEnvelopeChars,
+          )
+        : withResponseChars({ ...responsePayload, bridgeTiming });
+      const timedResponse = { ...timedPayload, __bridgeNotices };
       if (timedResponse.responseChars > maxEnvelopeChars && responseMode === "compact") {
-        timedResponse = {
-          ...withResponseChars({ ...responsePayload, bridgeTiming: compactBridgeTimingEnvelope(bridgeTiming) }),
-          __bridgeNotices,
-        };
-      }
-      if (timedResponse.responseChars > maxEnvelopeChars && responseMode === "compact") {
-        throw new Error(`Compact skill_bootstrap response with compact bridgeTiming requires ${timedResponse.responseChars} characters, above maxEnvelopeChars=${maxEnvelopeChars}.`);
+        throw new Error(`Compact skill_bootstrap base response requires ${timedResponse.responseChars} characters, above maxEnvelopeChars=${maxEnvelopeChars}.`);
       }
       recordMssrContextAssembly({ traceId, caller, stage: route.stage, requestedContextChars: maxContextChars, deliveredContextChars: page.deliveredChars, responseChars: timedResponse.responseChars, envelopeChars: maxEnvelopeChars, requiredOverflowChars: page.remaining.required.reduce((sum, unit) => sum + unit.chars, 0), acceptedOverflowChars: page.remaining.accepted.reduce((sum, unit) => sum + unit.chars, 0), remainingRequiredUnits: page.remaining.required.length, remainingAcceptedUnits: page.remaining.accepted.length, continuationIssued: page.mustContinue, chainCompleted: !page.mustContinue });
       return timedResponse;

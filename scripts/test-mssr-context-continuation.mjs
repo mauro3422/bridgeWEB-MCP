@@ -129,6 +129,22 @@ function acceptedOptionalDecisions(route) {
   }));
 }
 
+const responseHelpers = await import("../dist/skill-context-response.js");
+const envelopeBase = { status: "partial", payload: "x".repeat(1_000) };
+const fullTiming = { detail: "full", payload: "t".repeat(400) };
+const compactTiming = { detail: "compact", payload: "c".repeat(120) };
+const baseEnvelopeChars = responseHelpers.withResponseChars(envelopeBase).responseChars;
+const fullEnvelopeChars = responseHelpers.withResponseChars({ ...envelopeBase, bridgeTiming: fullTiming }).responseChars;
+const compactEnvelopeChars = responseHelpers.withResponseChars({ ...envelopeBase, bridgeTiming: compactTiming }).responseChars;
+assert.ok(fullEnvelopeChars > compactEnvelopeChars && compactEnvelopeChars > baseEnvelopeChars, "fixture must distinguish full, compact and omitted diagnostics");
+const fullTimingResponse = responseHelpers.withBestEffortOptionalResponseField(envelopeBase, "bridgeTiming", [fullTiming, compactTiming], fullEnvelopeChars);
+assert.deepEqual(fullTimingResponse.bridgeTiming, fullTiming, "full diagnostics should win when they fit");
+const compactTimingResponse = responseHelpers.withBestEffortOptionalResponseField(envelopeBase, "bridgeTiming", [fullTiming, compactTiming], compactEnvelopeChars);
+assert.deepEqual(compactTimingResponse.bridgeTiming, compactTiming, "compact diagnostics should be used when full diagnostics exceed the envelope");
+const omittedTimingResponse = responseHelpers.withBestEffortOptionalResponseField(envelopeBase, "bridgeTiming", [fullTiming, compactTiming], baseEnvelopeChars);
+assert.equal(Object.prototype.hasOwnProperty.call(omittedTimingResponse, "bridgeTiming"), false, "optional timing must be omitted rather than failing when only the base response fits");
+assert.equal(omittedTimingResponse.responseChars, baseEnvelopeChars, "omitted timing fallback must preserve the exact bounded base response size");
+
 const [{ skillCatalogToolModule, closeCodexSkillDiscoveryForTests }, { closeMssrObservatoryForTests }, { closeMetricsForTests }] = await Promise.all([
   import("../dist/tools/skill-catalog-tools.js"),
   import("../dist/mssr-observatory.js"),

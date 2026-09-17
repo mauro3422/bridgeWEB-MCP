@@ -1081,6 +1081,116 @@ try {
   });
   traceContext.resetSharedMssrTraceRegistryForTests();
 
+  const persistedFresherTraceId = 'trace-persisted-fresher-than-memory-001';
+  const persistedFresherTaskHash = createHash('sha256').update('persisted fresher than memory lifecycle fixture').digest('hex');
+  observatory.recordMssrEvent({
+    traceId: persistedFresherTraceId,
+    eventType: 'route_planned',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    ok: true,
+    taskHash: persistedFresherTaskHash,
+    details: {
+      workflowKey: 'persisted-fresher-than-memory-fixture',
+      requiredPhases: ['discovery', 'verification', 'persistence', 'maintenance'],
+      activeSkills: [{ name: 'skill-maintenance-loop', required: true }],
+      agentProfile: { model: 'gpt-5.6-sol', reasoningEffort: 'high' },
+    },
+  });
+  observatory.recordMssrEvent({
+    traceId: persistedFresherTraceId,
+    eventType: 'skill_loaded',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    skillName: 'skill-maintenance-loop',
+    required: true,
+    ok: true,
+    details: {},
+  });
+  observatory.recordMssrEvent({
+    traceId: persistedFresherTraceId,
+    eventType: 'phase_completed',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    ok: true,
+    details: { status: 'success', completedPhases: ['discovery', 'verification', 'persistence'] },
+  });
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const staleInMemoryCoordinator = traceContext.createMssrTraceSessionCoordinator(schemas);
+  const staleInMemoryOutcome = staleInMemoryCoordinator.prepare('mssr_trace_record', {
+    traceId: persistedFresherTraceId,
+    eventType: 'outcome',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    status: 'success',
+    verificationPassed: true,
+    persisted: true,
+  });
+  assert.equal(
+    staleInMemoryOutcome.blocked?.code,
+    'mssr-success-outcome-blocked-stale-close',
+    'The in-memory fixture must initially restore a genuinely incomplete maintenance close.',
+  );
+  observatory.recordMssrEvent({
+    traceId: persistedFresherTraceId,
+    eventType: 'phase_completed',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    ok: true,
+    details: { status: 'success', completedPhases: ['discovery', 'verification', 'persistence', 'maintenance'] },
+  });
+  const persistedFresherState = observatory.readPersistedMssrTraceState(persistedFresherTraceId);
+  assert.equal(persistedFresherState?.lifecycleRevision, persistedFresherState?.closeRevision);
+  assert.equal(persistedFresherState?.lifecycleRevision, persistedFresherState?.maintenanceRevision);
+  const reconciledOutcome = staleInMemoryCoordinator.prepare('mssr_trace_record', {
+    traceId: persistedFresherTraceId,
+    eventType: 'outcome',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    status: 'success',
+    verificationPassed: true,
+    persisted: true,
+  });
+  assert.equal(
+    reconciledOutcome.blocked,
+    undefined,
+    'An explicit outcome must reconcile a fresher persisted lifecycle before evaluating stale-close.',
+  );
+  staleInMemoryCoordinator.observe('skill_route_plan', {
+    traceId: persistedFresherTraceId,
+    task: 'persisted fresher than memory lifecycle fixture',
+    caller: 'chatgpt-web',
+    stage: 'resume',
+  }, {
+    traceId: persistedFresherTraceId,
+    stage: 'resume',
+    activeSkills: [],
+    coverage: { requiredPhases: ['discovery', 'verification', 'persistence', 'maintenance'] },
+  });
+  const fresherMemoryOutcome = staleInMemoryCoordinator.prepare('mssr_trace_record', {
+    traceId: persistedFresherTraceId,
+    eventType: 'outcome',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    status: 'success',
+    verificationPassed: true,
+    persisted: true,
+  });
+  assert.equal(
+    fresherMemoryOutcome.blocked?.code,
+    'mssr-success-outcome-blocked-stale-close',
+    'An older persisted lifecycle must never overwrite a newer in-memory continuation.',
+  );
+  observatory.recordMssrEvent({
+    traceId: persistedFresherTraceId,
+    eventType: 'outcome',
+    caller: 'chatgpt-web',
+    stage: 'close',
+    ok: true,
+    details: { status: 'partial', persisted: true, fixtureCleanup: true },
+  });
+  traceContext.resetSharedMssrTraceRegistryForTests();
+
   const rotatedOwner = traceContext.createMssrTraceSessionCoordinator(schemas);
   rotatedOwner.resolveMetricContext({
     caller: 'chatgpt-web',

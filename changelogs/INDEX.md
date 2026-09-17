@@ -4,6 +4,7 @@ Versioned release notes are the canonical change-history surface for MSSR debugg
 
 ## Current releases
 
+- [0.6.127](0.6.127.md) - Reconcile stale Bridge MSSR RAM with fresher persisted lifecycle state and harden compact skill-context delivery so optional diagnostics cannot overflow a valid response envelope.
 - [0.6.126](0.6.126.md) - Stabilize multi-chat Bridge transport with long keep-alive, async hot paths, bounded tunnel diagnostics, and sustained-readiness watchdog recovery.
 - [0.6.125](0.6.125.md) - Align Bridge with the canonical final MSSR 0.2.61 release artifact while preserving the 0.6.124 runtime behavior.
 - [0.6.124](0.6.124.md) - Observe long-running Bridge jobs before termination with timeout-alive state, sanitized process-tree progress, and Bridge-native attention notices.

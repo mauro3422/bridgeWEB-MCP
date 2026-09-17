@@ -1572,3 +1572,37 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Regresión / evidencia:** typecheck/build y regresores focales pasaron. Estrés live válido con 16 requests MCP concurrentes (8 context loads sin guides + 8 búsquedas) terminó 16/16 HTTP 200, cero tool errors, ~333 ms. El fast path live de `project_context_load(includeGuides=false)` quedó en ~11 ms y sin fase `workflow.guide.recommend`. `bridge_verify_all` job `bridge_verify_1789589039468_2` terminó `ok=true`, `failedRequired=0`; durante la suite el mismo runtime boot sobrevivió stalls transitorios sin auto-restart. Desde la baseline posterior al restart controlado hasta terminar estrés y gate integral: delta de tunnel 502 = 0 y delta de POST local sin status = 0.
 
 **Invariante:** `502`, `ECONNRESET`, `session_not_found` y proceso muerto son señales distintas. Nunca inferir “Bridge cayó” desde una sola. Correlacionar túnel, status local, PID/boot, restart ack y lifecycle de sesión. Readiness temporal de un proceso vivo es evidencia de degradación, no autorización inmediata para matarlo.
+
+
+## 2026-09-16 — MSSR success outcome blocked by stale Bridge RAM after durable close maintenance
+
+**Estado:** Corregido, verificado y adoptado live en Bridge 0.6.127 mediante restart HTTP-only ack `eb8e6b4e-1546-4ff8-babd-20b0a67b678c`; el túnel permaneció `live/ready`.
+
+**Capa / owner:** coordinador host `src/mssr-trace-context.ts` y su reconciliación con el observatorio durable de Bridge. La semántica portátil MSSR no cambió.
+
+**Síntoma observable:** la evidencia durable de una traza reconstruía `canCloseSuccess=true` y `nextRequiredAction=record-outcome`, pero el host Bridge rechazaba el mismo success outcome con `mssr-success-outcome-blocked-stale-close`.
+
+**Reproducción / evidencia:** se mantuvo una traza incompleta en `sharedTraces`, se completó su `close+maintenance` únicamente mediante eventos persistidos y se reintentó el outcome sin limpiar la memoria compartida. Antes del fix el gate siguió leyendo `maintenanceRevision=0` desde RAM y rechazó el cierre aunque SQLite ya tenía `lifecycleRevision == closeRevision == maintenanceRevision`.
+
+**Causa:** para un `traceId` explícito, `prepare()` elegía `sharedTraces.get(explicitTrace) ?? restore(explicitTrace)`. Si había estado RAM, nunca consultaba el lifecycle persistido más nuevo; el host terminaba con dos vistas válidas pero desincronizadas de la misma traza.
+
+**Corrección:** las operaciones explícitas sensibles al lifecycle (route/bootstrap, `skill_load`, `mssr_trace_record`) reconcilian primero una generación persistida estrictamente más fresca. La comparación usa lifecycle revision, route count, close revision, maintenance revision y estado terminal. Una persistencia vieja nunca rebobina RAM más nueva; skills cargadas y fases completadas se conservan de forma monotónica. Herramientas ordinarias no pagan este read durable en cada llamada.
+
+**Regresión / evidencia:** el nuevo fixture protege ambos sentidos: persisted-newer-than-RAM debe adoptarse y permitir el outcome; RAM-newer-than-persisted debe conservarse y seguir bloqueando un cierre stale. `npm run check`, `npm run build`, gates focales de trace/delegated-routing/compliance/telemetry y el `npm run test:regressions` completo terminaron PASS / exit 0.
+
+**Invariante:** RAM compartida y lifecycle durable son dos proyecciones host de una misma traza. Antes de decidir un gate de lifecycle explícito se usa la generación monotónicamente más nueva, sin migrar owner de `project`/`workflowKey` y sin convertir la reconciliación en un read SQLite para toda tool trace-aware.
+
+
+## 2026-09-17 — Compact skill bootstrap failed when optional timing diagnostics exceeded the envelope
+
+**Estado:** Corregido, cubierto por regresión y adoptado live en Bridge 0.6.127 mediante restart HTTP-only ack `c892b3bb-bbfb-49e7-a7fc-a10eb15f7656`; PID `16472`, boot `c9e8087a-4d87-47c9-a444-990ac71049ce`. El túnel permaneció `live/ready`.
+
+**Síntoma observable:** un `skill_bootstrap` compacto podía fallar aunque su respuesta funcional ya cupiera dentro de `maxEnvelopeChars`. El caso real reproducido necesitó 32.759 caracteres frente a un límite de 32.000 únicamente después de adjuntar `bridgeTiming`.
+
+**Causa:** `bridgeTiming` era metadata diagnóstica opcional, pero el builder la trataba como obligatoria al final del envelope. Primero intentaba timing completo y luego compacto; si ambos excedían el límite, lanzaba error en lugar de preservar la respuesta base ya válida.
+
+**Corrección:** `withBestEffortOptionalResponseField` selecciona la representación diagnóstica más rica que entre en el envelope; si ninguna entra, omite el campo opcional y conserva exactamente la respuesta base bounded. `skill_bootstrap` usa ahora la secuencia timing completo -> timing compacto -> timing omitido.
+
+**Regresión / evidencia:** el fixture durable cubre los tres estados y verifica el tamaño exacto de la respuesta base. El reproducer worst-case pasó a devolver una respuesta parcial válida de 31.728 caracteres. `npm run check`, `npm run build`, context-continuation, routing-latency, WAL-maintenance, HTTP smoke y `npm run test:regressions` completo terminaron PASS / exit 0; la suite integral duró ~113 s ejecutada como job inspeccionable.
+
+**Invariante:** diagnósticos host-only nunca deben convertir una respuesta funcional bounded en un fallo de transporte. El core contractual conserva prioridad; metadata opcional degrada representación o se omite antes de exceder el envelope.

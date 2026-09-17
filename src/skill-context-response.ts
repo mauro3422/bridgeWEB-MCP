@@ -15,6 +15,24 @@ export function withResponseChars<T extends Record<string, unknown>>(value: T): 
   return { ...value, responseChars };
 }
 
+/**
+ * Attach one optional diagnostic field using the richest candidate that still
+ * fits the serialized response envelope. If no candidate fits, preserve the
+ * bounded base response instead of turning optional diagnostics into failure.
+ */
+export function withBestEffortOptionalResponseField<T extends Record<string, unknown>>(
+  value: T,
+  fieldName: string,
+  candidates: readonly unknown[],
+  maxEnvelopeChars: number,
+): T & Record<string, unknown> & { responseChars: number } {
+  for (const candidateValue of candidates) {
+    const candidate = withResponseChars({ ...value, [fieldName]: candidateValue });
+    if (candidate.responseChars <= maxEnvelopeChars) return candidate;
+  }
+  return withResponseChars(value);
+}
+
 export function skillContextNextAction(traceId: string, cursor: string): Record<string, unknown> {
   return {
     label: "Cargar la siguiente página de contexto requerida",
