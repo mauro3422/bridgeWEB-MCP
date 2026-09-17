@@ -428,7 +428,7 @@ export const processToolModule: BridgeToolModule = {
     { name: "terminal_read", description: "Deep-inspect one persistent terminal session: bounded stdout/stderr, output counters, progress/timeout state, and a sanitized process-tree/CPU/memory summary. Accepts optional traceId control metadata.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, maxChars: { type: "number", default: 20000 }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId"], additionalProperties: false } },
     { name: "terminal_stop", description: "Explicitly stop the exact persistent terminal session and its process tree, then forget it. Inspect first when the session state is uncertain. Accepts optional traceId control metadata.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId"], additionalProperties: false } },
     { name: "terminal_list", description: "List persistent terminal sessions with lightweight running/progress/timeout/output metadata; does not scan every process tree.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
-    { name: "work_once", description: "Alias of run_command for one short project action; timeoutMs is capped at 60000 ms (60 seconds), and longer work must use work_begin/terminal_start so one MCP request is not held open. Accepts optional traceId control metadata for explicit MSSR correlation across projects or processes.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS, minimum: 1, maximum: MAX_SYNC_WORK_MS }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["command"], additionalProperties: false } },
+    { name: "work_once", description: "Alias of run_command for one short project action. Requests up to 60000 ms (60 seconds) execute synchronously; a larger timeout is accepted only to return a safe redirect to work_begin/terminal_start without executing the command, so one MCP request is not held open. Accepts optional traceId control metadata for explicit MSSR correlation across projects or processes.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS, minimum: 1, maximum: MAX_RUN_MS }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["command"], additionalProperties: false } },
     { name: "work_begin", description: "Alias of terminal_start for inspectable long-running project work. timeoutAction defaults to observe: crossing timeout raises a Bridge Notice but leaves the tree alive so work_peek can show progress before an explicit work_finish. Multiple sessions may run concurrently.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, name: { type: "string" }, logFile: { type: "string" }, timeoutMs: { type: "number", minimum: 1000, maximum: MAX_RUN_MS }, timeoutAction: { type: "string", enum: ["observe", "terminate"], default: "observe" }, cleanupAfterMs: { type: "number", default: DONE_TTL_MS, minimum: 0, maximum: MAX_RUN_MS }, traceId: TRACE_ID_INPUT_SCHEMA }, additionalProperties: false } },
     { name: "work_peek", description: "Deep-inspect one project-work session by exact sessionId: output, progress/timeout state, and sanitized process-tree/CPU/memory evidence before deciding whether to stop it.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, maxChars: { type: "number", default: 20000 }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId"], additionalProperties: false } },
     { name: "work_show", description: "List project-work sessions with lightweight state and progress metadata without scanning every process tree. Accepts optional traceId control metadata.", inputSchema: { type: "object", properties: { traceId: TRACE_ID_INPUT_SCHEMA }, additionalProperties: false } },
@@ -458,7 +458,19 @@ export const processToolModule: BridgeToolModule = {
     },
     terminal_list: () => terminalList(),
     work_once: async (args) => {
-      const parsed = z.object({ command: z.string().min(1), cwd: z.string().optional(), timeoutMs: z.number().positive().max(MAX_SYNC_WORK_MS).default(DEFAULT_TIMEOUT_MS), traceId: optionalTraceId }).parse(args);
+      const parsed = z.object({ command: z.string().min(1), cwd: z.string().optional(), timeoutMs: z.number().positive().max(MAX_RUN_MS).default(DEFAULT_TIMEOUT_MS), traceId: optionalTraceId }).parse(args);
+      if (parsed.timeoutMs > MAX_SYNC_WORK_MS) {
+        return {
+          executed: false,
+          redirected: true,
+          reason: "sync-timeout-exceeds-limit",
+          requestedTimeoutMs: parsed.timeoutMs,
+          maxSyncTimeoutMs: MAX_SYNC_WORK_MS,
+          recommendedTool: "work_begin",
+          alternateTool: "terminal_start",
+          instruction: "Start the same command with work_begin/terminal_start and inspect the returned sessionId before deciding whether to stop it.",
+        };
+      }
       return await runShellCommand(parsed.command, parsed.cwd, parsed.timeoutMs);
     },
     work_begin: async (args) => {

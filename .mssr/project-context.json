@@ -650,6 +650,433 @@
       "required": false,
       "priority": 45,
       "maxChars": 2400
+    },
+    {
+      "id": "bridge-skill-context-contracts",
+      "kind": "memory",
+      "description": "Resumable skill-context envelopes, host-gated MSSR inheritance, lifecycle completion, and workflow-guide specificity boundaries.",
+      "source": {
+        "path": ".mssr/knowledge/architecture/bridge-skill-context-contracts.md"
+      },
+      "topic": "architecture",
+      "area": "skill-context",
+      "stages": [
+        "start",
+        "implement",
+        "verify",
+        "persist",
+        "close",
+        "resume"
+      ],
+      "domains": [
+        "skill-system",
+        "agent-orchestration",
+        "coding"
+      ],
+      "actions": [
+        "analyze",
+        "debug",
+        "review",
+        "verify",
+        "maintain"
+      ],
+      "artifacts": [
+        "mcp",
+        "skill",
+        "project",
+        "code"
+      ],
+      "needs": [
+        "integrity-verification",
+        "cross-agent"
+      ],
+      "signals": [
+        "warning-observed",
+        "error-observed",
+        "repeated-friction",
+        "conflicting-evidence",
+        "recovery-needed",
+        "reusable-pattern"
+      ],
+      "required": false,
+      "priority": 82,
+      "maxChars": 7000
+    },
+    {
+      "id": "bridge-context-ack-provider-lifecycle",
+      "kind": "memory",
+      "description": "Context Plane receipt/tombstone semantics plus the provider-instance selection boundary carried by the historical project memory.",
+      "source": {
+        "path": ".mssr/knowledge/operations/bridge-context-ack-provider-lifecycle.md"
+      },
+      "topic": "operations",
+      "area": "context-plane",
+      "stages": [
+        "start",
+        "implement",
+        "verify",
+        "close",
+        "resume"
+      ],
+      "domains": [
+        "skill-system",
+        "agent-orchestration",
+        "godot"
+      ],
+      "actions": [
+        "analyze",
+        "edit",
+        "debug",
+        "verify",
+        "maintain"
+      ],
+      "artifacts": [
+        "mcp",
+        "project",
+        "game"
+      ],
+      "needs": [
+        "integrity-verification",
+        "safe-editing"
+      ],
+      "signals": [
+        "warning-observed",
+        "error-observed",
+        "conflicting-evidence",
+        "recovery-needed"
+      ],
+      "required": false,
+      "priority": 60,
+      "maxChars": 2200
+    },
+    {
+      "id": "bridge-windows-admin-boundaries",
+      "kind": "memory",
+      "description": "Closed-profile Windows elevation, storage diagnostics, and cache-cleanup safety boundaries.",
+      "source": {
+        "path": ".mssr/knowledge/operations/bridge-windows-admin-boundaries.md"
+      },
+      "topic": "operations",
+      "area": "windows-admin",
+      "stages": [
+        "start",
+        "implement",
+        "verify",
+        "close",
+        "resume"
+      ],
+      "domains": [
+        "filesystem",
+        "coding"
+      ],
+      "actions": [
+        "analyze",
+        "review",
+        "verify",
+        "recover",
+        "maintain"
+      ],
+      "artifacts": [
+        "project",
+        "code"
+      ],
+      "needs": [
+        "safe-editing",
+        "integrity-verification"
+      ],
+      "signals": [
+        "warning-observed",
+        "error-observed",
+        "recovery-needed",
+        "reusable-pattern"
+      ],
+      "required": false,
+      "priority": 58,
+      "maxChars": 4000
+    },
+    {
+      "id": "bridge-release-verification-contracts",
+      "kind": "memory",
+      "description": "Package-byte parity, source/dist/live release parity, and isolated HTTP-test observability-store invariants.",
+      "source": {
+        "path": ".mssr/knowledge/operations/bridge-release-verification-contracts.md"
+      },
+      "topic": "operations",
+      "area": "release",
+      "stages": [
+        "implement",
+        "verify",
+        "persist",
+        "close",
+        "resume"
+      ],
+      "domains": [
+        "coding",
+        "git",
+        "filesystem",
+        "agent-orchestration"
+      ],
+      "actions": [
+        "test",
+        "verify",
+        "debug",
+        "version",
+        "publish",
+        "maintain"
+      ],
+      "artifacts": [
+        "code",
+        "repository",
+        "mcp",
+        "project"
+      ],
+      "needs": [
+        "unit-tests",
+        "integrity-verification",
+        "version-control"
+      ],
+      "signals": [
+        "warning-observed",
+        "error-observed",
+        "conflicting-evidence",
+        "recovery-needed",
+        "reusable-pattern"
+      ],
+      "required": false,
+      "priority": 88,
+      "maxChars": 4200
+    },
+    {
+      "id": "bridge-readonly-history-boundary",
+      "kind": "memory",
+      "description": "Read-only external session/history roots remain narrower than writable and cwd path capabilities.",
+      "source": {
+        "path": ".mssr/knowledge/operations/bridge-readonly-history-boundary.md"
+      },
+      "topic": "operations",
+      "area": "path-policy",
+      "stages": [
+        "start",
+        "implement",
+        "verify",
+        "resume"
+      ],
+      "domains": [
+        "filesystem",
+        "agent-orchestration"
+      ],
+      "actions": [
+        "analyze",
+        "recover",
+        "review",
+        "verify",
+        "maintain"
+      ],
+      "artifacts": [
+        "project",
+        "repository"
+      ],
+      "needs": [
+        "history-recovery",
+        "safe-editing",
+        "cross-agent"
+      ],
+      "signals": [
+        "warning-observed",
+        "recovery-needed",
+        "reusable-pattern"
+      ],
+      "required": false,
+      "priority": 56,
+      "maxChars": 1200
+    },
+    {
+      "id": "bridge-dashboard-routing-liveness",
+      "kind": "memory",
+      "description": "Event-loop isolation for dashboard work, layered routing-latency attribution, read-your-writes observability, and passive WAL maintenance.",
+      "source": {
+        "path": ".mssr/knowledge/operations/bridge-dashboard-routing-liveness.md"
+      },
+      "topic": "operations",
+      "area": "routing-liveness",
+      "stages": [
+        "start",
+        "implement",
+        "verify",
+        "close",
+        "resume"
+      ],
+      "domains": [
+        "coding",
+        "agent-orchestration",
+        "skill-system"
+      ],
+      "actions": [
+        "analyze",
+        "debug",
+        "optimize",
+        "test",
+        "verify",
+        "maintain"
+      ],
+      "artifacts": [
+        "mcp",
+        "code",
+        "project"
+      ],
+      "needs": [
+        "performance",
+        "integrity-verification",
+        "unit-tests"
+      ],
+      "signals": [
+        "warning-observed",
+        "error-observed",
+        "repeated-friction",
+        "recovery-needed",
+        "reusable-pattern"
+      ],
+      "required": false,
+      "priority": 78,
+      "maxChars": 4200
+    },
+    {
+      "id": "bridge-skill-health-boundary",
+      "kind": "memory",
+      "description": "Privacy-safe daily structural Skill Health audit and no-auto-edit boundary.",
+      "source": {
+        "path": ".mssr/knowledge/operations/bridge-skill-health-boundary.md"
+      },
+      "topic": "operations",
+      "area": "skill-health",
+      "stages": [
+        "start",
+        "implement",
+        "verify",
+        "close",
+        "resume"
+      ],
+      "domains": [
+        "skill-system",
+        "agent-orchestration",
+        "coding"
+      ],
+      "actions": [
+        "analyze",
+        "review",
+        "verify",
+        "maintain"
+      ],
+      "artifacts": [
+        "skill",
+        "project",
+        "mcp"
+      ],
+      "needs": [
+        "integrity-verification"
+      ],
+      "signals": [
+        "warning-observed",
+        "repeated-friction",
+        "reusable-pattern"
+      ],
+      "required": false,
+      "priority": 62,
+      "maxChars": 1200
+    },
+    {
+      "id": "bridge-operational-notice-history-boundaries",
+      "kind": "memory",
+      "description": "Detailed historical host boundaries for C2b/C2c/C2d/C2e, Situation Model delivery receipts, and MssrNotice relay identity.",
+      "source": {
+        "path": ".mssr/knowledge/architecture/bridge-operational-notice-history-boundaries.md"
+      },
+      "topic": "architecture",
+      "area": "operational-notice",
+      "stages": [
+        "implement",
+        "verify",
+        "persist",
+        "close",
+        "resume"
+      ],
+      "domains": [
+        "coding",
+        "agent-orchestration",
+        "skill-system"
+      ],
+      "actions": [
+        "analyze",
+        "review",
+        "verify",
+        "maintain"
+      ],
+      "artifacts": [
+        "mcp",
+        "project",
+        "code"
+      ],
+      "needs": [
+        "integrity-verification",
+        "cross-agent"
+      ],
+      "signals": [
+        "warning-observed",
+        "conflicting-evidence",
+        "repeated-friction",
+        "reusable-pattern"
+      ],
+      "required": false,
+      "priority": 68,
+      "maxChars": 4800
+    },
+    {
+      "id": "bridge-http-readiness-evidence-boundary",
+      "kind": "memory",
+      "description": "Bounded HTTP child readiness and evidence-first recovery after lost MCP/connector responses.",
+      "source": {
+        "path": ".mssr/knowledge/operations/bridge-http-readiness-evidence-boundary.md"
+      },
+      "topic": "operations",
+      "area": "transport-readiness",
+      "stages": [
+        "start",
+        "implement",
+        "verify",
+        "close",
+        "resume"
+      ],
+      "domains": [
+        "coding",
+        "agent-orchestration",
+        "filesystem"
+      ],
+      "actions": [
+        "debug",
+        "recover",
+        "test",
+        "verify",
+        "maintain"
+      ],
+      "artifacts": [
+        "mcp",
+        "code",
+        "project"
+      ],
+      "needs": [
+        "integrity-verification",
+        "unit-tests"
+      ],
+      "signals": [
+        "error-observed",
+        "warning-observed",
+        "recovery-needed",
+        "conflicting-evidence",
+        "reusable-pattern"
+      ],
+      "required": false,
+      "priority": 72,
+      "maxChars": 1800
     }
   ]
 }

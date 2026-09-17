@@ -67,6 +67,37 @@ async function json(pathname) {
   return response.json();
 }
 
+const modernMeta = {
+  "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+  "io.modelcontextprotocol/clientInfo": { name: "bridge-liveness-synthetic-agent", version: "1.0.0" },
+  "io.modelcontextprotocol/clientCapabilities": {},
+};
+
+async function modernToolCall(id, name, arguments_) {
+  const response = await fetch(`${base}/mcp`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "mcp-protocol-version": "2026-07-28",
+      "mcp-method": "tools/call",
+      "mcp-name": name,
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id,
+      method: "tools/call",
+      params: { name, arguments: arguments_, _meta: modernMeta },
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  const text = await response.text();
+  assert.equal(response.status, 200, `${name} returned ${response.status}: ${text.slice(0, 800)}`);
+  const payload = JSON.parse(text);
+  assert.equal(payload.error, undefined, `${name} returned JSON-RPC error: ${text.slice(0, 800)}`);
+  assert.notEqual(payload.result?.isError, true, `${name} returned MCP tool error: ${text.slice(0, 800)}`);
+  return payload.result;
+}
+
 async function probeReady(durationMs) {
   const samples = [];
   const failures = [];
@@ -184,9 +215,73 @@ try {
   assert.ok((persistenceStatus.walMaintenance?.checkpointCount ?? 0) >= 1, "passive WAL checkpoint did not run");
   assert.equal(persistenceStatus.walMaintenance?.failureCount, 0, persistenceStatus.walMaintenance?.lastError ?? "WAL checkpoint failed");
 
-  const after = await json("/status");
-  assert.equal(after.runtimeBootId, baseline.runtimeBootId, "runtime boot changed during SQLite pressure");
-  assert.equal(after.pid, baseline.pid, "HTTP process changed during SQLite pressure");
+  // Model several independent MCP callers without involving real LLMs. Mix
+  // project-context discovery with skill bootstrap while probing /readyz from a
+  // separate request stream. Slow tool completion is acceptable; starving the
+  // shared HTTP event loop is not.
+  const beforeConcurrentAgents = await json("/status");
+  const concurrentProbePromise = probeReady(5_000);
+  const concurrentIntent = {
+    summary: "Synthetic concurrent Bridge liveness verification.",
+    domains: ["coding", "agent-orchestration"],
+    actions: ["verify", "test", "analyze"],
+    artifacts: ["mcp", "project"],
+    needs: ["performance", "integrity-verification", "cross-agent"],
+    signals: ["repeated-friction"],
+    risk: "read-only",
+    ambiguity: "low",
+  };
+  const syntheticAgentCalls = Array.from({ length: 6 }, (_, index) => {
+    if (index % 2 === 0) {
+      return modernToolCall(1_000 + index, "project_context_load", {
+        projectRoot: root,
+        task: `Synthetic concurrent liveness context load ${index}`,
+        workflowKey: "observability-http-liveness",
+        includeAgents: true,
+        includeProjectContext: true,
+        includeGuides: true,
+      });
+    }
+    return modernToolCall(1_000 + index, "skill_bootstrap", {
+      task: `Synthetic concurrent liveness bootstrap ${index}`,
+      projectRoot: root,
+      context: "Isolated regression fixture verifying that concurrent read-only MSSR routing work does not starve Bridge readiness.",
+      intent: concurrentIntent,
+      caller: "chatgpt-web",
+      model: "fixture-model",
+      reasoningEffort: "high",
+      stage: "verify",
+      completedPhases: ["discovery", "safety"],
+      sources: ["codex-local"],
+      maxSkills: 4,
+      contentMode: "selective",
+      includeReferences: "auto",
+      maxContextChars: 8_000,
+      workflowKey: "observability-http-liveness",
+    });
+  });
+  const syntheticAgentResults = await Promise.all(syntheticAgentCalls);
+  assert.equal(syntheticAgentResults.length, 6);
+  const concurrentProbes = await concurrentProbePromise;
+  assert.deepEqual(concurrentProbes.failures, [], `readyz failures under concurrent MCP callers: ${JSON.stringify(concurrentProbes.failures)}`);
+  assert.ok(concurrentProbes.samples.length >= 20, `expected repeated readyz samples under concurrent MCP callers, got ${concurrentProbes.samples.length}`);
+  const maxConcurrentReadyMs = Math.max(...concurrentProbes.samples);
+  const sortedConcurrent = [...concurrentProbes.samples].sort((a, b) => a - b);
+  const p95ConcurrentReadyMs = sortedConcurrent[Math.min(sortedConcurrent.length - 1, Math.floor(sortedConcurrent.length * 0.95))];
+  assert.ok(maxConcurrentReadyMs < 750, `readyz latency exceeded liveness budget under concurrent MCP callers: ${maxConcurrentReadyMs.toFixed(2)} ms`);
+
+  const afterConcurrentAgents = await json("/status");
+  assert.equal(afterConcurrentAgents.runtimeBootId, beforeConcurrentAgents.runtimeBootId, "runtime boot changed during concurrent MCP callers");
+  assert.equal(afterConcurrentAgents.pid, beforeConcurrentAgents.pid, "HTTP process changed during concurrent MCP callers");
+  assert.equal(
+    afterConcurrentAgents.runtimeDiagnostics?.eventLoop?.stallCount,
+    beforeConcurrentAgents.runtimeDiagnostics?.eventLoop?.stallCount,
+    `event loop stalled during concurrent MCP callers: ${JSON.stringify(afterConcurrentAgents.runtimeDiagnostics?.eventLoop)}`,
+  );
+
+  const after = afterConcurrentAgents;
+  assert.equal(after.runtimeBootId, baseline.runtimeBootId, "runtime boot changed during liveness regression");
+  assert.equal(after.pid, baseline.pid, "HTTP process changed during liveness regression");
   assert.equal(child.exitCode, null, `isolated Bridge exited unexpectedly: ${stderr}`);
 
   console.log("Bridge observability HTTP liveness PASS", {
@@ -194,6 +289,11 @@ try {
     readySamples: probes.samples.length,
     maxReadyMs: Math.round(maxReadyMs * 100) / 100,
     p95ReadyMs: Math.round(p95ReadyMs * 100) / 100,
+    syntheticAgents: syntheticAgentResults.length,
+    concurrentReadySamples: concurrentProbes.samples.length,
+    maxConcurrentReadyMs: Math.round(maxConcurrentReadyMs * 100) / 100,
+    p95ConcurrentReadyMs: Math.round(p95ConcurrentReadyMs * 100) / 100,
+    eventLoopStalls: after.runtimeDiagnostics?.eventLoop?.stallCount,
     runtimeBootId: after.runtimeBootId,
     persistenceCompleted: persistenceStatus.persistence.completed,
     walCheckpoints: persistenceStatus.walMaintenance.checkpointCount,

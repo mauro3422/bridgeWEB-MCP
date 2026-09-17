@@ -187,9 +187,23 @@ async function gitCreateBranch(cwd: string | undefined, name: string, startPoint
 }
 
 async function gitRestoreFile(cwd: string | undefined, filePath: string, source: string, staged: boolean, worktree: boolean) {
-  if (!staged && !worktree) throw new Error("At least one of staged or worktree must be true.");
   const root = projectRoot(cwd);
   const relative = repoRelativePath(root, filePath);
+  if (!staged && !worktree) {
+    return {
+      restored: false,
+      path: relative,
+      source,
+      staged,
+      worktree,
+      reason: "restore-target-not-selected",
+      recovery: {
+        recommendedArguments: { staged: false, worktree: true },
+        instruction: "Set worktree=true and/or staged=true explicitly; no restore was executed.",
+      },
+      status: await gitStatus(root),
+    };
+  }
   const args = ["restore", `--source=${assertSafeRef(source, "restore source")}`];
   if (staged) args.push("--staged");
   if (worktree) args.push("--worktree");
@@ -258,7 +272,7 @@ export const gitToolModule: BridgeToolModule = {
     { name: "git_show_commit", description: "Inspect one Git commit with metadata and either a summary or bounded patch, omitting and reporting sensitive denied paths.", inputSchema: { type: "object", properties: { cwd: { type: "string" }, ref: { type: "string", default: "HEAD" }, includePatch: { type: "boolean", default: false }, maxChars: { type: "number", default: 50000, minimum: 1000, maximum: 200000 } }, additionalProperties: false } },
     { name: "git_compare_branches", description: "Compare two Git refs using sensitive-path-filtered three-dot diff statistics and commits unique to the head ref.", inputSchema: { type: "object", properties: { cwd: { type: "string" }, base: { type: "string" }, head: { type: "string" }, maxChars: { type: "number", default: 50000, minimum: 1000, maximum: 200000 } }, required: ["base", "head"], additionalProperties: false } },
     { name: "git_create_branch", description: "Create a validated Git branch and optionally switch to it.", inputSchema: { type: "object", properties: { cwd: { type: "string" }, name: { type: "string" }, startPoint: { type: "string" }, checkout: { type: "boolean", default: true } }, required: ["name"], additionalProperties: false } },
-    { name: "git_restore_file", description: "Restore one repository file from a validated Git source into the index and/or working tree. At least one of staged or worktree must be true.", inputSchema: { type: "object", properties: { cwd: { type: "string" }, path: { type: "string" }, source: { type: "string", default: "HEAD" }, staged: { type: "boolean", default: false }, worktree: { type: "boolean", default: true } }, required: ["path"], not: { required: ["staged", "worktree"], properties: { staged: { const: false }, worktree: { const: false } } }, additionalProperties: false } },
+    { name: "git_restore_file", description: "Restore one repository file from a validated Git source into the index and/or working tree. If staged=false and worktree=false, no restore is executed and the tool returns a recovery hint instead of failing schema validation.", inputSchema: { type: "object", properties: { cwd: { type: "string" }, path: { type: "string" }, source: { type: "string", default: "HEAD" }, staged: { type: "boolean", default: false }, worktree: { type: "boolean", default: true } }, required: ["path"], additionalProperties: false } },
     { name: "git_set_remote", description: "Add or update a GitHub HTTPS remote for the current project.", inputSchema: { type: "object", properties: { repoUrl: { type: "string", default: DEFAULT_GIT_REMOTE_URL }, remote: { type: "string", default: "origin" }, cwd: { type: "string" } }, additionalProperties: false } },
     { name: "git_commit_all", description: "Stage all changed repository paths and create a commit, but refuse the operation when any changed path is denied by the sensitive-path policy.", inputSchema: { type: "object", properties: { message: { type: "string" }, cwd: { type: "string" } }, required: ["message"], additionalProperties: false } },
     { name: "git_push_current_branch", description: "Push the current Git branch to a remote using local credentials.", inputSchema: { type: "object", properties: { remote: { type: "string", default: "origin" }, branch: { type: "string" }, cwd: { type: "string" } }, additionalProperties: false } },

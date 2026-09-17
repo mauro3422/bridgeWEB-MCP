@@ -1062,9 +1062,14 @@ function routingCoverageFromDatabase(database: DatabaseSync, scope: BridgeMetric
   }
   return coverage;
 }
-function routingCoverageWithPending(database: DatabaseSync, scope: BridgeMetricsScope, detailed: boolean): Map<string, RoutingCoverage> {
+function routingCoverageWithPending(
+  database: DatabaseSync,
+  scope: BridgeMetricsScope,
+  detailed: boolean,
+  pendingSnapshot: BridgeMetricEnd[],
+): Map<string, RoutingCoverage> {
   const coverage = routingCoverageFromDatabase(database, scope, detailed);
-  const pending = pendingMetricEvents(scope);
+  const pending = pendingUnpersistedMetricEvents(database, scope, pendingSnapshot);
   if (pending.length === 0) return coverage;
 
   const filter = metricsFilter(scope);
@@ -1212,6 +1217,53 @@ function pendingMetricEvents(scope: BridgeMetricsScope): BridgeMetricEnd[] {
     return event.observabilityEpoch === epoch.activeEpoch && event.startedAtIso >= epoch.baselineAt;
   });
 }
+
+function pendingUnpersistedMetricEvents(
+  database: DatabaseSync,
+  scope: BridgeMetricsScope,
+  pendingSnapshot: BridgeMetricEnd[] = pendingMetricEvents(scope),
+): BridgeMetricEnd[] {
+  const pending = pendingSnapshot;
+  if (pending.length === 0) return pending;
+
+  // Persistence and its acknowledgement are intentionally decoupled from the
+  // request path. A row can therefore already exist in SQLite for a brief
+  // interval while the read-your-writes overlay still retains the same event.
+  // Aggregate projections lose row ids during GROUP BY, so filter that overlap
+  // before merging or the transition can count one call twice.
+  const persistedIds = new Set<string>();
+  const chunkSize = 250;
+  for (let offset = 0; offset < pending.length; offset += chunkSize) {
+    const chunk = pending.slice(offset, offset + chunkSize);
+    const placeholders = chunk.map(() => "?").join(",");
+    const rows = database.prepare(`SELECT id FROM tool_calls WHERE id IN (${placeholders})`)
+      .all(...chunk.map((event) => event.id));
+    for (const row of rows) {
+      if (typeof row.id === "string") persistedIds.add(row.id);
+    }
+  }
+  return pending.filter((event) => !persistedIds.has(event.id));
+}
+
+function withMetricsReadSnapshot<T>(
+  database: DatabaseSync,
+  scope: BridgeMetricsScope,
+  reader: (pendingSnapshot: BridgeMetricEnd[]) => T,
+): T {
+  const pendingSnapshot = pendingMetricEvents(scope);
+  database.exec("BEGIN DEFERRED");
+  try {
+    const result = reader(pendingSnapshot);
+    database.exec("COMMIT");
+    return result;
+  }
+  catch (error) {
+    try { database.exec("ROLLBACK"); }
+    catch {}
+    throw error;
+  }
+}
+
 export function getPendingTraceToolRowsSince(sinceIso: string): Array<Record<string, unknown>> {
   return recentToolMetricOverlay
     .filter((event) => Boolean(event.traceId) && event.startedAtIso >= sinceIso && !String(event.traceId).startsWith("__test_"))
@@ -1236,10 +1288,16 @@ export function getPendingTraceToolRowsSince(sinceIso: string): Array<Record<str
     }));
 }
 
-function mergePendingMetricSummary(rows: JsonRecord[], scope: BridgeMetricsScope, limit: number): JsonRecord[] {
+function mergePendingMetricSummary(
+  database: DatabaseSync,
+  rows: JsonRecord[],
+  scope: BridgeMetricsScope,
+  limit: number,
+  pendingSnapshot: BridgeMetricEnd[],
+): JsonRecord[] {
   const byTool = new Map<string, JsonRecord>();
   for (const row of rows) byTool.set(String(row.tool ?? "unknown"), { ...row });
-  for (const event of pendingMetricEvents(scope)) {
+  for (const event of pendingUnpersistedMetricEvents(database, scope, pendingSnapshot)) {
     const current = byTool.get(event.tool) ?? {
       tool: event.tool,
       calls: 0,
@@ -1265,10 +1323,17 @@ function mergePendingMetricSummary(rows: JsonRecord[], scope: BridgeMetricsScope
     .slice(0, Math.max(1, Math.trunc(limit)));
 }
 
-function mergePendingMetricProfiles(rows: JsonRecord[], scope: BridgeMetricsScope, detailed: boolean, limit?: number): JsonRecord[] {
+function mergePendingMetricProfiles(
+  database: DatabaseSync,
+  rows: JsonRecord[],
+  scope: BridgeMetricsScope,
+  detailed: boolean,
+  pendingSnapshot: BridgeMetricEnd[],
+  limit?: number,
+): JsonRecord[] {
   const byKey = new Map<string, JsonRecord>();
   for (const row of rows) byKey.set(metricProfileKey(row, detailed), { ...row });
-  for (const event of pendingMetricEvents(scope)) {
+  for (const event of pendingUnpersistedMetricEvents(database, scope, pendingSnapshot)) {
     const identity = metricProfileIdentityFromEvent(event, detailed);
     const key = metricProfileKey(identity, detailed);
     const current = byKey.get(key) ?? {
@@ -1307,7 +1372,12 @@ function mergePendingMetricProfiles(rows: JsonRecord[], scope: BridgeMetricsScop
   return limit === undefined ? merged : merged.slice(0, Math.max(1, Math.trunc(limit)));
 }
 
-function getMetricsProfiles(database: DatabaseSync, scope: BridgeMetricsScope, agentProfileLimit = 50) {
+function getMetricsProfiles(
+  database: DatabaseSync,
+  scope: BridgeMetricsScope,
+  pendingSnapshot: BridgeMetricEnd[],
+  agentProfileLimit = 50,
+) {
   const filter = metricsFilter(scope);
   const surfaces = database.prepare(`
     SELECT COALESCE(caller, 'other') AS caller,
@@ -1360,33 +1430,40 @@ function getMetricsProfiles(database: DatabaseSync, scope: BridgeMetricsScope, a
     ORDER BY calls DESC, caller ASC, model ASC, reasoning_effort ASC, project ASC, session_key ASC, task_key ASC
     LIMIT ?
   `).all(...filter.params, Math.max(1, Math.min(200, agentProfileLimit)));
-  const mergedSurfaces = mergePendingMetricProfiles(surfaces, scope, false);
-  const mergedAgentProfiles = mergePendingMetricProfiles(agentProfiles, scope, true, agentProfileLimit);
+  const mergedSurfaces = mergePendingMetricProfiles(database, surfaces, scope, false, pendingSnapshot);
+  const mergedAgentProfiles = mergePendingMetricProfiles(database, agentProfiles, scope, true, pendingSnapshot, agentProfileLimit);
   return {
-    surfaces: withRoutingCoverage(mergedSurfaces, routingCoverageWithPending(database, scope, false), false),
-    agentProfiles: withRoutingCoverage(mergedAgentProfiles, routingCoverageWithPending(database, scope, true), true),
+    surfaces: withRoutingCoverage(mergedSurfaces, routingCoverageWithPending(database, scope, false, pendingSnapshot), false),
+    agentProfiles: withRoutingCoverage(mergedAgentProfiles, routingCoverageWithPending(database, scope, true, pendingSnapshot), true),
   };
 }
 
 export function getMetricsSummary(limit = 50, scope: BridgeMetricsScope = "active") {
   const sqlite = getDb();
   if (!sqlite) return { ...getMetricsStatus(), scope, summary: [], surfaces: [], agentProfiles: [] };
-  const filter = metricsFilter(scope);
-  const rows = sqlite.prepare(`
-    SELECT tool,
-      COUNT(*) AS calls,
-      SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END) AS ok_calls,
-      SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS error_calls,
-      ROUND(AVG(duration_ms), 2) AS avg_duration_ms,
-      MAX(duration_ms) AS max_duration_ms,
-      MAX(started_at) AS last_started_at
-    FROM tool_calls
-    WHERE ${filter.where}
-    GROUP BY tool
-    ORDER BY calls DESC, tool ASC
-    LIMIT ?
-  `).all(...filter.params, limit);
-  return { ...getMetricsStatus(), scope, summary: mergePendingMetricSummary(rows, scope, limit), ...getMetricsProfiles(sqlite, scope, limit) };
+  return withMetricsReadSnapshot(sqlite, scope, (pendingSnapshot) => {
+    const filter = metricsFilter(scope);
+    const rows = sqlite.prepare(`
+      SELECT tool,
+        COUNT(*) AS calls,
+        SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END) AS ok_calls,
+        SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS error_calls,
+        ROUND(AVG(duration_ms), 2) AS avg_duration_ms,
+        MAX(duration_ms) AS max_duration_ms,
+        MAX(started_at) AS last_started_at
+      FROM tool_calls
+      WHERE ${filter.where}
+      GROUP BY tool
+      ORDER BY calls DESC, tool ASC
+      LIMIT ?
+    `).all(...filter.params, limit);
+    return {
+      ...getMetricsStatus(),
+      scope,
+      summary: mergePendingMetricSummary(sqlite, rows, scope, limit, pendingSnapshot),
+      ...getMetricsProfiles(sqlite, scope, pendingSnapshot, limit),
+    };
+  });
 }
 
 export function getRecentMetrics(limit = 25, scope: BridgeMetricsScope = "active") {
@@ -1459,27 +1536,29 @@ export function getMetricsOverview(scope: BridgeMetricsScope = "active") {
     };
   }
 
-  const filter = metricsFilter(scope);
-  const totals = sqlite.prepare(`
-    SELECT
-      COUNT(*) AS calls,
-      SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END) AS okCalls,
-      SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS errorCalls,
-      ROUND(AVG(duration_ms), 2) AS avgDurationMs,
-      MAX(duration_ms) AS maxDurationMs
-    FROM tool_calls
-    WHERE ${filter.where}
-  `).get(...filter.params) ?? { calls: 0, okCalls: 0, errorCalls: 0, avgDurationMs: 0, maxDurationMs: 0 };
+  return withMetricsReadSnapshot(sqlite, scope, (pendingSnapshot) => {
+    const filter = metricsFilter(scope);
+    const totals = sqlite.prepare(`
+      SELECT
+        COUNT(*) AS calls,
+        SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END) AS okCalls,
+        SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS errorCalls,
+        ROUND(AVG(duration_ms), 2) AS avgDurationMs,
+        MAX(duration_ms) AS maxDurationMs
+      FROM tool_calls
+      WHERE ${filter.where}
+    `).get(...filter.params) ?? { calls: 0, okCalls: 0, errorCalls: 0, avgDurationMs: 0, maxDurationMs: 0 };
 
-  const slowest = sqlite.prepare(`
-    SELECT started_at, duration_ms, tool, ok, error, input_keys, operation_subject, output_chars, pid
-    FROM tool_calls
-    WHERE ${filter.where}
-    ORDER BY duration_ms DESC
-    LIMIT 10
-  `).all(...filter.params);
+    const slowest = sqlite.prepare(`
+      SELECT started_at, duration_ms, tool, ok, error, input_keys, operation_subject, output_chars, pid
+      FROM tool_calls
+      WHERE ${filter.where}
+      ORDER BY duration_ms DESC
+      LIMIT 10
+    `).all(...filter.params);
 
-  return { ...getMetricsStatus(), scope, totals, slowest, ...getMetricsProfiles(sqlite, scope, 20) };
+    return { ...getMetricsStatus(), scope, totals, slowest, ...getMetricsProfiles(sqlite, scope, pendingSnapshot, 20) };
+  });
 }
 
 export function getMetricsDashboardSnapshot(limit = 12, scope: BridgeMetricsScope = "active") {

@@ -19,6 +19,25 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-09-17 — HTTP child exited y la recuperación carecía de evidencia externa suficiente
+
+**Estado:** Hardening implementado y cubierto por regresión en 0.6.128; causa del exit original no resuelta. Adopción live pendiente al momento de registrar este incidente.
+
+**Capa/owner:** lifecycle/supervisión del Bridge HTTP y watchdog externo. MSSR no posee ni debe reinterpretar el estado del proceso Node del host.
+
+**Síntoma observable:** durante la investigación de cortes recurrentes, el watchdog detectó que el Bridge HTTP administrado había salido realmente (`process-exited`) y lo reemplazó. El túnel se recuperó después de alcanzar su propio umbral de readiness. No apareció un evento de crash de Node/Bridge correspondiente en Windows Application Event Log.
+
+**Evidencia/reproducción:** rutas sospechadas por costo no reprodujeron starvation: Project Situation sobre 29 repositorios completó en ~136 ms con ~10,6 ms de gap máximo de timer; exploración agresiva de archivos se mantuvo alrededor de 13 ms. La regresión HTTP aislada con seis callers MCP sintéticos concurrentes (`project_context_load`/`skill_bootstrap`) mantuvo `/readyz` sin fallos, cero stalls nuevos y p95 ~1,3 ms. Por lo tanto no se atribuye el exit a MSSR, routing ni a esas rutas sin evidencia causal.
+
+**Causa demostrada:** no resuelta. La debilidad demostrada era diagnóstica: `/status` comparte el event loop del HTTP sospechado y podía quedar inaccesible justo cuando el watchdog necesitaba evidencia antes de un restart; si el child ya había salido tampoco se conservaba explícitamente su exit code en el recovery evidence.
+
+**Corrección:** 0.6.128 añade `scripts/bridge-process-diagnostics.ps1` y captura, desde el watchdog externo y antes de detener/reemplazar el HTTP, metadata acotada independiente del event loop: PID/parent, start/uptime, muestra CPU, memoria working/private, threads/handles y ownership del listener. `/status` pasa a ser evidencia suplementaria. Si el proceso administrado ya terminó, se intenta conservar su exit code. Se excluyen command-lines, output crudo, prompts y secretos.
+
+**Regresión:** `test-v060-tools.mjs` valida wiring, orden pre-kill, ejecución del helper y ausencia de command-line metadata. `test-observability-http-liveness.mjs` somete un child aislado a persistencia + seis callers MCP sintéticos mientras sondea readiness y exige boot/PID estables, cero fallos y cero stalls adicionales. La suite aislada completa también pasa antes del versionado final.
+
+**Seguimiento:** observar una futura recurrencia con el watchdog actualizado. Un recovery exitoso demuestra restauración del servicio, no la causa raíz. No ampliar timeouts ni culpar MSSR/ChatGPT/túnel sin correlacionar exit code, evidencia externa, event-loop diagnostics y métricas de transporte.
+
+---
 ## 2026-09-16 — `bridge_verify_all` dejó descendientes vivos tras timeout y restart
 
 **Estado:** Lifecycle de background jobs corregido en source/dist 0.6.124; adopción live y gates finales pendientes. La inestabilidad HTTP/readiness recurrente observada durante la investigación permanece como incidente separado no resuelto.

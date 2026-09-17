@@ -274,8 +274,10 @@ try {
   if (workOnceTool?.metadata?.role !== 'alias' || workOnceTool.metadata.aliasOf !== 'run_command' || workOnceTool.metadata.family !== 'process') throw new Error('tool alias metadata failed');
   const evidenceTool = registry.tools.find((tool) => tool.name === 'mssr_trace_evidence');
   if (!evidenceTool || !registry.riskSummary.readOnly.includes('mssr_trace_evidence') || evidenceTool.metadata?.lifecycle !== 'protected') throw new Error('mssr_trace_evidence metadata/risk failed');
-  if (workOnceTool?.inputSchema?.properties?.timeoutMs?.maximum !== 60000) throw new Error('work_once synchronous timeout cap regression');
-  if (!/60000 ms \(60 seconds\)/i.test(workOnceTool?.description || '') || !/work_begin\/terminal_start/i.test(workOnceTool?.description || '')) throw new Error('work_once timeout guidance regression');
+  if (workOnceTool?.inputSchema?.properties?.timeoutMs?.maximum !== 86400000) throw new Error('work_once accepted timeout range regression');
+  if (!/60000 ms \(60 seconds\)/i.test(workOnceTool?.description || '') || !/safe redirect/i.test(workOnceTool?.description || '') || !/work_begin\/terminal_start/i.test(workOnceTool?.description || '')) throw new Error('work_once timeout redirect guidance regression');
+  const redirectedWork = await call('work_once',{command:'node --version',timeoutMs:120000});
+  if (redirectedWork.executed !== false || redirectedWork.redirected !== true || redirectedWork.reason !== 'sync-timeout-exceeds-limit' || redirectedWork.maxSyncTimeoutMs !== 60000 || redirectedWork.recommendedTool !== 'work_begin') throw new Error('work_once long-timeout redirect regression');
   if (evidenceTool.inputSchema?.properties?.limit?.default !== 100 || evidenceTool.inputSchema?.properties?.limit?.maximum !== 500) throw new Error('mssr_trace_evidence bounded limit regression');
   const verifyStartTool = registry.tools.find((tool) => tool.name === 'bridge_verify_all');
   const verifyStatusTool = registry.tools.find((tool) => tool.name === 'bridge_verify_status');
@@ -283,6 +285,20 @@ try {
   if (!verifyStatusTool || !registry.riskSummary.readOnly.includes('bridge_verify_status')) throw new Error('bridge_verify_status read-only registration failed');
   const watchdogSource = fs.readFileSync(path.join(process.cwd(), 'scripts', 'start-bridge-http-watchdog.ps1'), 'utf8');
   if (!watchdogSource.includes('[int]$ConsecutiveFailureThreshold = 3') || !watchdogSource.includes('$bridgeReadinessFailures -ge $ConsecutiveFailureThreshold') || !watchdogSource.includes('while process is alive; deferring restart') || !watchdogSource.includes('process-exited')) throw new Error('watchdog transient-readiness debounce regression');
+  const processDiagnosticsPath = path.join(process.cwd(), 'scripts', 'bridge-process-diagnostics.ps1');
+  const processDiagnosticsSource = fs.readFileSync(processDiagnosticsPath, 'utf8');
+  if (!watchdogSource.includes('. $processDiagnosticsPath') || !watchdogSource.includes('processDiagnostics = $processDiagnostics') || !watchdogSource.includes('processExitCode = $ProcessExitCode') || !watchdogSource.includes('Get-BridgeProcessDiagnostics -ProcessId $ProcessId -Port $BridgePort') || !watchdogSource.includes('-ProcessExitCode $bridgeProcessExitCode')) throw new Error('watchdog external process diagnostics wiring regression');
+  if (/CommandLine|Win32_Process[^\n]*CommandLine/i.test(processDiagnosticsSource)) throw new Error('watchdog process diagnostics must not capture command lines');
+  const evidenceIndex = watchdogSource.indexOf('$bridgeRecoveryEvidence = Get-BridgeRecoveryEvidence');
+  const stopIndex = watchdogSource.indexOf('Stop-ProcessState -State $bridgeProcess -Name "bridge HTTP" -ForceExternal', evidenceIndex);
+  if (evidenceIndex < 0 || stopIndex < 0 || evidenceIndex > stopIndex) throw new Error('watchdog must capture recovery evidence before stopping bridge HTTP');
+  if (process.platform === 'win32') {
+    const quotedDiagnosticsPath = processDiagnosticsPath.replaceAll("'", "''");
+    const diagnosticsJson = execFileSync('powershell.exe', ['-NoProfile', '-Command', `. '${quotedDiagnosticsPath}'; Get-BridgeProcessDiagnostics -ProcessId $PID -SampleMilliseconds 10 | ConvertTo-Json -Compress -Depth 5`], { encoding: 'utf8', timeout: 10_000 }).trim();
+    const diagnostics = JSON.parse(diagnosticsJson);
+    if (diagnostics.available !== true || !Number.isInteger(diagnostics.processId) || diagnostics.processId <= 0 || typeof diagnostics.workingSetBytes !== 'number' || typeof diagnostics.threadCount !== 'number' || typeof diagnostics.handleCount !== 'number') throw new Error('watchdog process diagnostics execution regression');
+    if (Object.keys(diagnostics).some((key) => /command/i.test(key))) throw new Error('watchdog process diagnostics leaked command metadata');
+  }
   if (!/^[0-9a-f-]{36}$/.test(RUNTIME_BOOT_ID)) throw new Error('runtime boot identity must be a UUID');
   const workflowCoordinatorA = createMssrTraceSessionCoordinator(registry.tools);
   const unscopedRouteArgs = {task:'Unscoped task A',caller:'chatgpt-web'};
@@ -855,7 +871,11 @@ try {
   const compare = await call('git_compare_branches',{cwd:root,base:'main',head:'fixture-branch'});
   if (compare.diff.code !== 0 || compare.commits.code !== 0) throw new Error('git compare failed');
   const restoreTool = registry.tools.find((tool) => tool.name === 'git_restore_file');
-  if (!restoreTool?.inputSchema?.not) throw new Error('git restore schema must reject staged=false + worktree=false');
+  if (restoreTool?.inputSchema?.not) throw new Error('git restore schema must allow staged=false + worktree=false so the handler can return recovery guidance');
+  const beforeNoTargetRestore = fs.readFileSync(path.join(root,'app.txt'),'utf8');
+  const noTargetRestore = await call('git_restore_file',{cwd:root,path:'app.txt',staged:false,worktree:false});
+  const afterNoTargetRestore = fs.readFileSync(path.join(root,'app.txt'),'utf8');
+  if (noTargetRestore.restored !== false || noTargetRestore.reason !== 'restore-target-not-selected' || noTargetRestore.recovery?.recommendedArguments?.worktree !== true || afterNoTargetRestore !== beforeNoTargetRestore) throw new Error('git restore false/false recovery regression');
   const restored = await call('git_restore_file',{cwd:root,path:'app.txt'});
   const restoredText = fs.readFileSync(path.join(root,'app.txt'),'utf8').replace(/\r\n/g,'\n');
   if (!restored.restored || restoredText !== 'original\n') throw new Error('git restore failed');

@@ -33,6 +33,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$processDiagnosticsPath = Join-Path $PSScriptRoot "bridge-process-diagnostics.ps1"
+if (-not (Test-Path -LiteralPath $processDiagnosticsPath)) {
+  throw "Bridge process diagnostics helper not found: $processDiagnosticsPath"
+}
+. $processDiagnosticsPath
+
 function Write-BridgeLog {
   param([string]$Message, [string]$Level = "info")
   $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -363,9 +369,27 @@ function Get-BridgeRecoveryEvidence {
   param(
     [int]$ReadinessFailures,
     [bool]$ProcessAlive,
+    [int]$ProcessId = 0,
+    [object]$ProcessExitCode = $null,
     [int]$ReadinessFailureAgeSeconds = 0,
     [int]$AliveGraceSeconds = 0
   )
+
+  # Capture process evidence outside the Bridge HTTP event loop before probing
+  # /status. A wedged event loop can make /status unavailable even while the
+  # process is alive, so recovery evidence must not depend on that endpoint.
+  $processDiagnostics = if ($ProcessId -gt 0) {
+    Get-BridgeProcessDiagnostics -ProcessId $ProcessId -Port $BridgePort -SampleMilliseconds 250
+  }
+  else {
+    [ordered]@{
+      observedAt = (Get-Date).ToUniversalTime().ToString("o")
+      processId = $null
+      available = $false
+      reason = "process-id-unavailable"
+      port = $BridgePort
+    }
+  }
 
   $statusSnapshot = $null
   $statusError = $null
@@ -398,6 +422,8 @@ function Get-BridgeRecoveryEvidence {
     readinessFailureAgeSeconds = $ReadinessFailureAgeSeconds
     aliveReadinessGraceSeconds = $AliveGraceSeconds
     processAlive = $ProcessAlive
+    processExitCode = $ProcessExitCode
+    processDiagnostics = $processDiagnostics
     status = $statusSnapshot
     statusError = $statusError
   }
@@ -540,7 +566,16 @@ try {
         $bridgeReadinessFailureAgeSeconds -ge $AliveReadinessGraceSeconds
       if (-not $bridgeProcessAlive -or $bridgeReadinessSustained) {
         $bridgeRecoveryReason = if (-not $bridgeProcessAlive) { "process-exited" } else { "readiness-sustained" }
-        $bridgeRecoveryEvidence = Get-BridgeRecoveryEvidence -ReadinessFailures $bridgeReadinessFailures -ProcessAlive $bridgeProcessAlive -ReadinessFailureAgeSeconds $bridgeReadinessFailureAgeSeconds -AliveGraceSeconds $AliveReadinessGraceSeconds
+        $bridgeProcessId = if ($bridgeProcess -and $bridgeProcess.Process) { [int]$bridgeProcess.Process.Id } else { 0 }
+        $bridgeProcessExitCode = $null
+        if (-not $bridgeProcessAlive -and $bridgeProcess -and $bridgeProcess.Process) {
+          try {
+            $bridgeProcess.Process.Refresh()
+            if ($bridgeProcess.Process.HasExited) { $bridgeProcessExitCode = [int]$bridgeProcess.Process.ExitCode }
+          }
+          catch {}
+        }
+        $bridgeRecoveryEvidence = Get-BridgeRecoveryEvidence -ReadinessFailures $bridgeReadinessFailures -ProcessAlive $bridgeProcessAlive -ProcessId $bridgeProcessId -ProcessExitCode $bridgeProcessExitCode -ReadinessFailureAgeSeconds $bridgeReadinessFailureAgeSeconds -AliveGraceSeconds $AliveReadinessGraceSeconds
         Write-BridgeLog "Bridge HTTP recovery triggered reason=$bridgeRecoveryReason readinessFailures=$bridgeReadinessFailures threshold=$ConsecutiveFailureThreshold ageSeconds=$bridgeReadinessFailureAgeSeconds graceSeconds=$AliveReadinessGraceSeconds" "warn"
         Stop-ProcessState -State $bridgeProcess -Name "bridge HTTP" -ForceExternal
         Stop-PortOwner -Port $BridgePort -Name "bridge HTTP" -ExpectedCommandPattern $bridgeCommandPattern
