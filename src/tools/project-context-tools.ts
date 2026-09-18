@@ -20,6 +20,7 @@ import {
   evaluateProjectChangeConsistency,
   initializeMssrProject,
   initializeMssrWorkspace,
+  maintainMssrProjectContext,
   mssrProjectKnowledgeCaptureInputSchema,
   mssrProjectRelativePath,
   parseVersionChangelogMarkdown,
@@ -275,12 +276,66 @@ export const projectContextToolModule: BridgeToolModule = {
       description: "Run portable MSSR Project Context Health for one repository. Reports ok/watch/review plus missing/invalid initialization, legacy MSSR artifacts, oversized authorities/modules, missing sources and unindexed .mssr/knowledge files. Read-only and advisory.",
       inputSchema: { type: "object", properties: { projectRoot: { type: "string" } }, required: ["projectRoot"], additionalProperties: false },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      metadata: {
+        role: "dedicated",
+        family: "project-context",
+        lifecycle: "protected",
+        usage: {
+          recovery: [{
+            code: "project-context-pressure",
+            toolName: "project_context_modularization_plan",
+            instruction: "When WATCH/REVIEW reports growth or budget pressure, inspect the modularization plan. If it exposes exact already-indexed non-core candidates, use project_context_maintain; semantic/core blockers require explicit review rather than an invented split.",
+          }],
+        },
+      },
     },
     {
       name: "project_context_modularization_plan",
       description: "Read-only MSSR planner for Project Context Health pressure. It proposes exact hash-addressed moves of already-indexed sections from growing PROJECT_* authorities into .mssr/knowledge/<topic>/, preserves parent selectors/kind, identifies core decisions separately, and lists large unindexed sections for review. It never mutates or semantically rewrites project knowledge.",
       inputSchema: { type: "object", properties: { projectRoot: { type: "string" } }, required: ["projectRoot"], additionalProperties: false },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      metadata: {
+        role: "dedicated",
+        family: "project-context",
+        lifecycle: "protected",
+        usage: {
+          preflightTools: ["project_context_health"],
+          recovery: [{
+            code: "safe-exact-candidates",
+            toolName: "project_context_maintain",
+            instruction: "Apply only the MSSR-produced exact safe candidates. If the plan reports core, whole-file, overlap or semantic-segmentation review, do not synthesize a split.",
+          }],
+        },
+      },
+    },
+    {
+      name: "project_context_maintain",
+      description: "Apply MSSR-owned safe Project Context maintenance after health pressure is observed. It automatically relocates only exact already-indexed non-core Markdown sections into .mssr/knowledge/<topic>/ while preserving module id, kind, selectors, bytes and readback hashes. It never invents summaries, selectors or semantic segment boundaries: core narrowing, whole-file semantic splits, overlapping consumers and pressured semantic segments return review-required blockers instead of being rewritten.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectRoot: { type: "string" },
+          maxOperations: { type: "number", minimum: 1, maximum: 32, default: 8 },
+          expectedManifestSha256: { type: "string", pattern: "^[0-9a-fA-F]{64}$" },
+        },
+        required: ["projectRoot"],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+      metadata: {
+        role: "dedicated",
+        family: "project-context",
+        lifecycle: "protected",
+        usage: {
+          prerequisites: ["Run after Project Context Health or the modularization plan reports pressure/fanout. The executor may move only exact already-indexed non-core sections; it is not a semantic summarizer."],
+          preflightTools: ["project_context_health", "project_context_modularization_plan"],
+          recovery: [
+            { code: "whole-file-module-requires-semantic-segmentation", instruction: "Review and declare semantic segmentation explicitly; never let the host invent segment boundaries." },
+            { code: "semantic-segment-budget-pressure-requires-review", instruction: "Review the existing semantic segments/budget explicitly; automatic maintenance must abstain." },
+            { code: "core-requires-explicit-minimum-decision", instruction: "Decide the minimum core authority explicitly before moving or narrowing it." },
+          ],
+        },
+      },
     },
     {
       name: "project_context_initialize",
@@ -382,6 +437,19 @@ export const projectContextToolModule: BridgeToolModule = {
       const parsed = z.object({ projectRoot: z.string().min(1) }).strict().parse(raw);
       const projectRoot = resolveToolPath(parsed.projectRoot, { access: "read" });
       return await planMssrProjectContextModularization(projectRoot);
+    },
+    project_context_maintain: async (raw) => {
+      const parsed = z.object({
+        projectRoot: z.string().min(1),
+        maxOperations: z.number().int().min(1).max(32).default(8),
+        expectedManifestSha256: z.string().regex(/^[0-9a-fA-F]{64}$/).optional(),
+      }).strict().parse(raw);
+      const projectRoot = resolveToolPath(parsed.projectRoot, { access: "write" });
+      return await maintainMssrProjectContext({
+        projectRoot,
+        maxOperations: parsed.maxOperations,
+        ...(parsed.expectedManifestSha256 ? { expectedManifestSha256: parsed.expectedManifestSha256 } : {}),
+      });
     },
     project_context_initialize: async (raw) => {
       const parsed = z.object({

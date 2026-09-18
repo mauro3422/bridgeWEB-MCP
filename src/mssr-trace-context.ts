@@ -503,6 +503,19 @@ export function createMssrTraceSessionCoordinator(
       resolutionMessage: `La revisión de conocimiento durable para ${state.traceId} quedó cerrada para la revisión actual. Evidencia histórica puede permanecer en la traza, pero ya no requiere atención operativa hasta una nueva invalidación.`,
       recommendation: "Revisa sólo las autoridades señaladas y registra updated vs reviewed-none; no autoescribas desde la notificación.",
     });
+    const actions: Array<{ label: string; toolName: string; arguments?: JsonRecord; instruction: string }> = [{
+      label: "Revisar mantenimiento MSSR",
+      toolName: "skill_bootstrap",
+      instruction: "Reusa esta traceId y el objetivo resuelto. Replanifica en la fase adecuada (preferentemente close), carga skill-maintenance-loop y sólo las autoridades .mssr/skills señaladas; decide updated vs reviewed-none con diff/readback. No autoescribas desde la notificación.",
+    }];
+    if (state.projectRootHint && advisory.targets.some((target) => target.target === "context")) {
+      actions.push({
+        label: "Aplicar mantenimiento estructural seguro",
+        toolName: "project_context_maintain",
+        arguments: { projectRoot: state.projectRootHint },
+        instruction: "Usa el executor MSSR sólo para movimientos exactos ya indexados. Si devuelve review-required por core, whole-file, overlap o semantic segmentation, detente y revisa la semántica explícitamente.",
+      });
+    }
     return adaptMssrOperationalDecision(decision, {
       traceId: state.traceId,
       stage: state.stage,
@@ -523,11 +536,7 @@ export function createMssrTraceSessionCoordinator(
       projectContextHealth: state.projectContextHealth,
       recommendedSkills: [...advisory.recommendedSkills],
       advisoryOnly: true,
-    }, [{
-      label: "Revisar mantenimiento MSSR",
-      toolName: "skill_bootstrap",
-      instruction: "Reusa esta traceId y el objetivo resuelto. Replanifica en la fase adecuada (preferentemente close), carga skill-maintenance-loop y sólo las autoridades .mssr/skills señaladas; decide updated vs reviewed-none con diff/readback. No autoescribas desde la notificación.",
-    }]);
+    }, actions);
   }
 
   function contextFreshnessNotice(

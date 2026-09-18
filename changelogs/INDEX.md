@@ -4,6 +4,7 @@ Versioned release notes are the canonical change-history surface for MSSR debugg
 
 ## Current releases
 
+- [0.6.129](0.6.129.md) - Expose MSSR safe Project Context maintenance so exact indexed sections can move to reference-backed knowledge modules under pressure while semantic splits remain review-only.
 - [0.6.128](0.6.128.md) - Harden multi-agent liveness with safe long-work redirect, recoverable Git restore no-op, external watchdog process/exit evidence, concurrent MCP readiness regression, MSSR 0.2.63, and modular project memory.
 - [0.6.127](0.6.127.md) - Reconcile stale Bridge MSSR RAM with fresher persisted lifecycle state and harden compact skill-context delivery so optional diagnostics cannot overflow a valid response envelope.
 - [0.6.126](0.6.126.md) - Stabilize multi-chat Bridge transport with long keep-alive, async hot paths, bounded tunnel diagnostics, and sustained-readiness watchdog recovery.

@@ -766,6 +766,9 @@ try {
   assert.ok(healthReviewNotice, 'REVIEW Project Context Health must surface maintenance due.');
   assert.equal(healthReviewNotice.details?.projectInitialized, true);
   assert.equal(healthReviewNotice.details?.projectContextHealth, 'review');
+  const safeMaintenanceAction = healthReviewNotice.actions?.find((item) => item.toolName === 'project_context_maintain');
+  assert.ok(safeMaintenanceAction, 'Project Context REVIEW notice should expose the MSSR safe structural maintainer.');
+  assert.equal(safeMaintenanceAction.arguments?.projectRoot, 'D:\\Dev\\bridge-mcp');
   const healthReviewSnapshot = healthReview.snapshot();
   assert.equal(healthReviewSnapshot.projectMaintenance?.projectInitialized, true);
   assert.equal(healthReviewSnapshot.projectMaintenance?.projectContextHealth, 'review');
