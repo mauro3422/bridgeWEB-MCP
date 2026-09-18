@@ -630,7 +630,7 @@ Las tools Git filtran archivos sensibles de diffs y commits mostrados. `git_comm
 ## Docs relacionadas
 
 ```text
-STATUS_CURRENT.md
+STATUS_CURRENT.md  (deprecated compatibility pointer; use .mssr/PROJECT_STATE.md + live health)
 docs/REPOSITORY_STRUCTURE.md
 TOOLS.md
 CONNECTOR_CONTEXT.md

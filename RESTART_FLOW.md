@@ -24,6 +24,8 @@ Ack file:
 
 Both are runtime coordination files and are ignored by Git.
 
+The watchdog publishes `.bridge-restart-ack` transactionally: it writes and parses a unique temporary UTF-8 JSON file first, validates the required acknowledgement identity fields, replaces the public ack only after validation, then reads the published file back and rejects empty or mismatched content. Temporary ack files are cleaned in `finally`. A valid ack proves that the watchdog processed the restart request; package/source/dist/live parity must still be verified separately before claiming release adoption.
+
 ## MCP system tools
 
 Added in v0.4.0:

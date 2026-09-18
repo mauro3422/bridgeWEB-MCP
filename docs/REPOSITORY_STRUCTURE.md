@@ -45,7 +45,7 @@ tools/
 ```text
 README.md                installation, operation and public entry point
 AGENTS.md                repository working rules
-STATUS_CURRENT.md        concise live-verified operating snapshot
+STATUS_CURRENT.md        deprecated compatibility pointer; current state lives in .mssr/PROJECT_STATE.md + live health
 TOOLS.md                 generated registry reference
 CHANGELOG.md             released behavior
 ROADMAP.md               planned work

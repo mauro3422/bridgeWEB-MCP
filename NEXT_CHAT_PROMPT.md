@@ -13,15 +13,21 @@ A new ChatGPT or Codex session should not trust copied runtime facts from this d
 5. inspect `git status` and the relevant source before mutation;
 6. run the project gates before commit and `bridge_verify_all` for release/runtime closure.
 
-Durable authorities:
+Durable authorities and live evidence:
 
 ```text
 AGENTS.md
-STATUS_CURRENT.md
-docs/REPOSITORY_STRUCTURE.md
+.mssr/project-context.json
+.mssr/PROJECT_CONTEXT.md
+.mssr/PROJECT_MEMORY.md
+.mssr/PROJECT_STATE.md
+changelogs/INDEX.md
 docs/INCIDENTS.md
 README.md
 TOOLS.md
+bridge_health(check="all")
 ```
+
+`STATUS_CURRENT.md` is only a deprecated compatibility pointer and must not be treated as a current-state authority.
 
 Do not restore a large pasted prompt here. Project context, live health and Git are the sources of truth.

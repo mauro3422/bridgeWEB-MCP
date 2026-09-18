@@ -362,7 +362,31 @@ function Write-RestartAck {
     request = $Request
     evidence = $Evidence
   }
-  $ack | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $ackPath -Encoding UTF8
+
+  $ackJson = $ack | ConvertTo-Json -Depth 10
+  $tempPath = "$ackPath.$PID.$([guid]::NewGuid().ToString('N')).tmp"
+  try {
+    [System.IO.File]::WriteAllText($tempPath, $ackJson, [System.Text.UTF8Encoding]::new($false))
+    $tempText = [System.IO.File]::ReadAllText($tempPath, [System.Text.Encoding]::UTF8)
+    $tempAck = $tempText | ConvertFrom-Json -ErrorAction Stop
+    if (-not $tempAck.id -or -not $tempAck.action -or -not $tempAck.acknowledgedAt) {
+      throw "restart ack validation failed before publish"
+    }
+
+    Move-Item -LiteralPath $tempPath -Destination $ackPath -Force
+
+    $publishedText = [System.IO.File]::ReadAllText($ackPath, [System.Text.Encoding]::UTF8)
+    if ([string]::IsNullOrWhiteSpace($publishedText)) {
+      throw "restart ack publish produced an empty file"
+    }
+    $publishedAck = $publishedText | ConvertFrom-Json -ErrorAction Stop
+    if ($publishedAck.id -ne $ack.id -or $publishedAck.action -ne $Action) {
+      throw "restart ack readback did not match the published acknowledgement"
+    }
+  }
+  finally {
+    Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+  }
 }
 
 function Get-BridgeRecoveryEvidence {

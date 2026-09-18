@@ -270,6 +270,47 @@ if (status.lastAck.id !== "bom-test" || status.lastAck.action !== "restart-http"
     Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
   }
 }
+Invoke-Check "restart ack publish is non-empty, validated, and temp-clean" {
+  $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("bridge-ack-publish-" + [Guid]::NewGuid().ToString("N"))
+  New-Item -ItemType Directory -Path $tmp | Out-Null
+  try {
+    $watchdogPath = (Resolve-Path -LiteralPath ".\scripts\start-bridge-http-watchdog.ps1").Path
+    $tokens = $null
+    $parseErrors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($watchdogPath, [ref]$tokens, [ref]$parseErrors)
+    if ($parseErrors.Count -gt 0) { throw "watchdog PowerShell parse failed" }
+    $functionAst = $ast.Find({
+      param($node)
+      $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq "Write-RestartAck"
+    }, $true)
+    if (-not $functionAst) { throw "Write-RestartAck function not found" }
+    Invoke-Expression $functionAst.Extent.Text
+
+    $ProjectRoot = $tmp
+    $RestartAckFile = ".bridge-restart-ack"
+    $Profile = "regression"
+    $BridgeHost = "127.0.0.1"
+    $BridgePort = 3001
+    $TunnelBaseUrl = "http://127.0.0.1:8081"
+    $ackPath = Join-Path $tmp $RestartAckFile
+    [System.IO.File]::WriteAllText($ackPath, '{"id":"old","action":"old"}', [System.Text.UTF8Encoding]::new($false))
+
+    $request = [pscustomobject]@{ id = "atomic-test"; reason = "regression"; mode = "http" }
+    Write-RestartAck -Request $request -Action "restart-http"
+
+    $item = Get-Item -LiteralPath $ackPath
+    if ($item.Length -le 0) { throw "published restart ack is empty" }
+    $published = [System.IO.File]::ReadAllText($ackPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json -ErrorAction Stop
+    if ($published.id -ne "atomic-test" -or $published.action -ne "restart-http") { throw "published restart ack mismatch" }
+    $tempFiles = @(Get-ChildItem -LiteralPath $tmp -Filter ".bridge-restart-ack.*.tmp" -File -ErrorAction SilentlyContinue)
+    if ($tempFiles.Count -ne 0) { throw "restart ack temp file leaked" }
+    Write-Host "  OK validated ack publish and temp cleanup"
+  }
+  finally {
+    Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}
+
 
 Invoke-Check "tool annotations and compact safe tools are registered" {
   $nodeScript = @'

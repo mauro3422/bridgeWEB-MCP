@@ -19,6 +19,26 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-09-18 — El restart ack podía quedar vacío durante su publicación
+
+**Estado:** Failure mode corregido y cubierto por regresión en source/dist 0.6.133; adopción live y readback del ack nuevo pendientes al registrar esta entrada.
+
+**Capa/owner:** coordinación de restart del watchdog externo de `bridge-mcp`. El ack es evidencia host-owned de que el watchdog procesó una solicitud; no prueba por sí solo qué bytes/versiones quedaron adoptados.
+
+**Síntoma observable:** después de la adopción controlada de Bridge 0.6.132, `.bridge-restart-request` había sido consumido y el nuevo PID/boot/version estaban probados de forma independiente, pero `.bridge-restart-ack` quedó en 0 bytes. `bridge_restart_status`/`bridge_health` lo proyectaban como `parseError` con texto vacío.
+
+**Evidencia/reproducción:** el writer canónico `Write-RestartAck` serializaba el objeto y publicaba directamente sobre el destino con `Set-Content`. Ese patrón permite un estado intermedio observable con el archivo destino truncado antes de completar la escritura. La forma de fallo observada —archivo existente de 0 bytes— coincide exactamente con esa ventana; no existe evidencia retroactiva suficiente para demostrar qué interrupción concreta ocurrió durante el restart de 0.6.132.
+
+**Causa demostrada:** la publicación directa no era atómica ni validaba/readbackeaba el JSON antes de reemplazar el ack anterior. Ese defecto de robustez sí está demostrado aunque el instante exacto que dejó vacío el archivo histórico no pueda reconstruirse.
+
+**Corrección:** 0.6.133 escribe primero un archivo temporal UTF-8, lo parsea y exige `id`, `action` y `acknowledgedAt`; sólo entonces reemplaza el ack publicado, vuelve a leerlo, rechaza contenido vacío o identidad distinta y limpia cualquier temporal en `finally`.
+
+**Regresión:** `scripts/test-bridge-regressions.ps1` conserva la prueba de lectura con BOM y añade `restart ack publish is non-empty, validated, and temp-clean`, que ejecuta el `Write-RestartAck` real extraído del watchdog, reemplaza un ack previo, valida JSON/id/action y exige cero temporales residuales.
+
+**Seguimiento:** el restart controlado de 0.6.133 debe producir un ack parseable/no vacío cuyo `id` coincida con la request, además de verificar por separado package/source/dist/live, MSSR instalado, health y catálogo.
+
+---
+
 ## 2026-09-17 — HTTP child exited y la recuperación carecía de evidencia externa suficiente
 
 **Estado:** Hardening implementado y cubierto por regresión en 0.6.128; causa del exit original no resuelta. Adopción live pendiente al momento de registrar este incidente.
