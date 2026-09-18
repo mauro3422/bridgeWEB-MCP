@@ -238,17 +238,29 @@ Invoke-Check "mcp session lifecycle" {
     }
   }
 
-  $afterSessions = -1
-  foreach ($attempt in 1..20) {
-    $afterSessions = [int](Invoke-RestMethod "$BaseUrl/status").sessions
-    if ($afterSessions -le $baselineSessions) { break }
-    Start-Sleep -Milliseconds 100
+  # Validate the exact session identity instead of comparing the global session
+  # count. Other MCP clients may initialize concurrently, so total sessions can
+  # legitimately increase even when this test session was released correctly.
+  $afterSessions = [int](Invoke-RestMethod "$BaseUrl/status").sessions
+  $closedSessionStatus = 0
+  try {
+    $closedProbe = Invoke-WebRequest `
+      -UseBasicParsing `
+      -Uri "$BaseUrl$McpPath" `
+      -Method DELETE `
+      -Headers @{ Accept = "application/json, text/event-stream"; "Mcp-Session-Id" = $sessionId } `
+      -ErrorAction Stop
+    $closedSessionStatus = [int]$closedProbe.StatusCode
+  } catch {
+    if ($null -ne $_.Exception.Response) {
+      $closedSessionStatus = [int]$_.Exception.Response.StatusCode
+    }
   }
-  if ($afterSessions -gt $baselineSessions) {
-    throw "MCP session was not released: before=$baselineSessions after=$afterSessions session=$sessionId"
+  if ($closedSessionStatus -ne 404) {
+    throw "Deleted MCP session remained addressable: status=$closedSessionStatus session=$sessionId before=$baselineSessions after=$afterSessions"
   }
 
-  Write-Host "  OK initialize/initialized/delete session=$sessionId before=$baselineSessions after=$afterSessions"
+  Write-Host "  OK initialize/initialized/delete session=$sessionId exactSessionReleased=true before=$baselineSessions after=$afterSessions"
 }
 
 Write-Host "[bridge-http-test] all checks passed"
