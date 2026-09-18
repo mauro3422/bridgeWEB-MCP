@@ -4,6 +4,7 @@ Versioned release notes are the canonical change-history surface for MSSR debugg
 
 ## Current releases
 
+- [0.6.134](0.6.134.md) - Contextual low-noise notice delivery: current trace/project attention first, unrelated-project count-only summaries, global history recovery, lifecycle supersession/resolution, oversized-queue bypass/compaction, and restart reconciliation.
 - [0.6.133](0.6.133.md) - Adopt MSSR 0.2.65, publish restart acknowledgements through validated temp/readback replacement, deprecate stale STATUS_CURRENT state duplication, and review the remaining non-actionable Project Context module-count WATCH.
 - [0.6.132](0.6.132.md) - Refresh vulnerable production transitives within existing MCP dependency ranges: fast-uri 3.1.8, hono 4.13.8, and qs 6.16.0, without changing Bridge/MSSR semantics.
 - [0.6.131](0.6.131.md) - Keep Project Situation current-canonical: retained historical receipts remain audit evidence, while obsolete non-current sources no longer create false canonical-baseline gaps.

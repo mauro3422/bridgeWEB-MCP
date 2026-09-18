@@ -7,10 +7,10 @@ El objetivo es tener un puente local controlado por nosotros para operar filesys
 ## Estado actual
 
 ```text
-bridge-mcp current release v0.6.107
-Live runtime: v0.6.107
-Packaged MSSR: 0.2.32
-Mode: Streamable HTTP live; Operational Notice Plane Gate E5 migration/invariant integration closed and live-verified
+bridge-mcp source release v0.6.134
+Live runtime: v0.6.133 (pending 0.6.134 adoption)
+Packaged MSSR: 0.2.65
+Mode: Streamable HTTP live; contextual low-noise notice delivery prepared in 0.6.134, preserving one global history/transport
 Project root: D:\Dev\bridge-mcp
 Bridge MCP: http://127.0.0.1:3001/mcp
 Bridge status: http://127.0.0.1:3001/status
@@ -116,6 +116,8 @@ Desde 0.6.100, el mismo contrato cubre también lifecycle idle/missing-outcome, 
 Desde 0.6.105, C2e conecta proyecto+memoria con el mismo plano: `src/project-situation.ts` observa proyectos gestionados que tengan receipts operativamente activos del Context Plane, compara las revisiones entregadas de PROJECT_CONTEXT/PROJECT_MEMORY/PROJECT_STATE/changelogs/ADRs con las revisiones canónicas actuales mediante el MSSR empaquetado y entrega la contradicción a C2c/C2d. En 0.6.107 el paquete MSSR es `0.2.32`; `/api/mssr/project-situation` sigue exponiendo sólo metadata acotada. `noticeClass`, categoría y prioridad sirven para enrutar atención, pero no crean otra cola ni otra autoridad. Un receipt nuevo/una carga actual reemplaza evidencia vieja para esa autoridad; una alerta puede resolver sin borrar historia. Bridge sólo muestra acciones C2d `ready` y nunca interpreta prosa libre de memoria como verdad canónica. Ver `docs/SITUATION_MODEL_ADAPTER.md`.
 
 Desde 0.6.106, Gate E3 preserva el `MssrNotice v1` genuino como `BridgeNotice.mssrNotice` dentro del mismo `bridgeNotices`: `noticeId`, dedupe semántico y payload portable quedan intactos; `BridgeNotice.id`, timestamps, TTL, occurrences, mirrors de UI/details y acciones son metadata de delivery del host. En 0.6.107 / MSSR 0.2.32, Gate E5 cierra la migración: E4 direct-host sigue independiente, los notices Bridge-native y external-MCP conservan su identidad, el schema portable sigue rechazando metadata de delivery/ejecución y la cola general de Bridge sigue siendo una sola. Ver `docs/OPERATIONAL_NOTICE_PLANE_ADAPTER.md`.
+
+Desde 0.6.134, la entrega automática es contextual sin crear otro sistema: Bridge prioriza avisos del `traceId`/proyecto/workflow activo, deja los avisos de otros proyectos como conteo (`otherPending`) y conserva sus cuerpos completos en `bridge_notice_history`. La cola pendiente representa atención actual: transiciones MSSR nuevas reemplazan el estado anterior del mismo `noticeId`, `resolved` deja sólo historia, y eventos informativos de Context Message o lifecycle exitoso no ocupan atención. El drenaje ya no puede quedar bloqueado por un notice sobredimensionado; puede entregar un resumen host-only acotado sin modificar el payload MSSR ni el historial global.
 Las guias globales viven en `integrations/workflow-guides/`. Las guias del proyecto tienen prioridad sobre una global con el mismo nombre.
 
 ## Tools expuestas

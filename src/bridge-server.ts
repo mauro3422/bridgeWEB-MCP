@@ -11,8 +11,8 @@ import { beginToolMetric, classifyMssrRoutingStatus, classifyToolAuditError, ext
 import {
   drainBridgeNoticesWithinBudget,
   emitBridgeNotice,
-  type BridgeNotice,
   type BridgeNoticeAction,
+  type BridgeNoticeDeliveryBatch,
   type BridgeNoticeInput,
 } from "./notices.js";
 import { createDefaultToolRegistry } from "./tool-registry.js";
@@ -84,7 +84,7 @@ function extractInternalNotices(data: unknown): { payload: unknown; notices: Bri
   return { payload, notices };
 }
 
-function toolContent(data: JsonValue | unknown, deliveredNotices: BridgeNotice[] = [], remainingNotices = 0) {
+function toolContent(data: JsonValue | unknown, delivery?: BridgeNoticeDeliveryBatch) {
   let payload = data;
   let images: BridgeImageAttachment[] = [];
   if (data && typeof data === "object" && !Array.isArray(data)) {
@@ -102,12 +102,17 @@ function toolContent(data: JsonValue | unknown, deliveredNotices: BridgeNotice[]
     payload = publicPayload;
   }
 
-  if (deliveredNotices.length > 0 || remainingNotices > 0) {
+  if (delivery && (delivery.items.length > 0 || delivery.remaining > 0)) {
     const bridgeNotices = {
       delivery: "automatic-drain",
-      count: deliveredNotices.length,
-      remainingPending: remainingNotices,
-      items: deliveredNotices,
+      scope: "contextual",
+      count: delivery.items.length,
+      remainingPending: delivery.remaining,
+      relevantPending: delivery.relevantPending,
+      otherPending: delivery.otherPending,
+      globalPending: delivery.globalPending,
+      globalHistoryTool: "bridge_notice_history",
+      items: delivery.items,
     };
     payload = payload && typeof payload === "object" && !Array.isArray(payload)
       ? { ...(payload as Record<string, unknown>), bridgeNotices }
@@ -148,6 +153,14 @@ function toolRecoveryActions(toolName: string, error: string | undefined, toolSc
   }] : [];
 }
 
+function metricNoticeScope(event: ReturnType<typeof finishToolMetric>): Record<string, string> {
+  const result: Record<string, string> = {};
+  if (event.traceId && event.traceId !== "unknown") result.traceId = event.traceId;
+  if (event.project && event.project !== "unknown") result.project = event.project;
+  if (event.workflowKey && event.workflowKey !== "unknown" && event.workflowKey !== "unscoped") result.workflowKey = event.workflowKey;
+  return result;
+}
+
 function emitAutomaticMetricNotices(
   toolName: string,
   event: ReturnType<typeof finishToolMetric>,
@@ -165,6 +178,7 @@ function emitAutomaticMetricNotices(
       source: toolName,
       message: event.error || `La herramienta ${toolName} falló.`,
       details: {
+        ...metricNoticeScope(event),
         durationMs: event.durationMs,
         inputKeys: event.inputKeys,
         errorCategory,
@@ -184,6 +198,7 @@ function emitAutomaticMetricNotices(
       source: toolName,
       message: `${toolName} tardó ${event.durationMs} ms, por encima del umbral de ${latencyThresholdMs} ms.`,
       details: {
+        ...metricNoticeScope(event),
         durationMs: event.durationMs,
         thresholdMs: latencyThresholdMs,
         runtimeBootId: RUNTIME_BOOT_ID,
@@ -198,7 +213,7 @@ function emitAutomaticMetricNotices(
       code: "large-tool-response",
       source: toolName,
       message: `${toolName} produjo una respuesta de ${event.outputChars} caracteres.`,
-      details: { outputChars: event.outputChars, thresholdChars: largeOutputThresholdChars },
+      details: { ...metricNoticeScope(event), outputChars: event.outputChars, thresholdChars: largeOutputThresholdChars },
       dedupeKey: `${toolName}:large-tool-response`,
     });
   }
@@ -773,10 +788,20 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
       const bridgeTiming = bridgeTimingFromResult(rawData);
       emitAutomaticMetricNotices(name, event, toolSchema, hasImages, bridgeTiming);
       const delivery = noticeInspectionTools.has(name)
-        ? { items: [] as BridgeNotice[], remaining: 0 }
-        : drainBridgeNoticesWithinBudget(4, compactContextEnvelopeTools.has(name) ? 1_500 : 4_000);
+        ? undefined
+        : drainBridgeNoticesWithinBudget(
+          2,
+          compactContextEnvelopeTools.has(name) ? 1_500 : 4_000,
+          {
+            traceId: metric.traceId,
+            project: metric.project && metric.project !== "unknown" ? metric.project : undefined,
+            workflowKey: metric.workflowKey && metric.workflowKey !== "unknown" && metric.workflowKey !== "unscoped"
+              ? metric.workflowKey
+              : undefined,
+          },
+        );
       const deliveredPayload = withBridgeLatencyMetadata(name, extracted.payload, event.durationMs);
-      return toolContent(deliveredPayload, delivery.items, delivery.remaining);
+      return toolContent(deliveredPayload, delivery);
     };
 
     try {

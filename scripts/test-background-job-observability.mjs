@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 const { processToolModule } = await import('../dist/tools/process-tools.js');
 const { bridgeWorkflowToolModule } = await import('../dist/tools/bridge-workflow.js');
 const { classifyBackgroundActivity } = await import('../dist/tools/shared/process.js');
-const { clearBridgeNotices, drainBridgeNotices } = await import('../dist/notices.js');
+const { clearBridgeNotices, drainBridgeNotices, queryBridgeNoticeHistory } = await import('../dist/notices.js');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const callProcess = async (name, args = {}) => await processToolModule.handlers[name](args);
@@ -58,8 +58,10 @@ try {
   assert.ok(observeDone.stdout.includes('OBSERVE_DONE'));
   assert.ok(observeDone.output.stdoutBytes > 0);
   assert.ok(observeDone.output.stdoutLines >= 1);
-  const observeCompletion = drainBridgeNotices().filter((item) => item.code === 'terminal-session-completed');
+  const observeCompletion = queryBridgeNoticeHistory({limit:50,source:'terminal-session',code:'terminal-session-completed'})
+    .filter((item) => item.details?.sessionId === observe.id);
   assert.equal(observeCompletion.length, 1);
+  assert.equal(observeCompletion[0]?.deliveryState, 'not-delivered', 'successful completion is history-only and must not remain pending attention');
   assert.equal(observeCompletion[0]?.severity, 'info', 'observe timeout must not convert a later exit 0 into failure');
   await callProcess('work_finish', {sessionId: observe.id, traceId:'mssr-fixture-observe'});
   sessions.splice(sessions.indexOf(observe.id), 1);
@@ -83,8 +85,12 @@ try {
   assert.equal(hardDone.timeoutAction, 'terminate');
   assert.equal(hardDone.stdout.includes('SHOULD_NOT_PRINT'), false);
   const hardNotices = drainBridgeNotices();
-  assert.ok(hardNotices.some((item) => item.code === 'terminal-session-timeout-terminating'));
+  assert.equal(hardNotices.length, 1, 'current attention must keep only the latest unresolved state for one terminal session');
   assert.ok(hardNotices.some((item) => item.code === 'terminal-session-completed' && item.severity === 'warning'));
+  const hardTimeoutHistory = queryBridgeNoticeHistory({limit:50,source:'terminal-session',code:'terminal-session-timeout-terminating'})
+    .filter((item) => item.details?.sessionId === hard.id);
+  assert.equal(hardTimeoutHistory.length, 1, 'superseded timeout warning must remain globally recoverable in history');
+  assert.notEqual(hardTimeoutHistory[0]?.deliveryState, 'pending');
   await callProcess('terminal_stop', {sessionId: hard.id, traceId:'mssr-fixture-hard'});
   sessions.splice(sessions.indexOf(hard.id), 1);
 

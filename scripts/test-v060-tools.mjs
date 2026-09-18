@@ -202,13 +202,13 @@ try {
   }).trim());
   if (restartedHistory.status.pendingCount !== 0 || restartedHistory.items.length !== 1 || restartedHistory.items[0].code !== 'restart-history' || restartedHistory.items[0].deliveryCount !== 1) throw new Error('Bridge notice restart persistence failed');
 
-  for (let index = 0; index < 6; index += 1) emitBridgeNotice({severity:'info',code:`bounded-${index}`,source:'fixture',message:'x'.repeat(200)});
+  for (let index = 0; index < 6; index += 1) emitBridgeNotice({severity:'warning',code:`bounded-${index}`,source:'fixture',message:'x'.repeat(200)});
   const boundedDelivery = drainBridgeNoticesWithinBudget(4, 2_000);
   if (boundedDelivery.items.length < 1 || boundedDelivery.items.length > 4 || JSON.stringify(boundedDelivery.items).length > 3_000 || boundedDelivery.remaining < 1) throw new Error('Bridge automatic notice delivery budget failed');
   clearBridgeNotices();
   emitBridgeNotice({severity:'warning',code:'oversized-automatic-notice',source:'fixture',message:'Inspect explicitly',details:{payload:'x'.repeat(6_000)}});
   const oversizedDelivery = drainBridgeNoticesWithinBudget(4, 2_000);
-  if (oversizedDelivery.items.length !== 0 || oversizedDelivery.remaining !== 1) throw new Error('Bridge automatic notice delivery must leave an indivisible oversized notice for explicit inspection');
+  if (oversizedDelivery.items.length !== 1 || oversizedDelivery.items[0].code !== 'oversized-automatic-notice' || oversizedDelivery.items[0].summaryOnly !== true || oversizedDelivery.remaining !== 0) throw new Error('Bridge automatic notice delivery must compact an oversized notice instead of blocking the queue');
   clearBridgeNotices();
 
   const backgroundA = await call('work_begin',{command:'node -e "setTimeout(() => console.log(\'BG_A\'), 120)"',cwd:root,name:'fixture-bg-a',timeoutMs:5_000,cleanupAfterMs:5_000,traceId:'mssr-fixture-background'});
@@ -216,14 +216,17 @@ try {
   if (!backgroundA.id || !backgroundB.id || backgroundA.id === backgroundB.id) throw new Error('parallel work_begin session identity failed');
   const backgroundList = await call('work_show',{traceId:'mssr-fixture-background'});
   if (!backgroundList.some((item) => item.id === backgroundA.id && item.traceId === 'mssr-fixture-background') || !backgroundList.some((item) => item.id === backgroundB.id && item.traceId === 'mssr-fixture-background')) throw new Error('parallel work_show session/trace visibility failed');
-  const startNotices = drainBridgeNotices().filter((item) => item.code === 'terminal-session-started');
-  if (startNotices.length !== 2 || startNotices.some((item) => item.actions?.[0]?.toolName !== 'work_peek' || item.details?.commandStored !== false || item.details?.outputStored !== false)) throw new Error('background terminal start notices failed');
+  const backgroundIds = new Set([backgroundA.id, backgroundB.id]);
+  const startNotices = queryBridgeNoticeHistory({limit:50,source:'terminal-session',code:'terminal-session-started'})
+    .filter((item) => backgroundIds.has(item.details?.sessionId) && item.details?.traceId === 'mssr-fixture-background');
+  if (startNotices.length !== 2 || startNotices.some((item) => item.deliveryState === 'pending' || item.actions?.[0]?.toolName !== 'work_peek' || item.details?.commandStored !== false || item.details?.outputStored !== false)) throw new Error('background terminal start history failed');
   await new Promise((resolve) => setTimeout(resolve, 450));
   const backgroundAResult = await call('work_peek',{sessionId:backgroundA.id,traceId:'mssr-fixture-background'});
   const backgroundBResult = await call('work_peek',{sessionId:backgroundB.id,traceId:'mssr-fixture-background'});
   if (backgroundAResult.running || backgroundBResult.running || !backgroundAResult.stdout.includes('BG_A') || !backgroundBResult.stdout.includes('BG_B')) throw new Error('parallel background work completion/readback failed');
-  const completionNotices = drainBridgeNotices().filter((item) => item.code === 'terminal-session-completed');
-  if (completionNotices.length !== 2 || completionNotices.some((item) => item.severity !== 'info' || item.actions?.[0]?.toolName !== 'work_peek')) throw new Error('background terminal completion notices failed');
+  const completionNotices = queryBridgeNoticeHistory({limit:50,source:'terminal-session',code:'terminal-session-completed'})
+    .filter((item) => backgroundIds.has(item.details?.sessionId) && item.details?.traceId === 'mssr-fixture-background');
+  if (completionNotices.length !== 2 || completionNotices.some((item) => item.deliveryState === 'pending' || item.severity !== 'info' || item.actions?.[0]?.toolName !== 'work_peek')) throw new Error('background terminal completion history failed');
   await call('work_finish',{sessionId:backgroundA.id,traceId:'mssr-fixture-background'});
   await call('work_finish',{sessionId:backgroundB.id,traceId:'mssr-fixture-background'});
   clearBridgeNotices();

@@ -48,6 +48,34 @@ export type BridgeNoticeHistoryEntry = BridgeNotice & {
   deliveryState: "pending" | "delivered" | "not-delivered";
 };
 
+export type BridgeNoticeDeliveryContext = {
+  traceId?: string;
+  project?: string;
+  workflowKey?: string;
+};
+
+export type BridgeNoticeDeliverySummary = {
+  id: string;
+  severity: BridgeNoticeSeverity;
+  code: string;
+  message: string;
+  updatedAt: string;
+  occurrences: number;
+  summaryOnly: true;
+  mssrNoticeId?: string;
+  subject?: string;
+};
+
+export type BridgeNoticeDeliveryItem = BridgeNotice | BridgeNoticeDeliverySummary;
+
+export type BridgeNoticeDeliveryBatch = {
+  items: BridgeNoticeDeliveryItem[];
+  remaining: number;
+  relevantPending: number;
+  otherPending: number;
+  globalPending: number;
+};
+
 const DEFAULT_TTL_MS = 30 * 60 * 1000;
 const HISTORY_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_NOTICES = 100;
@@ -109,6 +137,176 @@ function cloneBridgeNotice(notice: BridgeNotice): BridgeNotice {
     ...(notice.mssrNotice ? { mssrNotice: parseMssrNoticeV1(notice.mssrNotice) } : {}),
   };
 }
+
+function detailsRecord(notice: BridgeNotice): Record<string, unknown> {
+  return notice.details && typeof notice.details === "object" && !Array.isArray(notice.details)
+    ? notice.details
+    : {};
+}
+
+function stringField(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function nestedStringField(value: unknown, key: string): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return stringField((value as Record<string, unknown>)[key]);
+}
+
+function normalizedScopeToken(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return value.trim().replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase() || undefined;
+}
+
+function scopeTokenVariants(value: string | undefined): string[] {
+  const normalized = normalizedScopeToken(value);
+  if (!normalized) return [];
+  const parts = normalized.split("/").filter(Boolean);
+  const leaf = parts.at(-1);
+  return leaf && leaf !== normalized ? [normalized, leaf] : [normalized];
+}
+
+function noticeTraceId(notice: BridgeNotice): string | undefined {
+  const details = detailsRecord(notice);
+  return stringField(details.traceId)
+    ?? nestedStringField(details.continuation, "traceId")
+    ?? notice.actions?.map((action) => nestedStringField(action.arguments, "traceId")).find(Boolean)
+    ?? (notice.mssrNotice?.subject.startsWith("trace-lifecycle:")
+      ? notice.mssrNotice.subject.slice("trace-lifecycle:".length)
+      : undefined);
+}
+
+function noticeProjectTokens(notice: BridgeNotice): string[] {
+  const details = detailsRecord(notice);
+  const candidates = [
+    stringField(details.project),
+    stringField(details.relativeRoot),
+    stringField(details.projectRoot),
+    stringField(details.cwd),
+  ];
+  const subject = notice.mssrNotice?.subject;
+  if (subject?.startsWith("project-situation:")) candidates.push(subject.slice("project-situation:".length));
+  if (subject?.startsWith("project:")) candidates.push(subject.slice("project:".length));
+  return [...new Set(candidates.flatMap(scopeTokenVariants))];
+}
+
+function noticeWorkflowKey(notice: BridgeNotice): string | undefined {
+  return stringField(detailsRecord(notice).workflowKey);
+}
+
+function noticeAttentionKey(notice: BridgeNotice): string {
+  if (notice.mssrNotice) return `mssr:${notice.mssrNotice.noticeId}`;
+  const details = detailsRecord(notice);
+  const sessionId = stringField(details.sessionId);
+  if (notice.source === "terminal-session" && sessionId) return `terminal-session:${sessionId}`;
+  const jobId = stringField(details.jobId);
+  if (notice.source === "bridge-verify-job" && jobId) return `bridge-verify:${jobId}`;
+  return `dedupe:${notice.dedupeKey}`;
+}
+
+function isMssrResolution(notice: BridgeNotice): boolean {
+  if (!notice.mssrNotice) return false;
+  return notice.mssrNotice.details.event === "resolved" || notice.mssrNotice.attentionLevel === "ok";
+}
+
+function isHistoryOnlyNotice(notice: BridgeNotice): boolean {
+  if (isMssrResolution(notice)) return true;
+  if (notice.source === "mssr-context-message-v1" && notice.severity === "info") return true;
+  if (notice.source === "terminal-session" && notice.severity === "info") {
+    return notice.code === "terminal-session-started"
+      || notice.code === "terminal-session-completed"
+      || notice.code === "terminal-session-progress-resumed";
+  }
+  return notice.source === "bridge-verify-job"
+    && notice.severity === "info"
+    && notice.code === "bridge-background-job-progress-resumed";
+}
+
+function clearsCurrentAttention(notice: BridgeNotice): boolean {
+  if (isMssrResolution(notice)) return true;
+  if (notice.source === "terminal-session" && notice.severity === "info") {
+    return notice.code === "terminal-session-completed" || notice.code === "terminal-session-progress-resumed";
+  }
+  return notice.source === "bridge-verify-job"
+    && notice.severity === "info"
+    && notice.code === "bridge-background-job-progress-resumed";
+}
+
+function reconcilePendingNotices(items: BridgeNotice[]): BridgeNotice[] {
+  const latest = new Map<string, { notice: BridgeNotice; index: number }>();
+  items.forEach((notice, index) => {
+    const attentionKey = noticeAttentionKey(notice);
+    if (clearsCurrentAttention(notice)) {
+      latest.delete(attentionKey);
+      return;
+    }
+    if (isHistoryOnlyNotice(notice)) return;
+    latest.set(attentionKey, { notice, index });
+  });
+  return [...latest.values()]
+    .sort((left, right) => left.index - right.index)
+    .map((item) => item.notice)
+    .slice(-MAX_NOTICES);
+}
+
+function noticeRelevance(notice: BridgeNotice, context: BridgeNoticeDeliveryContext): "relevant" | "other" | "global" {
+  const activeTrace = normalizedScopeToken(context.traceId);
+  const noticeTrace = normalizedScopeToken(noticeTraceId(notice));
+  if (activeTrace && noticeTrace) return activeTrace === noticeTrace ? "relevant" : "other";
+
+  const activeProjects = new Set(scopeTokenVariants(context.project));
+  const projectTokens = noticeProjectTokens(notice);
+  if (activeProjects.size > 0 && projectTokens.length > 0) {
+    return projectTokens.some((token) => activeProjects.has(token)) ? "relevant" : "other";
+  }
+
+  const activeWorkflow = normalizedScopeToken(context.workflowKey);
+  const noticeWorkflow = normalizedScopeToken(noticeWorkflowKey(notice));
+  if (activeWorkflow && noticeWorkflow) return activeWorkflow === noticeWorkflow ? "relevant" : "other";
+
+  return "global";
+}
+
+function deliveryPriority(notice: BridgeNotice, context: BridgeNoticeDeliveryContext): number {
+  const relevance = noticeRelevance(notice, context);
+  if (relevance === "other") return -1;
+  if (relevance === "relevant") {
+    if (notice.severity === "error") return 400;
+    if (notice.severity === "warning") return 350;
+    return 300;
+  }
+  if (notice.severity === "error") return 200;
+  if (notice.severity === "warning") return 150;
+  return -1;
+}
+
+function compactDeliverySummary(notice: BridgeNotice, maxChars: number): BridgeNoticeDeliverySummary | null {
+  const summary: BridgeNoticeDeliverySummary = {
+    id: notice.id,
+    severity: notice.severity,
+    code: boundedText(notice.code, 80),
+    message: boundedText(notice.message, Math.max(80, Math.min(260, maxChars - 220))),
+    updatedAt: notice.updatedAt,
+    occurrences: notice.occurrences,
+    summaryOnly: true,
+    ...(notice.mssrNotice ? {
+      mssrNoticeId: boundedText(notice.mssrNotice.noticeId, 120),
+      subject: boundedText(notice.mssrNotice.subject, 160),
+    } : {}),
+  };
+  if (JSON.stringify(summary).length <= maxChars) return summary;
+  const minimal: BridgeNoticeDeliverySummary = {
+    id: notice.id,
+    severity: notice.severity,
+    code: boundedText(notice.code, 60),
+    message: boundedText(notice.message, 80),
+    updatedAt: notice.updatedAt,
+    occurrences: notice.occurrences,
+    summaryOnly: true,
+  };
+  return JSON.stringify(minimal).length <= maxChars ? minimal : null;
+}
+
 function isIsoTimestamp(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
 }
@@ -223,8 +421,8 @@ function restoreNoticeState(): void {
         .filter((item) => Date.parse(item.expiresAt) > now)
         .slice(-MAX_HISTORY)
       : [];
-    queue.splice(0, queue.length, ...restoredQueue);
     history.splice(0, history.length, ...restoredHistory);
+    queue.splice(0, queue.length, ...reconcilePendingNotices(restoredQueue));
   } catch {
     // Persistence is best-effort host state. Corrupt/missing files never block Bridge startup.
   }
@@ -295,8 +493,9 @@ export function emitBridgeNotice(input: BridgeNoticeInput): BridgeNotice {
     return cloneBridgeNotice(existing);
   }
 
+  const historical = history.find((item) => item.dedupeKey === dedupeKey);
   const notice: BridgeNotice = {
-    id: randomId(),
+    id: historical?.id ?? randomId(),
     severity: input.severity,
     code,
     source,
@@ -304,14 +503,25 @@ export function emitBridgeNotice(input: BridgeNoticeInput): BridgeNotice {
     details: safeDetails(input.details),
     actions: safeActions(input.actions),
     ...(mssrNotice ? { mssrNotice } : {}),
-    createdAt: new Date(now).toISOString(),
+    createdAt: historical?.createdAt ?? new Date(now).toISOString(),
     updatedAt: new Date(now).toISOString(),
     expiresAt: new Date(now + ttlMs).toISOString(),
-    occurrences: 1,
+    occurrences: (historical?.occurrences ?? 0) + 1,
     dedupeKey,
-    deliveryCount: 0,
+    deliveryCount: historical?.deliveryCount ?? 0,
+    ...(historical?.lastDeliveredAt ? { lastDeliveredAt: historical.lastDeliveredAt } : {}),
+    ...(historical?.lastDeliveryMode ? { lastDeliveryMode: historical.lastDeliveryMode } : {}),
   };
-  queue.push(notice);
+
+  const attentionKey = noticeAttentionKey(notice);
+  for (let index = queue.length - 1; index >= 0; index -= 1) {
+    if (noticeAttentionKey(queue[index]) === attentionKey) queue.splice(index, 1);
+  }
+
+  // An exact MSSR transition that was already delivered stays quiet until its
+  // semantic fingerprint/event changes. Native failures may legitimately recur.
+  const alreadyDeliveredSemanticEvent = Boolean(mssrNotice && historical && historical.deliveryCount > 0);
+  if (!isHistoryOnlyNotice(notice) && !alreadyDeliveredSemanticEvent) queue.push(notice);
   rememberNotice(notice, now);
   if (queue.length > MAX_NOTICES) queue.splice(0, queue.length - MAX_NOTICES);
   return cloneBridgeNotice(notice);
@@ -370,23 +580,69 @@ export function drainBridgeNotices(limit = MAX_NOTICES): BridgeNotice[] {
   return selected.map(cloneBridgeNotice);
 }
 
-export function drainBridgeNoticesWithinBudget(maxItems = 4, maxChars = 4_000): { items: BridgeNotice[]; remaining: number } {
+export function getBridgeNoticePendingSummary(context: BridgeNoticeDeliveryContext = {}) {
+  cleanupExpired();
+  let relevantPending = 0;
+  let otherPending = 0;
+  let globalPending = 0;
+  for (const notice of queue) {
+    const relevance = noticeRelevance(notice, context);
+    if (relevance === "relevant") relevantPending += 1;
+    else if (relevance === "other") otherPending += 1;
+    else globalPending += 1;
+  }
+  return {
+    pendingCount: queue.length,
+    relevantPending,
+    otherPending,
+    globalPending,
+  };
+}
+
+export function drainBridgeNoticesWithinBudget(
+  maxItems = 4,
+  maxChars = 4_000,
+  context: BridgeNoticeDeliveryContext = {},
+): BridgeNoticeDeliveryBatch {
   cleanupExpired();
   const itemLimit = Math.max(1, Math.min(Math.floor(maxItems), MAX_NOTICES));
   const charLimit = Math.max(512, Math.min(Math.floor(maxChars), 32_000));
-  const selected: BridgeNotice[] = [];
+  const ranked = queue
+    .map((notice, index) => ({ notice, index, priority: deliveryPriority(notice, context) }))
+    .filter((candidate) => candidate.priority >= 0)
+    .sort((left, right) => right.priority - left.priority || left.index - right.index);
+  const selected: Array<{ notice: BridgeNotice; index: number; item: BridgeNoticeDeliveryItem }> = [];
   let used = 0;
-  while (queue.length > 0 && selected.length < itemLimit) {
-    const candidate = queue[0];
-    const chars = JSON.stringify(candidate).length;
-    if (used + chars > charLimit) break;
-    selected.push(queue.shift()!);
-    used += chars;
-    if (used >= charLimit) break;
+
+  for (const candidate of ranked) {
+    if (selected.length >= itemLimit || used >= charLimit) break;
+    const remainingBudget = charLimit - used;
+    const full = cloneBridgeNotice(candidate.notice);
+    const fullChars = JSON.stringify(full).length;
+    const item: BridgeNoticeDeliveryItem | null = fullChars <= remainingBudget
+      ? full
+      : compactDeliverySummary(candidate.notice, remainingBudget);
+    if (!item) continue;
+    selected.push({ notice: candidate.notice, index: candidate.index, item });
+    used += JSON.stringify(item).length;
   }
-  const now = Date.now();
-  for (const notice of selected) markNoticeDelivered(notice, "automatic", now);
-  return { items: selected.map(cloneBridgeNotice), remaining: queue.length };
+
+  if (selected.length > 0) {
+    const now = Date.now();
+    for (const candidate of [...selected].sort((left, right) => right.index - left.index)) {
+      const [removed] = queue.splice(candidate.index, 1);
+      if (removed) markNoticeDelivered(removed, "automatic", now);
+    }
+  }
+
+  const summary = getBridgeNoticePendingSummary(context);
+  return {
+    items: selected.map((candidate) => candidate.item),
+    remaining: summary.pendingCount,
+    relevantPending: summary.relevantPending,
+    otherPending: summary.otherPending,
+    globalPending: summary.globalPending,
+  };
 }
 
 export function clearBridgeNotices(): number {

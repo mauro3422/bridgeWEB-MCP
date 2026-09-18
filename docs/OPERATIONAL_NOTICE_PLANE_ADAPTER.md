@@ -69,6 +69,20 @@ Gate E5 changes no notice transport algorithm. It adopts MSSR 0.2.32 and proves 
 
 The integration regression is `scripts/test-operational-notice-e5-invariants.mjs`. Gate E5 is complete only after full Bridge regression plus controlled live package/runtime readback prove the same invariants on the adopted release.
 
+## Contextual delivery policy — 0.6.134
+
+Bridge still has one notice transport, but the host delivery policy now separates **current attention** from the **global audit ledger**. `bridgeNotices` pending queue represents the latest unresolved attention state; `bridge_notice_history` remains the bounded 24-hour global history.
+
+- MSSR `MssrNotice.noticeId` is reused only as a host-side attention grouping key. A newer `opened/changed/escalated/deescalated` transition supersedes the older pending wrapper for the same semantic lifecycle without altering the portable payload. `resolved`/`attentionLevel=ok` clears that current pending attention and remains history-only.
+- Informational Context Messages and successful terminal/job lifecycle events are history-only by default. Warning/error lifecycle states remain active attention; a later resume/success signal clears them.
+- Automatic response delivery is contextual: exact active `traceId` has precedence, then project/workflow scope. Notices scoped to another trace/project are not injected into the active response; their bodies remain globally recoverable while the response reports bounded `otherPending` counts. Unscoped warnings/errors remain eligible as global operational attention.
+- Delivery is capped to two notice bodies per ordinary MCP response. The envelope reports `relevantPending`, `otherPending`, `globalPending`, and points to `bridge_notice_history` for explicit global inspection.
+- Budgeting is non-blocking. An oversized queue head cannot block later notices: Bridge scans eligible candidates and emits a host-only compact delivery summary when it fits. The full notice remains unchanged in history. With an exceptionally tiny residual budget, Bridge may skip that candidate for the current response and continue with another bounded notice.
+- Exact MSSR semantic transitions already delivered once remain quiet until their fingerprint/event changes. Native Bridge failures retain recurrence semantics because a fresh host failure can be operationally meaningful even with the same native dedupe key.
+- Persisted pre-0.6.134 queues are reconciled on startup using the same lifecycle rules, preventing historical `started/resolved/resumed` wrappers from becoming fresh pending attention after restart.
+
+This is a host delivery policy only; it adds no second queue, semantic watcher, scheduler, or mutation authority.
+
 ## First producer slice — 0.6.99
 
 `src/operational-notices.ts` adapts two existing metadata-only daily projections:
