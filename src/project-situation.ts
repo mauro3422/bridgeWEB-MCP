@@ -122,6 +122,22 @@ function receiptIsOperationallyActive(receipt: MssrContextDeliveryReceipt, nowMs
   return Number.isFinite(selectedAt) && nowMs - selectedAt <= legacyMaxAgeMs;
 }
 
+function currentCanonicalReceiptSources(
+  receipts: readonly MssrContextDeliveryReceipt[],
+  observations: readonly MssrProducerObservation[],
+): MssrContextDeliveryReceipt[] {
+  const currentSources = new Set(
+    observations
+      .filter((item) => item.authoritative === true && item.provenance === "project" && item.revision)
+      .map((item) => `${item.canonicalOwner}\0${item.ref}`),
+  );
+
+  return receipts.flatMap((receipt) => {
+    const sources = receipt.sources.filter((source) => currentSources.has(`${source.canonicalOwner}\0${source.ref}`));
+    return sources.length > 0 ? [{ ...receipt, sources }] : [];
+  });
+}
+
 function emptyItem(workspaceRoot: string, projectRoot: string): ProjectSituationItem {
   const relativeRoot = path.relative(workspaceRoot, projectRoot).replace(/\\/g, "/") || ".";
   return {
@@ -212,12 +228,17 @@ export async function collectProjectSituationSnapshot(options: {
         continue;
       }
       const repository = await collectRepository(projectRoot);
+      const currentReceipts = currentCanonicalReceiptSources(activeReceipts, repository.observations);
+      if (currentReceipts.length === 0) {
+        projects.push(base);
+        continue;
+      }
       const observations = buildMssrKnowledgeRevisionSituation({
         repositoryObservations: repository.observations,
-        deliveryReceipts: activeReceipts,
+        deliveryReceipts: currentReceipts,
       });
       const situation = evaluateMssrSituationModel({ boundary: "context-load", observations });
-      projects.push(itemFromSituation(workspaceRoot, projectRoot, activeReceipts.length, situation));
+      projects.push(itemFromSituation(workspaceRoot, projectRoot, currentReceipts.length, situation));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         projects.push(base);

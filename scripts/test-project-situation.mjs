@@ -84,6 +84,39 @@ assert.equal(stale.projects[0].nextAction, "revalidate-context-evidence");
 assert.deepEqual(stale.projects[0].staleRefs, [".mssr/PROJECT_MEMORY.md"]);
 assert.ok(stale.projects[0].readyActions.includes("revalidate-context-evidence"));
 
+const historicalChangelog = receipt("changelog-old", {
+  messageId: "changelog:changelogs-0.6.1.md",
+  messageKind: "recent-changelog",
+  sources: [{
+    kind: "changelog",
+    ref: "changelogs/0.6.1.md",
+    summary: "Historical version changelog",
+    canonicalOwner: owner,
+    provenance: "project",
+    freshness: "fresh",
+    observedAt: "2026-08-16T16:00:00.000Z",
+    revision: "changelog-old",
+  }],
+});
+const stalePlusHistorical = await collectProjectSituationSnapshot({
+  workspaceRoot,
+  now,
+  dependencies: deps([receipt("memory-old"), historicalChangelog]),
+});
+assert.equal(stalePlusHistorical.projects[0].level, "review");
+assert.equal(stalePlusHistorical.projects[0].activeReceiptCount, 1, "receipts whose sources are no longer current canonical candidates must remain historical only");
+assert.equal(stalePlusHistorical.projects[0].reasonCodes.includes("canonical-baseline-missing"), false);
+assert.deepEqual(stalePlusHistorical.projects[0].staleRefs, [".mssr/PROJECT_MEMORY.md"]);
+
+const historicalOnly = await collectProjectSituationSnapshot({
+  workspaceRoot,
+  now,
+  dependencies: deps([historicalChangelog]),
+});
+assert.equal(historicalOnly.projects[0].level, "ok");
+assert.equal(historicalOnly.projects[0].activeReceiptCount, 0);
+assert.equal(historicalOnly.counts.activeContext, 0);
+
 const opened = buildProjectSituationNoticeInputs(stale, null);
 assert.equal(opened.length, 1);
 assert.equal(opened[0].code, "mssr-project-situation-review");
