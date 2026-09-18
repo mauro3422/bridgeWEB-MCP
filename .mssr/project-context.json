@@ -514,58 +514,11 @@
       "maxChars": 1600
     },
     {
-      "id": "bridge-trace-owner-integrity",
+      "id": "bridge-trace-integrity-and-lifecycle",
       "kind": "memory",
-      "description": "Bridge MSSR trace project/workflow owner compatibility and implicit recovery invariant.",
+      "description": "Bridge MSSR trace owner integrity plus shared-RAM/persisted lifecycle reconciliation invariant.",
       "source": {
-        "path": ".mssr/knowledge/observability/trace-owner-integrity.md"
-      },
-      "topic": "operations",
-      "area": "trace-identity",
-      "stages": [
-        "implement",
-        "verify",
-        "persist",
-        "close",
-        "resume"
-      ],
-      "domains": [
-        "coding",
-        "agent-orchestration",
-        "skill-system"
-      ],
-      "actions": [
-        "debug",
-        "recover",
-        "verify",
-        "maintain",
-        "analyze"
-      ],
-      "artifacts": [
-        "mcp",
-        "code",
-        "repository"
-      ],
-      "needs": [
-        "integrity-verification",
-        "cross-agent"
-      ],
-      "signals": [
-        "error-observed",
-        "conflicting-evidence",
-        "recovery-needed",
-        "reusable-pattern"
-      ],
-      "required": false,
-      "priority": 80,
-      "maxChars": 2200
-    },
-    {
-      "id": "bridge-trace-lifecycle-reconciliation",
-      "kind": "memory",
-      "description": "Bridge MSSR shared-RAM versus persisted lifecycle freshness and reconciliation invariant.",
-      "source": {
-        "path": ".mssr/knowledge/observability/trace-lifecycle-reconciliation.md"
+        "path": ".mssr/knowledge/observability/trace-integrity-and-lifecycle.md"
       },
       "topic": "operations",
       "area": "trace-lifecycle",
@@ -605,7 +558,7 @@
       ],
       "required": false,
       "priority": 82,
-      "maxChars": 1900
+      "maxChars": 4100
     },
     {
       "id": "bridge-http-transport-readiness-contract",

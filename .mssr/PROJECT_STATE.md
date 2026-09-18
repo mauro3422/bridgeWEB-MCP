@@ -20,7 +20,7 @@ Learning digests remain observe-only with `routingInfluence=false`; they do not 
 
 ## Project knowledge migration
 
-Bridge project control remains canonical under `.mssr/`. Project Context Health is currently WATCH only for `many-modules`: 25 modules warrant an organization review, but the portable modularization planner returns zero safe exact candidates and zero pressured authority sections. This finding was explicitly reviewed for 0.6.133; no semantic merge, selector rewrite, core extraction, or budget increase is justified merely to remove the advisory WATCH.
+Bridge project control remains canonical under `.mssr/`. A full human semantic review of all 25 selectable modules found one exact activation-equivalent pair: `bridge-trace-owner-integrity` and `bridge-trace-lifecycle-reconciliation`. Their owner-integrity and lifecycle-reconciliation contracts now live together in `bridge-trace-integrity-and-lifecycle`, preserving the shared stages/domains/actions/artifacts/needs/signals and the combined prior context budget. The manifest now contains 24 modules; Project Context Health reports `ok` with zero findings/recommendations, so the former `many-modules` WATCH is resolved structurally rather than suppressed. No other modules were merged because their authority or selectors differ, and the separately owned notice-history module remains untouched.
 
 ## Next performance/control work
 
