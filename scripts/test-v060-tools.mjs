@@ -93,7 +93,7 @@ const { closeCodexSkillDiscoveryForTests } = await import('../dist/tools/skill-c
 const { writePersistentCache } = await import('../dist/tools/shared/persistent-cache.js');
 const { asRobloxMcpDiscoveryHealth, classifyRobloxMcpToolCatalog, getRobloxMcpToolRequestOptions, parseRobloxStudios } = await import('../dist/integrations/roblox-mcp-client.js');
 const { extractRobloxMcpImage, validateRobloxCaptureImage } = await import('../dist/tools/roblox-studio-tools.js');
-const { clearBridgeNotices, drainBridgeNotices, drainBridgeNoticesWithinBudget, emitBridgeNotice, getBridgeNoticeStatus, peekBridgeNoticeHistory } = await import('../dist/notices.js');
+const { clearBridgeNotices, drainBridgeNotices, drainBridgeNoticesWithinBudget, emitBridgeNotice, getBridgeNoticeStatus, peekBridgeNoticeHistory, queryBridgeNoticeHistory } = await import('../dist/notices.js');
 const { closeMssrObservatoryForTests, getMssrTraceEvidence, queryMssrObservatory, recordMssrCheckpoint, recordMssrRoute } = await import('../dist/mssr-observatory.js');
 const { buildToolAudit } = await import('../dist/tool-audit.js');
 const { buildBridgeToolFrictionProjection, classifyBridgeToolFrictionSignature } = await import('../dist/mssr-tool-friction.js');
@@ -161,11 +161,46 @@ try {
   emitBridgeNotice({severity:'warning',code:'fixture-warning',source:'fixture',message:'Fixture notice',actions:[{label:'List sessions',toolName:'terminal_list',instruction:'Resolve a live session before retrying.'}]});
   emitBridgeNotice({severity:'warning',code:'fixture-warning',source:'fixture',message:'Fixture notice',actions:[{label:'List sessions',toolName:'terminal_list',instruction:'Resolve a live session before retrying.'}]});
   const noticeStatus = getBridgeNoticeStatus();
-  if (noticeStatus.pendingCount !== 1 || noticeStatus.notices[0].occurrences !== 2 || noticeStatus.notices[0].actions?.[0]?.toolName !== 'terminal_list') throw new Error('Bridge notice dedupe/status/action failed');
+  if (noticeStatus.pendingCount !== 1 || !noticeStatus.hasPending || !noticeStatus.historyAvailable) throw new Error('Bridge notice quiet status failed');
+  const pendingHistory = queryBridgeNoticeHistory({limit:5,deliveryState:'pending'});
+  if (pendingHistory.length !== 1 || pendingHistory[0].occurrences !== 2 || pendingHistory[0].actions?.[0]?.toolName !== 'terminal_list') throw new Error('Bridge notice pending history/dedupe failed');
   const drainedNotices = drainBridgeNotices();
   const noticeHistory = peekBridgeNoticeHistory(5);
+  const deliveredHistory = queryBridgeNoticeHistory({limit:5,deliveryState:'delivered'});
   if (drainedNotices.length !== 1 || getBridgeNoticeStatus().pendingCount !== 0) throw new Error('Bridge notice one-shot drain failed');
   if (!noticeHistory.some((item) => item.code === 'fixture-warning' && item.actions?.[0]?.toolName === 'terminal_list')) throw new Error('Bridge notice history did not retain actionable reminder after drain');
+  if (!deliveredHistory.some((item) => item.code === 'fixture-warning' && item.deliveryCount === 1 && item.lastDeliveryMode === 'manual')) throw new Error('Bridge notice delivery history did not preserve delivery state');
+
+  const persistedNoticeStatePath = path.join(sandbox, 'persisted-bridge-notices.json');
+  const persistedEnv = {
+    ...process.env,
+    BRIDGE_MCP_NOTICE_STATE_PATH: persistedNoticeStatePath,
+    BRIDGE_MCP_NOTICE_PERSISTENCE_ENABLED: '1',
+  };
+  const persistenceWriter = [
+    "const m = await import('./dist/notices.js');",
+    "m.emitBridgeNotice({severity:'warning',code:'restart-history',source:'fixture-persistence',message:'Persist across restart'});",
+    "m.drainBridgeNotices();",
+    "await m.flushBridgeNoticePersistence();",
+    "console.log(JSON.stringify(m.getBridgeNoticeStatus()));",
+  ].join('');
+  const writerStatus = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', persistenceWriter], {
+    cwd: process.cwd(),
+    env: persistedEnv,
+    encoding: 'utf8',
+  }).trim());
+  if (writerStatus.pendingCount !== 0 || writerStatus.historyCount < 1 || writerStatus.historyPersistence !== 'disk-backed') throw new Error('Bridge notice persisted writer status failed');
+
+  const persistenceReader = [
+    "const m = await import('./dist/notices.js');",
+    "console.log(JSON.stringify({status:m.getBridgeNoticeStatus(),items:m.queryBridgeNoticeHistory({source:'fixture-persistence',deliveryState:'delivered'})}));",
+  ].join('');
+  const restartedHistory = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', persistenceReader], {
+    cwd: process.cwd(),
+    env: persistedEnv,
+    encoding: 'utf8',
+  }).trim());
+  if (restartedHistory.status.pendingCount !== 0 || restartedHistory.items.length !== 1 || restartedHistory.items[0].code !== 'restart-history' || restartedHistory.items[0].deliveryCount !== 1) throw new Error('Bridge notice restart persistence failed');
 
   for (let index = 0; index < 6; index += 1) emitBridgeNotice({severity:'info',code:`bounded-${index}`,source:'fixture',message:'x'.repeat(200)});
   const boundedDelivery = drainBridgeNoticesWithinBudget(4, 2_000);
@@ -193,11 +228,11 @@ try {
   await call('work_finish',{sessionId:backgroundB.id,traceId:'mssr-fixture-background'});
   clearBridgeNotices();
 
-  if (registry.tools.length !== 163) throw new Error(`expected 163 tools, got ${registry.tools.length}`);
+  if (registry.tools.length !== 164) throw new Error(`expected 164 tools, got ${registry.tools.length}`);
   const catalogComparison = await call('bridge_connector_catalog_compare', {
     exposedToolNames: ['skill_catalog', 'skill_recommend', 'skill_load', 'host_private_tool'],
   });
-  if (catalogComparison.runtime.count !== 163 || catalogComparison.mssr.runtime !== 14) throw new Error('connector catalog comparison runtime baseline failed');
+  if (catalogComparison.runtime.count !== 164 || catalogComparison.mssr.runtime !== 14) throw new Error('connector catalog comparison runtime baseline failed');
   if (catalogComparison.mssr.directCoveragePercent !== 21.43) throw new Error(`unexpected MSSR direct coverage: ${catalogComparison.mssr.directCoveragePercent}`);
   if (!catalogComparison.mssr.delegatedViaQuery.includes('skill_bootstrap') || !catalogComparison.mssr.delegatedViaAction.includes('mssr_trace_record') || !catalogComparison.mssr.delegatedViaAction.includes('mssr_trace_working_update')) throw new Error('connector catalog wrapper classification failed');
   if (!catalogComparison.connectorObservation.unrecognized.includes('host_private_tool') || catalogComparison.interpretation.wrapperReachabilityIsDirectExposure !== false) throw new Error('connector catalog boundary classification failed');
@@ -211,7 +246,7 @@ try {
   if (!registry.riskSummary.readOnly.includes('project_context_audit') || !registry.riskSummary.readOnly.includes('project_change_consistency')) throw new Error('project context audit/consistency tools must be classified as read-only Bridge tools');
   if (!registry.riskSummary.destructive.includes('project_context_update') || !registry.riskSummary.destructive.includes('project_context_maintain')) throw new Error('project_context_update/project_context_maintain must be classified as write/destructive Bridge tools');
   for (const moduleName of ['project','project-context','workspace','cache','workflow-guides','skill-catalog-and-roblox-proxy','git-publication','roblox-studio-ops','roblox-assets','roblox-photo-capture','notices','mssr-observatory','binary-files','images','media-review','blender','godot','tablet-whiteboard']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
-  for (const toolName of ['project_context_load','project_context_audit','project_context_health','project_context_modularization_plan','project_context_maintain','project_change_consistency','project_context_update','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','bridge_connector_catalog_compare','bridge_tool_schema','bridge_tool_audit','git_multi_repo_publish','skill_catalog','skill_recommend','skill_route_audit','skill_route_vocabulary','skill_route_plan','skill_bootstrap','skill_context_next','skill_load','mssr_observatory_query','mssr_trace_evidence','mssr_trace_working_update','mssr_trace_record','mssr_observatory_epoch_start','bridge_notice_status','bridge_notice_drain','mssr_context_ack','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_studio_list','roblox_mcp_query','roblox_mcp_action','roblox_asset_upload','roblox_studio_window_capture_save','roblox_screen_capture_save','roblox_photo_capture_job','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_file_attach','image_asset_save','image_asset_import_files','image_character_views_prepare','image_reference_pack_prepare','media_review_ingest','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_focus_review','blender_review_bundle','blender_execute_code','blender_batch_script','blender_validate_reference_pack','blender_install_reference_pack','blender_setup_character_references','blender_character_loop_status','godot_mcp_status','godot_mcp_tool_list','godot_mcp_instance_list','godot_mcp_query','godot_scene_open','godot_scene_create','godot_screen_capture_save','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list','whiteboard_add_text','whiteboard_add_svg','whiteboard_add_diagram','whiteboard_insert_image']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/media/Blender/whiteboard tool ${toolName}`);
+  for (const toolName of ['project_context_load','project_context_audit','project_context_health','project_context_modularization_plan','project_context_maintain','project_change_consistency','project_context_update','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','bridge_connector_catalog_compare','bridge_tool_schema','bridge_tool_audit','git_multi_repo_publish','skill_catalog','skill_recommend','skill_route_audit','skill_route_vocabulary','skill_route_plan','skill_bootstrap','skill_context_next','skill_load','mssr_observatory_query','mssr_trace_evidence','mssr_trace_working_update','mssr_trace_record','mssr_observatory_epoch_start','bridge_notice_status','bridge_notice_history','bridge_notice_drain','mssr_context_ack','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_studio_list','roblox_mcp_query','roblox_mcp_action','roblox_asset_upload','roblox_studio_window_capture_save','roblox_screen_capture_save','roblox_photo_capture_job','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_file_attach','image_asset_save','image_asset_import_files','image_character_views_prepare','image_reference_pack_prepare','media_review_ingest','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_focus_review','blender_review_bundle','blender_execute_code','blender_batch_script','blender_validate_reference_pack','blender_install_reference_pack','blender_setup_character_references','blender_character_loop_status','godot_mcp_status','godot_mcp_tool_list','godot_mcp_instance_list','godot_mcp_query','godot_scene_open','godot_scene_create','godot_screen_capture_save','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list','whiteboard_add_text','whiteboard_add_svg','whiteboard_add_diagram','whiteboard_insert_image']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/media/Blender/whiteboard tool ${toolName}`);
   if (!registry.riskSummary.destructive.includes('roblox_mcp_action') || !registry.riskSummary.destructive.includes('roblox_studio_window_capture_save') || !registry.riskSummary.destructive.includes('roblox_screen_capture_save') || !registry.riskSummary.destructive.includes('roblox_photo_capture_job') || !registry.riskSummary.destructive.includes('roblox_place_save')) throw new Error('Roblox action/capture/save risk classification failed');
   for (const name of ['godot_mcp_status','godot_mcp_tool_list','godot_mcp_instance_list','godot_mcp_query']) if (!registry.riskSummary.readOnly.includes(name)) throw new Error(`Godot query tool ${name} must be read-only`);
   if (!registry.riskSummary.destructive.includes('godot_scene_create') || !registry.riskSummary.destructive.includes('godot_screen_capture_save')) throw new Error('Godot scene creation and capture must be classified as filesystem-writing actions');
@@ -234,7 +269,7 @@ try {
     }),
     /ROBLOX_OPEN_CLOUD_API_KEY_TEST_MISSING/,
   );
-  if (!registry.riskSummary.readOnly.includes('bridge_notice_status') || !registry.riskSummary.readOnly.includes('bridge_notice_drain')) throw new Error('Bridge notice risk classification failed');
+  if (!registry.riskSummary.readOnly.includes('bridge_notice_status') || !registry.riskSummary.readOnly.includes('bridge_notice_history') || !registry.riskSummary.readOnly.includes('bridge_notice_drain')) throw new Error('Bridge notice risk classification failed');
   const reviewTool = registry.tools.find((tool) => tool.name === 'blender_review_bundle');
   if (!reviewTool || !registry.riskSummary.destructive.includes('blender_review_bundle')) throw new Error('Blender review bundle classification failed');
   if (!reviewTool.inputSchema?.properties?.views || !reviewTool.inputSchema?.properties?.outputDir) throw new Error('Blender review bundle schema failed');
@@ -435,7 +470,7 @@ try {
   const skillLoadSchema = await call('bridge_tool_schema', {toolName:'skill_load'});
   if (!skillLoadSchema.tool?.metadata?.usage?.recovery?.some((rule) => rule.code === 'mssr-orphan-skill-load' && rule.toolName === 'skill_bootstrap')) throw new Error('skill_load MSSR recovery metadata failed');
   const aliasAudit = await call('bridge_tool_audit', {view:'aliases',scope:'active',days:30,limit:20});
-  if (aliasAudit.summary?.registeredTools !== 163 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
+  if (aliasAudit.summary?.registeredTools !== 164 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
   const delegatedMetric = beginToolMetric('bridge_tool_query', {toolName:'bridge_tool_audit',arguments:{view:'all'}}, {caller:'chatgpt-web',sessionKey:'fixture-session',project:'fixture-project'});
   finishToolMetric(delegatedMetric, true, 128);
   const delegatedSnapshot = getToolAuditMetrics(30, 'active');

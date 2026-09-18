@@ -108,6 +108,7 @@ const PREPARATION_TOOLS = new Set([
   "bridge_metrics_recent",
   "bridge_metrics_summary",
   "bridge_notice_status",
+  "bridge_notice_history",
   "bridge_notice_drain",
 ]);
 

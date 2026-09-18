@@ -27,6 +27,56 @@ const MAX_GUIDES = 200;
 const MAX_GUIDE_TEXT_CHARS = 120_000;
 const MAX_PHASES = 24;
 
+
+const stableProjectContextWatchFingerprints = new Map<string, string>();
+
+function presentProjectContextHealth(
+  projectRoot: string,
+  health: Awaited<ReturnType<typeof auditMssrProjectContextHealth>>,
+) {
+  const key = path.resolve(projectRoot).toLowerCase();
+  if (health.level !== "watch") {
+    stableProjectContextWatchFingerprints.delete(key);
+    return health;
+  }
+
+  const fingerprint = crypto.createHash("sha256").update(JSON.stringify({
+    manifestStatus: health.manifestStatus,
+    moduleCount: health.moduleCount,
+    coreCount: health.coreCount,
+    findings: health.findings.map((finding) => ({
+      code: finding.code,
+      level: finding.level,
+      target: finding.target,
+      recommendation: finding.recommendation,
+    })),
+  }), "utf8").digest("hex").slice(0, 20);
+  const previous = stableProjectContextWatchFingerprints.get(key);
+  stableProjectContextWatchFingerprints.set(key, fingerprint);
+
+  if (previous !== fingerprint) {
+    return {
+      ...health,
+      presentation: {
+        stableWatchSuppressed: false,
+        fingerprint,
+        note: "WATCH is advisory. It will be compacted on subsequent project_context_load calls until its fingerprint changes or severity escalates.",
+      },
+    };
+  }
+
+  return {
+    ...health,
+    findings: [],
+    recommendations: [],
+    presentation: {
+      stableWatchSuppressed: true,
+      fingerprint,
+      suppressedFindingCount: health.findings.length,
+      note: "Unchanged advisory WATCH details suppressed. Use project_context_health for explicit full inspection.",
+    },
+  };
+}
 const slugSchema = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).min(2).max(80);
 const phaseNameSchema = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).min(2).max(80);
 
@@ -750,7 +800,12 @@ export const workflowGuideToolModule: BridgeToolModule = {
         timing.measure("project.load", () => loadProjectContext(parsed, timing)),
         timing.measure("project.health", () => auditMssrProjectContextHealth(path.resolve(parsed.projectRoot))),
       ]);
-      return { ...context, projectContextHealth, workflowKey: parsed.workflowKey ?? null, bridgeTiming: timing.finish() };
+      return {
+        ...context,
+        projectContextHealth: presentProjectContextHealth(parsed.projectRoot, projectContextHealth),
+        workflowKey: parsed.workflowKey ?? null,
+        bridgeTiming: timing.finish(),
+      };
     },
     workflow_guide_recommend: async (raw) => {
       const parsed = z.object({

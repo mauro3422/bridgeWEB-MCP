@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "modules": [
+    {
+      "moduleId": "bridge-dashboard-routing-liveness",
+      "segments": [
+        {
+          "id": "dashboard-liveness",
+          "sections": ["## Dashboard work must not define transport health"],
+          "baseline": true
+        },
+        {
+          "id": "routing-catalog-latency",
+          "sections": ["## Routing and catalog latency attribution"],
+          "terms": ["routing", "catalog", "latency", "skill catalog", "watcher", "cache"],
+          "actions": ["analyze", "debug", "optimize", "verify"],
+          "priority": 10
+        },
+        {
+          "id": "observability-wal",
+          "sections": ["## Observability durability and WAL maintenance boundary"],
+          "terms": ["observability", "persistence", "sqlite", "wal", "overlay", "durability"],
+          "actions": ["analyze", "debug", "optimize", "verify"],
+          "priority": 10
+        }
+      ]
+    },
+    {
+      "moduleId": "bridge-host-health-projections",
+      "segments": [
+        {
+          "id": "host-health-ownership",
+          "sections": ["## Host health ownership boundary"],
+          "baseline": true
+        },
+        {
+          "id": "quiet-attention-history",
+          "sections": ["## Quiet attention and recoverable notice history"],
+          "terms": ["notice", "history", "watch", "attention", "delivery", "restart", "project context health"],
+          "actions": ["analyze", "debug", "review", "verify"],
+          "priority": 10
+        },
+        {
+          "id": "safe-project-context-maintenance",
+          "sections": ["## Explicit safe Project Context maintenance"],
+          "terms": ["project_context_maintain", "maintenance", "modularization", "split", "knowledge"],
+          "actions": ["edit", "maintain", "review", "verify"],
+          "priority": 10
+        }
+      ]
+    }
+  ]
+}

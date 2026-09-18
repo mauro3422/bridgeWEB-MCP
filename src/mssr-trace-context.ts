@@ -133,6 +133,7 @@ const CLOSURE_ACTIVITY_EXEMPT_TOOLS = new Set([
   "skill_route_vocabulary",
   "project_context_load",
   "bridge_notice_status",
+  "bridge_notice_history",
   "bridge_notice_drain",
 ]);
 const TRACE_BOUNDARY_STAGES = new Set(["verify", "persist", "close"]);
@@ -450,6 +451,7 @@ export function createMssrTraceSessionCoordinator(
     "project_context_modularization_plan",
     "project_change_consistency",
     "bridge_notice_status",
+    "bridge_notice_history",
     "bridge_notice_drain",
     "bridge_health",
     "bridge_verify_all",

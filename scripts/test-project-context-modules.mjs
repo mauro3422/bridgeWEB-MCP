@@ -200,6 +200,76 @@ try {
   assert.deepEqual(debugLoaded.projectChangeHistory.loaded, ["index", "1.0.0"]);
   assert.equal(debugLoaded.documents.some((item) => item.kind === "project-changelog-index"), true);
   assert.equal(debugLoaded.documents.some((item) => item.kind === "project-changelog-current"), true);
+  const watchKnowledgeDir = path.join(bridgeDir, "knowledge");
+  await fs.mkdir(watchKnowledgeDir, { recursive: true });
+  const watchModules = [];
+  for (let index = 0; index < 25; index += 1) {
+    const id = `watch-module-${String(index).padStart(2, "0")}`;
+    const relativePath = `.mssr/knowledge/${id}.md`;
+    await fs.writeFile(path.join(root, relativePath), `# ${id}\n\nStable advisory context.\n`, "utf8");
+    watchModules.push({
+      id,
+      kind: "memory",
+      description: `Watch fixture ${index}.`,
+      source: { path: relativePath },
+      domains: ["coding"],
+      actions: ["review"],
+      stages: ["implement"],
+    });
+  }
+  await fs.writeFile(path.join(bridgeDir, "project-context.json"), JSON.stringify({
+    schemaVersion: 1,
+    core: [],
+    modules: watchModules,
+  }, null, 2), "utf8");
+  const watchArgs = {
+    projectRoot: root,
+    task: "Review stable project context.",
+    intent: {
+      domains: ["coding"],
+      actions: ["review"],
+      artifacts: ["project"],
+      needs: ["integrity-verification"],
+      signals: ["warning-observed"],
+      risk: "read-only",
+      ambiguity: "low",
+    },
+    stage: "implement",
+    includeGuides: false,
+  };
+  const firstWatch = await workflowGuideToolModule.handlers.project_context_load(watchArgs);
+  assert.equal(firstWatch.projectContextHealth.level, "watch");
+  assert.equal(firstWatch.projectContextHealth.presentation?.stableWatchSuppressed, false);
+  assert.equal(firstWatch.projectContextHealth.findings.some((finding) => finding.code === "many-modules"), true);
+
+  const repeatedWatch = await workflowGuideToolModule.handlers.project_context_load(watchArgs);
+  assert.equal(repeatedWatch.projectContextHealth.level, "watch");
+  assert.equal(repeatedWatch.projectContextHealth.presentation?.stableWatchSuppressed, true);
+  assert.equal(repeatedWatch.projectContextHealth.findings.length, 0);
+  assert.equal(repeatedWatch.projectContextHealth.presentation?.suppressedFindingCount > 0, true);
+
+  const changedId = "watch-module-25";
+  const changedPath = `.mssr/knowledge/${changedId}.md`;
+  await fs.writeFile(path.join(root, changedPath), `# ${changedId}\n\nChanged watch fingerprint.\n`, "utf8");
+  watchModules.push({
+    id: changedId,
+    kind: "memory",
+    description: "Changed watch fixture.",
+    source: { path: changedPath },
+    domains: ["coding"],
+    actions: ["review"],
+    stages: ["implement"],
+  });
+  await fs.writeFile(path.join(bridgeDir, "project-context.json"), JSON.stringify({
+    schemaVersion: 1,
+    core: [],
+    modules: watchModules,
+  }, null, 2), "utf8");
+  const changedWatch = await workflowGuideToolModule.handlers.project_context_load(watchArgs);
+  assert.equal(changedWatch.projectContextHealth.level, "watch");
+  assert.equal(changedWatch.projectContextHealth.presentation?.stableWatchSuppressed, false);
+  assert.equal(changedWatch.projectContextHealth.findings.length > 0, true);
+
 
   console.log("project context module tests passed");
 } finally {

@@ -178,6 +178,7 @@ export const MSSR_DIAGNOSTIC_TOOL_NAMES = new Set([
   "mssr_observatory_query",
   "mssr_trace_evidence",
   "bridge_notice_status",
+  "bridge_notice_history",
   "bridge_notice_drain",
 ]);
 

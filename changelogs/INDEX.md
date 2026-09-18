@@ -4,6 +4,7 @@ Versioned release notes are the canonical change-history surface for MSSR debugg
 
 ## Current releases
 
+- [0.6.130](0.6.130.md) - Quiet, recoverable host attention: persistent filtered notice history, unchanged WATCH suppression in ordinary context loads, semantic liveness-history segmentation, and packaged MSSR 0.2.64 owner reconciliation.
 - [0.6.129](0.6.129.md) - Expose MSSR safe Project Context maintenance so exact indexed sections can move to reference-backed knowledge modules under pressure while semantic splits remain review-only.
 - [0.6.128](0.6.128.md) - Harden multi-agent liveness with safe long-work redirect, recoverable Git restore no-op, external watchdog process/exit evidence, concurrent MCP readiness regression, MSSR 0.2.63, and modular project memory.
 - [0.6.127](0.6.127.md) - Reconcile stale Bridge MSSR RAM with fresher persisted lifecycle state and harden compact skill-context delivery so optional diagnostics cannot overflow a valid response envelope.

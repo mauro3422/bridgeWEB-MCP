@@ -43,7 +43,7 @@ const largeOutputExemptTools = new Set([
   "whiteboard_latest_capture",
   "blender_review_bundle",
 ]);
-const noticeInspectionTools = new Set(["bridge_notice_status", "bridge_notice_drain"]);
+const noticeInspectionTools = new Set(["bridge_notice_status", "bridge_notice_history", "bridge_notice_drain"]);
 const mssrRouteTools = new Set([
   "skill_recommend",
   "skill_route_plan",

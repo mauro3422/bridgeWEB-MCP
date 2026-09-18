@@ -29,6 +29,10 @@ const env = {
   BRIDGE_MCP_RUNTIME_HEALTH_PATH: path.join(dataDir, "runtime-health.json"),
   BRIDGE_MCP_PROJECT_SITUATION_PATH: path.join(dataDir, "project-situation.json"),
   BRIDGE_MCP_PROJECT_SITUATION_ROOT: root,
+  // Keep independent regression scripts from inheriting each other's pending
+  // notice queue. The dedicated restart-persistence regression opts back in
+  // with its own BRIDGE_MCP_NOTICE_STATE_PATH.
+  BRIDGE_MCP_NOTICE_PERSISTENCE_ENABLED: "0",
 };
 
 console.log(`[bridge-test-isolation] npm script=${scriptName}`);
