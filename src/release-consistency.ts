@@ -7,7 +7,7 @@ import {
   type MssrConsistencyDecisionSupport,
   type MssrConsistencyObservation,
   type MssrSituationObservation,
-  type MssrSituationSemanticClaim,
+  type MssrSituationSemanticClaimInput,
 } from "@mauroprime/mssr";
 import { SERVER_VERSION } from "./config.js";
 import type { BridgeNoticeInput } from "./notices.js";
@@ -142,7 +142,7 @@ export async function collectBridgeReleaseConsistencyObservations(
   return observations;
 }
 
-function semanticClaimSourceForObservation(observation: MssrConsistencyObservation): MssrSituationSemanticClaim["source"] {
+function semanticClaimSourceForObservation(observation: MssrConsistencyObservation): MssrSituationSemanticClaimInput["source"] {
   if (observation.role === "generated") return "generated";
   if (observation.role === "installed") return "installed";
   if (observation.role === "runtime") return "runtime";
@@ -154,7 +154,7 @@ export async function collectBridgeReleaseSemanticSituationObservations(
   runtimeVersion = SERVER_VERSION,
 ): Promise<MssrSituationObservation[]> {
   const observations = await collectBridgeReleaseConsistencyObservations(root, runtimeVersion);
-  const claims: MssrSituationSemanticClaim[] = observations.map((observation) => ({
+  const claims: MssrSituationSemanticClaimInput[] = observations.map((observation) => ({
     kind: observation.key === "bridge.release-version" ? "release-version" : "state-value",
     subject: observation.key,
     source: semanticClaimSourceForObservation(observation),
