@@ -618,6 +618,7 @@ try {
   const schemas = [
     { name: 'skill_route_plan', inputSchema: { type: 'object', properties: { traceId: { type: 'string' } } } },
     { name: 'skill_load', inputSchema: { type: 'object', properties: { traceId: { type: 'string' } } } },
+    { name: 'skill_context_next', inputSchema: { type: 'object', properties: { traceId: { type: 'string' }, cursor: { type: 'string' } } } },
     { name: 'mssr_trace_record', inputSchema: { type: 'object', properties: { traceId: { type: 'string' } } } },
     { name: 'trace-domain-tool', inputSchema: { type: 'object', properties: { traceId: { type: 'string' }, payload: { type: 'string' } }, additionalProperties: false } },
     { name: 'apply_patch', inputSchema: { type: 'object', properties: { path: { type: 'string' }, oldText: { type: 'string' }, newText: { type: 'string' } } }, annotations: { destructiveHint: true } },
@@ -629,6 +630,78 @@ try {
   assert.ok(orphan.notices.some((item) => item.code === 'mssr-orphan-skill-load'));
   const noRouteOutcome = isolated.prepare('mssr_trace_record', { eventType: 'outcome', traceId: 'trace-no-route-001' });
   assert.ok(noRouteOutcome.notices.some((item) => item.code === 'mssr-outcome-without-route'));
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  const continuationLifecycle = traceContext.createMssrTraceSessionCoordinator(schemas);
+  continuationLifecycle.resolveMetricContext({
+    caller: 'chatgpt-web',
+    sessionKey: 'session-context-continuation-lifecycle',
+    project: 'bridge-mcp',
+    workflowKey: 'context-continuation-lifecycle',
+  });
+  continuationLifecycle.observe('skill_route_plan', {
+    task: 'context continuation lifecycle fixture',
+    caller: 'chatgpt-web',
+    stage: 'implement',
+    workflowKey: 'context-continuation-lifecycle',
+  }, {
+    traceId: 'trace-context-continuation-lifecycle-001',
+    stage: 'implement',
+    workflowKey: 'context-continuation-lifecycle',
+    activeSkills: [
+      { name: 'required-a', source: 'codex-local', required: true },
+      { name: 'required-b', source: 'codex-local', required: true },
+    ],
+    loaded: [
+      { skill: { name: 'required-a', source: 'codex-local' }, loaded: true },
+    ],
+  });
+  assert.deepEqual(
+    continuationLifecycle.snapshot().missingRequiredSkills,
+    ['required-b'],
+    'The first route page must preserve the remaining required skill obligation.',
+  );
+  continuationLifecycle.observe('skill_context_next', {
+    traceId: 'trace-context-continuation-lifecycle-foreign',
+    cursor: 'fixture-foreign-cursor',
+  }, {
+    traceId: 'trace-context-continuation-lifecycle-foreign',
+    status: 'complete',
+    loaded: [{ skill: { name: 'required-b', source: 'codex-local' }, loaded: true }],
+  });
+  assert.deepEqual(
+    continuationLifecycle.snapshot().missingRequiredSkills,
+    ['required-b'],
+    'A foreign continuation trace must not satisfy obligations on the active trace.',
+  );
+  const continuationDispatch = continuationLifecycle.prepare('bridge_tool_query', {
+    toolName: 'skill_context_next',
+    traceId: 'trace-context-continuation-lifecycle-001',
+    arguments: { cursor: 'fixture-valid-cursor' },
+  }, {
+    caller: 'chatgpt-web',
+    sessionKey: 'session-context-continuation-lifecycle',
+    project: 'bridge-mcp',
+    workflowKey: 'context-continuation-lifecycle',
+  });
+  assert.equal(
+    continuationDispatch.args.arguments.traceId,
+    'trace-context-continuation-lifecycle-001',
+    'Wrapper control traceId must be forwarded to the trace-aware continuation target.',
+  );
+  continuationLifecycle.observe('bridge_tool_query', continuationDispatch.args, {
+    result: {
+      traceId: 'trace-context-continuation-lifecycle-001',
+      status: 'complete',
+      loaded: [{ skill: { name: 'required-b', source: 'codex-local' }, loaded: true }],
+    },
+  });
+  const continuationSnapshot = continuationLifecycle.snapshot();
+  assert.equal(continuationSnapshot.routeCount > 0, true);
+  assert.deepEqual(
+    continuationSnapshot.missingRequiredSkills,
+    [],
+    'A completed skill_context_next page must update the in-memory lifecycle used by R2 preflight.',
+  );
   traceContext.resetSharedMssrTraceRegistryForTests();
   const projectMaintenance = traceContext.createMssrTraceSessionCoordinator(schemas);
   projectMaintenance.observe('skill_route_plan', {

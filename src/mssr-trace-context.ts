@@ -1523,6 +1523,21 @@ export function createMssrTraceSessionCoordinator(
       return notices;
     }
 
+    if (toolName === "skill_context_next" && record && validTraceId(record.traceId)) {
+      const state = sharedTraces.get(String(record.traceId));
+      if (state && Array.isArray(record.loaded)) {
+        let lifecycle = portableLifecycle(state);
+        for (const item of record.loaded) {
+          const entry = asRecord(item);
+          const skill = asRecord(entry?.skill);
+          const name = typeof skill?.name === "string" ? skill.name.trim() : "";
+          if (entry?.loaded === true && name) lifecycle = reduceMssrSkillLoadLifecycle(lifecycle, name);
+        }
+        applyPortableLifecycle(state, lifecycle);
+        adopt(state);
+      }
+    }
+
     if (toolName === "skill_load" && record && validTraceId(record.traceId)) {
       const state = sharedTraces.get(String(record.traceId));
       const name = typeof args.name === "string" ? args.name : "";

@@ -4,6 +4,7 @@ Versioned release notes are the canonical change-history surface for MSSR debugg
 
 ## Current releases
 
+- [0.6.138](0.6.138.md) - Fix paged MSSR continuation lifecycle synchronization so `skill_context_next` satisfies exact-trace required-skill obligations in Bridge RAM before R2 preflight, without weakening owner isolation.
 - [0.6.137](0.6.137.md) - Adopt MSSR 0.2.70 and complete Bridge R3 Context Economy v2 host adoption with explicit retained-context receipts, exact fingerprint invalidation, and bounded continuation preservation.
 - [0.6.136](0.6.136.md) - Adopt MSSR 0.2.69 and enforce immutable explicit-trace ownership plus automatic pre-side-effect lifecycle coverage for substantial Bridge operations.
 - [0.6.135](0.6.135.md) - Adopt MSSR 0.2.67 and connect semantic routing-owner classification, opt-in Document Freshness through Project Health, and C2e-D explicit semantic claims through Project Situation without adding parallel control planes.

@@ -1,5 +1,5 @@
 export const SERVER_NAME = "bridge-mcp";
-export const SERVER_VERSION = "0.6.137";
+export const SERVER_VERSION = "0.6.138";
 
 export const DEFAULT_MAX_FILE_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_TIMEOUT_MS = 30_000;

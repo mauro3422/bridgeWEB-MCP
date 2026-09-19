@@ -19,6 +19,24 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-09-19 — `skill_context_next` no actualizaba el lifecycle RAM usado por R2 preflight
+
+**Estado:** Corregido y cubierto por regresión en source/dist 0.6.138; adopción live pendiente al registrar esta entrada.
+
+**Capa/owner:** Bridge posee la proyección host-local en RAM de una traza MSSR y el preflight previo a side effects. Portable MSSR sigue siendo la autoridad semántica del lifecycle; el Bridge sólo debe mantener su proyección sincronizada con resultados observables del mismo trace.
+
+**Síntoma observable:** una traza podía mostrar evidencia durable con `routeCount > 0` y `missingRequiredSkills=[]` después de completar páginas de `skill_context_next`, mientras una mutación posterior era bloqueada por R2 como si no existiera una ruta/lifecycle completo. El fallo apareció al continuar R4: la evidencia de la traza era completa, pero el snapshot RAM del dispatcher conservaba obligaciones de la primera página.
+
+**Causa demostrada:** `mssr-trace-context.observe(...)` actualizaba el lifecycle para `skill_route_plan`/`skill_bootstrap` y `skill_load`, pero no consumía los `loaded[]` devueltos por `skill_context_next`. La continuación quedaba persistida por MSSR, pero el coordinador RAM del Bridge no aplicaba esos skill loads; el preflight consultaba esa proyección incompleta.
+
+**Corrección:** 0.6.138 procesa `skill_context_next` sólo cuando el resultado contiene una `traceId` válida y aplica cada `loaded=true` mediante `reduceMssrSkillLoadLifecycle(...)` sobre esa traza exacta. No se relaja `routePresent`, no se infiere completion desde historia y no se migra ownership.
+
+**Regresión:** `scripts/test-mssr-trace-contract.mjs` crea dos required skills, verifica que la primera página deje una pendiente, prueba que una continuación con otra `traceId` no cambie la obligación, y luego exige que la continuación matching —incluido el forwarding del wrapper control `traceId`— deje `missingRequiredSkills=[]`. Además pasan `test:mssr-lifecycle-host-adoption`, `test:mssr-trace-owner-isolation` y `test:mssr-context-continuation`.
+
+**Seguimiento:** completar gate integral, publicación y restart controlado de 0.6.138; después reintentar la mutación R4 que originalmente expuso el defecto.
+
+---
+
 ## 2026-09-18 — El restart ack podía quedar vacío durante su publicación
 
 **Estado:** Failure mode corregido y cubierto por regresión en source/dist 0.6.133; adopción live y readback del ack nuevo pendientes al registrar esta entrada.
