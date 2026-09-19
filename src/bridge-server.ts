@@ -25,6 +25,7 @@ import type { BridgeToolSchema } from "./tools/types.js";
 import { createMssrTraceSessionCoordinator } from "./mssr-trace-context.js";
 import { recordMssrEvent } from "./mssr-observatory.js";
 import { createMssrRoutingComplianceNoticeTracker } from "./mssr-routing-compliance.js";
+import { evaluateBridgeMssrLifecyclePreflight } from "./mssr-lifecycle-coverage.js";
 import { RUNTIME_BOOT_ID, normalizeModelIdentifier, normalizeWorkflowKey, resolveMetricTaskKey, resolveMetricWorkflowKey } from "./runtime-identity.js";
 
 export { SERVER_NAME, SERVER_VERSION } from "./config.js";
@@ -758,7 +759,14 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
       }
     }
     const toolSchema = modularToolRegistry.tools.find((tool) => tool.name === name);
-    emitRoutingComplianceNotice(name, metric, toolSchema?.annotations?.destructiveHint === true, routingCompliance);
+    const effectiveToolSchema = modularToolRegistry.tools.find((tool) => tool.name === effectivePrepared.toolName) ?? toolSchema;
+    const lifecyclePreflight = effectiveToolSchema
+      ? evaluateBridgeMssrLifecyclePreflight({
+          tool: effectiveToolSchema,
+          trace: traceSnapshot,
+          projectScoped: Boolean(metricProject && metricProject !== "unknown" && metricProject !== "multi-project"),
+        })
+      : null;
 
     const complete = (rawData: unknown, ok = true, error?: string) => {
       if (rawData && typeof rawData === "object" && !Array.isArray(rawData)) {
@@ -809,6 +817,28 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
         throw new Error(`${prepared.blocked.code}: ${prepared.blocked.message}`);
       }
       if (!modularToolRegistry.has(name)) throw new Error(`Unknown tool: ${name}`);
+      if (lifecyclePreflight?.intercepted) {
+        return complete({
+          executed: false,
+          status: "mssr-lifecycle-preflight-required",
+          originalTool: name,
+          effectiveTool: lifecyclePreflight.originalTool,
+          traceId: lifecyclePreflight.traceId,
+          effect: lifecyclePreflight.effect,
+          scale: lifecyclePreflight.scale,
+          routePresent: lifecyclePreflight.routePresent,
+          lifecycleDecision: lifecyclePreflight.decision,
+          nextAction: lifecyclePreflight.nextTool
+            ? {
+                toolName: lifecyclePreflight.nextTool,
+                ...(lifecyclePreflight.traceId ? { traceId: lifecyclePreflight.traceId } : {}),
+                instruction: lifecyclePreflight.instruction,
+              }
+            : null,
+          instruction: "La operación original no se ejecutó. Completa el preflight MSSR indicado, procesa su contexto/skills y reintenta la misma operación.",
+        });
+      }
+      emitRoutingComplianceNotice(name, metric, effectiveToolSchema?.annotations?.destructiveHint === true, routingCompliance);
       if (inheritedProjectRoot) {
         try {
           architectureImpactPrepared = await prepareBridgeArchitectureImpactHostAdoption({

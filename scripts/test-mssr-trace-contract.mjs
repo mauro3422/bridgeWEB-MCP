@@ -337,6 +337,17 @@ try {
   assert.equal(explicitlyTracedWork?.trace_id, nextRoute.traceId, 'work_once must accept explicit traceId metadata for cross-project/process correlation.');
   assert.equal(explicitlyTracedWork?.routing_status, 'traced');
 
+  const nextRequired = nextRoute.activeSkills.filter((skill) => skill.required).map((skill) => skill.name);
+  for (const name of nextRequired) {
+    await callFresh('skill_load', {
+      name,
+      source: 'codex',
+      traceId: nextRoute.traceId,
+      required: true,
+      stage: 'start',
+    });
+  }
+
   const genericTextPath = path.join(sandbox, 'generic-traced-write.txt');
   const genericTextWrite = await callFresh('write_text_file', {
     path: genericTextPath,
@@ -398,13 +409,13 @@ try {
     profile.caller === 'chatgpt-web'
     && profile.project === 'fixture-project'
     && profile.session_key === expectedSessionKey);
-  assert.equal(fixtureProfile?.task_key, expectedActiveTraceTaskKey, 'Rotated project/session context must not replace the active trace task identity.');
-  assert.notEqual(fixtureProfile?.task_key, expectedContextTaskKey, 'Project context task metadata must remain pending evidence, not overwrite an active trace.');
+  assert.equal(fixtureProfile?.task_key, expectedContextTaskKey, 'A different explicit project owner must keep its own project-context task identity instead of inheriting another project trace.');
+  assert.notEqual(fixtureProfile?.task_key, expectedActiveTraceTaskKey, 'Trace ownership isolation must prevent cross-project task identity migration.');
   assert.equal(fixtureProfile?.related_project, 'none');
   assert.equal(fixtureProfile?.eligible_calls, 1);
-  assert.equal(fixtureProfile?.traced_calls, 1);
-  assert.equal(fixtureProfile?.untraced_calls, 0);
-  assert.equal(fixtureProfile?.mssr_trace_coverage, 100);
+  assert.equal(fixtureProfile?.traced_calls, 0);
+  assert.equal(fixtureProfile?.untraced_calls, 1);
+  assert.equal(fixtureProfile?.mssr_trace_coverage, 0);
 
   const concurrentProjects = [
     path.join(sandbox, 'web-concurrent-primary-a'),
@@ -431,24 +442,19 @@ try {
   const concurrentProfiles = metrics.getMetricsOverview('active').agentProfiles
     .filter((profile) => String(profile.project).startsWith('web-concurrent-primary-'));
   assert.equal(new Set(concurrentProfiles.map((profile) => profile.session_key)).size, 2);
-  assert.equal(new Set(concurrentProfiles.map((profile) => profile.task_key)).size, 1, 'Concurrent project contexts attached to one active trace must preserve that trace task identity.');
-  assert.ok(concurrentProfiles.every((profile) => profile.task_key === expectedActiveTraceTaskKey));
+  const expectedConcurrentTaskKeys = new Set([1, 2].map((index) =>
+    `task_${createHash('sha256').update(`concurrent web benchmark task ${index}.`).digest('hex').slice(0, 16)}`));
+  assert.deepEqual(
+    new Set(concurrentProfiles.map((profile) => profile.task_key)),
+    expectedConcurrentTaskKeys,
+    'Concurrent projects must retain separate task identities when no compatible trace is routed for either owner.',
+  );
   assert.deepEqual(
     new Set(concurrentProfiles.map((profile) => profile.related_project)),
     new Set(['web-concurrent-support-a', 'web-concurrent-support-b']),
     'Concurrent Web tasks must preserve primary projects while exposing their auxiliary repositories.',
   );
 
-  const nextRequired = nextRoute.activeSkills.filter((skill) => skill.required).map((skill) => skill.name);
-  for (const name of nextRequired) {
-    await callFresh('skill_load', {
-      name,
-      source: 'codex',
-      traceId: nextRoute.traceId,
-      required: true,
-      stage: 'start',
-    });
-  }
   traceContext.resetSharedMssrTraceRegistryForTests();
   const restartSchemas = [
     { name: 'skill_route_plan', inputSchema: { type: 'object', properties: { traceId: { type: 'string' } } } },

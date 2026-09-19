@@ -7,6 +7,7 @@ import {
   evaluateMssrProjectKnowledgeMaintenance,
   evaluateMssrProjectKnowledgeOperationalAttention,
   evaluateMssrTraceLifecycleOperationalAttention,
+  evaluateMssrTraceOwnerCompatibility,
   getMssrTraceClosureState,
   hasFreshMaintenanceClose,
   missingRequiredSkills,
@@ -795,18 +796,34 @@ export function createMssrTraceSessionCoordinator(
     armReminder(reminderDelayMs);
   }
 
+  function ownerProject(value: string): string | null {
+    return value === "unknown" ? null : value;
+  }
+
+  function ownerWorkflow(value: string): string | null {
+    return value === "unknown" || value === "unscoped" ? null : value;
+  }
+
   function knownWorkflowKey(value: string): boolean {
-    return value !== "unknown" && value !== "unscoped";
+    return ownerWorkflow(value) !== null;
+  }
+
+  function traceOwnerCompatibility(state: ActiveTraceState) {
+    return evaluateMssrTraceOwnerCompatibility(
+      { project: ownerProject(state.project), workflowKey: ownerWorkflow(state.workflowKey) },
+      { project: ownerProject(hostContext.project), workflowKey: ownerWorkflow(hostContext.workflowKey) },
+    );
   }
 
   function traceOwnerCompatible(state: ActiveTraceState): boolean {
-    const projectMismatch = hostContext.project !== "unknown"
-      && state.project !== "unknown"
-      && state.project !== hostContext.project;
-    const workflowMismatch = knownWorkflowKey(hostContext.workflowKey)
-      && knownWorkflowKey(state.workflowKey)
-      && state.workflowKey !== hostContext.workflowKey;
-    return !projectMismatch && !workflowMismatch;
+    return traceOwnerCompatibility(state).compatible;
+  }
+
+  function bindCompatibleTraceOwner(state: ActiveTraceState): void {
+    const compatibility = traceOwnerCompatibility(state);
+    if (!compatibility.compatible) return;
+    if (compatibility.bound.project) state.project = compatibility.bound.project;
+    if (compatibility.bound.workflowKey) state.workflowKey = compatibility.bound.workflowKey;
   }
 
   function localState(allowClosed = false, enforceOwnerScope = false): ActiveTraceState | null {
@@ -1190,7 +1207,41 @@ export function createMssrTraceSessionCoordinator(
       const state = sharedState && lifecycleSensitiveCall
         ? reconcilePersistedLifecycle(sharedState)
         : sharedState ?? restore(explicitTrace);
-      if (state) adopt(state);
+      if (state) {
+        const compatibility = traceOwnerCompatibility(state);
+        if (!compatibility.compatible) {
+          const blocked = {
+            code: "mssr-trace-owner-mismatch",
+            message: `La traza explícita ${state.traceId} pertenece a otro owner y no puede adoptarse para este proyecto/workflow.`,
+            details: {
+              traceId: state.traceId,
+              existingProject: compatibility.existing.project,
+              requestedProject: compatibility.requested.project,
+              existingWorkflowKey: compatibility.existing.workflowKey,
+              requestedWorkflowKey: compatibility.requested.workflowKey,
+              mismatchFields: compatibility.mismatchFields,
+              ownerStatus: compatibility.status,
+            },
+          };
+          notices.push(notice(
+            "error",
+            blocked.code,
+            toolName,
+            blocked.message,
+            blocked.details,
+            `${blocked.code}:${state.traceId}:${compatibility.status}`,
+            [{
+              label: "Inspeccionar traza MSSR",
+              toolName: "mssr_trace_evidence",
+              arguments: { traceId: state.traceId },
+              instruction: "Conserva el owner original de la traza. Inspecciona su evidencia y crea/reanuda una traza separada para el proyecto o workflow solicitado.",
+            }],
+          ));
+          return { args, notices, blocked };
+        }
+        bindCompatibleTraceOwner(state);
+        adopt(state);
+      }
     }
     const activeBeforeCall = localState(toolName === "mssr_trace_record", !explicitTrace);
     if (activeBeforeCall) clearClosureTimer(activeBeforeCall.traceId);

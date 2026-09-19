@@ -516,7 +516,7 @@
     {
       "id": "bridge-trace-integrity-and-lifecycle",
       "kind": "memory",
-      "description": "Bridge MSSR trace owner integrity plus shared-RAM/persisted lifecycle reconciliation invariant.",
+      "description": "Bridge MSSR trace owner integrity, shared-RAM/persisted lifecycle reconciliation, and automatic host lifecycle coverage invariant.",
       "source": {
         "path": ".mssr/knowledge/observability/trace-integrity-and-lifecycle.md"
       },

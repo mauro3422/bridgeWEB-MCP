@@ -32,7 +32,7 @@ import { windowsAdminToolModule } from "./tools/windows-admin-tools.js";
 import { buildToolAudit, TOOL_AUDIT_VIEWS, type ToolAuditArgs, type ToolAuditView } from "./tool-audit.js";
 import { getToolAuditMetrics, getToolFrictionMetrics, type BridgeMetricsScope } from "./metrics.js";
 import { buildBridgeToolFrictionProjection } from "./mssr-tool-friction.js";
-import type { BridgeToolMetadata, BridgeToolModule, BridgeToolRegistry, BridgeToolSchema, BridgeToolUsageGuidance } from "./tools/types.js";
+import type { BridgeMssrLifecycleMetadata, BridgeToolMetadata, BridgeToolModule, BridgeToolRegistry, BridgeToolSchema, BridgeToolUsageGuidance } from "./tools/types.js";
 
 const readOnlyToolNames = new Set([
   "system_info", "list_dir", "read_text_file", "list_files_smart", "read_file_lines", "read_many_files", "search_files",
@@ -86,6 +86,26 @@ const protectedToolNames = new Set([
   "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query", "bridge_tool_action", "bridge_connector_catalog_compare", "project_context_load", "project_context_audit", "project_context_health", "project_context_modularization_plan", "project_context_initialize", "project_context_update", "project_context_capture",
   "skill_route_plan", "skill_bootstrap", "skill_context_next", "skill_load", "mssr_context_proposal_review", "mssr_trace_record", "mssr_trace_evidence", "bridge_verify_all", "git_multi_repo_publish", "roblox_place_save",
 ]);
+
+const mssrControlPlaneToolNames = new Set([
+  "skill_catalog", "skill_recommend", "skill_route_audit", "skill_route_vocabulary", "skill_route_plan", "skill_bootstrap", "skill_context_next", "skill_load",
+  "mssr_context_ack", "mssr_context_proposal_review", "mssr_trace_working_update", "mssr_trace_record", "mssr_trace_evidence", "mssr_observatory_query", "mssr_observatory_epoch_start",
+]);
+
+const mssrSubstantialReadToolNames = new Set([
+  "analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code",
+  "python_validate", "python_symbols", "python_impact_analysis", "python_import_graph", "python_call_graph", "python_dead_code", "python_test_plan", "pytest_testmon",
+  "project_context_audit", "project_context_health", "project_context_modularization_plan", "project_change_consistency", "bridge_verify_status",
+]);
+
+const mssrVerifyToolNames = new Set(["python_validate", "pytest_testmon", "bridge_verify_status", "bridge_verify_all"]);
+const mssrPublishToolNames = new Set(["git_push_current_branch", "git_multi_repo_publish", "roblox_asset_upload"]);
+const mssrPersistToolNames = new Set(["git_commit_all", "roblox_place_save", "binary_upload_finish"]);
+const mssrExternalSideEffectToolNames = new Set([
+  "remote_node_exec", "remote_node_upload_file", "roblox_mcp_action", "godot_mcp_action", "godot_scene_open",
+  "whiteboard_add_text", "whiteboard_add_svg", "whiteboard_add_diagram", "whiteboard_insert_image",
+]);
+const mssrTrivialInspectToolNames = new Set(["whiteboard_capture_pc_view"]);
 
 const toolUsageGuidance = new Map<string, BridgeToolUsageGuidance>([
   ["project_context_load", {
@@ -266,7 +286,20 @@ for (const [alias, canonical] of aliasTargets) {
   if (canonicalUsage && !toolUsageGuidance.has(alias)) toolUsageGuidance.set(alias, canonicalUsage);
 }
 
-function toolMetadata(tool: BridgeToolSchema, moduleName: string): BridgeToolMetadata {
+function mssrLifecycleMetadata(tool: BridgeToolSchema, annotations: Record<string, boolean>): BridgeMssrLifecycleMetadata {
+  if (mssrControlPlaneToolNames.has(tool.name)) return { effect: "control-plane", scale: "trivial" };
+  if (mssrPublishToolNames.has(tool.name)) return { effect: "publish", scale: "unknown" };
+  if (mssrPersistToolNames.has(tool.name)) return { effect: "persist", scale: "unknown" };
+  if (mssrExternalSideEffectToolNames.has(tool.name)) return { effect: "external-side-effect", scale: "unknown" };
+  if (mssrTrivialInspectToolNames.has(tool.name)) return { effect: "inspect", scale: "trivial" };
+  if (mssrVerifyToolNames.has(tool.name)) return { effect: "verify", scale: "substantial" };
+  if (mssrSubstantialReadToolNames.has(tool.name)) return { effect: "inspect", scale: "substantial" };
+  if (annotations.destructiveHint === true) return { effect: "mutate", scale: "unknown" };
+  if (annotations.readOnlyHint === true) return { effect: "read", scale: "trivial" };
+  return { effect: "unknown", scale: "unknown" };
+}
+
+function toolMetadata(tool: BridgeToolSchema, moduleName: string, annotations: Record<string, boolean>): BridgeToolMetadata {
   const aliasOf = aliasTargets.get(tool.name);
   const role = aliasOf
     ? "alias"
@@ -283,6 +316,7 @@ function toolMetadata(tool: BridgeToolSchema, moduleName: string): BridgeToolMet
     lifecycle: protectedToolNames.has(tool.name) ? "protected" : "stable",
     ...(aliasOf ? { aliasOf, preferredTool: aliasOf } : {}),
     ...(toolUsageGuidance.has(tool.name) ? { usage: toolUsageGuidance.get(tool.name) } : {}),
+    mssrLifecycle: mssrLifecycleMetadata(tool, annotations),
     ...(tool.metadata ?? {}),
   };
 }
@@ -293,7 +327,7 @@ function annotateTool(tool: BridgeToolSchema, moduleName: string): BridgeToolSch
     : destructiveToolNames.has(tool.name)
       ? { readOnlyHint: false, destructiveHint: true, ...(tool.annotations ?? {}) }
       : { readOnlyHint: false, destructiveHint: false, ...(tool.annotations ?? {}) };
-  return { ...tool, annotations, metadata: toolMetadata(tool, moduleName) };
+  return { ...tool, annotations, metadata: toolMetadata(tool, moduleName, annotations) };
 }
 
 type ToolRiskClassification = "read-only" | "destructive" | "neutral";

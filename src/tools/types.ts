@@ -2,7 +2,12 @@ export type BridgeToolInputSchema = Record<string, unknown>;
 
 export type BridgeToolRole = "dedicated" | "alias" | "fallback" | "aggregator" | "provider-proxy" | "experimental";
 export type BridgeToolLifecycle = "protected" | "stable" | "experimental" | "deprecated";
-
+export type BridgeMssrLifecycleEffect = "control-plane" | "read" | "inspect" | "verify" | "execute" | "mutate" | "persist" | "publish" | "external-side-effect" | "unknown";
+export type BridgeMssrLifecycleScale = "trivial" | "substantial" | "unknown";
+export type BridgeMssrLifecycleMetadata = {
+  effect: BridgeMssrLifecycleEffect;
+  scale: BridgeMssrLifecycleScale;
+};
 export type BridgeToolRecoveryRule = {
   code: string;
   instruction: string;
@@ -22,6 +27,7 @@ export type BridgeToolMetadata = {
   aliasOf?: string;
   preferredTool?: string;
   usage?: BridgeToolUsageGuidance;
+  mssrLifecycle?: BridgeMssrLifecycleMetadata;
 };
 
 export type BridgeToolSchema = {

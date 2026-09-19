@@ -1,21 +1,17 @@
-# MSSR trace integrity and lifecycle reconciliation
+# MSSR trace integrity and lifecycle
 
 ## Trace owner integrity
 
-A Bridge MSSR trace has an authoritative host owner when `project` and/or `workflowKey` are known. `sessionKey` is a continuity hint; it must never override a conflicting known project or workflow owner.
+A Bridge MSSR trace has an authoritative owner when `project` and/or `workflowKey` are known. `sessionKey` is only a continuity hint and never overrides a conflicting known owner.
 
-Implicit trace recovery is allowed only when known owner dimensions are compatible. Unknown/unscoped dimensions may acquire a known owner, and the same owner may recover across connector/session rotation. A known project A must not be inherited by project B merely because the session or caller matches; likewise a known workflow A must not be inherited by workflow B.
+Implicit recovery and explicit `traceId` resume use the same portable `evaluateMssrTraceOwnerCompatibility(...)` contract **before** adoption. Unknown/unscoped dimensions may bind to the current owner; equivalent known owners may resume across connector/session rotation; a known project/workflow mismatch fails closed without mutating the trace. Legitimate cross-project work uses a separately owned/delegated trace or bounded `related_project` evidence, never owner migration.
 
-An explicit `traceId` is a deliberate reference to a concrete trace, not permission to silently migrate that trace's owner. Auxiliary filesystem/repository work inside an already active workflow keeps the active trace owner and records the observed repository as `related_project`; it does not replace the primary project.
+The invariant applies to local state, process-shared recovery, persisted recovery, metric attribution and evidence projection so unrelated work cannot contaminate learning or maintenance evidence.
 
-The same compatibility rule applies to local active state, process-shared recovery, persisted SQLite recovery, metric attribution, and evidence projection. A trace's `identity.projects` and `workflowKeys` must not accumulate an unrelated independent project/workflow through implicit session continuity, because that would also contaminate learning and maintenance evidence.
+## Lifecycle reconciliation
 
-## Trace lifecycle reconciliation
+Bridge may hold RAM and durable observatory projections of one trace. Lifecycle-sensitive boundaries reconcile only a strictly fresher persisted lifecycle into RAM; reconciliation never rewinds newer RAM and never changes owner identity. Ordinary trace-aware tools do not perform this durable read.
 
-Bridge can hold two host views of one MSSR trace: process-shared RAM and lifecycle reconstructed from durable observatory events. They are projections of the same trace, not independent authorities.
+## Automatic lifecycle coverage
 
-Before lifecycle-sensitive explicit-trace operations (`skill_recommend`, `skill_route_plan`, `skill_bootstrap`, `skill_load`, `mssr_trace_record`) evaluate gates, Bridge reconciles a strictly fresher persisted lifecycle into RAM. Freshness is monotonic across lifecycle revision, route count, close revision, maintenance revision, and terminal closed state. A newer persisted close/maintenance checkpoint may unblock an outcome that stale RAM would reject.
-
-Reconciliation never rewinds newer RAM. Loaded skills and completed phases may be unioned, while trace owner identity (`project`, `workflowKey`, caller/session ownership) remains governed by the owner-integrity contract above and must not migrate.
-
-Ordinary trace-aware tools do not perform this durable read. Keep reconciliation at lifecycle boundaries. Regression coverage must prove both directions: persisted-newer-than-RAM is adopted; RAM-newer-than-persisted is preserved.
+Bridge registry metadata exposes bounded MSSR `effect` + `scale`. The central dispatcher evaluates packaged MSSR lifecycle policy before a tool handler runs: control-plane calls are recursion-exempt; trivial reads remain lightweight; substantial mutation/persist/publish/external work requires a compatible routed lifecycle. When requirements are missing Bridge returns `executed:false` with the required MSSR preflight/replan action and performs no original side effect. The caller processes the selected context/required skills, then retries the operation. Existing compatible lifecycle is reused. C2b routing compliance runs after this gate and remains fallback/recovery evidence, not the primary activation mechanism.
