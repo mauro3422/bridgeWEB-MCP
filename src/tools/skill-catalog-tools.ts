@@ -698,6 +698,24 @@ async function walkSkillFiles(root: string, source: SkillSource, maxDepth: numbe
         if (skill) results.push(skill);
         continue;
       }
+      if (entry.isSymbolicLink() && source === "codex-local") {
+        try {
+          const target = await fs.stat(fullPath);
+          if (!target.isDirectory()) continue;
+          // A directory link placed directly under CODEX_HOME/skills is an explicit
+          // skill registration surface. Read only that linked skill's root SKILL.md;
+          // do not recursively traverse the external target or broaden Bridge's
+          // general path policy to the resolved directory.
+          const linkedSkillPath = path.join(fullPath, "SKILL.md");
+          const linkedSkillStat = await fs.stat(linkedSkillPath);
+          if (!linkedSkillStat.isFile()) continue;
+          const linkedSkill = await readSkillEntry(linkedSkillPath, source, origin);
+          if (linkedSkill) results.push(linkedSkill);
+        } catch {
+          // Broken links or linked directories without a readable root SKILL.md are ignored.
+        }
+        continue;
+      }
       if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
       try {
         const target = await fs.stat(fullPath);

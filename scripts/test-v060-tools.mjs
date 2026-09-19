@@ -28,16 +28,21 @@ writeFixtureSkill('roblox-playtest', 'Run focused Roblox gameplay tests.');
 writeFixtureSkill('roblox-studio-qa', 'Inspect Roblox structure, visuals, and console output.');
 writeFixtureSkill('roblox-save-backup-recovery', 'Save and back up local Roblox places.');
 const linkedSkillSource = path.join(sandbox, 'linked-skill-source', 'linked-junction-skill');
+const linkedContainerSource = path.join(sandbox, 'linked-container-source');
 writeFixtureSkill('skill-maintenance-loop', 'Audit long iterations, record observable incidents, bugs and friction, and update the owning skill, routing, tool or lifecycle contract.');
 fs.mkdirSync(linkedSkillSource, {recursive:true});
 fs.writeFileSync(path.join(linkedSkillSource, 'SKILL.md'), '---\nname: linked-junction-skill\ndescription: Verify safe discovery through a directory junction.\n---\n\n# linked-junction-skill\n\nFixture guidance.\n');
 fs.symlinkSync(linkedSkillSource, path.join(fixtureSkillRoot, 'linked-junction-skill'), process.platform === 'win32' ? 'junction' : 'dir');
+fs.mkdirSync(path.join(linkedContainerSource, 'nested-escape-skill'), {recursive:true});
+fs.writeFileSync(path.join(linkedContainerSource, 'nested-escape-skill', 'SKILL.md'), '---\nname: nested-escape-skill\ndescription: Must not be discovered by recursively traversing an external junction target.\n---\n');
+fs.symlinkSync(linkedContainerSource, path.join(fixtureSkillRoot, 'linked-container'), process.platform === 'win32' ? 'junction' : 'dir');
 const fixturePluginSkill = path.join(fixtureCodexHome, 'plugins', 'cache', 'fixture-vendor', 'fixture-plugin', '1.0.0', 'skills', 'fixture-plugin-skill');
 fs.mkdirSync(fixturePluginSkill, {recursive:true});
 fs.writeFileSync(path.join(fixturePluginSkill, 'SKILL.md'), '---\nname: fixture-plugin-skill\ndescription: Verify read-only discovery from the managed Codex plugin cache.\n---\n\n# Fixture plugin skill\n\nFixture guidance.\n');
-// Deliberately exclude plugins/cache from the general Bridge path policy. Skill
-// discovery must use its narrower read-only cache boundary instead.
-process.env.BRIDGE_MCP_ALLOWED_ROOTS = [fixtureSkillRoot, linkedSkillSource, path.join(sandbox, 'project'), process.cwd()].join(path.delimiter);
+// Deliberately exclude both the external junction targets and plugins/cache from
+// the general Bridge path policy. Skill discovery may read a direct linked
+// SKILL.md, but must not recursively traverse an external linked directory.
+process.env.BRIDGE_MCP_ALLOWED_ROOTS = [fixtureSkillRoot, path.join(sandbox, 'project'), process.cwd()].join(path.delimiter);
 fs.mkdirSync(path.join(fixtureSkillRoot, '_dashboard'), {recursive:true});
 fs.writeFileSync(path.join(fixtureSkillRoot, '_dashboard', 'skill-routing-overrides.json'), JSON.stringify({
   schemaVersion: 1,
@@ -559,7 +564,8 @@ try {
   if (!syntheticAudit.items.some((item) => item.tool === 'missing_target_tool' && item.status === 'fix-ux-schema' && item.recommendation.includes('target discovery'))) throw new Error('missing-target UX recommendation failed');
 
   const junctionCatalog = await call('skill_catalog', {sources:['codex-local'],maxResults:50});
-  if (!junctionCatalog.skills.some((skill) => skill.name === 'linked-junction-skill')) throw new Error('skill catalog did not follow an allowed directory junction');
+  if (!junctionCatalog.skills.some((skill) => skill.name === 'linked-junction-skill')) throw new Error('skill catalog did not discover a direct codex-local directory junction outside the general allowed roots');
+  if (junctionCatalog.skills.some((skill) => skill.name === 'nested-escape-skill')) throw new Error('skill catalog recursively traversed an external codex-local junction target');
   const linkedSkill = junctionCatalog.skills.find((skill) => skill.name === 'linked-junction-skill');
   if (!linkedSkill?.description?.includes('directory junction')) throw new Error(`skill catalog lost plain-scalar frontmatter description: ${JSON.stringify(linkedSkill)}`);
   const pluginCatalog = await call('skill_catalog', {sources:['codex-plugin'],maxResults:50});
