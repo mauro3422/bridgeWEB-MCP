@@ -1651,20 +1651,37 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 
 ## 2026-09-18 — Una traza MSSR explícita aceptó otro proyecto/workflow y contaminó su owner
 
-**Estado:** Incidente confirmado y reproducido durante una auditoría real; causa raíz todavía no resuelta. No se considera corregido por contratos/documentación existentes.
+**Estado:** Corregido, cubierto por regresión y adoptado live en Bridge `0.6.136` consumiendo MSSR `0.2.69`. La reparación se verificó tanto antes como después de restart y en el gate strict recuperado `bridge_verify_1789791620109_1`.
 
-**Capa/owner:** `bridge-mcp` posee atribución/recovery de trazas entre sesiones, project roots, workflows y wrappers. MSSR portable define la semántica de lifecycle, pero el host debe impedir que una traza con owner conocido migre a otro proyecto/workflow.
+**Capa/owner:** `bridge-mcp` posee atribución/recovery de trazas entre sesiones, project roots, workflows y wrappers. MSSR portable define la compatibilidad de owner; Bridge debe evaluarla antes de adoptar una traza explícita.
 
 **Síntoma observable:** la traza `mssr-20260918231901-d7e71867-09d` nació para `project=mssr`, `workflowKey=mssr-integration-gap-audit`. Después de cargar `D:\Dev\bridge-mcp` en la misma sesión y reutilizar ese `traceId`, llamadas wrapper quedaron atribuidas a `project=bridge-mcp`, `related_project=mssr`, y un `skill_bootstrap` posterior sobre la misma traza devolvió `projectRoot=D:\Dev\bridge-mcp` sin rechazar el mismatch.
 
-**Evidencia exacta:** `mssr_trace_evidence` para la misma traza reportó `projects=[bridge-mcp,mssr]`, `workflowKeys=[mssr-integration-gap-audit,bridge-mssr-integration-gap-audit]` e `identity.project=bridge-mcp`. Los primeros eventos/herramientas de la traza están atribuidos a `project=mssr`; eventos posteriores pasan a `project=bridge-mcp`. El evento `project_context_selection` de `stage=implement` seleccionó módulos de Bridge dentro de esa misma identidad lógica.
+**Evidencia exacta:** `mssr_trace_evidence` para la misma traza reportó `projects=[bridge-mcp,mssr]`, `workflowKeys=[mssr-integration-gap-audit,bridge-mssr-integration-gap-audit]` e `identity.project=bridge-mcp`. Los primeros eventos/herramientas de la traza estaban atribuidos a `project=mssr`; eventos posteriores pasaban a `project=bridge-mcp`. El evento `project_context_selection` de `stage=implement` llegó a seleccionar módulos de Bridge dentro de esa misma identidad lógica.
 
 **Contrato contradicho:** `.mssr/knowledge/observability/trace-integrity-and-lifecycle.md` establece que project/workflow conocidos forman el owner compatible; un `traceId` explícito selecciona una traza concreta pero no autoriza migrar su owner, y `identity.projects`/`workflowKeys` no deben acumular trabajo independiente por continuidad de sesión.
 
-**Causa demostrada:** No resuelta. La reproducción muestra que la combinación `project_context_load` de otro root + wrapper con `traceId` explícito + replan/bootstrap puede atravesar la frontera de owner. Todavía no se atribuye a una función concreta hasta inspeccionar el camino de resolución/reconciliación y sus tests.
+**Causa demostrada:** en el camino de `traceId` explícito, Bridge recuperaba estado compartido/persistido y podía ejecutar `adopt(state)` antes de validar la compatibilidad del owner solicitado. Esa secuencia permitía que continuidad explícita se interpretara como autorización para cambiar project/workflow conocido.
 
-**Corrección aplicada:** Ninguna todavía. Para continuar la auditoría se abandonó esa traza para persistencia y se abrió una nueva traza explícitamente anclada a `D:\Dev\mssr` mediante `projectRoot` en `skill_bootstrap`.
+**Corrección aplicada:** Bridge evalúa ahora `evaluateMssrTraceOwnerCompatibility(state)` antes de cualquier `adopt(...)`. Un mismatch conocido de project/workflow falla cerrado con `mssr-trace-owner-mismatch` y no muta el owner; sólo dimensiones previamente desconocidas pueden enlazarse progresivamente. El mismo owner sí puede recuperarse después de restart. Trabajo legítimamente cross-project requiere otra traza/delegación o evidencia acotada de relación, nunca migración silenciosa.
 
-**Regresión requerida:** crear un fixture end-to-end que abra traza A para proyecto/workflow A, cargue luego proyecto B en la misma sesión, intente `bridge_tool_query`/`bridge_tool_action` y `skill_bootstrap` con el `traceId` A, y exija una de dos conductas válidas: preservar A y registrar B sólo como `related_project` cuando realmente sea trabajo auxiliar del mismo workflow, o rechazar/separar cuando project/workflow B representa otro owner. Nunca debe mutar `identity.project`, acumular un segundo workflow independiente ni seleccionar módulos de B en la traza A.
+**Regresión / evidencia:** `scripts/test-mssr-trace-owner-isolation.mjs` cubre continuación A→A, bloqueo A→B por proyecto, bloqueo por workflow, recuperación same-owner después de limpiar RAM/restart y rechazo del root incorrecto tras restauración persistida. `test-mssr-trace-contract.mjs`, la suite completa de regresiones y los gates strict live de `0.6.136` pasaron. La propia traza de release `mssr-20260919031347-d84d295e-7de` se restauró después de restart bajo el mismo `D:\Dev\bridge-mcp`/workflow sin migrar ownership.
 
-**Seguimiento:** inspeccionar resolución de `projectRoot`, `workflowKey`, `sessionWorkflowKeys`, shared/persisted trace recovery y wrappers explícitos. Verificar también que la reconciliación RAM/SQLite preserve owner y que métricas/learning digest no hayan usado identidades contaminadas como autoridad.
+**Seguimiento:** mantener owner compatibility como precondición transversal de cualquier nueva ruta explícita/reconciliación. La cobertura automática R2 actúa después de esta identidad compatible; no debe convertirse en mecanismo para adoptar una traza de otro owner.
+
+
+## 2026-09-19 — Strict verification exposed a recurrent HTTP smoke/readiness stall
+
+**Estado:** Observado y recuperado; no root-caused ni corregido en `0.6.136`. Se mantiene como seguimiento separado de performance/readiness del host y no reabre R1/R2.
+
+**Capa / owner:** transporte HTTP/MCP, watchdog y harness `test-bridge-http.ps1` de Bridge. MSSR semantic routing/trace ownership no es el owner de este síntoma.
+
+**Síntoma observable:** el job documentación-only `bridge_verify_1789791224524_3` quedó detenido en `smoke:http`; durante ese intervalo el conector devolvió 502 y el watchdog observó 8 fallos de readiness durante 91 s mientras el child Node PID `11228` seguía vivo, poseía el listener de 3001 y `/status` agotaba timeout.
+
+**Recuperación / evidencia:** watchdog PID `9788` emitió ack `b599179a-3f9a-4ae7-8385-a264ad9f84af` con `action=auto-restart-http-readiness-sustained`. El nuevo runtime quedó en Bridge `0.6.136`, PID `2232`, boot `306ee4ee-b313-4e98-9303-cdb2a80c7a46`, tunnel `live/ready`, 164 tools; `bridge_self_check` dio typecheck/build PASS y Git limpio. El job interrumpido expiró y no se contó como verificación.
+
+**Reproducción acotada posterior:** `bridge_verify_1789791620109_1` completó todo el strict gate con `ok=true`, `code=0`, `failedRequired=0`, `strictGit=true`; `smoke:http` volvió a ser anormalmente lento (`59569 ms`) pero terminó PASS y una consulta externa `bridge_health` durante la demora siguió respondiendo `live/ready`. No se reprodujo otro autorestart en esa corrida.
+
+**Conclusión actual:** existe evidencia de latencia/readiness anómala asociada al smoke, pero todavía no una causa raíz única. No se atribuye el problema a R1/R2 porque owner isolation, automatic lifecycle, dual-era, full regressions y liveness pasaron después de la recuperación.
+
+**Seguimiento:** instrumentar timing por subpaso de `test-bridge-http.ps1` y correlacionarlo con dashboard/telemetry/session lifecycle, event-loop lag y métricas del tunnel antes de cambiar thresholds del watchdog. Distinguir siempre un smoke lento de un runtime realmente no-responsive; no ocultar el síntoma aumentando timeouts sin evidencia.
