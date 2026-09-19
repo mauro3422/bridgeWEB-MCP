@@ -1,10 +1,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
+  buildMssrSemanticClaimSituation,
   evaluateMssrConsistencyDecisionSupport,
   type MssrConsistencyBoundary,
   type MssrConsistencyDecisionSupport,
   type MssrConsistencyObservation,
+  type MssrSituationObservation,
+  type MssrSituationSemanticClaim,
 } from "@mauroprime/mssr";
 import { SERVER_VERSION } from "./config.js";
 import type { BridgeNoticeInput } from "./notices.js";
@@ -137,6 +140,31 @@ export async function collectBridgeReleaseConsistencyObservations(
     : unavailable("bridge.mssr-package-version", "node_modules/@mauroprime/mssr/package.json", "installed", "replica", true));
 
   return observations;
+}
+
+function semanticClaimSourceForObservation(observation: MssrConsistencyObservation): MssrSituationSemanticClaim["source"] {
+  if (observation.role === "generated") return "generated";
+  if (observation.role === "installed") return "installed";
+  if (observation.role === "runtime") return "runtime";
+  return "source";
+}
+
+export async function collectBridgeReleaseSemanticSituationObservations(
+  root = process.cwd(),
+  runtimeVersion = SERVER_VERSION,
+): Promise<MssrSituationObservation[]> {
+  const observations = await collectBridgeReleaseConsistencyObservations(root, runtimeVersion);
+  const claims: MssrSituationSemanticClaim[] = observations.map((observation) => ({
+    kind: observation.key === "bridge.release-version" ? "release-version" : "state-value",
+    subject: observation.key,
+    source: semanticClaimSourceForObservation(observation),
+    sourceRef: observation.observer,
+    authority: observation.authority,
+    state: observation.state,
+    ...(observation.value ? { value: observation.value } : {}),
+    required: observation.required === true,
+  }));
+  return buildMssrSemanticClaimSituation(claims);
 }
 
 export async function observeBridgeReleaseConsistency(options: {

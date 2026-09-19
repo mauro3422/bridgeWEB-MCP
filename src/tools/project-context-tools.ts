@@ -27,6 +27,7 @@ import {
   planMssrProjectContextModularization,
 } from "@mauroprime/mssr";
 import { captureProjectKnowledge, updateProjectContextSection } from "../project-context-writer.js";
+import { isMssrRoutingSemanticOwnerPath } from "../mssr-project-change-signals.js";
 import { resolveToolPath } from "./shared/path.js";
 import type { BridgeToolModule } from "./types.js";
 
@@ -198,7 +199,7 @@ async function auditProjectChangeConsistency(projectRootInput: string, mode: "re
     materialWrites: substantiveChangedPaths.length,
     packageChanged: changedPaths.some((item) => ["package.json", "package-lock.json"].includes(item.toLowerCase())),
     runtimeChanged: false,
-    routingChanged: changedPaths.some((item) => item.toLowerCase().includes("skill-routing") || item.toLowerCase().includes("host-adapter-contract")),
+    routingChanged: changedPaths.some(isMssrRoutingSemanticOwnerPath),
     skillStructureChanged: changedPaths.some((item) => /(?:^|\/)skills\/[^/]+\/(?:skill\.md|context-modules\.json|references\/)/i.test(item.replace(/\\/g, "/"))),
     contextFreshnessIssues: 0,
     projectInitialized: authority.initialized,

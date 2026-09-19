@@ -1645,3 +1645,26 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Regresión / evidencia:** el fixture durable cubre los tres estados y verifica el tamaño exacto de la respuesta base. El reproducer worst-case pasó a devolver una respuesta parcial válida de 31.728 caracteres. `npm run check`, `npm run build`, context-continuation, routing-latency, WAL-maintenance, HTTP smoke y `npm run test:regressions` completo terminaron PASS / exit 0; la suite integral duró ~113 s ejecutada como job inspeccionable.
 
 **Invariante:** diagnósticos host-only nunca deben convertir una respuesta funcional bounded en un fallo de transporte. El core contractual conserva prioridad; metadata opcional degrada representación o se omite antes de exceder el envelope.
+
+
+---
+
+## 2026-09-18 — Una traza MSSR explícita aceptó otro proyecto/workflow y contaminó su owner
+
+**Estado:** Incidente confirmado y reproducido durante una auditoría real; causa raíz todavía no resuelta. No se considera corregido por contratos/documentación existentes.
+
+**Capa/owner:** `bridge-mcp` posee atribución/recovery de trazas entre sesiones, project roots, workflows y wrappers. MSSR portable define la semántica de lifecycle, pero el host debe impedir que una traza con owner conocido migre a otro proyecto/workflow.
+
+**Síntoma observable:** la traza `mssr-20260918231901-d7e71867-09d` nació para `project=mssr`, `workflowKey=mssr-integration-gap-audit`. Después de cargar `D:\Dev\bridge-mcp` en la misma sesión y reutilizar ese `traceId`, llamadas wrapper quedaron atribuidas a `project=bridge-mcp`, `related_project=mssr`, y un `skill_bootstrap` posterior sobre la misma traza devolvió `projectRoot=D:\Dev\bridge-mcp` sin rechazar el mismatch.
+
+**Evidencia exacta:** `mssr_trace_evidence` para la misma traza reportó `projects=[bridge-mcp,mssr]`, `workflowKeys=[mssr-integration-gap-audit,bridge-mssr-integration-gap-audit]` e `identity.project=bridge-mcp`. Los primeros eventos/herramientas de la traza están atribuidos a `project=mssr`; eventos posteriores pasan a `project=bridge-mcp`. El evento `project_context_selection` de `stage=implement` seleccionó módulos de Bridge dentro de esa misma identidad lógica.
+
+**Contrato contradicho:** `.mssr/knowledge/observability/trace-integrity-and-lifecycle.md` establece que project/workflow conocidos forman el owner compatible; un `traceId` explícito selecciona una traza concreta pero no autoriza migrar su owner, y `identity.projects`/`workflowKeys` no deben acumular trabajo independiente por continuidad de sesión.
+
+**Causa demostrada:** No resuelta. La reproducción muestra que la combinación `project_context_load` de otro root + wrapper con `traceId` explícito + replan/bootstrap puede atravesar la frontera de owner. Todavía no se atribuye a una función concreta hasta inspeccionar el camino de resolución/reconciliación y sus tests.
+
+**Corrección aplicada:** Ninguna todavía. Para continuar la auditoría se abandonó esa traza para persistencia y se abrió una nueva traza explícitamente anclada a `D:\Dev\mssr` mediante `projectRoot` en `skill_bootstrap`.
+
+**Regresión requerida:** crear un fixture end-to-end que abra traza A para proyecto/workflow A, cargue luego proyecto B en la misma sesión, intente `bridge_tool_query`/`bridge_tool_action` y `skill_bootstrap` con el `traceId` A, y exija una de dos conductas válidas: preservar A y registrar B sólo como `related_project` cuando realmente sea trabajo auxiliar del mismo workflow, o rechazar/separar cuando project/workflow B representa otro owner. Nunca debe mutar `identity.project`, acumular un segundo workflow independiente ni seleccionar módulos de B en la traza A.
+
+**Seguimiento:** inspeccionar resolución de `projectRoot`, `workflowKey`, `sessionWorkflowKeys`, shared/persisted trace recovery y wrappers explícitos. Verificar también que la reconciliación RAM/SQLite preserve owner y que métricas/learning digest no hayan usado identidades contaminadas como autoridad.

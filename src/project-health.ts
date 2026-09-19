@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { auditMssrProjectContextHealth, discoverMssrWorkspaceRepositories } from "@mauroprime/mssr";
+import { collectBridgeDocumentFreshness } from "./document-freshness-host.js";
 
 const DEFAULT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_CHECK_MS = 60 * 60 * 1000;
@@ -18,6 +19,11 @@ export type ProjectHealthItem = {
   findingCount: number;
   findingCodes: string[];
   findings: Array<{ code: string; target: string; recommendation: string }>;
+  freshnessManifestStatus: "absent" | "valid" | "invalid";
+  freshnessLevel: ProjectHealthLevel;
+  freshnessFindingCount: number;
+  freshnessFindingCodes: string[];
+  freshnessReviewDocuments: string[];
 };
 export type ProjectHealthSnapshot = {
   observedAt: string;
@@ -81,27 +87,55 @@ export async function collectProjectHealthSnapshot(options: {
   const repos = await discoverMssrWorkspaceRepositories(workspaceRoot, options.maxDepth ?? DEFAULT_MAX_DEPTH);
   const projects: ProjectHealthItem[] = [];
 
+  const rank = { review: 2, watch: 1, ok: 0 } as const;
   for (const projectRoot of repos) {
-    const health = await auditMssrProjectContextHealth(projectRoot);
+    const [health, freshness] = await Promise.all([
+      auditMssrProjectContextHealth(projectRoot),
+      collectBridgeDocumentFreshness(projectRoot),
+    ]);
     const relativeRoot = path.relative(workspaceRoot, projectRoot).replace(/\\/g, "/") || ".";
+    const freshnessLevel: ProjectHealthLevel = freshness.manifestStatus === "invalid"
+      ? "review"
+      : freshness.evaluation?.level ?? "ok";
+    const freshnessFindings = freshness.manifestStatus === "invalid"
+      ? [{
+          code: "document-freshness-manifest-invalid",
+          target: ".mssr/document-freshness.json",
+          recommendation: "Corrige el manifest de Document Freshness antes de confiar en sus señales; no reescribas documentos automáticamente.",
+        }]
+      : (freshness.evaluation?.findings ?? []).map((item) => ({
+          code: `document-freshness-${item.code}`,
+          target: item.impactRef ?? item.documentRef,
+          recommendation: item.level === "review"
+            ? `Revisa ${item.documentRef} contra sus refs declarados; la señal de freshness no prueba por sí sola una contradicción semántica.`
+            : `Reúne evidencia de revisión para ${item.documentRef}; el orden actual no es concluyente.`,
+        }));
+    const structuralFindings = health.findings.map((item) => ({
+      code: item.code,
+      target: item.target,
+      recommendation: item.recommendation,
+    }));
+    const findings = [...structuralFindings, ...freshnessFindings].slice(0, 24);
+    const level = rank[freshnessLevel] > rank[health.level] ? freshnessLevel : health.level;
     projects.push({
       name: path.basename(projectRoot),
       relativeRoot,
-      level: health.level,
+      level,
       manifestStatus: health.manifestStatus,
       coreEntries: health.coreCount,
       modules: health.moduleCount,
-      findingCount: health.findings.length,
-      findingCodes: [...new Set(health.findings.map((item) => item.code))].sort(),
-      findings: health.findings.slice(0, 24).map((item) => ({
-        code: item.code,
-        target: item.target,
-        recommendation: item.recommendation,
-      })),
+      findingCount: structuralFindings.length + freshnessFindings.length,
+      findingCodes: [...new Set([...structuralFindings, ...freshnessFindings].map((item) => item.code))].sort(),
+      findings,
+      freshnessManifestStatus: freshness.manifestStatus,
+      freshnessLevel,
+      freshnessFindingCount: freshnessFindings.length,
+      freshnessFindingCodes: [...new Set(freshnessFindings.map((item) => item.code))].sort(),
+      freshnessReviewDocuments: freshness.evaluation?.reviewDocuments ?? [],
     });
   }
 
-  const rank = { review: 2, watch: 1, ok: 0 } as const;
+
   projects.sort((a, b) => rank[b.level] - rank[a.level] || b.findingCount - a.findingCount || a.relativeRoot.localeCompare(b.relativeRoot));
   return {
     observedAt: now.toISOString(),

@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createEmptyMssrContextInboxState } from "@mauroprime/mssr";
+import { buildMssrSemanticClaimSituation, createEmptyMssrContextInboxState, evaluateMssrSituationModel } from "@mauroprime/mssr";
 import {
   buildProjectSituationNoticeInputs,
   captureProjectSituationIfDue,
   collectProjectSituationSnapshot,
   getProjectSituationReport,
 } from "../dist/project-situation.js";
+import { collectBridgeReleaseSemanticSituationObservations } from "../dist/release-consistency.js";
 
 const workspaceRoot = path.resolve("D:/Dev-test-workspace");
 const projectRoot = path.join(workspaceRoot, "alpha");
@@ -116,6 +117,47 @@ const historicalOnly = await collectProjectSituationSnapshot({
 assert.equal(historicalOnly.projects[0].level, "ok");
 assert.equal(historicalOnly.projects[0].activeReceiptCount, 0);
 assert.equal(historicalOnly.counts.activeContext, 0);
+
+const semanticOnly = await collectProjectSituationSnapshot({
+  workspaceRoot,
+  now,
+  dependencies: {
+    ...deps([]),
+    collectSemanticClaims: async () => buildMssrSemanticClaimSituation([
+      {
+        kind: "release-version",
+        subject: "bridge.release-version",
+        source: "source",
+        sourceRef: "package.json",
+        authority: "canonical",
+        value: "0.6.135",
+        required: true,
+      },
+      {
+        kind: "release-version",
+        subject: "bridge.release-version",
+        source: "runtime",
+        sourceRef: "live-runtime",
+        authority: "replica",
+        value: "0.6.134",
+        required: true,
+      },
+    ]),
+  },
+});
+assert.equal(semanticOnly.projects[0].level, "review");
+assert.equal(semanticOnly.projects[0].activeReceiptCount, 0, "semantic claims must be evaluated without Context Plane receipts");
+assert.equal(semanticOnly.counts.activeContext, 0);
+assert.equal(semanticOnly.projects[0].noticeClass, "runtime-integrity");
+assert.ok(semanticOnly.projects[0].reasonCodes.includes("runtime-state-mismatch"));
+assert.ok(semanticOnly.projects[0].observationCount >= 2);
+
+const bridgePackage = JSON.parse(await fs.readFile(path.join(process.cwd(), "package.json"), "utf8"));
+const bridgeReleaseClaims = await collectBridgeReleaseSemanticSituationObservations(process.cwd(), String(bridgePackage.version));
+assert.ok(bridgeReleaseClaims.some((item) => item.key === "semantic.release-version:bridge.release-version"));
+assert.ok(bridgeReleaseClaims.some((item) => item.key === "semantic.state-value:bridge.mssr-package-version"));
+const bridgeReleaseSituation = evaluateMssrSituationModel({ boundary: "post-restart", observations: bridgeReleaseClaims });
+assert.equal(bridgeReleaseSituation.decision.level, "ok", JSON.stringify(bridgeReleaseSituation.decision));
 
 const opened = buildProjectSituationNoticeInputs(stale, null);
 assert.equal(opened.length, 1);

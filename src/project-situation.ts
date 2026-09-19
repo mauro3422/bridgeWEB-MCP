@@ -11,8 +11,10 @@ import {
   type MssrContextDeliveryReceipt,
   type MssrProducerObservation,
   type MssrSituationModelResult,
+  type MssrSituationObservation,
 } from "@mauroprime/mssr";
 import type { BridgeNoticeInput } from "./notices.js";
+import { collectBridgeReleaseSemanticSituationObservations } from "./release-consistency.js";
 import { adaptMssrOperationalDecision } from "./operational-notices.js";
 import { bridgeActionForMssrConsistencyAction } from "./mssr-consistency.js";
 
@@ -71,6 +73,7 @@ type SituationDependencies = {
   discover?: (workspaceRoot: string, maxDepth: number) => Promise<string[]>;
   loadInbox?: (filePath: string) => Promise<Awaited<ReturnType<typeof loadMssrContextInboxStateFromFile>>>;
   collectRepository?: (projectRoot: string) => Promise<{ observations: MssrProducerObservation[] }>;
+  collectSemanticClaims?: (projectRoot: string) => Promise<MssrSituationObservation[]>;
 };
 
 function defaultFilePath(): string {
@@ -213,6 +216,11 @@ export async function collectProjectSituationSnapshot(options: {
   const loadInbox = options.dependencies?.loadInbox ?? loadMssrContextInboxStateFromFile;
   const collectRepository = options.dependencies?.collectRepository
     ?? (async (projectRoot: string) => collectRepositoryContextMessages({ projectRoot, maxObservations: 32 }));
+  const bridgeRoot = path.resolve(process.cwd());
+  const collectSemanticClaims = options.dependencies?.collectSemanticClaims
+    ?? (async (projectRoot: string) => path.resolve(projectRoot) === bridgeRoot
+      ? collectBridgeReleaseSemanticSituationObservations(projectRoot)
+      : []);
   const repos = await discover(workspaceRoot, maxDepth);
   const projects: ProjectSituationItem[] = [];
 
@@ -220,30 +228,37 @@ export async function collectProjectSituationSnapshot(options: {
     const base = emptyItem(workspaceRoot, projectRoot);
     const inboxPath = path.join(projectRoot, ".mssr", "runtime", "context-inbox.json");
     try {
-      const state = await loadInbox(inboxPath);
-      const pruned = pruneMssrContextInbox(state, now.toISOString()).state;
-      const activeReceipts = pruned.deliveries.filter((receipt) => receiptIsOperationallyActive(receipt, nowMs, legacyReceiptMaxAgeMs));
-      if (activeReceipts.length === 0) {
+      const semanticObservations = await collectSemanticClaims(projectRoot);
+      let activeReceipts: MssrContextDeliveryReceipt[] = [];
+      try {
+        const state = await loadInbox(inboxPath);
+        const pruned = pruneMssrContextInbox(state, now.toISOString()).state;
+        activeReceipts = pruned.deliveries.filter((receipt) => receiptIsOperationallyActive(receipt, nowMs, legacyReceiptMaxAgeMs));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+
+      let currentReceipts: MssrContextDeliveryReceipt[] = [];
+      let receiptObservations: MssrSituationObservation[] = [];
+      if (activeReceipts.length > 0) {
+        const repository = await collectRepository(projectRoot);
+        currentReceipts = currentCanonicalReceiptSources(activeReceipts, repository.observations);
+        if (currentReceipts.length > 0) {
+          receiptObservations = buildMssrKnowledgeRevisionSituation({
+            repositoryObservations: repository.observations,
+            deliveryReceipts: currentReceipts,
+          });
+        }
+      }
+
+      const observations = [...semanticObservations, ...receiptObservations];
+      if (observations.length === 0) {
         projects.push(base);
         continue;
       }
-      const repository = await collectRepository(projectRoot);
-      const currentReceipts = currentCanonicalReceiptSources(activeReceipts, repository.observations);
-      if (currentReceipts.length === 0) {
-        projects.push(base);
-        continue;
-      }
-      const observations = buildMssrKnowledgeRevisionSituation({
-        repositoryObservations: repository.observations,
-        deliveryReceipts: currentReceipts,
-      });
       const situation = evaluateMssrSituationModel({ boundary: "context-load", observations });
       projects.push(itemFromSituation(workspaceRoot, projectRoot, currentReceipts.length, situation));
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        projects.push(base);
-        continue;
-      }
       projects.push({
         ...base,
         level: "error",

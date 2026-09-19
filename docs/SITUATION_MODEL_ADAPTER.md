@@ -1,10 +1,10 @@
 # Situation Model adapter
 
-Bridge 0.6.105 consumes the portable MSSR C2e Situation Model from `@mauroprime/mssr` 0.2.26.
+Bridge 0.6.135 consumes the portable MSSR Situation Model from `@mauroprime/mssr` 0.2.67, including the original receipt/revision path and C2e-D explicit semantic claim producers.
 
 ## Purpose
 
-Project knowledge is operational evidence, not just documentation. Bridge watches the bounded revision metadata already produced by MSSR Context Plane and compares what an agent was actually delivered with the current canonical repository owners.
+Project knowledge and explicit host facts are operational evidence, not just documentation. Bridge compares bounded Context Plane delivery revisions with current canonical repository owners and can also supply contract-defined scalar semantic claims such as package/source/generated/installed/runtime version facts. Free-form project prose is not converted into claims.
 
 ```text
 PROJECT_CONTEXT / PROJECT_MEMORY / PROJECT_STATE
@@ -25,7 +25,7 @@ This applies to any host that consumes the same Context Plane contract: ChatGPT 
 
 ## Watcher contract
 
-`src/project-situation.ts` discovers the managed workspace but performs repository collection only for projects with operationally active Context Plane delivery receipts. It then compares receipt revisions with current canonical repository revisions through portable MSSR C2e/C2c/C2d.
+`src/project-situation.ts` discovers the managed workspace and composes two bounded evidence channels. Receipt-derived C2e observations are collected only when operationally active Context Plane delivery receipts still point at current canonical candidates. Explicit C2e-D semantic claims are independent of receipt presence; Bridge currently auto-produces them only for its own release/install/runtime contract by reusing `src/release-consistency.ts`. Both channels enter the same portable MSSR Situation Model/C2c/C2d evaluation.
 
 The watcher persists metadata-only snapshots under ignored `data/project-situation.json` (or `BRIDGE_MCP_PROJECT_SITUATION_PATH`) so stable REVIEW does not reopen after a Bridge restart. No raw PROJECT_MEMORY body, prompt, transcript, private reasoning, or arbitrary document content is written to this store.
 
@@ -56,7 +56,7 @@ For a stale project-knowledge receipt, `revalidate-context-evidence` may render 
 
 C2e distinguishes `observed`, `declared`, `inferred`, and `learned` evidence. Reliability does not override semantic ownership. Inferred/learned evidence cannot become canonical merely because its confidence is high.
 
-The current watcher is revision-first. It does not parse arbitrary free-form memory prose into truth. Contract-defined semantic claim producers can be added later under separate tests and ownership rules.
+The watcher remains evidence-first and never parses arbitrary free-form memory prose into truth. From 0.6.135, Bridge's release-consistency observer is the first production C2e-D producer: it maps already-structured package/source/generated/installed/runtime facts into bounded scalar semantic claims. Adding another producer requires an explicit structured contract plus host tests; lexical similarity, prose search, or model confidence alone cannot assert contradiction.
 
 ## HTTP projection
 

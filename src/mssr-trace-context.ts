@@ -27,6 +27,7 @@ import { adaptMssrOperationalDecision } from "./operational-notices.js";
 import type { BridgeNoticeAction, BridgeNoticeInput } from "./notices.js";
 import { findPersistedMssrTraceCandidates, purgeMssrTraceWorkingMemory, readPersistedMssrTraceState } from "./mssr-observatory.js";
 import { createMssrRoutingComplianceNoticeTracker } from "./mssr-routing-compliance.js";
+import { isMssrRoutingSemanticOwnerPath } from "./mssr-project-change-signals.js";
 import { normalizeModelIdentifier } from "./runtime-identity.js";
 
 type JsonRecord = Record<string, unknown>;
@@ -258,7 +259,7 @@ function pathSignals(paths: Iterable<string>): {
   const values = [...paths].map((value) => value.replace(/\\/g, "/").toLowerCase());
   return {
     packageChanged: values.some((value) => value === "package.json" || value === "package-lock.json" || value.endsWith("/package.json")),
-    routingChanged: values.some((value) => value.includes("skill-routing") || value.includes("host-adapter-contract") || value.includes("mssr-adapter")),
+    routingChanged: values.some(isMssrRoutingSemanticOwnerPath),
     skillStructureChanged: values.some((value) => /(?:^|\/)skills\/[^/]+\/(?:skill\.md|context-modules\.json|references\/)/.test(value)),
   };
 }
