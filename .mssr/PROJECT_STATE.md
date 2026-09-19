@@ -6,7 +6,7 @@ Bridge `0.6.135` is published and live-adopted with exact `@mauroprime/mssr 0.2.
 ## Liveness and observability
 Durable MSSR events and Bridge tool metrics use the shared single-writer observability worker instead of synchronous JSONL/SQLite request-path writes. A bounded in-memory overlay preserves immediate read-your-writes semantics for active trace/recent/routing projections while durable persistence catches up. WAL maintenance is separate from receipt durability: passive checkpoints run outside the HTTP/MCP event loop after a true quiet-period debounce.
 
-Bridge `0.6.135` post-restart verification job `bridge_verify_1789779879137_1` proved doctor/check/build, HTTP smoke, dual-era MCP, full regressions, routing latency, WAL maintenance, HTTP liveness, skill routing, watchdog/metrics reachability, tools/list sanity, and clean Git; the live smoke observed PID `13508` / boot `a7faec2b-4ad9-425a-83b4-5d097d03fc68`, `live/ready`, and 164 tools. Its only required failure was generated `TOOLS.md` freshness after the version bump; `npm run docs:tools` regenerated the 164-tool catalog for 0.6.135, so a final strict-Git verification rerun is required before closing the release trace. Liveness remained healthy with 64 completed writes, 0 event-loop stalls and low-millisecond p95 readiness.
+Bridge `0.6.135` final post-restart verification job `bridge_verify_1789780400020_2` completed with `ok=true`, `code=0`, `failedRequired=0`, and `strictGit=true`. Doctor, check, build, HTTP smoke, dual-era MCP, full regressions, routing latency, WAL maintenance, HTTP liveness, skill routing, generated-tools freshness, watchdog/metrics reachability, tools/list sanity, and clean Git all passed. The live smoke observed PID `13508` / boot `a7faec2b-4ad9-425a-83b4-5d097d03fc68`, `live/ready`, and 164 tools; routing covered 240 canonical effective cases with `maintenanceRequired=false`; liveness recorded 64 completed writes, 0 event-loop stalls and low-millisecond p95 readiness. The earlier job `bridge_verify_1789779879137_1` correctly exposed stale generated `TOOLS.md`; regeneration fixed that sole required failure before this clean rerun.
 
 Routing latency is attributed by layer. `bridgeTiming` reports instrumented internal phases and `bridgeMeta.latency.dispatchMs` reports time inside Bridge dispatch; caller-to-Bridge ingress and Bridge-to-caller egress remain outside that boundary. Host latency/readiness/transport warnings, including `bridge-routing-latency`, are Bridge-native Notices and do not become MSSR semantic notices.
 
@@ -24,7 +24,7 @@ Bridge project control remains canonical under `.mssr/`. A full human semantic r
 
 ## Next performance/control work
 
-Bridge 0.6.135 is live-adopted and the functional code path is complete. The remaining close gate is purely release consistency: publish the regenerated 0.6.135 `TOOLS.md` plus this live-adoption state, rerun strict verification from a clean tree, then close the MSSR trace. Future semantic monitoring should extend typed producers/registries through Project Health/Situation and the existing single notice transport rather than adding parallel watchers or queues.
+Bridge 0.6.135 is live-adopted, remotely published, generated-tool fresh, and fully post-adoption verified from a clean tree. No further Bridge mutation is required for this release scope. Future semantic monitoring should extend typed producers/registries through Project Health/Situation and the existing single notice transport rather than adding parallel watchers or queues.
 
 ## Repository reconciliation — 2026-09-18
 
