@@ -196,6 +196,40 @@ try {
   assertComplete(completeInOne, "fit-in-one response");
   assert.deepEqual(loadedNames(completeInOne).sort(), expectedSkillNames, "a fitting selection must deliver each unit once without a cursor");
 
+  const retainedContextObligations = completeInOne.contextAssembly.units.map(({ id, fingerprint }) => ({ id, fingerprint }));
+  assert.equal(retainedContextObligations.length, expectedSkillNames.length, "fit-in-one response must expose one stable receipt per selected core");
+  assert.ok(retainedContextObligations.every((item) => typeof item.id === "string" && /^[A-Za-z0-9_-]{43}$/.test(item.fingerprint)), "every retention receipt must expose a stable id and exact content fingerprint");
+
+  const retained = await bootstrap({ ...bootstrapInput, traceId: completeInOne.traceId, skillDecisions, maxContextChars: 30_000, maxEnvelopeChars: 40_000, retainedContextObligations });
+  assertComplete(retained, "fully retained response");
+  assert.equal(retained.contextAssembly.deliveredChars, 0, "exact retained obligations must suppress duplicate procedural bytes");
+  assert.equal(retained.contextAssembly.retainedContextCharsSaved, expectedCoreChars, "retained savings must equal the exact selected context bytes");
+  assert.equal(retained.contextAssembly.selectedChars, expectedCoreChars, "retained units remain part of the selected context contract");
+  assert.deepEqual(retained.contextAssembly.retained.map((unit) => unit.id).sort(), retainedContextObligations.map((unit) => unit.id).sort(), "Bridge must expose exactly the obligations MSSR accepted as retained");
+  assert.deepEqual(loadedNames(retained).sort(), expectedSkillNames, "retained guidance must keep selected skills lifecycle-satisfied without reserializing content");
+  assert.ok(retained.loaded.every((item) => item.content === "" && item.contextAssembly.contextSatisfied === true), "fully retained skills must be satisfied with empty re-delivered content");
+
+  const historicalOnly = await bootstrap({ ...bootstrapInput, traceId: retained.traceId, skillDecisions, maxContextChars: 30_000, maxEnvelopeChars: 40_000 });
+  assertComplete(historicalOnly, "historical trace without receipts");
+  assert.equal(historicalOnly.contextAssembly.deliveredChars, expectedCoreChars, "historical skill_load state alone must never prove current-context retention");
+  assert.equal(historicalOnly.contextAssembly.retainedContextCharsSaved, 0, "omitting receipts after compaction/restart/handoff must fail open to re-delivery");
+
+  const mismatchedReceipts = retainedContextObligations.map((receipt, index) => index === 0
+    ? { ...receipt, fingerprint: `${receipt.fingerprint.slice(0, -1)}${receipt.fingerprint.endsWith("A") ? "B" : "A"}` }
+    : receipt);
+  const mismatch = await bootstrap({ ...bootstrapInput, skillDecisions, maxContextChars: 30_000, maxEnvelopeChars: 40_000, retainedContextObligations: mismatchedReceipts });
+  assertComplete(mismatch, "fingerprint mismatch response");
+  assert.ok(mismatch.contextAssembly.deliveredChars > 0 && mismatch.contextAssembly.deliveredChars < expectedCoreChars, "a changed fingerprint must re-deliver only the unmet unit while preserving exact matches");
+  assert.equal(mismatch.contextAssembly.retainedContextCharsSaved + mismatch.contextAssembly.deliveredChars, expectedCoreChars, "mismatch accounting must partition retained and re-delivered selected bytes exactly");
+
+  const partialRetainedReceipts = retainedContextObligations.slice(0, 2);
+  const retainedPartial = await bootstrap({ ...bootstrapInput, skillDecisions, maxContextChars: 7_000, maxEnvelopeChars: 30_000, retainedContextObligations: partialRetainedReceipts });
+  assertPartial(retainedPartial, "retained partial response");
+  assert.equal(retainedPartial.contextAssembly.retained.length, partialRetainedReceipts.length, "partial chains must bind caller receipts into the first page");
+  const retainedContinuation = await next({ traceId: retainedPartial.traceId, cursor: retainedPartial.cursor });
+  assertComplete(retainedContinuation, "retained continuation response");
+  assert.deepEqual(retainedContinuation.contextAssembly.retained.map((unit) => unit.id).sort(), partialRetainedReceipts.map((unit) => unit.id).sort(), "skill_context_next must preserve the original receipt set internally without caller resubmission");
+
   console.log(JSON.stringify({
     ok: true,
     expectedCoreChars,

@@ -4,6 +4,7 @@ Versioned release notes are the canonical change-history surface for MSSR debugg
 
 ## Current releases
 
+- [0.6.137](0.6.137.md) - Adopt MSSR 0.2.70 and complete Bridge R3 Context Economy v2 host adoption with explicit retained-context receipts, exact fingerprint invalidation, and bounded continuation preservation.
 - [0.6.136](0.6.136.md) - Adopt MSSR 0.2.69 and enforce immutable explicit-trace ownership plus automatic pre-side-effect lifecycle coverage for substantial Bridge operations.
 - [0.6.135](0.6.135.md) - Adopt MSSR 0.2.67 and connect semantic routing-owner classification, opt-in Document Freshness through Project Health, and C2e-D explicit semantic claims through Project Situation without adding parallel control planes.
 - [0.6.134](0.6.134.md) - Contextual low-noise notice delivery: current trace/project attention first, unrelated-project count-only summaries, global history recovery, lifecycle supersession/resolution, oversized-queue bypass/compaction, and restart reconciliation.

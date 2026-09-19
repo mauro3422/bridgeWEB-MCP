@@ -1,5 +1,6 @@
 import type {
   SkillContextMode,
+  SkillContextRetentionReceipt,
   SkillReferenceMode,
   StructuredSkillIntent,
 } from "@mauroprime/mssr";
@@ -25,6 +26,7 @@ export type BridgeSkillContextContinuationState = Readonly<{
   requestedContextChars: number;
   maxContextChars: number;
   maxEnvelopeChars: number;
+  retainedContextObligations: readonly SkillContextRetentionReceipt[];
   postContextAction?: Readonly<Record<string, unknown>> | null;
   cursorFingerprint: string;
   entries: readonly BridgeSkillContextContinuationEntry[];
@@ -54,6 +56,7 @@ export function rememberSkillContextContinuation(
   const state: BridgeSkillContextContinuationState = {
     ...input,
     entries: input.entries.map((entry) => ({ ...entry })),
+    retainedContextObligations: input.retainedContextObligations.map((receipt) => ({ ...receipt })),
     postContextAction: input.postContextAction ? { ...input.postContextAction } : null,
     createdAt: previous?.createdAt ?? now,
     updatedAt: now,

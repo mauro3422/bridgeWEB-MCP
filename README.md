@@ -7,10 +7,10 @@ El objetivo es tener un puente local controlado por nosotros para operar filesys
 ## Estado actual
 
 ```text
-bridge-mcp current release v0.6.136
-Live runtime: v0.6.136
-Packaged MSSR: 0.2.69
-Mode: Streamable HTTP live; R1 trace-owner isolation + R2 automatic lifecycle preflight live-adopted and strict-verified
+bridge-mcp current source release v0.6.137
+Live runtime: v0.6.136 until controlled adoption completes
+Packaged MSSR: 0.2.70
+Mode: Streamable HTTP live; R1/R2 remain live, R3 retained-context receipt adoption is release-gated before restart
 Project root: D:\Dev\bridge-mcp
 Bridge MCP: http://127.0.0.1:3001/mcp
 Bridge status: http://127.0.0.1:3001/status

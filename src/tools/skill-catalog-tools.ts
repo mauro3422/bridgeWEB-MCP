@@ -58,6 +58,8 @@ import {
   resolveMssrHostSkillSelection,
   shouldLoadProjectChangeHistory,
   type SkillContextMode,
+  type PlannedSkillContext,
+  type SkillContextRetentionReceipt,
   type SkillReferenceMode,
 } from "@mauroprime/mssr";
 import {
@@ -241,8 +243,10 @@ function compactContextAssembly(
     planningMode: page.planningMode,
     deliveredChars: page.deliveredChars,
     totalContextCharsLoaded: page.totalContextCharsLoaded,
+    retainedContextCharsSaved: page.retainedContextCharsSaved,
+    retained: page.retained,
+    selectedChars: page.retainedContextCharsSaved + page.deliveredChars + remaining.chars,
     estimatedCharsSaved: page.estimatedCharsSaved,
-    selectedChars: page.deliveredChars + remaining.chars,
     requiredCoreReservedChars: page.requiredCoreReservedChars,
     requiredModuleReservedChars: page.requiredModuleReservedChars,
     requiredOverflowChars: page.requiredOverflowChars,
@@ -258,6 +262,9 @@ function compactContextAssembly(
       required: item.obligation === "required",
       obligation: item.obligation,
       loaded: item.loaded,
+      retainedContextCharsSaved: item.contextAssembly.retainedContextCharsSaved,
+      contextSatisfied: item.contextAssembly.contextSatisfied,
+      retainedUnits: item.contextAssembly.retainedUnits,
       coreCharsLoaded: item.contextAssembly.coreCharsLoaded,
       moduleCharsLoaded: item.contextAssembly.moduleCharsLoaded,
       totalCharsLoaded: item.contextAssembly.totalCharsLoaded,
@@ -267,8 +274,10 @@ function compactContextAssembly(
   };
 }
 
-function loadedContextItems(page: Awaited<ReturnType<typeof planSkillContextPage>>) {
-  return page.skills.filter((item) => item.loaded);
+function loadedContextItems(page: Awaited<ReturnType<typeof planSkillContextPage>>): Array<Extract<PlannedSkillContext, { loaded: true }>> {
+  return page.skills.filter((item): item is Extract<PlannedSkillContext, { loaded: true }> => item.loaded && (
+    item.content.length > 0 || (page.page === 1 && item.contextAssembly.retainedUnits.length > 0)
+  ));
 }
 
 function compactLoadedContextItems(page: Awaited<ReturnType<typeof planSkillContextPage>>) {
@@ -285,6 +294,9 @@ function compactLoadedContextItems(page: Awaited<ReturnType<typeof planSkillCont
       moduleCharsLoaded: item.contextAssembly.moduleCharsLoaded,
       totalCharsLoaded: item.contextAssembly.totalCharsLoaded,
       selectedModules: item.contextAssembly.selectedModules,
+      retainedContextCharsSaved: item.contextAssembly.retainedContextCharsSaved,
+      contextSatisfied: item.contextAssembly.contextSatisfied,
+      retainedUnits: item.contextAssembly.retainedUnits,
       contextDeferred: item.contextAssembly.contextDeferred,
       ...(item.contextAssembly.warning ? { warning: item.contextAssembly.warning } : {}),
     },
@@ -1279,7 +1291,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
     },
     {
       name: "skill_bootstrap",
-      description: "Load the current phase of a structured MSSR route. It globally plans selective skill context from context-modules.json manifests and, when projectRoot is supplied, also re-selects project context/memory/state/directive modules only from canonical .mssr/project-context.json for the same stage and structured intent without duplicating the already-loaded project core. Missing or invalid project initialization remains explicit and never falls back to .bridge. Optional MSSR Context Messages are validated and selected by portable MSSR, returned as complete advisory evidence, and piggybacked only when selected; Bridge never executes their advisory actions or persists their proposals. Required skill cores are reserved first; optional procedural context remains budgeted. The response reports skill-context savings plus scoped project-context decisions. Deferred skills and project modules remain metadata-only.",
+      description: "Load the current phase of a structured MSSR route. It globally plans selective skill context from context-modules.json manifests and, when projectRoot is supplied, also re-selects project context/memory/state/directive modules only from canonical .mssr/project-context.json for the same stage and structured intent without duplicating the already-loaded project core. Missing or invalid project initialization remains explicit and never falls back to .bridge. Optional MSSR Context Messages are validated and selected by portable MSSR, returned as complete advisory evidence, and piggybacked only when selected; Bridge never executes their advisory actions or persists their proposals. Required skill cores are reserved first; optional procedural context remains budgeted. Callers may provide exact retainedContextObligations receipts only for procedural units still present in the current uncompacted host context; Bridge forwards those receipts to portable MSSR but never infers retention from trace history. The response reports delivered and retained-context savings plus scoped project-context decisions. Deferred skills and project modules remain metadata-only.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1303,6 +1315,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
           maxContextMessageChars: { type: "number", default: 6000, minimum: 0, maximum: 20000 },
           contentMode: { type: "string", enum: ["selective", "full"], default: "selective", description: "Use selective to assemble manifest-guided core/modules. Use full only for explicit diagnosis, compatibility comparison, or recovery." },
           includeReferences: { type: "string", enum: ["auto", "none"], default: "auto", description: "Auto selects matching manifest modules. None loads only the declared core while preserving routing." },
+          retainedContextObligations: { type: "array", maxItems: 128, description: "Exact host attestations for procedural units still present in the caller's current uncompacted context. Each receipt must match the stable unit id and current content fingerprint. Omit after compaction, restart, handoff, or whenever retention is uncertain; Bridge never infers these from trace history.", items: { type: "object", properties: { id: { type: "string", minLength: 1, maxLength: 240 }, fingerprint: { type: "string", pattern: "^[A-Za-z0-9_-]{43}$" } }, required: ["id", "fingerprint"], additionalProperties: false } },
           maxContextChars: { type: "number", default: 24000, minimum: 4000, maximum: 100000, description: "Global character budget for assembled Codex skill context. Required cores are never silently truncated; budget overflow is reported." },
           maxEnvelopeChars: { type: "number", default: 32000, minimum: 4000, maximum: 120000, description: "Hard target for the compact serialized bootstrap envelope, including routed metadata and delivered procedural context. Selected context that cannot fit is continued explicitly instead of silently omitted." },
           responseMode: { type: "string", enum: routeResponseModes, default: "compact", description: "compact returns one bounded context page plus exact continuation metadata; debug preserves the full diagnostic route and assembly details." },
@@ -1696,6 +1709,10 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const referenceMode = z.enum(["auto", "none"]).catch("auto").parse(args.includeReferences ?? "auto") as SkillReferenceMode;
       const maxContextChars = z.number().int().min(4_000).max(100_000).catch(24_000).parse(args.maxContextChars ?? 24_000);
       const maxEnvelopeChars = z.number().int().min(4_000).max(120_000).catch(32_000).parse(args.maxEnvelopeChars ?? 32_000);
+      const retainedContextObligations = z.array(z.object({
+        id: z.string().trim().min(1).max(240),
+        fingerprint: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+      }).strict()).max(128).parse(args.retainedContextObligations ?? []) as SkillContextRetentionReceipt[];
       const responseMode = z.enum(routeResponseModes).catch("compact").parse(args.responseMode ?? "compact");
       const requestedProjectContextChars = z.number().int().min(2_000).max(80_000).catch(12_000).parse(args.maxProjectContextChars ?? 12_000);
       const requestedContextMessageChars = z.number().int().min(0).max(20_000).catch(6_000).parse(args.maxContextMessageChars ?? 6_000);
@@ -1920,6 +1937,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         mode: contentMode,
         references: referenceMode,
         maxContextChars: pageBudget,
+        retainedContextObligations,
       }));
       const buildResponse = () => {
         const remaining = remainingContextSummary(page);
@@ -1954,6 +1972,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
           mode: contentMode,
           references: referenceMode,
           maxContextChars: pageBudget,
+          retainedContextObligations,
         }));
         response = timing.measureSync("response.rebuild", buildResponse);
       }
@@ -1974,6 +1993,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
           requestedContextChars: maxContextChars,
           maxContextChars,
           maxEnvelopeChars,
+          retainedContextObligations,
           postContextAction,
           cursorFingerprint: contextCursorFingerprint(page.cursor!),
           entries,
@@ -2019,7 +2039,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         return { skill, obligation: entry.obligation, routeIndex: entry.routeIndex, routeScore: entry.routeScore };
       });
       let pageBudget = state.maxContextChars;
-      let page = await continueSkillContextPage({ skills: selected, intent: state.intent, stage: z.enum(SKILL_STAGES).parse(state.stage), mode: state.mode, references: state.references, maxContextChars: pageBudget, cursor });
+      let page = await continueSkillContextPage({ skills: selected, intent: state.intent, stage: z.enum(SKILL_STAGES).parse(state.stage), mode: state.mode, references: state.references, maxContextChars: pageBudget, retainedContextObligations: state.retainedContextObligations, cursor });
       const buildResponse = () => {
         const remaining = remainingContextSummary(page);
         const nextCursor = page.cursor ?? null;
@@ -2041,7 +2061,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
       let response = buildResponse();
       for (let attempt = 0; response.responseChars > state.maxEnvelopeChars && pageBudget > 256 && attempt < 12; attempt += 1) {
         pageBudget = Math.max(256, pageBudget - (response.responseChars - state.maxEnvelopeChars) - 256);
-        page = await continueSkillContextPage({ skills: selected, intent: state.intent, stage: z.enum(SKILL_STAGES).parse(state.stage), mode: state.mode, references: state.references, maxContextChars: pageBudget, cursor });
+        page = await continueSkillContextPage({ skills: selected, intent: state.intent, stage: z.enum(SKILL_STAGES).parse(state.stage), mode: state.mode, references: state.references, maxContextChars: pageBudget, retainedContextObligations: state.retainedContextObligations, cursor });
         response = buildResponse();
       }
       const nextCursor = page.cursor ?? null;
