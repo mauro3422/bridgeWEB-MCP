@@ -98,8 +98,9 @@ export async function inspectProcessTree(rootPid: number | null | undefined, max
   const script = [
     "$ErrorActionPreference='Stop'",
     "$all=Get-CimInstance Win32_Process",
+    "$byId=@{};$all|ForEach-Object{$byId[[int]$_.ProcessId]=$_}",
     `$ids=@(${rootPid})`,
-    "do{$before=$ids.Count;$ids+=@($all|Where-Object{$ids -contains [int]$_.ParentProcessId}|ForEach-Object{[int]$_.ProcessId});$ids=@($ids|Sort-Object -Unique)}while($ids.Count -gt $before)",
+    "do{$before=$ids.Count;$ids+=@($all|Where-Object{$parent=$byId[[int]$_.ParentProcessId];$parent -and ($ids -contains [int]$_.ParentProcessId) -and $_.CreationDate -and $parent.CreationDate -and ([datetime]$_.CreationDate -ge [datetime]$parent.CreationDate)}|ForEach-Object{[int]$_.ProcessId});$ids=@($ids|Sort-Object -Unique)}while($ids.Count -gt $before)",
     "$rows=@($all|Where-Object{$ids -contains [int]$_.ProcessId}|ForEach-Object{[pscustomobject]@{pid=[int]$_.ProcessId;parentPid=[int]$_.ParentProcessId;name=[string]$_.Name;commandLine=[string]$_.CommandLine;cpuSeconds=[math]::Round((([double]$_.KernelModeTime+[double]$_.UserModeTime)/10000000),3);workingSetBytes=[int64]$_.WorkingSetSize}})",
     "$rows|ConvertTo-Json -Compress -Depth 3",
   ].join(";");
@@ -233,6 +234,7 @@ export async function runShellCommand(command: string, cwd?: string, timeoutMs =
   assertCommandAllowed(command);
   const resolvedCwd = resolveToolPath(cwd ?? process.cwd(), { access: "cwd" });
   if (!(await fileExists(resolvedCwd))) throw new Error(`cwd does not exist: ${resolvedCwd}`);
+  const shell = process.platform === "win32" ? (process.env.ComSpec || "cmd.exe") : (process.env.SHELL || "/bin/sh");
   return await new Promise<Record<string, unknown>>((resolve) => {
     const startedAt = Date.now();
     const child = spawn(command, { cwd: resolvedCwd, shell: true, windowsHide: true, env: process.env });
@@ -247,7 +249,7 @@ export async function runShellCommand(command: string, cwd?: string, timeoutMs =
     child.stderr?.on("data", (chunk: Buffer) => { stderr = appendBounded(stderr, chunk); });
     child.on("close", (code, signal) => {
       clearTimeout(timer);
-      resolve({ command, cwd: resolvedCwd, code, signal, timedOut, durationMs: Date.now() - startedAt, stdout, stderr });
+      resolve({ command, cwd: resolvedCwd, shell, code, signal, timedOut, durationMs: Date.now() - startedAt, stdout, stderr });
     });
   });
 }

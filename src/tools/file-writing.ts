@@ -61,7 +61,7 @@ function buildDiagnostic(snapshot: TextFileSnapshot, options: {
   };
 }
 
-function diagnosticError(category: "patch-conflict" | "stale-file-state", message: string, diagnostic: EditFailureDiagnostic): Error {
+function diagnosticError(category: "patch-conflict" | "stale-file-state" | "schema-validation", message: string, diagnostic: EditFailureDiagnostic): Error {
   return new Error(`[${category}] ${message} Diagnostic: ${JSON.stringify(diagnostic)}`);
 }
 
@@ -100,9 +100,11 @@ async function editLines(filePath: string, startLine: number, endLine: number | 
   try {
     edit = applyLineEdit({ snapshot: before, startLine, endLine, newContent, mode, previewContext });
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const category = /outside file range/i.test(message) ? "stale-file-state" : "schema-validation";
     throw diagnosticError(
-      "stale-file-state",
-      error instanceof Error ? error.message : String(error),
+      category,
+      message,
       buildDiagnostic(before, { requestedStart: startLine, requestedEnd: endLine }),
     );
   }
