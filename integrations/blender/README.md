@@ -70,7 +70,7 @@ When Mauro says he is modeling while ChatGPT generates references, use `referenc
 New character and prop work should use:
 
 ```text
-image_asset_save
+image_asset_import_files
 → image_reference_pack_prepare
 → blender_validate_reference_pack
 → blender_install_reference_pack

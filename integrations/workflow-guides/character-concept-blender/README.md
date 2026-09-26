@@ -15,7 +15,7 @@ locked character brief
   → generate and approve front geometric master
   → derive rear / side / optional opposite side
   → semantic visual QA for every view
-  → image_asset_save
+  → image_asset_import_files
   → image_reference_pack_prepare
   → blender_validate_reference_pack
   → blender_install_reference_pack
@@ -28,10 +28,10 @@ locked character brief
 
 ## Tools
 
-- `image_asset_save`: persists generated originals atomically with dimensions, hashes, prompts and provenance.
+- `image_asset_import_files`: primary ChatGPT Web persistence path for generated/edited originals; receives authorized file parameters and preserves original bytes without agent-side Base64 conversion. If its dedicated schema is omitted, `bridge_tool_action.files` is the canonical file-aware fallback. If that wrapper field is also absent, refresh/reopen the stale connector and reuse the already-generated image instead of regenerating it. `image_asset_save` remains compatibility-only when actual image bytes already exist natively and direct file transport is genuinely unavailable.
 - `image_reference_pack_prepare`: crops and uniformly scales a generic pack without stretching; records roles, masters, semantic QA, occupancy, optional landmarks and cross-view warnings.
 - `blender_validate_reference_pack`: verifies actual image bytes, roles, hashes, canvas dimensions, projections, semantic-QA state and required views.
-- `blender_install_reference_pack`: creates the axis-aligned Blender working scene with side-aware Image Empties and a verified installation manifest.
+- `blender_install_reference_pack`: creates the axis-aligned Blender working scene with side-aware Image Empties and a verified installation manifest. Standalone `blender-mcp reference_setup` is a path-backed lower-level implementation of this same install contract, not a second workflow.
 - `blender_viewport_screenshot`: captures the exact current viewport.
 - `blender_focus_review`: captures general/context/zoom evidence around a selected detail or the 3D Cursor.
 - `blender_review_bundle`: renders repeatable model views and records geometry, materials, visibility, rig and animation context.
