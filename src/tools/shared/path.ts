@@ -111,6 +111,7 @@ function defaultReadOnlyRoots(): string[] {
     path.join(home, ".codex", "sessions"),
     path.join(home, ".codex", "archived_sessions"),
     path.join(home, ".codex", "history.jsonl"),
+    path.join(home, "AppData", "Local", "QuietDesk", "captures"),
   ]);
 }
 
