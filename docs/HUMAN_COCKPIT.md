@@ -89,6 +89,20 @@ The **En qué está cada proyecto** projection is the organization layer above r
 
 `finished` and `abandoned-or-replaced` are deliberately reserved for explicit owner evidence. Age, a clean Git tree, closed traces, lack of chat activity or a superseded execution trace are insufficient to declare a whole project finished or abandoned. Until an owning project exposes such an explicit classification, ambiguous cases remain `review-needed` or `paused`.
 
+Terminal owner evidence uses one bounded section in the owning repository's existing canonical `.mssr/PROJECT_STATE.md`; the Cockpit does not create a second authority:
+
+```text
+## Workspace status
+
+State: finished
+Updated-At: 2026-09-26T17:30:00-03:00
+Reason: Final verification and persistence completed.
+```
+
+`State` currently accepts only `finished` or `abandoned-or-replaced`; `Updated-At` is required so the declaration can be ordered against later MSSR work. `Reason` is optional and bounded. `abandoned-or-replaced` may additionally declare `Replaced-By: <project/ref>`. Project Health parses only these metadata fields and never persists the surrounding PROJECT_STATE content. Invalid terminal metadata raises `workspace-status-invalid` / REVIEW rather than guessing.
+
+A terminal declaration is not timeless: if the weekly evidence contains substantive MSSR activity newer than `Updated-At`, the workspace map projects `review-needed` with `basis=project-owner`. This preserves the explicit owner record while making the contradiction visible instead of silently treating stale terminal state as current truth.
+
 This map is intended to become the evidence layer for later dirty-tree partitioning: cleanup may use project/task ownership, trace provenance and Git pressure to explain batches, but the Cockpit itself never stages, restores, deletes, commits or pushes.
 
 ## Snapshot performance

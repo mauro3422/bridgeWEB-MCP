@@ -142,6 +142,7 @@ try {
     assert.equal(init.initialized, true);
   }
   await fs.writeFile(path.join(healthy, "ROADMAP.md"), "# Roadmap\n\nCandidate-only reference audit fixture.\n", "utf8");
+  await fs.appendFile(path.join(healthy, ".mssr", "PROJECT_STATE.md"), "\n## Workspace status\n\nState: abandoned-or-replaced\nUpdated-At: 2026-08-15T19:30:00Z\nReason: Replaced by the next prototype after explicit owner review.\nReplaced-By: healthy-v2\n", "utf8");
 
   const reviewState = path.join(review, ".mssr", "PROJECT_STATE.md");
   await fs.writeFile(reviewState, `# Project State\n\n## Oversized current state\n\n${marker}\n${"state-line-with-structure\n".repeat(1800)}`, "utf8");
@@ -182,6 +183,11 @@ try {
   assert.equal(healthyProject.referenceCandidateCount >= 1, true);
   assert.equal(healthyProject.referenceHighPriorityCount >= 1, true);
   assert.equal(healthyProject.referenceHighCandidates.includes("ROADMAP.md"), true);
+  assert.equal(healthyProject.workspaceStatus.status, "valid");
+  assert.equal(healthyProject.workspaceStatus.state, "abandoned-or-replaced");
+  assert.equal(healthyProject.workspaceStatus.updatedAt, "2026-08-15T19:30:00.000Z");
+  assert.equal(healthyProject.workspaceStatus.replacedBy, "healthy-v2");
+  assert.match(healthyProject.workspaceStatus.reason ?? "", /next prototype/);
 
   const captured = await captureProjectHealthIfDue({
     force: true,
@@ -212,6 +218,17 @@ try {
   const stored = await fs.readFile(store, "utf8");
   assert.equal(stored.includes(marker), false, "Project Health store must not persist project content");
   assert.equal(stored.includes("state-line-with-structure"), false);
+
+  const healthyStatePath = path.join(healthy, ".mssr", "PROJECT_STATE.md");
+  const validHealthyState = await fs.readFile(healthyStatePath, "utf8");
+  await fs.writeFile(healthyStatePath, validHealthyState.replace("State: abandoned-or-replaced", "State: maybe-done"), "utf8");
+  const invalidWorkspaceSnapshot = await collectProjectHealthSnapshot({ workspaceRoot: root, maxDepth: 2, now: new Date("2026-08-15T20:20:00Z") });
+  const invalidWorkspaceProject = invalidWorkspaceSnapshot.projects.find((project) => project.name === "healthy");
+  assert.ok(invalidWorkspaceProject);
+  assert.equal(invalidWorkspaceProject.workspaceStatus.status, "invalid");
+  assert.equal(invalidWorkspaceProject.level, "review");
+  assert.equal(invalidWorkspaceProject.findingCodes.includes("workspace-status-invalid"), true);
+  await fs.writeFile(healthyStatePath, validHealthyState, "utf8");
 
   const port = await freePort();
   const httpStore = path.join(root, "http-project-health.json");

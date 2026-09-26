@@ -120,9 +120,9 @@ Constraints:
 
 Success gate: `ayer`, `esta semana`, and `dónde quedamos` are fast even after restart.
 
-## P5 — cross-project organization — PHASE A IMPLEMENTED
+## P5 — cross-project organization — PHASE B SOURCE IMPLEMENTED
 
-The Cockpit now builds a bounded **En qué está cada proyecto** map from projects observed in the rolling seven-day MSSR history. It joins current human tasks, last meaningful activity, Project Health, Git pressure and the next observable gate.
+The Cockpit builds a bounded **En qué está cada proyecto** map from projects observed in the rolling seven-day MSSR history. It joins current human tasks, last meaningful activity, Project Health, Git pressure and the next observable gate.
 
 Current organization states:
 
@@ -130,12 +130,12 @@ Current organization states:
 - `paused`: no recent task activity; this never means finished;
 - `experimental`: explicit experiment/prototype/spike identity;
 - `review-needed`: lifecycle/health/evidence requires human classification;
-- `finished`: reserved for explicit owner evidence;
-- `abandoned-or-replaced`: reserved for explicit owner evidence.
+- `finished`: explicit terminal evidence from the owning project;
+- `abandoned-or-replaced`: explicit terminal evidence from the owning project.
 
-The dashboard must not derive `finished` or `abandoned-or-replaced` from age, silence, clean Git, closed traces or an execution-level supersedes edge. Phase B may add an explicit project-owner classification contract so those terminal organization states can be recorded without turning the Cockpit into authority.
+Phase B defines the owner contract without adding a new workspace authority: an owning repository may declare `## Workspace status` inside canonical `.mssr/PROJECT_STATE.md`, with terminal `State`, required `Updated-At`, and optional bounded `Reason` / `Replaced-By`. Project Health carries only those metadata fields. Invalid declarations become REVIEW; substantive MSSR activity newer than the declaration forces `review-needed`, so stale `finished`/replacement state cannot silently override later work. Age, silence, clean Git, closed traces and execution-level supersedes edges remain insufficient to infer terminal project state.
 
-The map is the ownership evidence input for P6. It does not rename/move/delete projects automatically.
+The map remains ownership/orientation evidence. It does not rename/move/delete projects or mass-write terminal labels automatically.
 
 ## P6 — shared dirty-tree cleanup — DONE LOCALLY
 
@@ -159,9 +159,9 @@ Current status and follow-up priority:
 
 1. **P1 + P2 + P3 adopted live:** `Al volver` separates forensic/support recovery from the human backlog, MSSR 0.2.77 provides explicit task identity/lineage, and capability inventory is dynamically derived from runtime tools, Skill Health and workflow guides;
 2. **P4 phase A adopted live:** bounded context inventory + daily snapshots prevent weekly `scope=all` reconstruction on every refresh; a 30-day derived view/background cadence remains optional follow-up rather than a blocker;
-3. **P5 phase A adopted live:** the Cockpit classifies observed projects conservatively and exposes current tasks, Git pressure, classification confidence/reason and next gate. Terminal states remain explicit-owner-only;
-4. **P6 completed locally:** the 92-path shared dirty tree was reconstructed on an ownership-safe recovery branch, verified against a durable rollback, committed in 10 local batches through `f0deaa9`, and reconciled back into clean local `main`. `main` is now 10 commits ahead of `origin/main`; remote publication was deliberately not performed;
-5. next product work should improve evidence quality rather than add another authority layer: optional 30-day summaries, explicit owner classification for terminal project states, and continued recovery/closure of genuinely unfinished traces. Capability/schema freshness stays dynamic rather than copied into AGENTS or assistant memory.
+3. **P5A + P5B adopted live:** the Cockpit classifies observed projects conservatively and terminal states now have an explicit owner contract in `.mssr/PROJECT_STATE.md`, with invalid-metadata REVIEW and stale-state conflict detection. Restart `7920eaff-0bbe-4fc3-81f9-18c5699dc4db` adopted the source; fresh Project Health readback exposes `workspaceStatus` metadata and no terminal labels were mass-written;
+4. **P6 completed locally:** the former 92-path shared dirty tree was reconstructed with durable rollback and ownership-safe commits. Before this P5B slice, local `main` was clean and 11 commits ahead of `origin/main`; remote publication remains deliberately separate;
+5. **next product priority after P5B adoption:** review genuine lifecycle debt with resume packets instead of raw trace lists, then add optional 30-day derived summaries and profile/trim cold reconstruction. Capability/schema freshness stays dynamic rather than copied into AGENTS or assistant memory.
 
 A new workspace-level `D:\Dev\AGENTS.md` owns only transversal procedure: Bridge-first local recovery, MSSR lifecycle, dynamic capability discovery, support-trace handling and safe shared-tree rules. It deliberately contains no static tool/skill catalog; repository-local `AGENTS.md` and `.mssr/` remain the project authorities.
 

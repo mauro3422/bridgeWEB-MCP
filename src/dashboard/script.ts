@@ -1050,6 +1050,8 @@ function renderCockpit(cockpit) {
       { label: 'Revisar', value: num(workspaceCounts['review-needed'] || 0), detail: 'cierre/clasificación necesita decisión humana' },
       { label: 'Pausados', value: num(workspaceCounts.paused || 0), detail: 'sin actividad reciente; no significa terminado' },
       { label: 'Experimentos', value: num(workspaceCounts.experimental || 0), detail: 'marcador explícito experiment/prototype/spike' },
+      { label: 'Terminados', value: num(workspaceCounts.finished || 0), detail: 'sólo con estado terminal explícito del proyecto owner' },
+      { label: 'Reemplazados', value: num(workspaceCounts['abandoned-or-replaced'] || 0), detail: 'abandono/reemplazo declarado por el proyecto owner' },
     ].map((item) => '<div class="cockpit-weekly-stat"><span>' + esc(item.label) + '</span><strong>' + esc(item.value) + '</strong><small>' + esc(item.detail) + '</small></div>').join('');
   }
   const workspaceProjectTarget = byId('cockpit-workspace-projects');

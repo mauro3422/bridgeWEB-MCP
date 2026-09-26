@@ -1,11 +1,11 @@
 # Context resume and inventory projection
 
-Bridge's resume/orientation layer derives current context from observable owners rather than chat memory. **Al volver** separates previous-local-day work, current human work, and MSSR lifecycle debt. A substantive trace with `needsClosureReview` stays auditable/resumable but is not ordinary active product work; review decides whether to resume it or record an outcome. Nothing in the projection auto-closes lifecycle state.
+Bridge derives resume/orientation from observable owners, not chat memory. **Al volver** separates yesterday, current human work and MSSR lifecycle debt. Unclosed substantive traces remain resumable evidence until review; the projection never auto-closes them.
 
-MSSR 0.2.77 owns explicit `taskKey`; optional parent/supersedes refs correlate executions without closing them. Older history keeps labeled project+workflow/trace fallback. Active and debt items carry bounded resume packets only: owner/project, identity/provenance, latest summary/stage, required/completed phases, next gate, bounded evidence ref and latest activity. Raw prompts, transcripts, secrets and private reasoning are excluded.
+MSSR 0.2.77 owns explicit `taskKey` and optional parent/supersedes lineage; older history keeps labeled fallback identity. Resume packets stay bounded to owner, identity/provenance, summary/stage, phases, next gate, evidence ref and latest activity—never raw prompts, transcripts, secrets or private reasoning.
 
-Periodic inventory uses a bounded derived cache (`data/context-inventory-state.json`) refreshed on material lifecycle changes or the freshness fallback, with rolling daily snapshots and seven-day reconstruction; `scope=all` remains the recovery path. Capability inventory is derived from runtime tools, Skill Health and workflow guides instead of copied into AGENTS or assistant memory. Provider-backed availability requires an on-demand live probe.
+Periodic inventory uses ignored `data/context-inventory-state.json`, material-lifecycle invalidation plus TTL fallback, rolling daily snapshots and seven-day reconstruction; `scope=all` remains recovery. Capabilities come from runtime tools, Skill Health and workflow guides, with provider availability probed on demand.
 
-**En qué está cada proyecto** is conservative: active/paused/experimental/review-needed may be projected from current evidence; finished and abandoned-or-replaced require explicit owner evidence. Git is supporting state, never proof of completion. Workspace classification and capability inventory are read-only orientation evidence, not new project authority.
+Workspace state is conservative. Active/paused/experimental/review-needed are projections; terminal states require the owning repo's `.mssr/PROJECT_STATE.md#Workspace status` with `State` and required `Updated-At` (optional bounded `Reason`/`Replaced-By`). Invalid metadata becomes REVIEW; newer substantive MSSR activity makes the terminal declaration stale and projects review-needed. Git supports orientation but never proves completion.
 
-Full UX/contract: `docs/HUMAN_COCKPIT.md`; priorities: `docs/CONTEXT_LAYER_ROADMAP.md`; workflow: `cross-project-context-inventory`.
+Full UX: `docs/HUMAN_COCKPIT.md`; priorities: `docs/CONTEXT_LAYER_ROADMAP.md`; workflow: `cross-project-context-inventory`.

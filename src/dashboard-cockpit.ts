@@ -152,9 +152,15 @@ type HumanWorkState = "active" | "review-needed" | "paused" | "finished" | "expe
 type HumanWorkClassification = {
   state: HumanWorkState;
   confidence: "high" | "medium" | "low";
-  basis: "mssr-lifecycle" | "project-health" | "recency" | "explicit-label" | "mixed" | "insufficient-evidence";
+  basis: "mssr-lifecycle" | "project-health" | "project-owner" | "recency" | "explicit-label" | "mixed" | "insufficient-evidence";
   observed: boolean;
   reason: string;
+};
+type ProjectOwnerWorkspaceStatus = {
+  state: "finished" | "abandoned-or-replaced";
+  reason: string | null;
+  updatedAt: string | null;
+  replacedBy: string | null;
 };
 
 function hasExplicitExperimentMarker(...values: Array<string | null | undefined>): boolean {
@@ -234,6 +240,19 @@ function classifyOpenHumanTask(input: {
   };
 }
 
+function ownerWorkspaceStatus(value: unknown): ProjectOwnerWorkspaceStatus | null {
+  const row = asRecord(value);
+  if (stringValue(row.status) !== "valid") return null;
+  const state = stringValue(row.state);
+  if (state !== "finished" && state !== "abandoned-or-replaced") return null;
+  return {
+    state,
+    reason: stringValue(row.reason),
+    updatedAt: stringValue(row.updatedAt),
+    replacedBy: stringValue(row.replacedBy),
+  };
+}
+
 function classifyWeeklyProject(input: {
   name: string;
   healthLevel: string;
@@ -241,8 +260,34 @@ function classifyWeeklyProject(input: {
   closedTraceCount: number;
   workflowKeys: string[];
   latestAt: string | null;
-  openTasks: Array<{ classification: HumanWorkClassification }>;
+  ownerStatus: ProjectOwnerWorkspaceStatus | null;
+  openTasks: Array<{ classification: HumanWorkClassification; latestAt: string }>;
 }, now: Date): HumanWorkClassification {
+  if (input.ownerStatus) {
+    const ownerAt = timestamp(input.ownerStatus.updatedAt);
+    const latestObservedAt = Math.max(
+      timestamp(input.latestAt),
+      ...input.openTasks.map((task) => timestamp(task.latestAt)),
+    );
+    if (latestObservedAt > ownerAt) {
+      return {
+        state: "review-needed",
+        confidence: "high",
+        basis: "project-owner",
+        observed: true,
+        reason: `El proyecto declaró ${input.ownerStatus.state} en ${input.ownerStatus.updatedAt}, pero existe trabajo MSSR posterior; hay que revalidar el estado explícito antes de tratarlo como terminal.`,
+      };
+    }
+    const replacement = input.ownerStatus.replacedBy ? ` Reemplazo declarado: ${input.ownerStatus.replacedBy}.` : "";
+    const reason = input.ownerStatus.reason ? ` ${input.ownerStatus.reason}` : "";
+    return {
+      state: input.ownerStatus.state,
+      confidence: "high",
+      basis: "project-owner",
+      observed: true,
+      reason: `Estado terminal declarado por el proyecto en ## Workspace status.${reason}${replacement}`,
+    };
+  }
   if (input.openTasks.some((task) => task.classification.state === "review-needed")) {
     return {
       state: "review-needed",
@@ -674,6 +719,7 @@ export function buildHumanCockpitSnapshot(input: {
       workflowKeys: stringArray(history.workflowKeys).slice(0, 12),
       latestSummary: stringValue(history.latestSummary),
       healthLevel: stringValue(health.level) ?? "unknown",
+      ownerWorkspaceStatus: ownerWorkspaceStatus(health.workspaceStatus),
       branch: git?.branch ?? null,
       trackedChanges: git?.trackedChanges ?? null,
       untrackedChanges: git?.untrackedChanges ?? null,
@@ -888,6 +934,7 @@ export function buildHumanCockpitSnapshot(input: {
       closedTraceCount: project.closedTraceCount,
       workflowKeys: project.workflowKeys,
       latestAt: project.latestAt,
+      ownerStatus: project.ownerWorkspaceStatus,
       openTasks: relatedTasks,
     }, nowDate);
     const nextTask = [...relatedTasks].sort((left, right) => {
@@ -903,7 +950,11 @@ export function buildHumanCockpitSnapshot(input: {
           ? "decidir si reactivar o mantener pausado"
           : classification.state === "experimental"
             ? "decidir si promover, conservar o descartar"
-            : "sin próximo gate humano observado");
+            : classification.state === "finished"
+              ? "sin próximo gate: terminado por owner"
+              : classification.state === "abandoned-or-replaced"
+                ? "seguir el reemplazo si corresponde"
+                : "sin próximo gate humano observado");
     return {
       ...project,
       classification,

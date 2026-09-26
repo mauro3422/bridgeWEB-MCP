@@ -484,6 +484,62 @@ assert.equal(cockpit.workspaceMap.projects[0].gitPressure, 5);
 assert.equal(cockpit.workspaceMap.projects[0].nextGate, "verificar");
 assert.deepEqual(cockpit.workspaceMap.policy.explicitOwnerStates, ["finished", "abandoned-or-replaced"]);
 
+const terminalHealth = structuredClone(projectHealth);
+terminalHealth.latest.projects[0].workspaceStatus = {
+  status: "valid",
+  state: "finished",
+  reason: "Owner explicitly closed the project after final verification.",
+  updatedAt: "2026-09-24T04:00:00.000Z",
+  replacedBy: null,
+  source: ".mssr/PROJECT_STATE.md#Workspace status",
+  error: null,
+};
+const terminalWeekly = structuredClone(weeklySummary);
+terminalWeekly.workHistory.openTraces = [];
+terminalWeekly.workHistory.openSubstantiveTraceCount = 0;
+terminalWeekly.workHistory.humanOpenTraceCount = 0;
+terminalWeekly.workHistory.needsClosureReviewCount = 0;
+terminalWeekly.workHistory.humanNeedsClosureReviewCount = 0;
+const terminalCockpit = buildHumanCockpitSnapshot({
+  observatoryRecent,
+  projectHealth: terminalHealth,
+  gitStates: [],
+  weeklySummary: terminalWeekly,
+  weeklyGitStates: [],
+  now,
+});
+assert.equal(terminalCockpit.workspaceMap.projects[0].classification.state, "finished");
+assert.equal(terminalCockpit.workspaceMap.projects[0].classification.basis, "project-owner");
+assert.match(terminalCockpit.workspaceMap.projects[0].classification.reason, /Workspace status/);
+
+const replacedHealth = structuredClone(terminalHealth);
+replacedHealth.latest.projects[0].workspaceStatus.state = "abandoned-or-replaced";
+replacedHealth.latest.projects[0].workspaceStatus.replacedBy = "bridge-next";
+const replacedCockpit = buildHumanCockpitSnapshot({
+  observatoryRecent,
+  projectHealth: replacedHealth,
+  gitStates: [],
+  weeklySummary: terminalWeekly,
+  weeklyGitStates: [],
+  now,
+});
+assert.equal(replacedCockpit.workspaceMap.projects[0].classification.state, "abandoned-or-replaced");
+assert.match(replacedCockpit.workspaceMap.projects[0].classification.reason, /bridge-next/);
+
+const staleTerminalHealth = structuredClone(terminalHealth);
+staleTerminalHealth.latest.projects[0].workspaceStatus.updatedAt = "2026-09-24T03:00:00.000Z";
+const staleTerminalCockpit = buildHumanCockpitSnapshot({
+  observatoryRecent,
+  projectHealth: staleTerminalHealth,
+  gitStates: [],
+  weeklySummary: terminalWeekly,
+  weeklyGitStates: [],
+  now,
+});
+assert.equal(staleTerminalCockpit.workspaceMap.projects[0].classification.state, "review-needed");
+assert.equal(staleTerminalCockpit.workspaceMap.projects[0].classification.basis, "project-owner");
+assert.match(staleTerminalCockpit.workspaceMap.projects[0].classification.reason, /trabajo MSSR posterior/);
+
 const html = renderDashboardHtml();
 assert.match(html, /data-tab="cockpit">Dónde estoy<\/button>/);
 assert.match(html, /id="panel-cockpit"/);
