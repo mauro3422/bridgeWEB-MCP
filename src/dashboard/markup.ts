@@ -39,6 +39,7 @@ export const dashboardMarkup = `
 
   <nav class="tabs" role="tablist" aria-label="Secciones del dashboard">
     <button class="tab-button" type="button" role="tab" aria-selected="true" aria-controls="panel-summary" id="tab-summary" data-tab="summary">Resumen</button>
+    <button class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-cockpit" id="tab-cockpit" data-tab="cockpit">Dónde estoy</button>
     <button class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-activity" id="tab-activity" data-tab="activity">Actividad</button>
     <button class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-tools" id="tab-tools" data-tab="tools">Tools</button>
     <button class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-mssr" id="tab-mssr" data-tab="mssr">MSSR</button>
@@ -119,6 +120,75 @@ export const dashboardMarkup = `
             <tbody id="agent-profiles"><tr><td colspan="9" class="muted">Cargando perfiles…</td></tr></tbody>
           </table>
         </div>
+      </article>
+    </div>
+  </section>
+
+  <section id="panel-cockpit" class="tab-panel" role="tabpanel" aria-labelledby="tab-cockpit" data-panel="cockpit" hidden>
+    <div class="grid">
+      <article class="card span-12 cockpit-focus-card">
+        <div class="card-header">
+          <div><div class="card-kicker">Orientación humana</div><h2 class="card-title">Dónde estoy ahora</h2><p class="card-description">Una proyección de MSSR + Bridge + Git. Resume lo que está abierto, qué ya se cumplió y qué toca después; no crea una segunda autoridad.</p></div>
+          <span id="cockpit-authority" class="status-pill" data-tone="info"><span class="dot info"></span><span>projection-only</span></span>
+        </div>
+        <div id="cockpit-focus" class="cockpit-focus"><div class="empty-state">Cargando foco actual…</div></div>
+      </article>
+
+      <article class="card span-12 cockpit-return-card">
+        <div class="card-header">
+          <div><div class="card-kicker">Reanudar sin releer todo</div><h2 class="card-title">Al volver</h2><p class="card-description">Qué pasó ayer, qué tareas siguen abiertas y cuáles quedaron con trabajo sustantivo pero sin cierre observable. MSSR taskKey agrupa explícitamente retries/agentes/resumes; las trazas legacy usan proyecto + workflow sólo como fallback visible.</p></div>
+          <span id="cockpit-return-status" class="status-pill" data-tone="info"><span class="dot info"></span><span>cargando contexto</span></span>
+        </div>
+        <div id="cockpit-return-summary" class="cockpit-return-summary"><div class="empty-state">Reconstruyendo dónde quedamos…</div></div>
+        <div class="cockpit-return-grid">
+          <section class="cockpit-return-pane"><div class="cockpit-return-heading">Ayer</div><div id="cockpit-yesterday"><div class="empty-state">Cargando actividad de ayer…</div></div></section>
+          <section class="cockpit-return-pane"><div class="cockpit-return-heading">Qué falta ahora</div><div id="cockpit-open-tasks"><div class="empty-state">Cargando tareas abiertas…</div></div></section>
+        </div>
+      </article>
+
+      <article class="card span-12 cockpit-workspace-card">
+        <div class="card-header">
+          <div><div class="card-kicker">Mapa de trabajo</div><h2 class="card-title">En qué está cada proyecto</h2><p class="card-description">Clasificación conservadora de proyectos observados en los últimos 7 días: tareas humanas MSSR + Git + Project Health. Activo/pausado/experimental/revisar son proyecciones; terminado o abandonado/reemplazado sólo se aceptan con evidencia explícita del owner.</p></div>
+          <span id="cockpit-workspace-status" class="status-pill" data-tone="info"><span class="dot info"></span><span>clasificando</span></span>
+        </div>
+        <div id="cockpit-workspace-summary" class="cockpit-weekly-summary"><div class="empty-state">Armando mapa de proyectos…</div></div>
+        <div class="table-wrap"><table><thead><tr><th>Proyecto</th><th>Estado</th><th>Tarea / contexto</th><th>Git</th><th>Próximo gate</th></tr></thead><tbody id="cockpit-workspace-projects"><tr><td colspan="5" class="muted">Clasificando proyectos observados…</td></tr></tbody></table></div>
+      </article>
+
+      <article class="card span-12 cockpit-capabilities-card">
+        <div class="card-header">
+          <div><div class="card-kicker">Inventario vivo</div><h2 class="card-title">Qué puede hacer el sistema hoy</h2><p class="card-description">Se deriva del catálogo runtime, Skill Health y workflow guides. No es una lista hardcodeada en AGENTS ni memoria de chat; las capacidades dependientes de providers externos quedan en revisión hasta un probe live.</p></div>
+          <span id="cockpit-capability-status" class="status-pill" data-tone="info"><span class="dot info"></span><span>cargando capacidades</span></span>
+        </div>
+        <div id="cockpit-capability-summary" class="cockpit-weekly-summary"><div class="empty-state">Leyendo catálogo vivo…</div></div>
+        <div id="cockpit-capability-families" class="cockpit-capability-families"><div class="empty-state">Cargando familias…</div></div>
+      </article>
+
+      <article class="card span-12 cockpit-weekly-card">
+        <div class="card-header">
+          <div><div class="card-kicker">Resumen transversal</div><h2 class="card-title">Qué hicimos esta semana</h2><p class="card-description">Ventana móvil de 7 días sobre el historial MSSR preservado (scope=all) cruzado con Git local de los repos observados. Sirve para reconstruir avances y pendientes sin depender de recordar en qué chat quedó cada cosa.</p></div>
+          <span id="cockpit-weekly-window" class="status-pill" data-tone="info"><span class="dot info"></span><span>7 días · cargando</span></span>
+        </div>
+        <div id="cockpit-weekly-summary" class="cockpit-weekly-summary"><div class="empty-state">Reconstruyendo la semana…</div></div>
+        <div class="table-wrap"><table><thead><tr><th>Proyecto</th><th>Evidencia MSSR</th><th>Git local</th><th>Commits 7d</th><th>Remote / tracking</th><th>Pendiente observable</th></tr></thead><tbody id="cockpit-weekly-projects"><tr><td colspan="6" class="muted">Cargando semana…</td></tr></tbody></table></div>
+      </article>
+
+      <article class="card span-12">
+        <div class="card-header">
+          <div><div class="card-kicker">Tareas / chats observables</div><h2 class="card-title">Checklist de trabajo</h2><p class="card-description">Cada tarjeta corresponde a una traza MSSR reciente. Las casillas salen del lifecycle registrado: discovery → safety → implementation → verification → persistence → maintenance.</p></div>
+          <span id="cockpit-trace-count" class="status-pill" data-tone="info"><span class="dot info"></span><span>cargando</span></span>
+        </div>
+        <div id="cockpit-traces" class="cockpit-traces"><div class="empty-state">Cargando trazas…</div></div>
+      </article>
+
+      <article class="card span-7">
+        <div class="card-header"><div><div class="card-kicker">Repos relacionados</div><h2 class="card-title">Proyectos recientes y presión Git</h2><p class="card-description">Git se consulta sólo para proyectos con trazas abiertas y dentro del worker aislado. Se cuentan cambios tracked; no se hace un scan global de repos cada 15 segundos.</p></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Proyecto</th><th>Tareas</th><th>Contexto</th><th>Git</th></tr></thead><tbody id="cockpit-projects"><tr><td colspan="4" class="muted">Cargando proyectos…</td></tr></tbody></table></div>
+      </article>
+
+      <article class="card span-5">
+        <div class="card-header"><div><div class="card-kicker">Qué requiere atención</div><h2 class="card-title">Mantenimiento y referencias</h2><p class="card-description">WATCH/REVIEW siguen siendo señales del owner canónico; el Cockpit sólo las muestra.</p></div></div>
+        <div id="cockpit-maintenance" class="cockpit-maintenance"><div class="empty-state">Cargando mantenimiento…</div></div>
       </article>
     </div>
   </section>

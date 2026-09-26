@@ -458,6 +458,63 @@ td code { display: inline-block; max-width: 22rem; padding: 0.1rem 0.28rem; over
 
 .portfolio-reason { margin-top: 0.32rem; color: var(--muted); font-size: 0.68rem; line-height: 1.42; }
 
+.cockpit-focus-card { border-color: rgba(123,168,255,0.24); }
+.cockpit-weekly-card { border-color: rgba(123,168,255,0.16); }
+.cockpit-capabilities-card { border-color: rgba(123,168,255,0.13); }
+.cockpit-weekly-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.55rem; padding: 0.2rem 1rem 0.9rem; }
+.cockpit-capability-families { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; padding: 0 1rem 1rem; }
+.cockpit-capability-family { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 0.65rem; padding: 0.65rem 0.72rem; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,0.018); }
+.cockpit-capability-family > div { min-width: 0; }
+.cockpit-capability-family strong { display: block; color: #e8f0ff; font-size: 0.72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cockpit-capability-family span:not(.status-pill):not(.dot) { display: block; margin-top: 0.16rem; color: var(--faint); font-size: 0.6rem; line-height: 1.3; }
+.cockpit-weekly-stat { min-width: 0; padding: 0.72rem 0.78rem; border: 1px solid var(--line); border-radius: 11px; background: rgba(123,168,255,0.035); }
+.cockpit-weekly-stat > span { display: block; color: var(--muted); font-size: 0.65rem; line-height: 1.3; }
+.cockpit-weekly-stat > strong { display: block; margin-top: 0.24rem; color: #e8f0ff; font-size: 1.05rem; }
+.cockpit-weekly-stat > small { display: block; margin-top: 0.2rem; color: var(--faint); font-size: 0.62rem; line-height: 1.35; }
+.cockpit-return-card { border-color: rgba(109,224,184,0.18); }
+.cockpit-return-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.55rem; padding: 0.2rem 1rem 0.75rem; }
+.cockpit-return-stat { min-width: 0; padding: 0.72rem 0.78rem; border: 1px solid var(--line); border-radius: 11px; background: rgba(109,224,184,0.035); }
+.cockpit-return-stat > span { display: block; color: var(--muted); font-size: 0.65rem; line-height: 1.3; }
+.cockpit-return-stat > strong { display: block; margin-top: 0.24rem; color: #e7fff6; font-size: 1rem; overflow-wrap: anywhere; }
+.cockpit-return-stat > small { display: block; margin-top: 0.2rem; color: var(--faint); font-size: 0.62rem; line-height: 1.35; }
+.cockpit-return-grid { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 0.65rem; padding: 0 1rem 1rem; }
+.cockpit-return-pane { min-width: 0; padding: 0.78rem; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,0.018); }
+.cockpit-return-heading { margin-bottom: 0.58rem; color: #dce8ff; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; }
+.cockpit-return-meta { display: flex; justify-content: space-between; gap: 0.6rem; color: var(--muted); font-size: 0.66rem; }
+.cockpit-return-meta strong { color: #e8f0ff; }
+.cockpit-return-chips { display: flex; flex-wrap: wrap; gap: 0.34rem; margin-top: 0.58rem; }
+.cockpit-chip { padding: 0.25rem 0.44rem; border: 1px solid var(--line); border-radius: 999px; color: #c9d8f1; font-size: 0.62rem; background: rgba(123,168,255,0.04); }
+.cockpit-return-list { display: grid; gap: 0.42rem; margin-top: 0.66rem; }
+.cockpit-return-item { display: grid; gap: 0.16rem; padding-top: 0.44rem; border-top: 1px solid rgba(255,255,255,0.06); }
+.cockpit-return-item strong { color: #dfeaff; font-size: 0.66rem; }
+.cockpit-return-item span { color: var(--muted); font-size: 0.65rem; line-height: 1.42; }
+.cockpit-open-task { padding: 0.62rem 0; border-top: 1px solid rgba(255,255,255,0.06); }
+.cockpit-open-task:first-child { padding-top: 0; border-top: 0; }
+.cockpit-open-task[data-needs-closure="true"] { padding-left: 0.58rem; border-left: 2px solid rgba(255,190,92,0.5); }
+.cockpit-open-task-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.58rem; }
+.cockpit-open-task-head > div { min-width: 0; display: grid; gap: 0.1rem; }
+.cockpit-open-task-head strong { color: #edf3ff; font-size: 0.7rem; }
+.cockpit-open-task-head > div > span { color: var(--faint); font-size: 0.61rem; overflow-wrap: anywhere; }
+.cockpit-open-task-summary { margin-top: 0.32rem; color: var(--muted); font-size: 0.66rem; line-height: 1.42; }
+.cockpit-focus { padding: 0.8rem 1rem 1rem; }
+.cockpit-focus-main { padding: 0.9rem; border: 1px solid var(--line); border-radius: 13px; background: rgba(123,168,255,0.045); }
+.cockpit-focus-heading, .cockpit-trace-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.8rem; }
+.cockpit-focus-heading > strong { min-width: 0; font-size: 1rem; overflow-wrap: anywhere; }
+.cockpit-focus-summary, .cockpit-trace-summary { margin-top: 0.62rem; color: #dbe6fa; font-size: 0.8rem; line-height: 1.5; }
+.cockpit-meta { margin-top: 0.25rem; color: var(--muted); font-size: 0.68rem; line-height: 1.4; overflow-wrap: anywhere; }
+.cockpit-phase-row { display: flex; flex-wrap: wrap; gap: 0.36rem; margin-top: 0.72rem; }
+.cockpit-phase { display: inline-flex; align-items: center; gap: 0.32rem; min-height: 1.65rem; padding: 0.16rem 0.46rem; border: 1px solid var(--line); border-radius: 999px; color: var(--faint); background: rgba(255,255,255,0.02); font-size: 0.66rem; }
+.cockpit-phase[data-state="done"] { color: #b8f5d1; border-color: rgba(66,215,134,0.22); background: rgba(66,215,134,0.06); }
+.cockpit-phase[data-state="current"] { color: #ffe0a0; border-color: rgba(255,201,101,0.28); background: rgba(255,201,101,0.07); }
+.cockpit-traces { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.68rem; padding: 0.72rem 1rem 1rem; }
+.cockpit-trace { min-width: 0; padding: 0.78rem; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,0.022); }
+.cockpit-trace[data-status="active"] { border-color: rgba(66,215,134,0.18); }
+.cockpit-trace[data-status="idle"] { border-color: rgba(255,201,101,0.2); }
+.cockpit-trace-head strong { display: block; min-width: 0; font-size: 0.8rem; overflow-wrap: anywhere; }
+.cockpit-maintenance { display: grid; gap: 0; padding: 0.55rem 1rem 1rem; }
+.cockpit-maintenance-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.58rem 0; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 0.76rem; }
+.cockpit-maintenance-note { margin-top: 0.7rem; padding: 0.7rem; border: 1px dashed var(--line); border-radius: 9px; color: var(--muted); font-size: 0.69rem; line-height: 1.45; }
+
 .inline-note { color: var(--muted); font-size: 0.72rem; }
 .muted { color: var(--muted); }
 .small { font-size: 0.72rem; }
@@ -468,6 +525,11 @@ td code { display: inline-block; max-width: 22rem; padding: 0.1rem 0.28rem; over
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .portfolio-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .portfolio-field:first-child { grid-column: 1 / -1; }
+  .cockpit-weekly-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cockpit-capability-families { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cockpit-return-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cockpit-return-grid { grid-template-columns: 1fr; }
+  .cockpit-traces { grid-template-columns: 1fr; }
   .span-3, .span-4, .span-5, .span-6, .span-7, .span-8 { grid-column: span 12; }
 }
 
@@ -483,6 +545,10 @@ td code { display: inline-block; max-width: 22rem; padding: 0.1rem 0.28rem; over
   .metric-grid { grid-template-columns: 1fr; }
   .portfolio-filters { grid-template-columns: 1fr; }
   .portfolio-field:first-child { grid-column: auto; }
+  .cockpit-weekly-summary { grid-template-columns: 1fr; }
+  .cockpit-capability-families { grid-template-columns: 1fr; }
+  .cockpit-return-summary { grid-template-columns: 1fr; }
+  .cockpit-return-meta, .cockpit-open-task-head { flex-direction: column; }
   .attention-head { flex-wrap: wrap; }
   .mssr-row { grid-template-columns: 1fr 4rem; }
   .mssr-row .progress-track { grid-column: 1 / -1; grid-row: 2; }

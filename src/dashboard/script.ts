@@ -908,6 +908,310 @@ function updateMssr(mssr) {
   renderSkillOutcomes(mssr.top && mssr.top.skillOutcomes ? mssr.top.skillOutcomes : []);
 }
 
+function phaseLabel(value) {
+  const labels = {
+    discovery: 'descubrir',
+    safety: 'seguridad',
+    implementation: 'implementar',
+    verification: 'verificar',
+    persistence: 'persistir',
+    maintenance: 'mantener',
+  };
+  return labels[value] || value || '—';
+}
+
+function cockpitTraceTone(status) {
+  if (status === 'active') return 'ok';
+  if (status === 'idle') return 'warn';
+  return 'info';
+}
+
+function renderCockpitChecklist(checklist) {
+  return (checklist || []).filter((item) => item.required || item.completed).map((item) => {
+    const state = item.completed ? 'done' : item.current ? 'current' : 'pending';
+    const mark = item.completed ? '✓' : item.current ? '→' : '·';
+    return '<span class="cockpit-phase" data-state="' + state + '"><span>' + mark + '</span>' + esc(phaseLabel(item.phase)) + '</span>';
+  }).join('');
+}
+
+function renderCockpit(cockpit) {
+  const root = cockpit || {};
+  const counts = root.counts || {};
+  const authority = root.authority || {};
+  setPill('cockpit-authority', authority.writesProjectTruth === false ? 'ok' : 'warn', authority.mode || 'projection-only');
+  setPill('cockpit-trace-count', Number(counts.active || 0) + Number(counts.idle || 0) > 0 ? 'info' : 'ok',
+    num(counts.active || 0) + ' activas · ' + num(counts.idle || 0) + ' pausadas');
+
+  const focusTarget = byId('cockpit-focus');
+  const focus = root.focus;
+  if (focusTarget) {
+    if (!focus) {
+      focusTarget.innerHTML = '<div class="empty-state">No hay trazas recientes para orientar.</div>';
+    } else {
+      const nextText = focus.closed ? 'cerrada' : focus.nextPhase ? 'siguiente: ' + phaseLabel(focus.nextPhase) : 'siguiente: continuar / cerrar lifecycle';
+      focusTarget.innerHTML = '<div class="cockpit-focus-main">' +
+        '<div class="cockpit-focus-heading"><span class="status-pill" data-tone="' + cockpitTraceTone(focus.status) + '"><span class="dot ' + cockpitTraceTone(focus.status) + '"></span><span>' + esc(focus.status) + '</span></span>' +
+        '<strong>' + esc(focus.displayName || focus.workflowKey || focus.project || 'Tarea MSSR sin nombre') + '</strong></div>' +
+        '<div class="cockpit-focus-summary">' + esc(focus.summary || 'Traza MSSR técnica o intermedia sin descripción específica registrada.') + '</div>' +
+        '<div class="cockpit-meta">' + esc([focus.project, focus.stage, nextText, focus.model].filter(Boolean).join(' · ')) + '</div>' +
+        '<div class="cockpit-phase-row">' + renderCockpitChecklist(focus.checklist) + '</div>' +
+      '</div>';
+    }
+  }
+
+  const brief = root.morningBrief || {};
+  const yesterday = brief.yesterday || {};
+  const openTasks = brief.tasks || [];
+  const contextInventory = root.contextInventory || {};
+  const closureReviewCount = Number(brief.needsClosureReviewCount || 0);
+  setPill(
+    'cockpit-return-status',
+    closureReviewCount > 0 ? 'warn' : openTasks.length > 0 ? 'info' : 'ok',
+    closureReviewCount > 0 ? num(closureReviewCount) + ' cierre(s) para revisar' : openTasks.length > 0 ? num(openTasks.length) + ' tarea(s) abierta(s)' : 'sin pendientes observables',
+  );
+  const returnSummaryTarget = byId('cockpit-return-summary');
+  if (returnSummaryTarget) {
+    returnSummaryTarget.innerHTML = [
+      { label: 'Ayer', value: num(yesterday.projectCount || 0) + ' proyectos', detail: num(yesterday.traceCount || 0) + ' trazas sustantivas observadas' },
+      { label: 'Abiertas ahora', value: num(brief.openTaskCount || 0), detail: 'taskKey MSSR explícito + fallback legacy visible' },
+      { label: 'Cierre pendiente', value: num(closureReviewCount), detail: 'hubo trabajo + recordatorio MSSR sin outcome posterior' },
+      { label: 'Inventario', value: contextInventory.mode === 'cached' ? 'cache' : contextInventory.mode === 'refreshed' ? 'actualizado' : 'sin estado', detail: num(contextInventory.dailySnapshotCount || 0) + ' días guardados · ' + (contextInventory.refreshedAt ? dateTime(contextInventory.refreshedAt) : 'sin snapshot durable') },
+    ].map((item) => '<div class="cockpit-return-stat"><span>' + esc(item.label) + '</span><strong>' + esc(item.value) + '</strong><small>' + esc(item.detail) + '</small></div>').join('');
+  }
+
+  const yesterdayTarget = byId('cockpit-yesterday');
+  if (yesterdayTarget) {
+    const summaries = yesterday.latestSummaries || [];
+    const projects = yesterday.projects || [];
+    yesterdayTarget.innerHTML = Number(yesterday.traceCount || 0) === 0
+      ? '<div class="empty-state">No hay trabajo sustantivo MSSR observado para ' + esc(yesterday.date || 'ayer') + '.</div>'
+      : '<div class="cockpit-return-meta"><strong>' + esc(yesterday.date || 'ayer') + '</strong><span>' + num(yesterday.traceCount || 0) + ' trazas · ' + num(yesterday.projectCount || 0) + ' proyectos</span></div>' +
+        '<div class="cockpit-return-chips">' + projects.slice(0, 12).map((project) => '<span class="cockpit-chip">' + esc(project) + '</span>').join('') + '</div>' +
+        (summaries.length ? '<div class="cockpit-return-list">' + summaries.slice(0, 6).map((item) => '<div class="cockpit-return-item"><strong>' + esc(item.project || 'Proyecto') + '</strong><span>' + esc(item.summary || '') + '</span></div>').join('') + '</div>' : '');
+  }
+
+  const openTaskTarget = byId('cockpit-open-tasks');
+  if (openTaskTarget) {
+    openTaskTarget.innerHTML = openTasks.length ? openTasks.slice(0, 10).map((task) => {
+      const needsClosure = task.needsClosureReview === true;
+      const tone = needsClosure ? 'warn' : 'info';
+      const taskLabel = task.taskKeySource === 'explicit-mssr'
+        ? task.taskKey
+        : task.workflowKey || task.latestSummary || task.taskKey || 'tarea observable';
+      const projectLabel = (task.projects || []).length > 1 ? task.projects.join(' + ') : task.project || 'Proyecto';
+      const identityLabel = task.taskKeySource === 'explicit-mssr'
+        ? 'taskKey MSSR explícito'
+        : task.taskKeySource === 'derived-project-workflow'
+          ? 'fallback legacy proyecto + workflow'
+          : 'fallback legacy por traza';
+      const lineageCount = Number((task.parentTraceIds || []).length) + Number((task.supersedesTraceIds || []).length);
+      return '<div class="cockpit-open-task" data-needs-closure="' + (needsClosure ? 'true' : 'false') + '">' +
+        '<div class="cockpit-open-task-head"><div><strong>' + esc(projectLabel) + '</strong><span>' + esc(taskLabel) + '</span></div>' +
+        '<span class="status-pill" data-tone="' + tone + '"><span class="dot ' + tone + '"></span><span>' + esc(needsClosure ? 'revisar cierre' : task.nextGate || 'continuar') + '</span></span></div>' +
+        '<div class="cockpit-open-task-summary">' + esc(task.latestSummary || 'Sin summary humano explícito; se conserva la procedencia de las trazas.') + '</div>' +
+        '<div class="recent-detail">' + num((task.traceIds || []).length) + ' traza(s) · última actividad ' + esc(dateTime(task.latestAt)) + ' · ' + esc(identityLabel) + (lineageCount > 0 ? ' · ' + num(lineageCount) + ' enlace(s) de lineage' : '') + '</div>' +
+      '</div>';
+    }).join('') : '<div class="empty-state">No hay tareas sustantivas abiertas observables en la ventana semanal.</div>';
+  }
+
+  const workspaceMap = root.workspaceMap || {};
+  const workspaceCounts = workspaceMap.counts || {};
+  const workspaceProjects = workspaceMap.projects || [];
+  const workspaceReviewCount = Number(workspaceCounts['review-needed'] || 0);
+  const workspaceActiveCount = Number(workspaceCounts.active || 0);
+  setPill(
+    'cockpit-workspace-status',
+    workspaceReviewCount > 0 ? 'warn' : workspaceActiveCount > 0 ? 'ok' : 'info',
+    workspaceReviewCount > 0 ? num(workspaceReviewCount) + ' para revisar · ' + num(workspaceActiveCount) + ' activos' : num(workspaceActiveCount) + ' activos · mapa al día',
+  );
+  const workspaceSummaryTarget = byId('cockpit-workspace-summary');
+  if (workspaceSummaryTarget) {
+    workspaceSummaryTarget.innerHTML = [
+      { label: 'Activos', value: num(workspaceCounts.active || 0), detail: 'tarea abierta o gate MSSR observable' },
+      { label: 'Revisar', value: num(workspaceCounts['review-needed'] || 0), detail: 'cierre/clasificación necesita decisión humana' },
+      { label: 'Pausados', value: num(workspaceCounts.paused || 0), detail: 'sin actividad reciente; no significa terminado' },
+      { label: 'Experimentos', value: num(workspaceCounts.experimental || 0), detail: 'marcador explícito experiment/prototype/spike' },
+    ].map((item) => '<div class="cockpit-weekly-stat"><span>' + esc(item.label) + '</span><strong>' + esc(item.value) + '</strong><small>' + esc(item.detail) + '</small></div>').join('');
+  }
+  const workspaceProjectTarget = byId('cockpit-workspace-projects');
+  if (workspaceProjectTarget) {
+    const workspaceLabels = {
+      active: 'activo',
+      'review-needed': 'revisar',
+      paused: 'pausado',
+      finished: 'terminado',
+      experimental: 'experimental',
+      'abandoned-or-replaced': 'abandonado / reemplazado',
+    };
+    const workspaceTones = {
+      active: 'ok',
+      'review-needed': 'warn',
+      paused: 'info',
+      finished: 'ok',
+      experimental: 'info',
+      'abandoned-or-replaced': 'info',
+    };
+    workspaceProjectTarget.innerHTML = workspaceProjects.length ? workspaceProjects.map((project) => {
+      const classification = project.classification || {};
+      const state = classification.state || 'review-needed';
+      const tone = workspaceTones[state] || 'info';
+      const task = (project.currentTasks || [])[0] || null;
+      const taskText = task && task.summary ? task.summary : project.latestSummary || 'Sin tarea humana abierta resumida.';
+      const gitText = project.gitClean === true
+        ? 'clean'
+        : project.gitClean === false
+          ? num(project.gitPressure || 0) + ' cambios locales'
+          : 'Git no observado';
+      const gitTone = project.gitClean === true ? 'ok' : project.gitClean === false ? 'warn' : 'info';
+      return '<tr>' +
+        '<td><strong>' + esc(project.name || 'Proyecto') + '</strong><div class="recent-detail">última evidencia ' + esc(dateTime(project.latestAt)) + '</div></td>' +
+        '<td><span class="status-pill" data-tone="' + tone + '"><span class="dot ' + tone + '"></span><span>' + esc(workspaceLabels[state] || state) + '</span></span><div class="recent-detail">' + esc((classification.confidence || 'low') + ' · ' + (classification.basis || 'sin base')) + '</div></td>' +
+        '<td><div>' + esc(taskText) + '</div><div class="recent-detail">' + num(project.openTaskCount || 0) + ' tarea(s) abierta(s) · ' + esc(classification.reason || '') + '</div></td>' +
+        '<td><span class="status-pill" data-tone="' + gitTone + '"><span class="dot ' + gitTone + '"></span><span>' + esc(gitText) + '</span></span><div class="recent-detail">' + esc(project.branch || project.remoteState || 'sin branch observada') + '</div></td>' +
+        '<td><strong>' + esc(project.nextGate || 'revisar') + '</strong></td>' +
+      '</tr>';
+    }).join('') : '<tr><td colspan="5" class="muted">No hay proyectos con evidencia suficiente dentro de la ventana observable.</td></tr>';
+  }
+
+  const capabilities = root.capabilities || {};
+  const capabilityFamilies = capabilities.families || [];
+  const capabilitySkills = capabilities.skills || {};
+  const capabilityReviewCount = capabilityFamilies.filter((family) => family.status === 'review').length + (capabilitySkills.status === 'review' ? 1 : 0);
+  setPill(
+    'cockpit-capability-status',
+    capabilityReviewCount > 0 ? 'warn' : 'ok',
+    capabilityReviewCount > 0 ? num(capabilityReviewCount) + ' fuente(s) requieren probe/revisión' : 'catálogo disponible',
+  );
+  const capabilitySummaryTarget = byId('cockpit-capability-summary');
+  if (capabilitySummaryTarget) {
+    capabilitySummaryTarget.innerHTML = [
+      { label: 'Tools registradas', value: num(capabilities.toolCount || 0), detail: num(capabilities.familyCount || 0) + ' familias runtime' },
+      { label: 'Skills observadas', value: num(capabilitySkills.catalogSkills || 0), detail: num(capabilitySkills.ownedSkills || 0) + ' propias · ' + num(capabilitySkills.explicitRouting || 0) + ' routing explícito' },
+      { label: 'Workflow guides', value: num(capabilities.workflowGuideCount || 0), detail: 'procedimientos reutilizables del Bridge' },
+      { label: 'Provider-dependent', value: num(capabilityFamilies.filter((family) => family.status === 'review').length), detail: 'registradas, probe live sólo bajo demanda' },
+    ].map((item) => '<div class="cockpit-weekly-stat"><span>' + esc(item.label) + '</span><strong>' + esc(item.value) + '</strong><small>' + esc(item.detail) + '</small></div>').join('');
+  }
+  const capabilityFamilyTarget = byId('cockpit-capability-families');
+  if (capabilityFamilyTarget) {
+    capabilityFamilyTarget.innerHTML = capabilityFamilies.length ? capabilityFamilies.slice(0, 24).map((family) => {
+      const tone = family.status === 'available' ? 'ok' : family.status === 'review' ? 'warn' : 'info';
+      return '<div class="cockpit-capability-family">' +
+        '<div><strong>' + esc(family.label || family.family || 'Capability') + '</strong><span>' + num(family.toolCount || 0) + ' tools · ' + num(family.readOnlyCount || 0) + ' lectura · ' + num(family.mutableCount || 0) + ' mutables</span></div>' +
+        '<span class="status-pill" data-tone="' + tone + '"><span class="dot ' + tone + '"></span><span>' + esc(family.status === 'available' ? 'registrada' : 'probe live pendiente') + '</span></span>' +
+      '</div>';
+    }).join('') : '<div class="empty-state">No hay catálogo runtime disponible.</div>';
+  }
+
+  const weekly = root.weekly || {};
+  const weeklyProjects = weekly.projects || [];
+  setPill('cockpit-weekly-window', 'info', num(weekly.days || 7) + ' días · ' + num(weekly.projectCount || 0) + ' proyectos');
+  const weeklySummaryTarget = byId('cockpit-weekly-summary');
+  if (weeklySummaryTarget) {
+    const weeklyCommits = weeklyProjects.reduce((total, project) => total + Number(project.commitCount || 0), 0);
+    const dirtyProjects = weeklyProjects.filter((project) => project.gitClean === false).length;
+    const localOnlyProjects = weeklyProjects.filter((project) => project.remoteState === 'local-only').length;
+    weeklySummaryTarget.innerHTML = [
+      { label: 'Proyectos observados', value: num(weekly.projectCount || 0), detail: num(weekly.substantiveTraceCount || 0) + ' trazas con trabajo' },
+      { label: 'Trazas MSSR', value: num(weekly.traceCount || 0), detail: 'historial preservado · scope ' + (weekly.scope || 'all') },
+      { label: 'Commits en ventana', value: num(weeklyCommits), detail: 'sólo repos correlacionados' },
+      { label: 'Repos con cambios', value: num(dirtyProjects), detail: num(localOnlyProjects) + ' sin remote configurado' },
+    ].map((item) => '<div class="cockpit-weekly-stat"><span>' + esc(item.label) + '</span><strong>' + esc(item.value) + '</strong><small>' + esc(item.detail) + '</small></div>').join('');
+  }
+
+  const weeklyProjectTarget = byId('cockpit-weekly-projects');
+  if (weeklyProjectTarget) {
+    const remoteLabels = {
+      'git-unavailable': 'Git no observado',
+      'local-only': 'sólo local',
+      'remote-no-upstream': 'remote sin upstream',
+      'diverged-local-tracking': 'tracking divergente',
+      'ahead-local-tracking': 'por delante',
+      'behind-local-tracking': 'por detrás',
+      'aligned-local-tracking': 'alineado',
+    };
+    weeklyProjectTarget.innerHTML = weeklyProjects.length ? weeklyProjects.map((project) => {
+      const localChanges = Number(project.trackedChanges || 0) + Number(project.untrackedChanges || 0);
+      const gitTone = project.gitClean === true ? 'ok' : project.gitClean === false ? 'warn' : 'info';
+      const gitLabel = project.gitClean === true ? 'clean' : project.gitClean === false ? num(localChanges) + ' cambios' : 'sin lectura';
+      const remoteTone = project.remoteState === 'diverged-local-tracking' ? 'bad'
+        : project.remoteState === 'ahead-local-tracking' || project.remoteState === 'behind-local-tracking' ? 'warn'
+          : project.remoteState === 'aligned-local-tracking' ? 'ok' : 'info';
+      const remoteLabel = remoteLabels[project.remoteState] || project.remoteState || '—';
+      const commitDetail = project.latestCommitSubject
+        ? '<div class="recent-detail">' + esc((project.latestCommitHash || '').slice(0, 8) + ' · ' + project.latestCommitSubject) + '</div>'
+        : '<div class="recent-detail">sin commit en la ventana</div>';
+      return '<tr>' +
+        '<td><strong>' + esc(project.name) + '</strong><div class="recent-detail">' + esc(project.latestSummary || 'sin resumen explícito') + '</div></td>' +
+        '<td>' + num(project.substantiveTraceCount || 0) + ' trazas<div class="recent-detail">' + num(project.substantiveToolCalls || 0) + ' calls · ' + num((project.workflowKeys || []).length) + ' workflows</div></td>' +
+        '<td><span class="status-pill" data-tone="' + gitTone + '"><span class="dot ' + gitTone + '"></span><span>' + esc(gitLabel) + '</span></span><div class="recent-detail">' + esc(project.branch || project.gitError || 'branch no observada') + '</div></td>' +
+        '<td><strong>' + num(project.commitCount || 0) + '</strong>' + commitDetail + '</td>' +
+        '<td><span class="status-pill" data-tone="' + remoteTone + '"><span class="dot ' + remoteTone + '"></span><span>' + esc(remoteLabel) + '</span></span><div class="recent-detail">' + esc(project.upstream || (project.remotes || []).join(', ') || 'sin tracking remoto local') + '</div></td>' +
+        '<td>' + esc(project.pendingHint || '—') + '</td>' +
+      '</tr>';
+    }).join('') : '<tr><td colspan="6" class="muted">No hay proyectos MSSR correlacionados en la ventana semanal.</td></tr>';
+  }
+
+  const traceTarget = byId('cockpit-traces');
+  const traces = root.traces || [];
+  if (traceTarget) {
+    if (!traces.length) {
+      traceTarget.innerHTML = '<div class="empty-state">Sin trazas MSSR recientes.</div>';
+    } else {
+      traceTarget.innerHTML = traces.map((trace) => {
+        const tone = cockpitTraceTone(trace.status);
+        const attentionLabels = { closed: 'cerrada', verify: 'toca verificar', persist: 'toca persistir', close: 'falta cerrar', intermediate: 'traza intermedia', continue: trace.nextPhase ? 'toca ' + phaseLabel(trace.nextPhase) : 'continuar' };
+        const next = attentionLabels[trace.attentionKind] || (trace.nextPhase ? 'toca ' + phaseLabel(trace.nextPhase) : 'continuar');
+        const roleLabel = trace.traceRole === 'synthetic-test' ? 'prueba técnica' : trace.traceRole === 'technical-intermediate' ? 'traza técnica' : trace.traceRole === 'workflow-member' ? 'miembro de workflow' : null;
+        return '<article class="cockpit-trace" data-status="' + esc(trace.status) + '">' +
+          '<div class="cockpit-trace-head"><div><strong>' + esc(trace.displayName || trace.workflowKey || trace.project || 'Tarea MSSR sin nombre') + '</strong><div class="cockpit-meta">' + esc([trace.project, trace.stage, roleLabel ? roleLabel + (trace.workflowTraceCount > 1 ? ' · ' + trace.workflowTraceCount + ' trazas relacionadas' : '') : (trace.workflowTraceCount > 1 ? trace.workflowTraceCount + ' trazas relacionadas' : null), clock(trace.latestAt), trace.model].filter(Boolean).join(' · ')) + '</div></div>' +
+          '<span class="status-pill" data-tone="' + tone + '"><span class="dot ' + tone + '"></span><span>' + esc(next) + '</span></span></div>' +
+          '<div class="cockpit-trace-summary">' + esc(trace.summary || 'Traza MSSR técnica o intermedia sin descripción específica registrada.') + '</div>' +
+          '<div class="cockpit-phase-row">' + renderCockpitChecklist(trace.checklist) + '</div>' +
+        '</article>';
+      }).join('');
+    }
+  }
+
+  const projectTarget = byId('cockpit-projects');
+  const projects = root.projects || [];
+  if (projectTarget) {
+    projectTarget.innerHTML = projects.length ? projects.map((project) => {
+      const healthTone = project.healthLevel === 'review' ? 'bad' : project.healthLevel === 'watch' ? 'warn' : project.healthLevel === 'ok' ? 'ok' : 'info';
+      const projectLocalChanges = Number(project.trackedChanges || 0) + Number(project.untrackedChanges || 0);
+      const gitLabel = project.gitClean === true ? 'clean' : project.gitClean === false ? num(projectLocalChanges) + ' cambios' : 'sin lectura';
+      const gitTone = project.gitClean === true ? 'ok' : project.gitClean === false ? 'warn' : 'info';
+      return '<tr>' +
+        '<td><strong>' + esc(project.name) + '</strong><div class="recent-detail">' + esc(project.relativeRoot || '') + '</div></td>' +
+        '<td>' + num(project.activeTraces) + ' abiertas<div class="recent-detail">' + num(project.recentTraces) + ' recientes</div></td>' +
+        '<td><span class="status-pill" data-tone="' + healthTone + '"><span class="dot ' + healthTone + '"></span><span>' + esc(project.healthLevel) + '</span></span><div class="recent-detail">' + num(project.findingCount) + ' findings · ' + num(project.referenceCandidateCount || 0) + ' refs candidatas' + (Number(project.referenceHighPriorityCount || 0) > 0 ? ' · ' + num(project.referenceHighPriorityCount) + ' high' : '') + '</div></td>' +
+        '<td><span class="status-pill" data-tone="' + gitTone + '"><span class="dot ' + gitTone + '"></span><span>' + esc(gitLabel) + '</span></span><div class="recent-detail">' + esc(project.branch || project.gitError || 'branch no observada') + '</div></td>' +
+      '</tr>';
+    }).join('') : '<tr><td colspan="4" class="muted">Todavía no hay proyectos correlacionados con las trazas recientes.</td></tr>';
+  }
+
+  const maintenanceTarget = byId('cockpit-maintenance');
+  if (maintenanceTarget) {
+    const refs = root.referenceLifecycle || {};
+    const referenceCounts = refs.candidates || {};
+    const referenceValue = refs.candidateReferenceProjectionAvailable
+      ? num(referenceCounts.total || 0) + ' candidatas · '
+        + num(referenceCounts.high || 0) + ' high · '
+        + num(referenceCounts.medium || 0) + ' medium · '
+        + num(referenceCounts.low || 0) + ' low'
+      : 'snapshot pendiente';
+    const referenceTone = !refs.candidateReferenceProjectionAvailable
+      ? 'info'
+      : Number(referenceCounts.high || 0) > 0 ? 'warn' : Number(referenceCounts.total || 0) > 0 ? 'info' : 'ok';
+    const items = [
+      { label: 'Project Health REVIEW', value: num(counts.projectReview || 0), tone: Number(counts.projectReview || 0) > 0 ? 'bad' : 'ok' },
+      { label: 'Project Health WATCH', value: num(counts.projectWatch || 0), tone: Number(counts.projectWatch || 0) > 0 ? 'warn' : 'ok' },
+      { label: 'Referencias documentales', value: referenceValue, tone: referenceTone },
+    ];
+    maintenanceTarget.innerHTML = items.map((item) => '<div class="cockpit-maintenance-row"><span>' + esc(item.label) + '</span><span class="status-pill" data-tone="' + item.tone + '"><span class="dot ' + item.tone + '"></span><span>' + esc(item.value) + '</span></span></div>').join('') +
+      '<div class="cockpit-maintenance-note">' + esc(refs.note || authority.note || '') + '</div>';
+  }
+}
+
 function updateSystem(status, overview, mssr) {
   const observability = mssr.observability || {};
   const privacy = mssr.privacy || {};
@@ -973,7 +1277,7 @@ async function refresh() {
   refreshing = true;
   try {
     const snapshot = await getJson('/api/dashboard/snapshot');
-    const { status, overview, summary, recent, errors, timeline, mssr, skillHealth, projectHealth, runtimeHealth, toolAudit, toolNotices } = snapshot;
+    const { status, overview, summary, recent, errors, timeline, mssr, skillHealth, projectHealth, runtimeHealth, toolAudit, toolNotices, cockpit } = snapshot;
 
     updateHealth(status, overview, mssr);
     updateSummary(status, overview, summary, recent, timeline, mssr);
@@ -984,6 +1288,7 @@ async function refresh() {
     renderRuntimeHealth(runtimeHealth);
     updateToolPortfolio(toolAudit);
     updateToolNotices(toolNotices);
+    renderCockpit(cockpit);
     updateSystem(status, overview, mssr);
     renderErrors(errors.errors || []);
     setText('updated-at', 'actualizado ' + new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));

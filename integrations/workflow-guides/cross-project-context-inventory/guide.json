@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "name": "cross-project-context-inventory",
+  "title": "Cross-Project Context Inventory",
+  "description": "Reconstruct and maintain MauroPrime's daily/weekly work context across projects by joining MSSR history, project context, Git state and live capability catalogs; recover unfinished/abandoned traces without auto-closing them; publish a bounded resume-oriented dashboard and defer dirty-tree cleanup until ownership is explainable.",
+  "activation": {
+    "keywords": [
+      "context inventory",
+      "inventario de proyectos",
+      "resumen semanal",
+      "qué hicimos ayer",
+      "dónde quedamos",
+      "tareas abiertas",
+      "chat cortado",
+      "MSSR",
+      "Git",
+      "capability inventory",
+      "capacidades",
+      "dirty tree",
+      "dashboard de contexto"
+    ],
+    "phrases": [
+      "hacé un inventario de lo que trabajamos",
+      "mostrame qué hicimos ayer y qué falta",
+      "reconstruí dónde quedamos en todos los proyectos",
+      "actualizá el resumen semanal de trabajo",
+      "detectá chats o trazas que quedaron sin cerrar",
+      "inventariá las capacidades y herramientas disponibles",
+      "ordená los proyectos antes de limpiar los cambios dirty",
+      "quiero levantarme y ver en el dashboard dónde quedamos"
+    ],
+    "negativeKeywords": [
+      "benchmark visual Roblox",
+      "capturas de modelo Roblox",
+      "photo rig",
+      "VFX benchmark",
+      "turntable"
+    ],
+    "examples": [
+      "Reconstruí los últimos 7 días con MSSR y Git, mostrá tareas abiertas y un resume packet por proyecto.",
+      "Actualizá el dashboard con qué hicimos ayer, qué falta y qué chats quedaron sin outcome.",
+      "Inventariá herramientas, skills y providers activos sin hardcodear una lista estática.",
+      "Antes de limpiar el Bridge dirty, clasificá ownership y separá los bloques de cambios."
+    ]
+  },
+  "entrypoint": "GUIDE.md",
+  "phases": {
+    "collect-evidence": "phases/collect-evidence.md",
+    "reconstruct-work": "phases/reconstruct-work.md",
+    "recover-unfinished": "phases/recover-unfinished.md",
+    "inventory-capabilities": "phases/inventory-capabilities.md",
+    "persist-snapshot": "phases/persist-snapshot.md",
+    "publish-dashboard": "phases/publish-dashboard.md",
+    "organize-workspace": "phases/organize-workspace.md",
+    "dirty-tree-cleanup": "phases/dirty-tree-cleanup.md",
+    "maintain-workflow": "phases/maintain-workflow.md"
+  },
+  "recommendedTools": [
+    "project_context_load",
+    "skill_bootstrap",
+    "mssr_observatory_query",
+    "mssr_trace_evidence",
+    "git_status",
+    "skill_catalog",
+    "bridge_health",
+    "bridge_metrics_query",
+    "workflow_guide_recommend",
+    "workflow_guide_load",
+    "work_once",
+    "workspace_snapshot",
+    "mssr_trace_record"
+  ],
+  "scopeNotes": "Global guide available to all projects connected through Mauro's Bridge MCP."
+}
