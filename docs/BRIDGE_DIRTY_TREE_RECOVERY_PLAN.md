@@ -234,4 +234,26 @@ A clean dependency install inside the worktree could not complete offline becaus
 
 Focused full-state verification passed on the integration worktree: TypeScript check/build plus MSSR 0.2.77 semantic adoption, receipt-count boundary, weekly work history, Human Cockpit, context-inventory cache, system hardening, Project Health, authorized image import, QuietDesk proxy, Storage Growth, Blender animation tools and the 176-tool v0.6 registry regression. Durable combined log: `data/p6-focused-integration-gates.log`.
 
-Next gate: stage the remaining mixed integration/release paths explicitly, run staged `project_change_consistency`, commit/read back the final integration batch, then run the clean-branch verification and compare the resulting branch against the still-frozen `main` before any reconciliation.
+At this checkpoint, the remaining gate was to stage the mixed integration/release paths explicitly, run staged `project_change_consistency`, commit/read back the final integration batch, verify the clean branch, and compare it against the still-frozen `main`. The following section records that gate's completed result.
+
+## Final local reconciliation — 2026-09-26
+
+The recovery branch closed with final mixed integration commit `f0deaa9` (`release: integrate Bridge 0.6.141 host changes`). Before mutating `main`, a final parity script re-read the frozen source and recovery branch and proved:
+
+- `main` was still exactly `dcd33a8ea766d7dfcd47cb9efea41cb3960944aa`;
+- recovery target was `f0deaa9156f977f78fe3b33451082f5b902ea516`;
+- both sides covered the same 92 Git-visible paths, with no source-only or branch-only paths;
+- 90 paths matched byte-for-byte;
+- the only two mismatches were intentional branch-newer corrections: this P6 plan and `scripts/test-mssr-semantic-r4-adoption.mjs` moving the adoption assertion from 0.2.75 to 0.2.77;
+- the external rollback ZIP remained available with SHA-256 `04387e9238de315ea1fb212542f351f2d5aa23572d3bcb9ee4e968e69bc7811b`.
+
+A heavy `bridge_verify_all` attempt on the clean recovery worktree coincided with sustained HTTP readiness stalls and a watchdog restart. The verifier job state did not survive the restart, so it was deliberately **not** retried unchanged. Bridge access was recovered with the authorized desktop diagnostic path, local/tunnel readiness returned healthy, and the accepted verification authority remained the already-passing focused integration suite plus a fresh `bridge_self_check` on the clean recovery worktree (typecheck PASS, build PASS, Git clean, tunnel/readiness healthy, 176-tool runtime catalog).
+
+With those gates satisfied, local `main` was reconciled using the already-verified recovery history. Post-reconciliation readback:
+
+- `HEAD = f0deaa9156f977f78fe3b33451082f5b902ea516`;
+- branch remains `main`;
+- `git status --short --branch` reports only `main...origin/main [ahead 10]` and no dirty paths;
+- no force operation or remote push was performed.
+
+P6 is therefore complete **locally**. The ten commits are now the local auditable history for the previously shared dirty work. Publishing them to `origin/main` is a separate external-side-effect decision and is intentionally outside this recovery step.

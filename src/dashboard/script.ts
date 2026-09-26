@@ -962,19 +962,25 @@ function renderCockpit(cockpit) {
   const brief = root.morningBrief || {};
   const yesterday = brief.yesterday || {};
   const openTasks = brief.tasks || [];
+  const lifecycleDebt = brief.lifecycleDebt || [];
   const contextInventory = root.contextInventory || {};
-  const closureReviewCount = Number(brief.needsClosureReviewCount || 0);
+  const closureReviewCount = Number(brief.lifecycleDebtTaskCount || brief.needsClosureReviewCount || 0);
+  const activeTaskCount = Number(brief.openTaskCount || openTasks.length || 0);
   setPill(
     'cockpit-return-status',
-    closureReviewCount > 0 ? 'warn' : openTasks.length > 0 ? 'info' : 'ok',
-    closureReviewCount > 0 ? num(closureReviewCount) + ' cierre(s) para revisar' : openTasks.length > 0 ? num(openTasks.length) + ' tarea(s) abierta(s)' : 'sin pendientes observables',
+    activeTaskCount > 0 ? 'info' : closureReviewCount > 0 ? 'warn' : 'ok',
+    activeTaskCount > 0
+      ? num(activeTaskCount) + ' activa(s) · ' + num(closureReviewCount) + ' deuda MSSR'
+      : closureReviewCount > 0
+        ? num(closureReviewCount) + ' deuda MSSR para revisar'
+        : 'sin pendientes observables',
   );
   const returnSummaryTarget = byId('cockpit-return-summary');
   if (returnSummaryTarget) {
     returnSummaryTarget.innerHTML = [
       { label: 'Ayer', value: num(yesterday.projectCount || 0) + ' proyectos', detail: num(yesterday.traceCount || 0) + ' trazas sustantivas observadas' },
-      { label: 'Abiertas ahora', value: num(brief.openTaskCount || 0), detail: 'taskKey MSSR explícito + fallback legacy visible' },
-      { label: 'Cierre pendiente', value: num(closureReviewCount), detail: 'hubo trabajo + recordatorio MSSR sin outcome posterior' },
+      { label: 'Trabajo activo', value: num(activeTaskCount), detail: 'tareas sin recordatorio de cierre pendiente' },
+      { label: 'Deuda MSSR', value: num(closureReviewCount), detail: 'sin outcome; requiere revisar, no continuar automáticamente' },
       { label: 'Inventario', value: contextInventory.mode === 'cached' ? 'cache' : contextInventory.mode === 'refreshed' ? 'actualizado' : 'sin estado', detail: num(contextInventory.dailySnapshotCount || 0) + ' días guardados · ' + (contextInventory.refreshedAt ? dateTime(contextInventory.refreshedAt) : 'sin snapshot durable') },
     ].map((item) => '<div class="cockpit-return-stat"><span>' + esc(item.label) + '</span><strong>' + esc(item.value) + '</strong><small>' + esc(item.detail) + '</small></div>').join('');
   }
@@ -1012,6 +1018,19 @@ function renderCockpit(cockpit) {
         '<div class="recent-detail">' + num((task.traceIds || []).length) + ' traza(s) · última actividad ' + esc(dateTime(task.latestAt)) + ' · ' + esc(identityLabel) + (lineageCount > 0 ? ' · ' + num(lineageCount) + ' enlace(s) de lineage' : '') + '</div>' +
       '</div>';
     }).join('') : '<div class="empty-state">No hay tareas sustantivas abiertas observables en la ventana semanal.</div>';
+  }
+
+  const lifecycleDebtTarget = byId('cockpit-lifecycle-debt');
+  if (lifecycleDebtTarget) {
+    lifecycleDebtTarget.innerHTML = lifecycleDebt.length ? lifecycleDebt.slice(0, 10).map((task) => {
+      const taskLabel = task.workflowKey || task.latestSummary || task.taskKey || 'deuda de lifecycle';
+      return '<div class="cockpit-open-task" data-needs-closure="true">' +
+        '<div class="cockpit-open-task-head"><div><strong>' + esc(task.project || 'Proyecto') + '</strong><span>' + esc(taskLabel) + '</span></div>' +
+        '<span class="status-pill" data-tone="warn"><span class="dot warn"></span><span>revisar outcome</span></span></div>' +
+        '<div class="cockpit-open-task-summary">' + esc(task.latestSummary || 'Trabajo sustantivo sin outcome posterior observable.') + '</div>' +
+        '<div class="recent-detail">' + num((task.traceIds || []).length) + ' traza(s) · última actividad ' + esc(dateTime(task.latestAt)) + ' · no se considera trabajo activo hasta revisión explícita</div>' +
+      '</div>';
+    }).join('') : '<div class="empty-state">No hay deuda MSSR humana separada del trabajo activo.</div>';
   }
 
   const workspaceMap = root.workspaceMap || {};

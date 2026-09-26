@@ -477,7 +477,7 @@ td code { display: inline-block; max-width: 22rem; padding: 0.1rem 0.28rem; over
 .cockpit-return-stat > span { display: block; color: var(--muted); font-size: 0.65rem; line-height: 1.3; }
 .cockpit-return-stat > strong { display: block; margin-top: 0.24rem; color: #e7fff6; font-size: 1rem; overflow-wrap: anywhere; }
 .cockpit-return-stat > small { display: block; margin-top: 0.2rem; color: var(--faint); font-size: 0.62rem; line-height: 1.35; }
-.cockpit-return-grid { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 0.65rem; padding: 0 1rem 1rem; }
+.cockpit-return-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.65rem; padding: 0 1rem 1rem; }
 .cockpit-return-pane { min-width: 0; padding: 0.78rem; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,0.018); }
 .cockpit-return-heading { margin-bottom: 0.58rem; color: #dce8ff; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; }
 .cockpit-return-meta { display: flex; justify-content: space-between; gap: 0.6rem; color: var(--muted); font-size: 0.66rem; }

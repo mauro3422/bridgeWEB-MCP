@@ -820,7 +820,9 @@ export function buildHumanCockpitSnapshot(input: {
       classification: classifyOpenHumanTask(task, nowDate),
     }))
     .sort((left, right) => timestamp(right.latestAt) - timestamp(left.latestAt) || Number(right.needsClosureReview) - Number(left.needsClosureReview));
-  const openTasks = allOpenTasks
+  const currentTasks = allOpenTasks.filter((task) => !task.needsClosureReview);
+  const closureDebtTasks = allOpenTasks.filter((task) => task.needsClosureReview);
+  const openTasks = currentTasks
     .slice(0, 24)
     .map((task) => ({
       ...task,
@@ -844,6 +846,29 @@ export function buildHumanCockpitSnapshot(input: {
         latestAt: task.latestAt,
       },
     }));
+  const lifecycleDebt = closureDebtTasks.slice(0, 24).map((task) => ({
+    ...task,
+    resumePacket: {
+      schemaVersion: 2,
+      project: task.project,
+      projects: task.projects,
+      taskKey: task.taskKey,
+      taskKeySource: task.taskKeySource,
+      workflowKey: task.workflowKey,
+      workflowKeys: task.workflowKeys,
+      traceIds: task.traceIds,
+      parentTraceIds: task.parentTraceIds,
+      supersedesTraceIds: task.supersedesTraceIds,
+      lastKnownSummary: task.latestSummary,
+      lastKnownStage: task.latestStage,
+      requiredPhases: task.requiredPhases,
+      completedPhases: task.completedPhases,
+      nextGate: "revisar si retomar / cerrar outcome",
+      evidenceRef: task.evidenceRef,
+      latestAt: task.latestAt,
+    },
+    debtReason: "Trabajo sustantivo quedó sin outcome MSSR posterior. Se conserva como deuda de lifecycle y no como trabajo activo hasta revisión; no se auto-cierra.",
+  }));
 
   const workspaceStatePriority: Record<HumanWorkState, number> = {
     "review-needed": 6,
@@ -855,7 +880,7 @@ export function buildHumanCockpitSnapshot(input: {
   };
   const workspaceProjects = weeklyProjects.map((project) => {
     const projectKey = project.name.toLowerCase();
-    const relatedTasks = allOpenTasks.filter((task) => task.projects.some((candidate) => candidate.toLowerCase() === projectKey));
+    const relatedTasks = currentTasks.filter((task) => task.projects.some((candidate) => candidate.toLowerCase() === projectKey));
     const classification = classifyWeeklyProject({
       name: project.name,
       healthLevel: project.healthLevel,
@@ -952,13 +977,17 @@ export function buildHumanCockpitSnapshot(input: {
     taskIdentityNote: "Explicit MSSR taskKey groups related traces when recorded; older history falls back to project + workflowKey, then traceId. Raw trace provenance and lineage remain visible.",
     today: dayProjection(todayKey),
     yesterday: dayProjection(yesterdayKey),
-    openTaskCount: allOpenTasks.length,
+    openTaskCount: currentTasks.length,
     returnedTaskCount: openTasks.length,
-    needsClosureReviewCount: allOpenTasks.filter((task) => task.needsClosureReview).length,
+    lifecycleDebtTaskCount: closureDebtTasks.length,
+    lifecycleDebtReturnedCount: lifecycleDebt.length,
+    needsClosureReviewCount: closureDebtTasks.length,
     supportOpenTraceCount,
     supportNeedsClosureReviewCount,
     supportNote: "Las trazas forenses/de recuperación siguen visibles en la evidencia semanal pero no inflan la lista de tareas humanas pendientes.",
+    lifecycleDebtNote: "Una traza sin outcome no se presenta como trabajo activo: queda en deuda de lifecycle hasta revisión explícita, sin auto-cierre.",
     tasks: openTasks,
+    lifecycleDebt,
   };
 
   const healthRoot = asRecord(input.projectHealth);

@@ -2429,6 +2429,96 @@ function summary(days: number, scope: MssrObservatoryScope) {
     }
     workProjects.set(key, current);
   }
+  type WorkTraceRow = (typeof workTraceRows)[number];
+  const workTasks = new Map<string, {
+    taskKey: string;
+    taskKeySource: "explicit-mssr" | "derived-project-workflow" | "trace-fallback";
+    project: string;
+    projects: Set<string>;
+    workflowKey: string | null;
+    workflowKeys: Set<string>;
+    traceIds: string[];
+    openTraceIds: string[];
+    closedTraceIds: string[];
+    parentTraceIds: Set<string>;
+    supersedesTraceIds: Set<string>;
+    supportWorkflow: boolean;
+    latest: WorkTraceRow;
+  }>();
+  for (const row of workTraceRows.filter((item) => item.substantive)) {
+    const explicitTaskKey = row.taskKey;
+    const legacyTaskKey = row.workflowKey
+      ? `${row.project.toLowerCase()}::${row.workflowKey}`
+      : `${row.project.toLowerCase()}::trace:${row.traceId}`;
+    const taskKey = explicitTaskKey ?? legacyTaskKey;
+    const taskKeySource = explicitTaskKey ? "explicit-mssr" : row.workflowKey ? "derived-project-workflow" : "trace-fallback";
+    const groupKey = explicitTaskKey ? `explicit:${explicitTaskKey}` : `legacy:${legacyTaskKey}`;
+    const current = workTasks.get(groupKey) ?? {
+      taskKey,
+      taskKeySource,
+      project: row.project,
+      projects: new Set<string>(),
+      workflowKey: row.workflowKey,
+      workflowKeys: new Set<string>(),
+      traceIds: [],
+      openTraceIds: [],
+      closedTraceIds: [],
+      parentTraceIds: new Set<string>(),
+      supersedesTraceIds: new Set<string>(),
+      supportWorkflow: row.supportWorkflow,
+      latest: row,
+    };
+    current.projects.add(row.project);
+    if (row.workflowKey) current.workflowKeys.add(row.workflowKey);
+    current.traceIds.push(row.traceId);
+    if (row.closed) current.closedTraceIds.push(row.traceId);
+    else current.openTraceIds.push(row.traceId);
+    if (row.parentTraceId) current.parentTraceIds.add(row.parentTraceId);
+    if (row.supersedesTraceId) current.supersedesTraceIds.add(row.supersedesTraceId);
+    current.supportWorkflow = current.supportWorkflow && row.supportWorkflow;
+    if (row.latestAt > current.latest.latestAt) {
+      current.latest = row;
+      current.project = row.project;
+      current.workflowKey = row.workflowKey;
+    }
+    workTasks.set(groupKey, current);
+  }
+  const taskStates = [...workTasks.values()]
+    .map((task) => {
+      const latest = task.latest;
+      const currentWork = !latest.closed;
+      const closureDebtTraceIds = task.openTraceIds.filter((traceId) => latest.closed || traceId !== latest.traceId);
+      return {
+        taskKey: task.taskKey,
+        taskKeySource: task.taskKeySource,
+        project: task.project,
+        projects: [...task.projects],
+        workflowKey: task.workflowKey,
+        workflowKeys: [...task.workflowKeys],
+        traceIds: task.traceIds,
+        openTraceIds: task.openTraceIds,
+        closedTraceIds: task.closedTraceIds,
+        parentTraceIds: [...task.parentTraceIds],
+        supersedesTraceIds: [...task.supersedesTraceIds],
+        supportWorkflow: task.supportWorkflow,
+        currentWork,
+        latestTraceClosed: latest.closed,
+        closureDebtTraceCount: closureDebtTraceIds.length,
+        closureDebtTraceIds,
+        latestTraceId: latest.traceId,
+        latestAt: latest.latestAt,
+        latestSummary: latest.summary,
+        latestStage: latest.latestStage,
+        caller: latest.caller,
+        requiredPhases: latest.requiredPhases,
+        completedPhases: latest.completedPhases,
+        evidenceRef: latest.evidenceRef,
+        needsClosureReview: currentWork && latest.needsClosureReview,
+        closureReminderObserved: latest.closureReminderObserved,
+      };
+    })
+    .sort((left, right) => right.latestAt.localeCompare(left.latestAt))
+    .slice(0, 120);
   const workHistory = {
     scope,
     days,
@@ -2440,6 +2530,10 @@ function summary(days: number, scope: MssrObservatoryScope) {
     supportOpenTraceCount: workTraceRows.filter((row) => row.substantive && !row.closed && row.supportWorkflow).length,
     needsClosureReviewCount: workTraceRows.filter((row) => row.needsClosureReview).length,
     humanNeedsClosureReviewCount: workTraceRows.filter((row) => row.needsClosureReview && !row.supportWorkflow).length,
+    humanCurrentTaskCount: taskStates.filter((task) => task.currentWork && !task.supportWorkflow).length,
+    humanClosureDebtTaskCount: taskStates.filter((task) => !task.currentWork && task.closureDebtTraceCount > 0 && !task.supportWorkflow).length,
+    humanClosureDebtTraceCount: taskStates.filter((task) => !task.supportWorkflow).reduce((total, task) => total + task.closureDebtTraceCount, 0),
+    taskStates,
     projectCount: workProjects.size,
     projects: [...workProjects.values()]
       .map((project) => ({

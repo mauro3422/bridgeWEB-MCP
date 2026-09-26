@@ -1127,6 +1127,58 @@
       "required": false,
       "priority": 45,
       "maxChars": 4000
+    },
+    {
+      "id": "bridge-context-resume-inventory",
+      "kind": "context",
+      "description": "Daily/weekly resume packets, lifecycle-debt separation, periodic inventory, dynamic capabilities and conservative cross-project organization.",
+      "source": {
+        "path": ".mssr/knowledge/operations/bridge-context-resume-inventory.md"
+      },
+      "topic": "operations",
+      "area": "context-orientation",
+      "stages": [
+        "start",
+        "resume",
+        "implement",
+        "verify",
+        "close"
+      ],
+      "domains": [
+        "agent-orchestration",
+        "coding",
+        "filesystem",
+        "git",
+        "skill-system"
+      ],
+      "actions": [
+        "recover",
+        "analyze",
+        "review",
+        "maintain",
+        "verify"
+      ],
+      "artifacts": [
+        "ui",
+        "project",
+        "repository",
+        "mcp",
+        "document"
+      ],
+      "needs": [
+        "history-recovery",
+        "cross-agent",
+        "integrity-verification"
+      ],
+      "signals": [
+        "recovery-needed",
+        "reusable-pattern",
+        "warning-observed",
+        "capability-discovery-needed"
+      ],
+      "required": false,
+      "priority": 76,
+      "maxChars": 2600
     }
   ]
 }

@@ -142,7 +142,8 @@ export const dashboardMarkup = `
         <div id="cockpit-return-summary" class="cockpit-return-summary"><div class="empty-state">Reconstruyendo dónde quedamos…</div></div>
         <div class="cockpit-return-grid">
           <section class="cockpit-return-pane"><div class="cockpit-return-heading">Ayer</div><div id="cockpit-yesterday"><div class="empty-state">Cargando actividad de ayer…</div></div></section>
-          <section class="cockpit-return-pane"><div class="cockpit-return-heading">Qué falta ahora</div><div id="cockpit-open-tasks"><div class="empty-state">Cargando tareas abiertas…</div></div></section>
+          <section class="cockpit-return-pane"><div class="cockpit-return-heading">Trabajo activo</div><div id="cockpit-open-tasks"><div class="empty-state">Cargando tareas activas…</div></div></section>
+          <section class="cockpit-return-pane"><div class="cockpit-return-heading">Deuda MSSR · revisar, no continuar a ciegas</div><div id="cockpit-lifecycle-debt"><div class="empty-state">Separando cierres administrativos…</div></div></section>
         </div>
       </article>
 

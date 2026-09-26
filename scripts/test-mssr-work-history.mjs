@@ -139,6 +139,10 @@ try {
   assert.equal(summary.workHistory.supportOpenTraceCount, 1);
   assert.equal(summary.workHistory.needsClosureReviewCount, 2);
   assert.equal(summary.workHistory.humanNeedsClosureReviewCount, 1);
+  assert.equal(summary.workHistory.humanCurrentTaskCount, 1);
+  assert.equal(summary.workHistory.humanClosureDebtTaskCount, 0);
+  assert.equal(summary.workHistory.taskStates.length, 2);
+  assert.equal(summary.workHistory.taskStates.find((task) => task.supportWorkflow === false)?.currentWork, true);
   assert.equal(summary.workHistory.openTraces.length, 2);
   const humanOpenTrace = summary.workHistory.openTraces.find((item) => item.traceId === "trace-weekly-a");
   const supportOpenTrace = summary.workHistory.openTraces.find((item) => item.traceId === "trace-weekly-support");

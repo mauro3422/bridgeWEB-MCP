@@ -23,13 +23,13 @@ The dashboard is a read-only projection. MSSR lifecycle/Project Context, Git rep
 - Bounded local Git join for correlated Project Health repositories.
 - Restart-safe persisted dashboard seed and isolated analytics worker.
 
-## P1 — morning brief + unfinished-work recovery — CURRENT / CORE IMPLEMENTED
+## P1 — morning brief + unfinished-work recovery — LIVE / REFINED
 
-Build a compact `Al volver` projection that answers what happened yesterday and what needs attention now.
+`Al volver` now answers what happened yesterday and separates **current human work** from **MSSR lifecycle debt**.
 
 Required evidence:
 
-- substantive MSSR work grouped by project/workflow;
+- substantive MSSR work grouped by project/workflow or explicit `taskKey`;
 - explicit outcomes vs open traces;
 - idle/closure reminders such as `mssr-web-outcome-missing-after-idle`;
 - latest bounded human summary and lifecycle phase;
@@ -38,11 +38,13 @@ Required evidence:
 Rules:
 
 - Never auto-close a trace because it became idle.
-- An idle trace with substantive activity and no later outcome becomes `needs-closure-review`, not `failed`.
-- A newer trace for the same task/workflow may supersede an older setup/retry trace in the UI, but provenance remains visible.
+- A trace with substantive activity + closure reminder + no later outcome becomes `needsClosureReview`, not `failed`.
+- `needsClosureReview` is projected in a separate **Deuda MSSR** lane instead of ordinary active product work. It remains resumable and auditable, but the next action is to review whether to resume or record an outcome—not to blindly continue implementation.
+- Active-work and lifecycle-debt items both keep bounded resume packets; no raw prompts/transcripts/private reasoning are stored.
+- A newer trace for the same explicit task may supersede/retry an older execution in the UI, but provenance remains visible and lifecycle state is never rewritten by the dashboard.
 - Unknown transcript labels (for example a bad speech transcription) are not promoted into project names without repository/MSSR evidence.
 
-Success gate: after opening the dashboard, Mauro can identify yesterday's main work and the next concrete gate without reading handoffs/README files.
+Success gate met: after opening the dashboard, Mauro can see yesterday, real work to continue, and separate lifecycle debt without reading handoffs/README files or confusing an administrative missing outcome with a feature still pending.
 
 ## P1b — chat/context interruption recovery
 
@@ -100,7 +102,7 @@ Success gate: the system can show `available / degraded / unavailable / review` 
 
 Persist bounded context-inventory snapshots so weekly/daily summaries are incremental rather than rebuilt from scratch.
 
-**Status:** PHASE A LIVE. Bridge now persists `data/context-inventory-state.json` as a bounded derived cache, refreshes it on material MSSR lifecycle changes or a one-hour TTL, keeps rolling daily resume snapshots, and reuses the stored weekly MSSR+Git projection between dashboard refreshes. Source gates measured the isolated worker at roughly 4.0 s for a forced rebuild and ~1.0 s for the next cached snapshot. Remaining P4 work is the 30-day derived view and further refinement of event/freshness triggers if evidence shows the hourly fallback is too coarse.
+**Status:** PHASE A LIVE. Bridge now persists `data/context-inventory-state.json` as a bounded derived cache, refreshes it on material MSSR lifecycle changes or a one-hour TTL, keeps rolling daily resume snapshots, and reuses the stored weekly MSSR+Git projection between dashboard refreshes. Focused source gates have measured roughly 4.0 s for a forced rebuild and ~1.0 s for a warm cached snapshot, but a real busy post-restart cold analytics refresh on 2026-09-26 took ~117 s. The persisted last-good seed kept first paint/readiness available throughout, so this is performance debt rather than a liveness failure. Remaining P4 work is therefore: (1) optional 30-day derived view, (2) profile/trim the true cold reconstruction path, and (3) refine event/freshness triggers only where evidence shows the hourly fallback is too coarse.
 
 Cadence target:
 
@@ -135,31 +137,31 @@ The dashboard must not derive `finished` or `abandoned-or-replaced` from age, si
 
 The map is the ownership evidence input for P6. It does not rename/move/delete projects automatically.
 
-## P6 — shared dirty-tree cleanup — LAST
+## P6 — shared dirty-tree cleanup — DONE LOCALLY
 
-Bridge currently contains concurrent work from multiple chats/agents. Cleanup must happen only after the context layer can explain ownership.
+The shared Bridge worktree has been reconciled through an ownership-safe recovery branch rather than a blind cleanup. The frozen dirty `main` was replayed into `recovery/p6-integration-20260926`, partitioned into dedicated subsystem commits plus one mixed host-integration commit, verified, and only then adopted back into local `main`.
 
-Procedure:
+Final safety evidence:
 
-1. snapshot the shared tree;
-2. partition changed paths by workflow/trace/evidence;
-3. identify unowned or ambiguous changes;
-4. run focused gates per partition;
-5. stage/commit only one ownership-safe partition at a time;
-6. verify commit readback and remote separately;
-7. leave unrelated work untouched.
+1. external rollback ZIP verified before mutation: `D:\MauroPrimeBackups\bridge-mcp\2026-09-26-pre-p6\bridge-mcp-pre-p6.zip`, SHA-256 `04387e9238de315ea1fb212542f351f2d5aa23572d3bcb9ee4e968e69bc7811b`;
+2. frozen source and recovery branch covered exactly the same 92 Git-visible dirty paths;
+3. 90 paths were byte-identical at the final parity gate;
+4. the only two branch-newer differences were deliberate: this recovery-plan documentation and the MSSR semantic-adoption regression corrected from 0.2.75 to 0.2.77;
+5. focused integration gates and `bridge_self_check` passed on the clean recovery worktree;
+6. local `main` was reconciled to `f0deaa9` only after `safeToReconcile=true`;
+7. post-reconciliation `git status` is clean and local `main` is 10 commits ahead of `origin/main`.
 
-No `git add -A`, blind restore, or global cleanup while ownership remains ambiguous.
+No remote push was performed. Remote publication remains a separate explicit decision. The reusable rule remains unchanged: never use `git add -A`, blind restore, reset or cleanup on a shared dirty tree until ownership, rollback and parity are observable.
 
 ## Current execution checkpoint — 2026-09-26
 
-Priority order from here:
+Current status and follow-up priority:
 
 1. **P1 + P2 + P3 adopted live:** `Al volver` separates forensic/support recovery from the human backlog, MSSR 0.2.77 provides explicit task identity/lineage, and capability inventory is dynamically derived from runtime tools, Skill Health and workflow guides;
-2. **P4 phase A adopted live:** bounded context inventory + daily snapshots prevent weekly `scope=all` reconstruction on every refresh; a 30-day derived view/background cadence remains optional follow-up;
-3. **P5 phase A adopted live:** the Cockpit now classifies observed projects conservatively and exposes current tasks, Git pressure, classification confidence/reason and next gate. Focused check/build + Human Cockpit/context-inventory tests passed, restart `a2e36afb-4bd8-4294-9366-63ae7a3a9bed` adopted the source, and the fresh live snapshot exposed 19 projects (`1 active / 16 review-needed / 2 paused`) while keeping `finished` / `abandoned-or-replaced` at zero without explicit owner evidence;
-4. **P6 is now current and mutation-gated:** the read-only ownership partition is drafted in `docs/BRIDGE_DIRTY_TREE_RECOVERY_PLAN.md` for the 81 current dirty paths, with dedicated owner buckets and aggregate/shared files deferred to hunk-level review. Actual staging/cleanup is blocked until rollback capacity is safe: workspace snapshot storage is currently ~99.92% utilized (about 878 KB free), so no new cleanup mutation should begin merely to obtain a clean `git status`;
-5. keep `finished` / `abandoned-or-replaced` explicit-owner-only and keep capability/schema freshness dynamic rather than copying volatile catalogs into AGENTS or assistant memory.
+2. **P4 phase A adopted live:** bounded context inventory + daily snapshots prevent weekly `scope=all` reconstruction on every refresh; a 30-day derived view/background cadence remains optional follow-up rather than a blocker;
+3. **P5 phase A adopted live:** the Cockpit classifies observed projects conservatively and exposes current tasks, Git pressure, classification confidence/reason and next gate. Terminal states remain explicit-owner-only;
+4. **P6 completed locally:** the 92-path shared dirty tree was reconstructed on an ownership-safe recovery branch, verified against a durable rollback, committed in 10 local batches through `f0deaa9`, and reconciled back into clean local `main`. `main` is now 10 commits ahead of `origin/main`; remote publication was deliberately not performed;
+5. next product work should improve evidence quality rather than add another authority layer: optional 30-day summaries, explicit owner classification for terminal project states, and continued recovery/closure of genuinely unfinished traces. Capability/schema freshness stays dynamic rather than copied into AGENTS or assistant memory.
 
 A new workspace-level `D:\Dev\AGENTS.md` owns only transversal procedure: Bridge-first local recovery, MSSR lifecycle, dynamic capability discovery, support-trace handling and safe shared-tree rules. It deliberately contains no static tool/skill catalog; repository-local `AGENTS.md` and `.mssr/` remain the project authorities.
 
