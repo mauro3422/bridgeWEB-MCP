@@ -212,16 +212,29 @@ async function getRuntimeToolCatalog() {
     const { createDefaultToolRegistry } = await import("../tool-registry.js");
     const registry = createDefaultToolRegistry();
     const names = registry.tools.map((tool) => tool.name);
-    const payload = registry.tools.map((tool) => ({ name: tool.name, inputSchema: tool.inputSchema, annotations: tool.annotations }));
+    const payload = registry.tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+      annotations: tool.annotations,
+      _meta: tool._meta,
+    }));
     const hash = createHash("sha256").update(JSON.stringify(payload)).digest("hex").slice(0, 16);
+    const fileParamTools = registry.tools
+      .filter((tool) => {
+        const fileParams = tool._meta?.["openai/fileParams"];
+        return Array.isArray(fileParams) && fileParams.includes("files");
+      })
+      .map((tool) => tool.name);
     return {
       available: true,
       count: names.length,
       hash,
       modules: registry.modules,
       names,
+      fileParamTools,
       riskSummary: registry.riskSummary,
-      refreshHint: "If the connector exposes fewer tools than this runtime catalog, reopen the connector or start a new chat.",
+      refreshHint: "If the connector exposes fewer tools or an older schema than this runtime catalog, the runtime may already be fresh while the host-side connector catalog is stale. Reconnect/reopen the connector when list-changed refresh is not honored.",
     };
   } catch (error) {
     return {
@@ -239,6 +252,7 @@ async function compareConnectorCatalog(exposedToolNames: string[]) {
   const runtimeNames = catalog.names;
   const riskSummary = catalog.riskSummary;
   if (!riskSummary) throw new Error("Runtime tool catalog risk summary unavailable.");
+  const fileParamTools = Array.isArray(catalog.fileParamTools) ? catalog.fileParamTools : [];
   const runtimeSet = new Set(runtimeNames);
   const exposed = [...new Set(exposedToolNames.map((name) => name.trim()).filter(Boolean))].sort();
   const recognized = exposed.filter((name) => runtimeSet.has(name));
@@ -252,6 +266,8 @@ async function compareConnectorCatalog(exposedToolNames: string[]) {
   const absentDirectDetails = absentDirectly.map((name) => {
     const risk = riskFor(name);
     const wrapper = risk === "read-only" ? "bridge_tool_query" : "bridge_tool_action";
+    const fileParamFallback = wrapper === "bridge_tool_action" && fileParamTools.includes(name);
+    const preserveOriginalBytes = name === "image_asset_import_files";
     return {
       name,
       risk,
@@ -261,8 +277,25 @@ async function compareConnectorCatalog(exposedToolNames: string[]) {
       schemaLookup: { toolName: "bridge_tool_schema", arguments: { toolName: name } },
       fallback: wrapper === "bridge_tool_query"
         ? { toolName: wrapper, arguments: { toolName: name, arguments: {} } }
-        : { toolName: wrapper, arguments: { toolName: name, confirmToolName: name, arguments: {} } },
-      instruction: "Use this wrapper only because the dedicated connector schema is absent. Inspect bridge_tool_schema first unless a route response already supplied exact fallback arguments.",
+        : {
+            toolName: wrapper,
+            arguments: { toolName: name, confirmToolName: name, arguments: {} },
+            ...(fileParamFallback ? { topLevelFileParam: "files" } : {}),
+          },
+      ...(fileParamFallback
+        ? {
+            filePassthrough: {
+              supportedBy: "bridge_tool_action",
+              field: "files",
+              metadata: "openai/fileParams",
+              delegatedTarget: name,
+              preserveOriginalBytes,
+            },
+          }
+        : {}),
+      instruction: fileParamFallback
+        ? `The dedicated '${name}' schema is absent from this connector snapshot. If bridge_tool_action exposes top-level files, pass the ChatGPT-authorized files there and delegate to '${name}'; do not put files inside arguments or reconstruct them as Base64. If the current bridge_tool_action schema itself lacks files, the host-side connector catalog is stale: preserve the source file, reconnect/reopen the connector, and retry after the wrapper schema refreshes.`
+        : "Use this wrapper only because the dedicated connector schema is absent. Inspect bridge_tool_schema first unless a route response already supplied exact fallback arguments.",
     };
   });
   const mssrCore = [

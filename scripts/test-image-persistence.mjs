@@ -20,7 +20,7 @@ try {
   const saved = await registry.call('image_asset_save', {
     items: [{ outputPath, base64: `data:image/png;base64,${pngBase64}`, role: 'front' }],
     manifestPath,
-    collectionName: 'base64-smoke',
+    collectionName: 'base64-fallback-smoke',
   });
   assert.equal(saved.itemCount, 1);
   assert.equal(saved.saved[0].sha256, pngSha);

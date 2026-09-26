@@ -75,7 +75,7 @@
     "workflow_guide_load",
     "skill_recommend",
     "skill_load",
-    "blender_store_reference_image",
+    "image_asset_import_files",
     "blender_batch_script",
     "blender_open",
     "blender_scene_info",

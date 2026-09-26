@@ -726,40 +726,8 @@ export const imageToolModule: BridgeToolModule = {
       },
     },
     {
-      name: "image_asset_save",
-      description: "Use this when ChatGPT has generated or edited one or more images that must be persisted on MauroPrime. Saves one image or an atomic batch from base64/data URLs, validates signatures, records hashes and dimensions, and can write a JSON manifest.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          items: {
-            type: "array",
-            minItems: 1,
-            maxItems: MAX_BATCH_ITEMS,
-            items: {
-              type: "object",
-              properties: {
-                outputPath: { type: "string" },
-                base64: { type: "string", maxLength: MAX_BASE64_CHARS },
-                role: { type: "string" },
-                prompt: { type: "string" },
-                source: { type: "string" },
-                metadata: { type: "object", additionalProperties: true },
-              },
-              required: ["outputPath", "base64"],
-              additionalProperties: false,
-            },
-          },
-          overwrite: { type: "boolean", default: false },
-          manifestPath: { type: "string" },
-          collectionName: { type: "string" },
-        },
-        required: ["items"],
-        additionalProperties: false,
-      },
-    },
-    {
       name: "image_asset_import_files",
-      description: "Import one or more ChatGPT-authorized image file parameters without recompression. Downloads the temporary authorized files, validates image signatures, MIME, dimensions and byte limits, saves them atomically, records SHA-256 provenance, and can write a JSON manifest.",
+      description: "Primary ChatGPT Web path for persisting generated or edited images on MauroPrime. Receives ChatGPT-authorized image file parameters, downloads the original bytes without recompression or agent-side base64 conversion, validates signatures, MIME, dimensions and byte limits, saves atomically, records SHA-256 provenance, and can write a JSON manifest.",
       inputSchema: {
         type: "object",
         $defs: {
@@ -808,6 +776,38 @@ export const imageToolModule: BridgeToolModule = {
       },
       _meta: {
         "openai/fileParams": ["files"],
+      },
+    },
+    {
+      name: "image_asset_save",
+      description: "Compatibility fallback only for image persistence. Use image_asset_import_files whenever ChatGPT can provide an authorized image file parameter. Use this tool only when direct file-parameter transport is proven unavailable and the actual image bytes are already available as base64/data URL; never convert a generated image or file reference to base64 merely to call it. Saves atomically, validates signatures, and records hashes and dimensions.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            minItems: 1,
+            maxItems: MAX_BATCH_ITEMS,
+            items: {
+              type: "object",
+              properties: {
+                outputPath: { type: "string" },
+                base64: { type: "string", maxLength: MAX_BASE64_CHARS },
+                role: { type: "string" },
+                prompt: { type: "string" },
+                source: { type: "string" },
+                metadata: { type: "object", additionalProperties: true },
+              },
+              required: ["outputPath", "base64"],
+              additionalProperties: false,
+            },
+          },
+          overwrite: { type: "boolean", default: false },
+          manifestPath: { type: "string" },
+          collectionName: { type: "string" },
+        },
+        required: ["items"],
+        additionalProperties: false,
       },
     },
     {
@@ -883,7 +883,7 @@ export const imageToolModule: BridgeToolModule = {
 
     {
       name: "image_character_views_prepare",
-      description: "Use this after image_asset_save when a character has exactly one front, side, back, and three-quarter source view. Normalizes the set for Blender, aligns feet and scale, exports lightweight references, and returns quality warnings plus a manifest.",
+      description: "Use this after the character source images have been persisted, normally through image_asset_import_files. For exactly one front, side, back, and three-quarter source view, normalizes the set for Blender, aligns feet and scale, exports lightweight references, and returns quality warnings plus a manifest.",
       inputSchema: {
         type: "object",
         properties: {

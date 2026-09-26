@@ -84,22 +84,22 @@ function normalizeEncoded(data: string, encoding: BinaryEncoding): string {
   let value = String(data ?? "").trim();
   if (encoding === "base64") value = value.replace(/^data:[^;,]+;base64,/i, "");
   value = value.replace(/\s+/g, "");
-  if (!value) throw new Error("Encoded payload is empty");
+  if (!value) throw new Error("[invalid-encoded-payload] Encoded payload is empty");
 
   if (encoding === "hex") {
-    if (!/^[0-9a-f]+$/i.test(value)) throw new Error("Hex payload contains invalid characters");
+    if (!/^[0-9a-f]+$/i.test(value)) throw new Error("[invalid-encoded-payload] Hex payload contains invalid characters");
     return value;
   }
 
   const pattern = encoding === "base64" ? /^[A-Za-z0-9+/]*={0,2}$/ : /^[A-Za-z0-9_-]*={0,2}$/;
-  if (!pattern.test(value)) throw new Error(`${encoding} payload contains invalid characters`);
+  if (!pattern.test(value)) throw new Error(`[invalid-encoded-payload] ${encoding} payload contains invalid characters`);
   return value;
 }
 
 function decodeEncoded(data: string, encoding: BinaryEncoding): Buffer {
   const normalized = normalizeEncoded(data, encoding);
   if (encoding === "hex") {
-    if (normalized.length % 2 !== 0) throw new Error("Hex payload must contain an even number of characters");
+    if (normalized.length % 2 !== 0) throw new Error("[invalid-encoded-payload] Hex payload must contain an even number of characters");
     return Buffer.from(normalized, "hex");
   }
 
@@ -107,12 +107,12 @@ function decodeEncoded(data: string, encoding: BinaryEncoding): Buffer {
     ? normalized.replace(/-/g, "+").replace(/_/g, "/")
     : normalized;
   const remainder = standard.length % 4;
-  if (remainder === 1) throw new Error("Invalid base64 length");
+  if (remainder === 1) throw new Error("[invalid-encoded-payload] Invalid base64 length");
   if (remainder > 0) standard += "=".repeat(4 - remainder);
   const bytes = Buffer.from(standard, "base64");
   const canonicalInput = standard.replace(/=+$/g, "");
   const canonicalOutput = bytes.toString("base64").replace(/=+$/g, "");
-  if (canonicalInput !== canonicalOutput) throw new Error("Base64 payload is truncated or non-canonical");
+  if (canonicalInput !== canonicalOutput) throw new Error("[invalid-encoded-payload] Base64 payload is truncated or non-canonical");
   return bytes;
 }
 
@@ -255,7 +255,7 @@ export const binaryFileToolModule: BridgeToolModule = {
     },
     {
       name: "binary_file_write",
-      description: "Write a small binary payload atomically from base64, base64url, or hex. Validates optional expected byte count and SHA-256 before replacing the target.",
+      description: "Write a small binary payload that is already available as base64, base64url, or hex. Do not convert ChatGPT-generated images or authorized file references merely to call this tool; use image_asset_import_files for those. Validates optional expected byte count and SHA-256 before replacing the target.",
       inputSchema: {
         type: "object",
         properties: {
