@@ -24,6 +24,15 @@ export type ProjectHealthItem = {
   freshnessFindingCount: number;
   freshnessFindingCodes: string[];
   freshnessReviewDocuments: string[];
+  referenceAuditAvailable: boolean;
+  referenceScannedMarkdown: number;
+  referenceCandidateCount: number;
+  referenceHighPriorityCount: number;
+  referenceMediumPriorityCount: number;
+  referenceLowPriorityCount: number;
+  referenceConnectedCount: number;
+  referenceAuditTruncated: boolean;
+  referenceHighCandidates: string[];
 };
 export type ProjectHealthSnapshot = {
   observedAt: string;
@@ -115,6 +124,7 @@ export async function collectProjectHealthSnapshot(options: {
       target: item.target,
       recommendation: item.recommendation,
     }));
+    const referenceAudit = health.referenceAudit ?? null;
     const findings = [...structuralFindings, ...freshnessFindings].slice(0, 24);
     const level = rank[freshnessLevel] > rank[health.level] ? freshnessLevel : health.level;
     projects.push({
@@ -132,6 +142,18 @@ export async function collectProjectHealthSnapshot(options: {
       freshnessFindingCount: freshnessFindings.length,
       freshnessFindingCodes: [...new Set(freshnessFindings.map((item) => item.code))].sort(),
       freshnessReviewDocuments: freshness.evaluation?.reviewDocuments ?? [],
+      referenceAuditAvailable: Boolean(referenceAudit),
+      referenceScannedMarkdown: referenceAudit?.scannedMarkdown ?? 0,
+      referenceCandidateCount: referenceAudit?.candidateCount ?? 0,
+      referenceHighPriorityCount: referenceAudit?.highPriorityCount ?? 0,
+      referenceMediumPriorityCount: referenceAudit?.mediumPriorityCount ?? 0,
+      referenceLowPriorityCount: referenceAudit?.lowPriorityCount ?? 0,
+      referenceConnectedCount: referenceAudit?.connectedCount ?? 0,
+      referenceAuditTruncated: referenceAudit?.truncated ?? false,
+      referenceHighCandidates: (referenceAudit?.candidates ?? [])
+        .filter((candidate) => candidate.reviewPriority === "high")
+        .slice(0, 8)
+        .map((candidate) => candidate.path),
     });
   }
 

@@ -141,6 +141,7 @@ try {
     const init = await initializeMssrProject(repo, { initializeMissing: true, cleanupLegacyArtifacts: true });
     assert.equal(init.initialized, true);
   }
+  await fs.writeFile(path.join(healthy, "ROADMAP.md"), "# Roadmap\n\nCandidate-only reference audit fixture.\n", "utf8");
 
   const reviewState = path.join(review, ".mssr", "PROJECT_STATE.md");
   await fs.writeFile(reviewState, `# Project State\n\n## Oversized current state\n\n${marker}\n${"state-line-with-structure\n".repeat(1800)}`, "utf8");
@@ -169,11 +170,18 @@ try {
   assert.equal(snapshot.counts.projects, 2);
   assert.equal(snapshot.counts.initialized, 2);
   assert.equal(snapshot.counts.review, 1);
-  assert.equal(snapshot.counts.ok, 1);
+  assert.equal(snapshot.counts.watch, 1, "A high-priority unconnected document candidate should surface as WATCH, never auto-link or REVIEW by itself");
+  assert.equal(snapshot.counts.ok, 0);
   assert.equal(snapshot.projects[0].name, "review");
   assert.equal(snapshot.projects[0].level, "review");
   assert.equal(snapshot.projects[0].findingCodes.includes("oversized-authority"), true);
   assert.equal(snapshot.projects[0].findingCodes.includes("oversized-module"), false, "Explicit maxChars budget must supersede the legacy generic oversized-module heuristic");
+  const healthyProject = snapshot.projects.find((project) => project.name === "healthy");
+  assert.ok(healthyProject, "Expected healthy project in Project Health snapshot");
+  assert.equal(healthyProject.referenceAuditAvailable, true);
+  assert.equal(healthyProject.referenceCandidateCount >= 1, true);
+  assert.equal(healthyProject.referenceHighPriorityCount >= 1, true);
+  assert.equal(healthyProject.referenceHighCandidates.includes("ROADMAP.md"), true);
 
   const captured = await captureProjectHealthIfDue({
     force: true,
