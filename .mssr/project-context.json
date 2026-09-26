@@ -894,6 +894,54 @@
       "maxChars": 4200
     },
     {
+      "id": "bridge-human-cockpit-projection",
+      "kind": "context",
+      "description": "Read-only human orientation cockpit over MSSR lifecycle, Project Health, Bridge observability and bounded active-project Git state.",
+      "source": {
+        "path": ".mssr/knowledge/observability/human-cockpit-projection.md"
+      },
+      "topic": "operations",
+      "area": "human-orientation",
+      "stages": [
+        "start",
+        "resume",
+        "implement",
+        "verify",
+        "close"
+      ],
+      "domains": [
+        "agent-orchestration",
+        "coding",
+        "filesystem",
+        "git"
+      ],
+      "actions": [
+        "review",
+        "recover",
+        "analyze",
+        "maintain",
+        "verify"
+      ],
+      "artifacts": [
+        "ui",
+        "project",
+        "repository"
+      ],
+      "needs": [
+        "history-recovery",
+        "cross-agent",
+        "integrity-verification"
+      ],
+      "signals": [
+        "recovery-needed",
+        "reusable-pattern",
+        "warning-observed"
+      ],
+      "required": false,
+      "priority": 74,
+      "maxChars": 2200
+    },
+    {
       "id": "bridge-skill-health-boundary",
       "kind": "memory",
       "description": "Privacy-safe daily structural Skill Health audit and no-auto-edit boundary.",
@@ -1030,6 +1078,55 @@
       "required": false,
       "priority": 72,
       "maxChars": 1800
+    },
+    {
+      "id": "canonical-reference-discoverability-gap",
+      "kind": "state",
+      "description": "Implementation handoff for automatic MSSR discoverability of newly created or split canonical project documentation.",
+      "source": {
+        "path": ".mssr/knowledge/reference/canonical-reference-discoverability-gap.md"
+      },
+      "topic": "reference",
+      "area": "project-context",
+      "stages": [
+        "start",
+        "implement",
+        "verify",
+        "resume"
+      ],
+      "domains": [
+        "agent-orchestration",
+        "coding",
+        "filesystem"
+      ],
+      "actions": [
+        "design",
+        "create",
+        "edit",
+        "move",
+        "maintain",
+        "document",
+        "review",
+        "verify"
+      ],
+      "artifacts": [
+        "project",
+        "repository",
+        "document",
+        "mcp"
+      ],
+      "needs": [
+        "cross-agent",
+        "integrity-verification",
+        "unit-tests"
+      ],
+      "signals": [
+        "missing-capability",
+        "reusable-pattern"
+      ],
+      "required": false,
+      "priority": 45,
+      "maxChars": 4000
     }
   ]
 }

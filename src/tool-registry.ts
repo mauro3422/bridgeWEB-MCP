@@ -29,13 +29,15 @@ import { workspaceToolModule } from "./tools/workspace-tools.js";
 import { workflowGuideToolModule } from "./tools/workflow-guide-tools.js";
 import { whiteboardToolModule } from "./tools/whiteboard-tools.js";
 import { windowsAdminToolModule } from "./tools/windows-admin-tools.js";
+import { quietDeskToolModule } from "./tools/quietdesk-tools.js";
+import { storageGrowthToolModule } from "./tools/storage-growth-tools.js";
 import { buildToolAudit, TOOL_AUDIT_VIEWS, type ToolAuditArgs, type ToolAuditView } from "./tool-audit.js";
 import { getToolAuditMetrics, getToolFrictionMetrics, type BridgeMetricsScope } from "./metrics.js";
 import { buildBridgeToolFrictionProjection } from "./mssr-tool-friction.js";
 import type { BridgeMssrLifecycleMetadata, BridgeToolMetadata, BridgeToolModule, BridgeToolRegistry, BridgeToolSchema, BridgeToolUsageGuidance } from "./tools/types.js";
 
 const readOnlyToolNames = new Set([
-  "system_info", "list_dir", "read_text_file", "list_files_smart", "read_file_lines", "read_many_files", "search_files",
+  "system_info", "list_dir", "read_text_file", "list_files_smart", "read_file_lines", "read_many_files", "search_files", "storage_growth_scan",
   "terminal_read", "terminal_list", "work_peek", "work_show",
   "git_status", "git_diff", "git_log", "git_show_commit", "git_compare_branches",
   "tunnel_health", "bridge_health", "bridge_connector_catalog_compare", "bridge_self_check", "bridge_restart_status",
@@ -45,11 +47,12 @@ const readOnlyToolNames = new Set([
   "project_context_load", "project_context_audit", "project_context_health", "project_context_modularization_plan", "project_change_consistency", "workflow_guide_recommend", "workflow_guide_load", "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query",
   "skill_catalog", "skill_recommend", "skill_route_audit", "skill_route_vocabulary", "skill_route_plan", "skill_bootstrap", "skill_context_next", "skill_load", "mssr_context_proposal_review", "roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list", "roblox_mcp_query",
   "binary_file_info", "binary_file_read_chunk", "binary_upload_status", "image_file_attach",
-  "blender_status", "blender_scene_info", "blender_validate_reference_pack", "blender_character_loop_status",
+  "blender_status", "blender_scene_info", "blender_rig_inspect", "blender_validate_reference_pack", "blender_character_loop_status",
   "godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list", "godot_mcp_query",
   "whiteboard_latest_capture", "whiteboard_capture_list",
   "python_validate", "python_symbols", "python_impact_analysis", "python_import_graph", "python_call_graph", "python_dead_code", "python_test_plan", "pytest_testmon",
   "remote_node_list", "remote_node_status",
+  "quietdesk_status", "quietdesk_desktop_snapshot", "quietdesk_desktop_coverage", "quietdesk_desktop_candidates", "quietdesk_desktop_semantic_context", "quietdesk_runtime_telemetry",
 ]);
 
 const destructiveToolNames = new Set([
@@ -62,9 +65,10 @@ const destructiveToolNames = new Set([
   "image_asset_save", "image_asset_import_files", "image_character_views_prepare", "image_reference_pack_prepare",
   "media_review_ingest",
   "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_finish", "binary_upload_abort",
-  "blender_open", "blender_viewport_screenshot", "blender_focus_review", "blender_review_bundle", "blender_execute_code", "blender_batch_script", "blender_store_reference_image", "blender_install_reference_pack", "blender_setup_character_references",
+  "blender_open", "blender_viewport_screenshot", "blender_focus_review", "blender_review_bundle", "blender_animation_review", "blender_ik_keyframe", "blender_execute_code", "blender_batch_script", "blender_install_reference_pack", "blender_setup_character_references",
   "godot_mcp_action", "godot_scene_create", "godot_screen_capture_save",
   "remote_node_exec", "remote_node_upload_file",
+  "quietdesk_execute_semantic",
 ]);
 
 const aliasTargets = new Map<string, string>([
@@ -76,11 +80,12 @@ const aliasTargets = new Map<string, string>([
   ["work_finish", "terminal_stop"],
 ]);
 
-const fallbackToolNames = new Set(["bridge_tool_query", "bridge_tool_action"]);
+const fallbackToolNames = new Set(["bridge_tool_query", "bridge_tool_action", "image_asset_save"]);
 const aggregatorToolNames = new Set(["bridge_metrics_query", "bridge_verify_all", "bridge_health", "bridge_self_check", "skill_bootstrap"]);
 const providerProxyToolNames = new Set([
   "roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list", "roblox_mcp_query", "roblox_mcp_action",
   "godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list", "godot_mcp_query", "godot_mcp_action",
+  "quietdesk_status", "quietdesk_desktop_snapshot", "quietdesk_desktop_coverage", "quietdesk_desktop_candidates", "quietdesk_desktop_semantic_context", "quietdesk_desktop_capture", "quietdesk_runtime_telemetry", "quietdesk_execute_semantic",
 ]);
 const protectedToolNames = new Set([
   "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query", "bridge_tool_action", "bridge_connector_catalog_compare", "project_context_load", "project_context_audit", "project_context_health", "project_context_modularization_plan", "project_context_initialize", "project_context_update", "project_context_capture",
@@ -104,8 +109,9 @@ const mssrPersistToolNames = new Set(["git_commit_all", "roblox_place_save", "bi
 const mssrExternalSideEffectToolNames = new Set([
   "remote_node_exec", "remote_node_upload_file", "roblox_mcp_action", "godot_mcp_action", "godot_scene_open",
   "whiteboard_add_text", "whiteboard_add_svg", "whiteboard_add_diagram", "whiteboard_insert_image",
+  "quietdesk_execute_semantic",
 ]);
-const mssrTrivialInspectToolNames = new Set(["whiteboard_capture_pc_view"]);
+const mssrTrivialInspectToolNames = new Set(["whiteboard_capture_pc_view", "quietdesk_desktop_capture"]);
 
 const toolUsageGuidance = new Map<string, BridgeToolUsageGuidance>([
   ["project_context_load", {
@@ -423,17 +429,37 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
   };
   const actionTool: BridgeToolSchema = {
     name: "bridge_tool_action",
-    description: "Use this explicit non-read-only fallback immediately when a runtime Bridge tool exists but its dedicated schema is missing from the current connector catalog. When routing or another Bridge response supplied exact fallback arguments, use them without another discovery call; otherwise inspect bridge_tool_schema first. Delegates to neutral or destructive tools and requires exact target-name confirmation. Stateless or concurrent callers may pass the active MSSR traceId as wrapper control without changing the delegated target schema.",
+    description: "Use this explicit non-read-only fallback when a runtime Bridge tool exists but its dedicated schema is missing from the current connector catalog. When routing or another Bridge response supplied exact fallback arguments, use them without another discovery call; otherwise inspect the target with bridge_tool_schema first and pass arguments matching that exact runtime contract. Delegates to neutral or destructive tools and requires exact target-name confirmation. Stateless or concurrent callers may pass the active MSSR traceId as wrapper control without changing the delegated target schema. For runtime tools that explicitly declare an authorized top-level files parameter through openai/fileParams metadata, pass ChatGPT-authorized files through this wrapper's stable top-level files parameter so newly added file tools remain usable even when their dedicated connector schema has not refreshed yet; never reconstruct those files as Base64 merely to bypass catalog drift.",
     inputSchema: {
       type: "object",
       properties: {
         toolName: { type: "string", description: "Exact runtime tool name to invoke." },
         confirmToolName: { type: "string", description: "Must exactly match toolName to confirm the delegated destructive action." },
         traceId: { type: "string", description: "Optional active MSSR trace control for stateless or concurrent callers. The wrapper uses it for attribution and does not forward it to targets that do not declare traceId." },
+        files: {
+          type: "array",
+          minItems: 1,
+          maxItems: 8,
+          description: "ChatGPT-authorized file parameters for delegated runtime tools that explicitly declare files through openai/fileParams metadata. The host injects download_url and file_id without agent-side Base64 conversion.",
+          items: {
+            type: "object",
+            properties: {
+              download_url: { type: "string" },
+              file_id: { type: "string" },
+              mime_type: { type: "string" },
+              file_name: { type: "string" },
+            },
+            required: ["download_url", "file_id"],
+            additionalProperties: false,
+          },
+        },
         arguments: { type: "object", description: "Arguments for the delegated tool.", additionalProperties: true, default: {} },
       },
       required: ["toolName", "confirmToolName"],
       additionalProperties: false,
+    },
+    _meta: {
+      "openai/fileParams": ["files"],
     },
   };
   tools.push(
@@ -513,7 +539,17 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
     if (classification === "read-only") throw new Error(`Tool '${name}' is classified read-only; use its direct schema or bridge_tool_query.`);
     if (args.confirmToolName !== name) throw new Error(`confirmToolName must exactly match '${name}'.`);
     const handler = handlers.get(name)!;
-    const delegatedResult = await handler(delegatedArguments(args.arguments));
+    const delegated = delegatedArguments(args.arguments);
+    if (args.files !== undefined) {
+      const declaredFileParams = target._meta?.["openai/fileParams"];
+      if (!Array.isArray(declaredFileParams) || !declaredFileParams.includes("files")) {
+        throw new Error(`Tool '${name}' does not declare an authorized top-level files parameter through openai/fileParams.`);
+      }
+      if (Object.prototype.hasOwnProperty.call(delegated, "files")) throw new Error("Provide authorized files either through top-level files or arguments.files, not both.");
+      if (!Array.isArray(args.files) || args.files.length === 0) throw new Error("files must be a non-empty array when provided.");
+      delegated.files = args.files;
+    }
+    const delegatedResult = await handler(delegated);
     if (delegatedResult && typeof delegatedResult === "object" && !Array.isArray(delegatedResult)) {
       const record = delegatedResult as Record<string, unknown>;
       const { __bridgeImages, __bridgeNotices, ...publicResult } = record;
@@ -544,6 +580,7 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
 const defaultToolModules: readonly BridgeToolModule[] = [
   coreToolModule,
   fileNavigationToolModule,
+  storageGrowthToolModule,
   fileWritingToolModule,
   workflowGuideToolModule,
   projectContextToolModule,
@@ -571,6 +608,7 @@ const defaultToolModules: readonly BridgeToolModule[] = [
   blenderToolModule,
   godotToolModule,
   whiteboardToolModule,
+  quietDeskToolModule,
   windowsAdminToolModule,
   bridgeWorkflowToolModule,
 ];

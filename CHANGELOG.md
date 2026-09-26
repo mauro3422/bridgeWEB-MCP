@@ -2,7 +2,7 @@
 
 The canonical Bridge release history now lives under [`changelogs/`](changelogs/INDEX.md).
 
-- Current release: [0.6.140](changelogs/0.6.140.md)
+- Current source release: [0.6.141](changelogs/0.6.141.md) (local pre-publication; published runtime remains 0.6.140 until controlled adoption)
 - Version index: [changelogs/INDEX.md](changelogs/INDEX.md)
 - Historical monolithic archive: [changelogs/LEGACY.md](changelogs/LEGACY.md)
 

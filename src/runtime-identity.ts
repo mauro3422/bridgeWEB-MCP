@@ -57,22 +57,24 @@ export function resolveMetricWorkflowKey(args: {
     ?? normalizeWorkflowKey(args.localWorkflowKey);
 }
 
-const TASK_KEY_PATTERN = /^task_[0-9a-f]{16}$/;
+const TASK_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{1,159}$/;
 
-function normalizeTaskKey(value: unknown): string | undefined {
-  return typeof value === "string" && TASK_KEY_PATTERN.test(value) ? value : undefined;
+export function normalizeTaskKey(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return TASK_KEY_PATTERN.test(normalized) ? normalized : undefined;
 }
 
 export function resolveMetricTaskKey(args: {
   startsNewRoute: boolean;
   traceId?: string | null;
-  traceTaskHash?: string | null;
+  traceTaskKey?: string | null;
   explicitTaskKey?: unknown;
   sessionTaskKey?: unknown;
   localTaskKey?: unknown;
 }): string | undefined {
-  if (!args.startsNewRoute && args.traceId && typeof args.traceTaskHash === "string" && /^[0-9a-f]{64}$/.test(args.traceTaskHash)) {
-    return `task_${args.traceTaskHash.slice(0, 16)}`;
+  if (!args.startsNewRoute && args.traceId) {
+    return normalizeTaskKey(args.traceTaskKey);
   }
   if (args.startsNewRoute) return normalizeTaskKey(args.explicitTaskKey);
   return normalizeTaskKey(args.explicitTaskKey)

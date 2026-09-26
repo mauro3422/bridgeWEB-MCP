@@ -370,6 +370,17 @@ function agentProfile(args: Record<string, unknown>): Record<string, string> {
   };
 }
 
+function routeTaskIdentity(args: Record<string, unknown>) {
+  const taskKey = z.string().trim().min(2).max(160).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/).optional().parse(args.taskKey);
+  const parentTraceId = z.string().trim().min(6).max(128).optional().parse(args.parentTraceId);
+  const supersedesTraceId = z.string().trim().min(6).max(128).optional().parse(args.supersedesTraceId);
+  const traceId = typeof args.traceId === "string" ? args.traceId.trim() : null;
+  if ((parentTraceId || supersedesTraceId) && !taskKey) throw new Error("taskKey is required when parentTraceId or supersedesTraceId is supplied.");
+  if (traceId && parentTraceId === traceId) throw new Error("A trace cannot be its own parent.");
+  if (traceId && supersedesTraceId === traceId) throw new Error("A trace cannot supersede itself.");
+  return { taskKey: taskKey ?? null, parentTraceId: parentTraceId ?? null, supersedesTraceId: supersedesTraceId ?? null };
+}
+
 function contextNowValue(value: unknown): string | undefined {
   if (value === undefined) return undefined;
   const parsed = z.string().datetime({ offset: true }).safeParse(value);
@@ -950,7 +961,7 @@ function tokens(value: string): Set<string> {
 
 export function isSkillCoverageMetaTask(task: string): boolean {
   const taskText = normalize(task);
-  return /(?:existing ?skill ?coverage|skill ?coverage|routing.{0,24}coverage|coverage.{0,24}diagnostic|routing.{0,24}diagnostic|workflow ownership|coverage matcher|skill matcher|routing matcher|workflow guide recommendation|skill recommendation|false positive|false negative|misroute|misrouting|wrong skill|unrelated skill|must not cover|should not cover|incorrectly (?:select|report|recommend)|falso positivo|falso negativo|cobertura de skills?|matcher de skills?|skill equivocada|ruteo de skills?)/.test(taskText);
+  return /(?:existing ?skill ?coverage|skill ?coverage|routing.{0,24}coverage|coverage.{0,24}diagnostic|routing.{0,24}diagnostic|workflow ownership|coverage matcher|skill matcher|routing matcher|workflow guide recommendation|skill recommendation|false positive|false negative|false trigger|misroute|misrouting|wrong skill|wrong guide|unrelated skill|unrelated guide|must not cover|should not cover|incorrectly (?:select|report|recommend)|falso positivo|falso negativo|falso trigger|cobertura de skills?|matcher de skills?|skill equivocada|guia equivocada|guía equivocada|ruteo de skills?)/.test(taskText);
 }
 
 function removeKnownSkillReferences(task: string, skills: SkillEntry[]): string {
@@ -1013,6 +1024,7 @@ function skillScore(
     "roblox-locomotion-camera-review": /caminar|correr|sprint|dash|locomotion|walk|run|camera|camara/,
     "roblox-model-turnaround-review": /turnaround|frente|espalda|costado|silueta|proporcion|modelo 3d/,
     "roblox-placement-ui-review": /placement|colocar|colocacion|ghost|fantasma|cursor|hud|rotar|snap|preview/,
+    "roblox-save-backup-recovery": /\broblox\b|\.rbxlx?\b/,
     "roblox-technique-animation-authoring": /tecnica|technique|ability|habilidad|keyframe|r6|r15|cooldown/,
     "roblox-ui-ux": /\bui\b|ux|interfaz|hud|screen ?gui|surface ?gui|billboard ?gui|icono|layout|responsive/,
     "figma-design-to-code": /\bfigma\b|figma\.com|get_design_context|design[- ]to[- ]code/,
@@ -1020,7 +1032,8 @@ function skillScore(
     "figma-code-connect": /\bfigma\b|figma\.com|code connect|\.figma\.(?:ts|js)/,
   };
   const requiredPattern = narrowSkillRequirements[skill.name];
-  if (requiredPattern && !requiredPattern.test(taskText)) {
+  const narrowIntentMissing = Boolean(requiredPattern && !requiredPattern.test(taskText));
+  if (narrowIntentMissing) {
     score -= 8;
     reasons.push("narrow skill excluded because its core intent is absent");
   }
@@ -1045,6 +1058,7 @@ function skillScore(
     }
   }
   if (descriptionText && taskText.includes(descriptionText)) score += 4;
+  if (narrowIntentMissing) score = Math.min(score, 11);
   return { score, reasons };
 }
 
@@ -1249,6 +1263,9 @@ export const skillCatalogToolModule: BridgeToolModule = {
           maxResults: { type: "number", default: 8, minimum: 1, maximum: 16 },
           responseMode: { type: "string", enum: routeResponseModes, default: "compact", description: "compact returns the actionable phase route; debug includes full scores, metadata and phase diagnostics." },
           workflowKey: { type: "string", pattern: "^[a-z0-9][a-z0-9._-]{1,79}$", description: "Optional stable workflow id shared by related traces, for example mauroprime-system-loop. It is local observability metadata, not a ChatGPT conversation id." },
+          taskKey: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$", minLength: 2, maxLength: 160, description: "Explicit stable human-task identity. Never inferred from task prose, workflow similarity, recency, or inactivity." },
+          parentTraceId: { type: "string", minLength: 6, maxLength: 128, description: "Optional explicit parent trace inside the same task. Correlation only; never lifecycle authority. Requires taskKey." },
+          supersedesTraceId: { type: "string", minLength: 6, maxLength: 128, description: "Optional explicit trace replaced by this trace inside the same task. Correlation only; never closes the older trace. Requires taskKey." },
           traceId: { type: "string", description: "Optional existing MSSR trace id for a replan. A new id is generated when omitted." },
         },
         required: ["task"],
@@ -1301,6 +1318,9 @@ export const skillCatalogToolModule: BridgeToolModule = {
           maxContextMessageChars: { type: "number", default: 6000, minimum: 0, maximum: 20000 },
           responseMode: { type: "string", enum: routeResponseModes, default: "compact", description: "compact returns the actionable phase route; debug includes full scores, metadata and phase diagnostics." },
           workflowKey: { type: "string", pattern: "^[a-z0-9][a-z0-9._-]{1,79}$", description: "Optional stable workflow id shared by related traces, for example mauroprime-system-loop. It is local observability metadata, not a ChatGPT conversation id." },
+          taskKey: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$", minLength: 2, maxLength: 160, description: "Explicit stable human-task identity. Never inferred from task prose, workflow similarity, recency, or inactivity." },
+          parentTraceId: { type: "string", minLength: 6, maxLength: 128, description: "Optional explicit parent trace inside the same task. Correlation only; never lifecycle authority. Requires taskKey." },
+          supersedesTraceId: { type: "string", minLength: 6, maxLength: 128, description: "Optional explicit trace replaced by this trace inside the same task. Correlation only; never closes the older trace. Requires taskKey." },
           traceId: { type: "string", description: "Optional existing MSSR trace id for a replan. A new id is generated when omitted." },
         },
         required: ["task"],
@@ -1356,6 +1376,9 @@ export const skillCatalogToolModule: BridgeToolModule = {
             },
           },
           workflowKey: { type: "string", pattern: "^[a-z0-9][a-z0-9._-]{1,79}$", description: "Optional stable workflow id shared by related traces, for example mauroprime-system-loop. It is local observability metadata, not a ChatGPT conversation id." },
+          taskKey: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$", minLength: 2, maxLength: 160, description: "Explicit stable human-task identity. Never inferred from task prose, workflow similarity, recency, or inactivity." },
+          parentTraceId: { type: "string", minLength: 6, maxLength: 128, description: "Optional explicit parent trace inside the same task. Correlation only; never lifecycle authority. Requires taskKey." },
+          supersedesTraceId: { type: "string", minLength: 6, maxLength: 128, description: "Optional explicit trace replaced by this trace inside the same task. Correlation only; never closes the older trace. Requires taskKey." },
           traceId: { type: "string", description: "Optional existing MSSR trace id for a replan. A new id is generated when omitted." },
         },
         required: ["task"],
@@ -1517,6 +1540,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const traceId = intentResult.traceId;
       const profile = agentProfile(args);
       const workflowKey = requireWorkflowKey(args.workflowKey);
+      const taskIdentity = routeTaskIdentity(args);
       const observedRoute = { ...route, agentProfile: profile, workflowKey: workflowKey ?? null };
       recordMssrRoute({ traceId, action: "recommend", task, route: observedRoute as unknown as Record<string, unknown> });
       const matches = [...route.activeSkills, ...route.deferredSkills]
@@ -1596,6 +1620,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const traceId = intentResult.traceId;
       const profile = agentProfile(args);
       const workflowKey = requireWorkflowKey(args.workflowKey);
+      const taskIdentity = routeTaskIdentity(args);
       const observedRoute = { ...route, agentProfile: profile, workflowKey: workflowKey ?? null };
       const systemAwareness = await timing.measure("system.awareness", () => buildMssrSystemAwareness({
         intent: route.intent,
@@ -1718,6 +1743,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const traceId = intentResult.traceId;
       const profile = agentProfile(args);
       const workflowKey = requireWorkflowKey(args.workflowKey);
+      const taskIdentity = routeTaskIdentity(args);
       const systemAwareness = await timing.measure("system.awareness", () => buildMssrSystemAwareness({
         intent: route.intent,
         workflows: route.workflows,

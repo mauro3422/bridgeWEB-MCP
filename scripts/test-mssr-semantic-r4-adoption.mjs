@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 
 import {
@@ -11,7 +12,13 @@ import {
 const installedPackage = JSON.parse(
   await fs.readFile(new URL("../node_modules/@mauroprime/mssr/package.json", import.meta.url), "utf8"),
 );
-assert.equal(installedPackage.version, "0.2.72", "Bridge must consume the exact MSSR 0.2.72 package");
+assert.equal(installedPackage.version, "0.2.77", "Bridge must consume the exact MSSR 0.2.77 package");
+const vendorTarball = await fs.readFile(new URL("../vendor/mauroprime-mssr-0.2.77.tgz", import.meta.url));
+assert.equal(
+  createHash("sha256").update(vendorTarball).digest("hex"),
+  "32f2fd9d86db8a9479efe4fad89eb7a812d13ac76ebf238834c1eff8df191317",
+  "Bridge must vendor the exact MSSR 0.2.77 release-gate artifact",
+);
 
 const roadmapEvaluation = evaluateMssrSemanticConsistency({
   boundary: "ordinary",
@@ -42,10 +49,32 @@ const messages = produceMssrSemanticContextMessages({
   evaluation: roadmapEvaluation,
   observedAt: "2026-09-19T20:00:00-03:00",
 });
+const repeatedMessages = produceMssrSemanticContextMessages({
+  evaluation: roadmapEvaluation,
+  observedAt: "2026-09-19T20:05:00-03:00",
+});
 assert.equal(messages.length, 1);
 assert.equal(messages[0].kind, "roadmap-contradiction");
 assert.equal(messages[0].advisoryActions.includes("inspect-reference"), true);
 assert.equal(messages[0].advisoryActions.includes("replan"), true);
+assert.equal(
+  messages[0].dedupeKey,
+  repeatedMessages[0].dedupeKey,
+  "Bridge must preserve stable semantic message identity across repeated observations",
+);
+
+const resolvedRoadmap = evaluateMssrSemanticConsistency({
+  boundary: "ordinary",
+  claims: roadmapEvaluation.activeClaims.map((claim) => ({ ...claim, value: "completed" })),
+});
+assert.equal(
+  produceMssrSemanticContextMessages({
+    evaluation: resolvedRoadmap,
+    observedAt: "2026-09-19T20:10:00-03:00",
+  }).length,
+  0,
+  "A resolved contradiction must become silent instead of leaving stale semantic noise",
+);
 
 const claims = [
   {
@@ -100,4 +129,4 @@ assert.equal(shadow.truthAuthority, false);
 assert.equal(shadow.directNoticeAuthority, false);
 assert.equal(shadow.canonicalRewriteAllowed, false);
 
-console.log("Bridge MSSR 0.2.72 R4 host-consumption adoption test passed.");
+console.log("Bridge MSSR 0.2.77 R4 host-consumption adoption test passed.");

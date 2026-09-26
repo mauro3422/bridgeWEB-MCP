@@ -86,6 +86,12 @@ async function openLegacySession(id, clientName) {
     }),
   });
   assert.equal(initializeResponse.status, 200);
+  const initializeText = await initializeResponse.text();
+  const initializeDataLine = initializeText.split(/\r?\n/).find((line) => line.startsWith('data: '));
+  const initializeBody = initializeDataLine
+    ? JSON.parse(initializeDataLine.slice('data: '.length))
+    : JSON.parse(initializeText);
+  assert.equal(initializeBody.result.capabilities.tools.listChanged, true, 'Legacy initialize must advertise tools.listChanged so clients can refresh stale tool schemas.');
   const sessionId = initializeResponse.headers.get("mcp-session-id");
   assert.ok(sessionId);
 
@@ -125,6 +131,19 @@ async function closeLegacySession(sessionId) {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function assertCatalogRefreshHook() {
+  const { createBridgeServer, createModernBridgeServer } = await import('../dist/bridge-server.js');
+  for (const [label, factory] of [['legacy', createBridgeServer], ['modern', createModernBridgeServer]]) {
+    const server = factory();
+    assert.equal(typeof server.oninitialized, 'function', `${label} server must install an initialized hook for tool-catalog refresh.`);
+    let notifications = 0;
+    server.sendToolListChanged = async () => { notifications += 1; };
+    server.oninitialized();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(notifications, 1, `${label} server must emit one tools/list_changed notification after initialization.`);
+  }
+}
 
 async function runConcurrentCapacityTest() {
   const raceTempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "bridge-mcp-capacity-"));
@@ -230,6 +249,7 @@ async function runConcurrentCapacityTest() {
 
 try {
   await waitReady();
+  await assertCatalogRefreshHook();
 
   const discoverResponse = await modernRequest(1, "server/discover");
   assert.equal(discoverResponse.status, 200);
@@ -244,6 +264,16 @@ try {
   const list = await listResponse.json();
   assert.ok(list.result.tools.length >= 100);
   assert.ok(list.result.tools.some((tool) => tool.name === "skill_bootstrap"));
+
+  const imageImportTool = list.result.tools.find((tool) => tool.name === "image_asset_import_files");
+  assert.ok(imageImportTool, "HTTP tools/list must publish image_asset_import_files.");
+  assert.deepEqual(imageImportTool._meta?.["openai/fileParams"], ["files"]);
+  assert.ok(imageImportTool.inputSchema?.properties?.files, "image_asset_import_files must expose its authorized file parameter in HTTP tools/list.");
+
+  const actionFallbackTool = list.result.tools.find((tool) => tool.name === "bridge_tool_action");
+  assert.ok(actionFallbackTool, "HTTP tools/list must publish bridge_tool_action.");
+  assert.deepEqual(actionFallbackTool._meta?.["openai/fileParams"], ["files"]);
+  assert.ok(actionFallbackTool.inputSchema?.properties?.files, "bridge_tool_action must preserve top-level authorized file passthrough when dedicated schemas are omitted by a host catalog.");
 
   const mismatchResponse = await fetch(`${baseUrl}/mcp`, {
     method: "POST",

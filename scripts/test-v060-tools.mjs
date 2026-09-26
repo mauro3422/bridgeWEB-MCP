@@ -236,11 +236,11 @@ try {
   await call('work_finish',{sessionId:backgroundB.id,traceId:'mssr-fixture-background'});
   clearBridgeNotices();
 
-  if (registry.tools.length !== 164) throw new Error(`expected 164 tools, got ${registry.tools.length}`);
+  if (registry.tools.length !== 176) throw new Error(`expected 176 tools, got ${registry.tools.length}`);
   const catalogComparison = await call('bridge_connector_catalog_compare', {
     exposedToolNames: ['skill_catalog', 'skill_recommend', 'skill_load', 'host_private_tool'],
   });
-  if (catalogComparison.runtime.count !== 164 || catalogComparison.mssr.runtime !== 14) throw new Error('connector catalog comparison runtime baseline failed');
+  if (catalogComparison.runtime.count !== 176 || catalogComparison.mssr.runtime !== 14) throw new Error('connector catalog comparison runtime baseline failed');
   if (catalogComparison.mssr.directCoveragePercent !== 21.43) throw new Error(`unexpected MSSR direct coverage: ${catalogComparison.mssr.directCoveragePercent}`);
   if (!catalogComparison.mssr.delegatedViaQuery.includes('skill_bootstrap') || !catalogComparison.mssr.delegatedViaAction.includes('mssr_trace_record') || !catalogComparison.mssr.delegatedViaAction.includes('mssr_trace_working_update')) throw new Error('connector catalog wrapper classification failed');
   if (!catalogComparison.connectorObservation.unrecognized.includes('host_private_tool') || catalogComparison.interpretation.wrapperReachabilityIsDirectExposure !== false) throw new Error('connector catalog boundary classification failed');
@@ -249,12 +249,12 @@ try {
   if (!delegatedQueryTool?.description?.includes('use them without another discovery call')) throw new Error('bridge_tool_query must support route-provided immediate fallback');
   if (!delegatedActionTool?.description?.includes('use them without another discovery call')) throw new Error('bridge_tool_action must support route-provided immediate fallback');
   if (!delegatedQueryTool?.inputSchema?.properties?.traceId || !delegatedActionTool?.inputSchema?.properties?.traceId) throw new Error('delegated wrappers must expose optional MSSR trace control');
-  const expectedNeutral = ['mssr_context_ack','godot_scene_open','whiteboard_capture_pc_view', 'whiteboard_add_text', 'whiteboard_add_svg', 'whiteboard_add_diagram', 'whiteboard_insert_image', 'mssr_trace_working_update', 'mssr_trace_record', 'mssr_observatory_epoch_start'];
+  const expectedNeutral = ['mssr_context_ack','blender_activity_trace','godot_scene_open','whiteboard_capture_pc_view', 'whiteboard_add_text', 'whiteboard_add_svg', 'whiteboard_add_diagram', 'whiteboard_insert_image', 'quietdesk_desktop_capture', 'mssr_trace_working_update', 'mssr_trace_record', 'mssr_observatory_epoch_start'];
   if (registry.riskSummary.neutral.length !== expectedNeutral.length || expectedNeutral.some((name) => !registry.riskSummary.neutral.includes(name))) throw new Error(`unexpected neutral tools: ${registry.riskSummary.neutral.join(', ')}`);
   if (!registry.riskSummary.readOnly.includes('project_context_audit') || !registry.riskSummary.readOnly.includes('project_change_consistency')) throw new Error('project context audit/consistency tools must be classified as read-only Bridge tools');
   if (!registry.riskSummary.destructive.includes('project_context_update') || !registry.riskSummary.destructive.includes('project_context_maintain')) throw new Error('project_context_update/project_context_maintain must be classified as write/destructive Bridge tools');
-  for (const moduleName of ['project','project-context','workspace','cache','workflow-guides','skill-catalog-and-roblox-proxy','git-publication','roblox-studio-ops','roblox-assets','roblox-photo-capture','notices','mssr-observatory','binary-files','images','media-review','blender','godot','tablet-whiteboard']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
-  for (const toolName of ['project_context_load','project_context_audit','project_context_health','project_context_modularization_plan','project_context_maintain','project_change_consistency','project_context_update','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','bridge_connector_catalog_compare','bridge_tool_schema','bridge_tool_audit','git_multi_repo_publish','skill_catalog','skill_recommend','skill_route_audit','skill_route_vocabulary','skill_route_plan','skill_bootstrap','skill_context_next','skill_load','mssr_observatory_query','mssr_trace_evidence','mssr_trace_working_update','mssr_trace_record','mssr_observatory_epoch_start','bridge_notice_status','bridge_notice_history','bridge_notice_drain','mssr_context_ack','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_studio_list','roblox_mcp_query','roblox_mcp_action','roblox_asset_upload','roblox_studio_window_capture_save','roblox_screen_capture_save','roblox_photo_capture_job','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_file_attach','image_asset_save','image_asset_import_files','image_character_views_prepare','image_reference_pack_prepare','media_review_ingest','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_focus_review','blender_review_bundle','blender_execute_code','blender_batch_script','blender_validate_reference_pack','blender_install_reference_pack','blender_setup_character_references','blender_character_loop_status','godot_mcp_status','godot_mcp_tool_list','godot_mcp_instance_list','godot_mcp_query','godot_scene_open','godot_scene_create','godot_screen_capture_save','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list','whiteboard_add_text','whiteboard_add_svg','whiteboard_add_diagram','whiteboard_insert_image']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/media/Blender/whiteboard tool ${toolName}`);
+  for (const moduleName of ['project','project-context','workspace','cache','workflow-guides','skill-catalog-and-roblox-proxy','git-publication','roblox-studio-ops','roblox-assets','roblox-photo-capture','notices','mssr-observatory','binary-files','images','media-review','blender','godot','tablet-whiteboard','quietdesk']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
+  for (const toolName of ['project_context_load','project_context_audit','project_context_health','project_context_modularization_plan','project_context_maintain','project_change_consistency','project_context_update','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','bridge_connector_catalog_compare','bridge_tool_schema','bridge_tool_audit','git_multi_repo_publish','skill_catalog','skill_recommend','skill_route_audit','skill_route_vocabulary','skill_route_plan','skill_bootstrap','skill_context_next','skill_load','mssr_observatory_query','mssr_trace_evidence','mssr_trace_working_update','mssr_trace_record','mssr_observatory_epoch_start','bridge_notice_status','bridge_notice_history','bridge_notice_drain','mssr_context_ack','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_studio_list','roblox_mcp_query','roblox_mcp_action','roblox_asset_upload','roblox_studio_window_capture_save','roblox_screen_capture_save','roblox_photo_capture_job','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_file_attach','image_asset_save','image_asset_import_files','image_character_views_prepare','image_reference_pack_prepare','media_review_ingest','blender_status','blender_open','blender_scene_info','blender_activity_trace','blender_viewport_screenshot','blender_focus_review','blender_review_bundle','blender_execute_code','blender_batch_script','blender_validate_reference_pack','blender_install_reference_pack','blender_setup_character_references','blender_character_loop_status','godot_mcp_status','godot_mcp_tool_list','godot_mcp_instance_list','godot_mcp_query','godot_scene_open','godot_scene_create','godot_screen_capture_save','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list','whiteboard_add_text','whiteboard_add_svg','whiteboard_add_diagram','whiteboard_insert_image','quietdesk_status','quietdesk_desktop_snapshot','quietdesk_desktop_coverage','quietdesk_desktop_candidates','quietdesk_desktop_semantic_context','quietdesk_desktop_capture','quietdesk_runtime_telemetry','quietdesk_execute_semantic']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/media/Blender/whiteboard tool ${toolName}`);
   if (!registry.riskSummary.destructive.includes('roblox_mcp_action') || !registry.riskSummary.destructive.includes('roblox_studio_window_capture_save') || !registry.riskSummary.destructive.includes('roblox_screen_capture_save') || !registry.riskSummary.destructive.includes('roblox_photo_capture_job') || !registry.riskSummary.destructive.includes('roblox_place_save')) throw new Error('Roblox action/capture/save risk classification failed');
   for (const name of ['godot_mcp_status','godot_mcp_tool_list','godot_mcp_instance_list','godot_mcp_query']) if (!registry.riskSummary.readOnly.includes(name)) throw new Error(`Godot query tool ${name} must be read-only`);
   if (!registry.riskSummary.destructive.includes('godot_scene_create') || !registry.riskSummary.destructive.includes('godot_screen_capture_save')) throw new Error('Godot scene creation and capture must be classified as filesystem-writing actions');
@@ -301,10 +301,14 @@ try {
   const imageImportTool = registry.tools.find((tool) => tool.name === 'image_asset_import_files');
   const imageImportFileDef = imageImportTool?.inputSchema?.$defs?.OpenAIFile;
   if (!imageImportTool || !registry.riskSummary.destructive.includes('image_asset_import_files')) throw new Error('Authorized image-file import classification failed');
+  if (!imageImportTool.description?.includes('Primary ChatGPT Web path')) throw new Error('Authorized image-file import must be the primary ChatGPT Web path');
   if (!imageImportTool.inputSchema?.properties?.files || !imageImportTool.inputSchema?.properties?.targets) throw new Error('Authorized image-file import schema failed');
   if (JSON.stringify(imageImportTool._meta?.['openai/fileParams']) !== JSON.stringify(['files'])) throw new Error('Authorized image-file import fileParams metadata failed');
   if (!imageImportFileDef?.properties?.download_url || !imageImportFileDef?.properties?.file_id || !imageImportFileDef?.properties?.mime_type || !imageImportFileDef?.properties?.file_name) throw new Error('Authorized image-file import file schema properties failed');
   if (JSON.stringify(imageImportFileDef.required) !== JSON.stringify(['download_url','file_id'])) throw new Error('Authorized image-file import file schema required fields failed');
+  const imageBase64FallbackTool = registry.tools.find((tool) => tool.name === 'image_asset_save');
+  if (!imageBase64FallbackTool?.description?.includes('Compatibility fallback only') || imageBase64FallbackTool.metadata?.role !== 'fallback') throw new Error('Base64 image persistence must remain explicitly fallback-only');
+  if (registry.has('blender_store_reference_image')) throw new Error('Redundant Blender base64 image persistence tool must not be registered');
   const mediaReviewTool = registry.tools.find((tool) => tool.name === 'media_review_ingest');
   const mediaReviewFileDef = mediaReviewTool?.inputSchema?.$defs?.OpenAIFile;
   if (!mediaReviewTool || !registry.riskSummary.destructive.includes('media_review_ingest')) throw new Error('Authorized media review classification failed');
@@ -379,15 +383,14 @@ try {
   const stalePendingWorkflow = resolveMetricWorkflowKey({startsNewRoute:true,sessionWorkflowKey:'workflow-b',localWorkflowKey:'workflow-b'});
   if (stalePendingWorkflow !== undefined) throw new Error('a new route inherited a stale pending workflow without an explicit workflowKey');
 
-  const traceTaskHash = 'a'.repeat(64);
   const isolatedTraceTask = resolveMetricTaskKey({
     startsNewRoute:false,
     traceId:'__test_workflow_trace_a',
-    traceTaskHash,
-    explicitTaskKey:'task_bbbbbbbbbbbbbbbb',
-    sessionTaskKey:'task_cccccccccccccccc',
+    traceTaskKey:'context-layer-task-a',
+    explicitTaskKey:'context-layer-task-b',
+    sessionTaskKey:'context-layer-task-c',
   });
-  if (isolatedTraceTask !== 'task_aaaaaaaaaaaaaaaa') throw new Error('an existing trace inherited another task key from the shared session');
+  if (isolatedTraceTask !== 'context-layer-task-a') throw new Error('an existing trace inherited another task key from the shared session');
   const explicitNewTask = resolveMetricTaskKey({
     startsNewRoute:true,
     explicitTaskKey:'task_bbbbbbbbbbbbbbbb',
@@ -478,7 +481,7 @@ try {
   const skillLoadSchema = await call('bridge_tool_schema', {toolName:'skill_load'});
   if (!skillLoadSchema.tool?.metadata?.usage?.recovery?.some((rule) => rule.code === 'mssr-orphan-skill-load' && rule.toolName === 'skill_bootstrap')) throw new Error('skill_load MSSR recovery metadata failed');
   const aliasAudit = await call('bridge_tool_audit', {view:'aliases',scope:'active',days:30,limit:20});
-  if (aliasAudit.summary?.registeredTools !== 164 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
+  if (aliasAudit.summary?.registeredTools !== 176 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
   const delegatedMetric = beginToolMetric('bridge_tool_query', {toolName:'bridge_tool_audit',arguments:{view:'all'}}, {caller:'chatgpt-web',sessionKey:'fixture-session',project:'fixture-project'});
   finishToolMetric(delegatedMetric, true, 128);
   const delegatedSnapshot = getToolAuditMetrics(30, 'active');
@@ -624,7 +627,7 @@ try {
   if (!traceResult.trace.some((event) => event.eventType === 'route_planned') || !traceResult.trace.some((event) => event.eventType === 'skill_loaded' && event.ok === true) || !traceResult.trace.some((event) => event.eventType === 'verification')) throw new Error('MSSR observatory trace correlation failed');
   const storedRouteIntent = traceResult.trace.find((event) => event.eventType === 'route_planned')?.details?.intent;
   if (!storedRouteIntent || storedRouteIntent.domains?.[0] !== 'roblox' || storedRouteIntent.risk !== 'write') throw new Error('MSSR direct route lost bounded intent dimensions');
-  if (Object.hasOwn(storedRouteIntent, 'summary')) throw new Error('MSSR route telemetry must not persist intent summaries');
+  if (storedRouteIntent.summary !== 'Sistema Roblox de conexiones y recursos con cambios persistentes' || storedRouteIntent.summary.length > 240) throw new Error('MSSR route telemetry lost or exceeded the bounded human-facing intent summary contract');
   const observatoryStatus = await call('mssr_observatory_query', {kind:'status'});
   if (!observatoryStatus.enabled || !observatoryStatus.privacy || observatoryStatus.privacy.rawPromptsStored !== false) throw new Error('MSSR observatory privacy/status failed');
 

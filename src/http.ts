@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto";
+import { fork, type ChildProcess } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { mkdir, rename, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { Worker } from "node:worker_threads";
+import { fileURLToPath } from "node:url";
 import { createMcpHandler, isLegacyRequest } from "@modelcontextprotocol/server";
 import { toNodeHandler, toWebRequest } from "@modelcontextprotocol/node";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -39,6 +43,10 @@ const CLEANUP_INTERVAL_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_CLEANUP_INTERVAL_
 const MAX_REQUEST_BODY_BYTES = getPositiveIntEnv("BRIDGE_MCP_HTTP_MAX_BODY_BYTES", 16 * 1024 * 1024);
 const DASHBOARD_CACHE_MS = getPositiveIntEnv("BRIDGE_MCP_DASHBOARD_CACHE_MS", 15 * 1000);
 const DASHBOARD_WORKER_TIMEOUT_MS = getPositiveIntEnv("BRIDGE_MCP_DASHBOARD_WORKER_TIMEOUT_MS", 120 * 1000);
+const DASHBOARD_SNAPSHOT_STATE_PATH = path.resolve(
+  process.env.BRIDGE_MCP_DASHBOARD_SNAPSHOT_STATE
+    || path.join(process.env.BRIDGE_MCP_METRICS_DIR || path.join(process.cwd(), "data"), "dashboard-snapshot-cache.json"),
+);
 const EVENT_LOOP_PROBE_INTERVAL_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_EVENT_LOOP_PROBE_MS", 100);
 const EVENT_LOOP_STALL_THRESHOLD_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_EVENT_LOOP_STALL_MS", 250);
 const HTTP_KEEP_ALIVE_TIMEOUT_MS = getPositiveIntEnv("BRIDGE_MCP_HTTP_KEEP_ALIVE_TIMEOUT_MS", 120_000);
@@ -66,8 +74,15 @@ let lastEventLoopStallLagMs = 0;
 let httpClientErrorCount = 0;
 let lastHttpClientErrorAt: string | null = null;
 let capacityAdmissionTail: Promise<void> = Promise.resolve();
-let dashboardSnapshotCache: { expiresAtMs: number; value: Record<string, unknown> } | null = null;
+let dashboardSnapshotCache: { expiresAtMs: number; buildMs: number; value: Record<string, unknown> } | null = null;
 let dashboardSnapshotInFlight: Promise<Record<string, unknown>> | null = null;
+let dashboardWorkerProcess: ChildProcess | null = null;
+let dashboardWorkerSequence = 0;
+const dashboardWorkerRequests = new Map<string, {
+  resolve: (value: Record<string, unknown>) => void;
+  reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}>();
 
 const modernMcpHandler = createMcpHandler(
   () => createModernBridgeServer(),
@@ -268,52 +283,116 @@ function getStatus() {
   };
 }
 
-function getDashboardWorkerSnapshot(): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL("./dashboard-mssr-worker.js", import.meta.url));
-    let settled = false;
-    const finish = (callback: () => void) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      callback();
-      void worker.terminate();
+function restoreDashboardSnapshotCache() {
+  try {
+    const parsed = JSON.parse(readFileSync(DASHBOARD_SNAPSHOT_STATE_PATH, "utf8")) as Record<string, unknown>;
+    if (parsed.schemaVersion !== 1 || !parsed.value || typeof parsed.value !== "object") return;
+    const buildMs = typeof parsed.buildMs === "number" && Number.isFinite(parsed.buildMs) ? parsed.buildMs : 0;
+    dashboardSnapshotCache = {
+      expiresAtMs: 0,
+      buildMs,
+      value: parsed.value as Record<string, unknown>,
     };
-    const timeout = setTimeout(() => {
-      finish(() => reject(new Error(`dashboard worker exceeded ${DASHBOARD_WORKER_TIMEOUT_MS}ms`)));
-    }, DASHBOARD_WORKER_TIMEOUT_MS);
+  } catch {
+    // First boot or an interrupted cache write: simply rebuild in the isolated worker.
+  }
+}
 
-    worker.once("message", (message: unknown) => {
-      const payload = message && typeof message === "object" ? message as Record<string, unknown> : {};
-      if (payload.ok === true && payload.value && typeof payload.value === "object") {
-        finish(() => resolve(payload.value as Record<string, unknown>));
-        return;
-      }
-      finish(() => reject(new Error(typeof payload.error === "string" ? payload.error : "dashboard worker failed")));
-    });
-    worker.once("error", (error) => finish(() => reject(error)));
-    worker.once("exit", (code) => {
-      if (!settled) finish(() => reject(new Error(`dashboard worker exited before producing a snapshot (code ${code})`)));
+async function persistDashboardSnapshotCache(value: Record<string, unknown>, buildMs: number) {
+  await mkdir(path.dirname(DASHBOARD_SNAPSHOT_STATE_PATH), { recursive: true });
+  const tempPath = `${DASHBOARD_SNAPSHOT_STATE_PATH}.${process.pid}.tmp`;
+  await writeFile(tempPath, JSON.stringify({
+    schemaVersion: 1,
+    savedAt: new Date().toISOString(),
+    buildMs,
+    value,
+  }), "utf8");
+  await rename(tempPath, DASHBOARD_SNAPSHOT_STATE_PATH);
+}
+function rejectDashboardWorkerRequests(error: Error) {
+  for (const request of dashboardWorkerRequests.values()) {
+    clearTimeout(request.timeout);
+    request.reject(error);
+  }
+  dashboardWorkerRequests.clear();
+}
+
+function stopDashboardWorker(error?: Error) {
+  const child = dashboardWorkerProcess;
+  dashboardWorkerProcess = null;
+  if (error) rejectDashboardWorkerRequests(error);
+  if (!child) return;
+  if (child.connected) child.disconnect();
+  if (!child.killed) child.kill();
+}
+
+function ensureDashboardWorkerProcess(): ChildProcess {
+  if (dashboardWorkerProcess && dashboardWorkerProcess.connected && dashboardWorkerProcess.exitCode === null && !dashboardWorkerProcess.killed) {
+    return dashboardWorkerProcess;
+  }
+
+  const workerPath = fileURLToPath(new URL("./dashboard-mssr-worker.js", import.meta.url));
+  const child = fork(workerPath, [], {
+    stdio: ["ignore", "ignore", "ignore", "ipc"],
+    execArgv: process.execArgv.filter((arg) => arg !== "--input-type=module" && !arg.startsWith("--input-type=")),
+    env: { ...process.env, BRIDGE_MCP_METRICS_READONLY: "1" },
+  });
+  dashboardWorkerProcess = child;
+
+  child.on("message", (message: unknown) => {
+    const payload = message && typeof message === "object" ? message as Record<string, unknown> : {};
+    const requestId = typeof payload.requestId === "string" ? payload.requestId : null;
+    if (!requestId) return;
+    const request = dashboardWorkerRequests.get(requestId);
+    if (!request) return;
+    dashboardWorkerRequests.delete(requestId);
+    clearTimeout(request.timeout);
+    if (payload.ok === true && payload.value && typeof payload.value === "object") {
+      request.resolve(payload.value as Record<string, unknown>);
+      return;
+    }
+    request.reject(new Error(typeof payload.error === "string" ? payload.error : "dashboard snapshot process failed"));
+  });
+  child.once("error", (error) => {
+    if (dashboardWorkerProcess === child) stopDashboardWorker(error);
+  });
+  child.once("exit", (code) => {
+    if (dashboardWorkerProcess === child) stopDashboardWorker(new Error(`dashboard snapshot process exited (code ${code})`));
+  });
+  return child;
+}
+
+function getDashboardWorkerSnapshot(): Promise<Record<string, unknown>> {
+  const child = ensureDashboardWorkerProcess();
+  const requestId = `${RUNTIME_BOOT_ID}:${++dashboardWorkerSequence}`;
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      if (!dashboardWorkerRequests.has(requestId)) return;
+      stopDashboardWorker(new Error(`dashboard snapshot process exceeded ${DASHBOARD_WORKER_TIMEOUT_MS}ms`));
+    }, DASHBOARD_WORKER_TIMEOUT_MS);
+    dashboardWorkerRequests.set(requestId, { resolve, reject, timeout });
+    child.send({ type: "snapshot", requestId }, (error) => {
+      if (!error) return;
+      if (dashboardWorkerRequests.has(requestId)) stopDashboardWorker(error);
     });
   });
 }
 
-async function getDashboardSnapshot(): Promise<Record<string, unknown>> {
-  const now = Date.now();
-  if (dashboardSnapshotCache && dashboardSnapshotCache.expiresAtMs > now) {
-    return { ...dashboardSnapshotCache.value, cache: { hit: true, ttlMs: DASHBOARD_CACHE_MS } };
-  }
+function refreshDashboardSnapshot(): Promise<Record<string, unknown>> {
   if (dashboardSnapshotInFlight) return dashboardSnapshotInFlight;
 
   dashboardSnapshotInFlight = (async () => {
+    const refreshStartedAtMs = performance.now();
     const generatedAt = new Date().toISOString();
     const dashboardData = await getDashboardWorkerSnapshot();
+    const buildMs = Math.round((performance.now() - refreshStartedAtMs) * 100) / 100;
     const noticeItems = peekBridgeNoticeHistory(20);
     const value: Record<string, unknown> = {
       generatedAt,
-      cache: { hit: false, ttlMs: DASHBOARD_CACHE_MS },
+      cache: { hit: false, stale: false, refreshing: false, ttlMs: DASHBOARD_CACHE_MS, buildMs },
       status: getStatus(),
       ...dashboardData,
+      toolAudit: getDefaultToolAudit({ view: "all", scope: "active", days: 30, limit: 200 }),
       toolNotices: {
         delivery: "recent-history",
         count: noticeItems.length,
@@ -325,13 +404,39 @@ async function getDashboardSnapshot(): Promise<Record<string, unknown>> {
         },
       },
     };
-    dashboardSnapshotCache = { expiresAtMs: Date.now() + DASHBOARD_CACHE_MS, value };
+    dashboardSnapshotCache = { expiresAtMs: Date.now() + DASHBOARD_CACHE_MS, buildMs, value };
+    void persistDashboardSnapshotCache(value, buildMs).catch((error) => {
+      log("warn", "dashboard snapshot cache persistence failed", { error: error instanceof Error ? error.message : String(error) });
+    });
     return value;
   })().finally(() => {
     dashboardSnapshotInFlight = null;
   });
 
   return dashboardSnapshotInFlight;
+}
+
+async function getDashboardSnapshot(): Promise<Record<string, unknown>> {
+  const now = Date.now();
+  if (dashboardSnapshotCache && dashboardSnapshotCache.expiresAtMs > now) {
+    return { ...dashboardSnapshotCache.value, status: getStatus(), cache: { hit: true, stale: false, refreshing: false, ttlMs: DASHBOARD_CACHE_MS, buildMs: dashboardSnapshotCache.buildMs } };
+  }
+
+  if (dashboardSnapshotCache) {
+    const refreshing = !dashboardSnapshotInFlight;
+    if (refreshing) {
+      void refreshDashboardSnapshot().catch((error) => {
+        log("warn", "dashboard background refresh failed", { error: error instanceof Error ? error.message : String(error) });
+      });
+    }
+    return {
+      ...dashboardSnapshotCache.value,
+      status: getStatus(),
+      cache: { hit: true, stale: true, refreshing: refreshing || Boolean(dashboardSnapshotInFlight), ttlMs: DASHBOARD_CACHE_MS, buildMs: dashboardSnapshotCache.buildMs },
+    };
+  }
+
+  return await refreshDashboardSnapshot();
 }
 
 async function closeTransport(transport: BridgeHttpTransport, reason: string, sessionId?: string) {
@@ -634,6 +739,7 @@ async function handleDualEraMcpRequest(req: IncomingMessage, res: ServerResponse
 
 async function main() {
   ensureMssrTelemetryToken();
+  restoreDashboardSnapshotCache();
   ready = true;
 
   const cleanupTimer = setInterval(() => {
@@ -862,6 +968,7 @@ async function main() {
     if (closing) return;
     closing = true;
     ready = false;
+    stopDashboardWorker(new Error("bridge shutdown"));
     clearInterval(cleanupTimer);
     clearInterval(eventLoopProbeTimer);
     skillHealthScheduler.stop();
@@ -936,6 +1043,9 @@ async function main() {
         httpKeepAliveTimeoutBufferMs: HTTP_KEEP_ALIVE_TIMEOUT_BUFFER_MS,
         httpHeadersTimeoutMs: HTTP_HEADERS_TIMEOUT_MS,
       },
+    });
+    void refreshDashboardSnapshot().catch((error) => {
+      log("warn", "dashboard warmup failed", { error: error instanceof Error ? error.message : String(error) });
     });
   });
 }

@@ -8,6 +8,7 @@ import {
   evaluateMssrProjectKnowledgeOperationalAttention,
   evaluateMssrTraceLifecycleOperationalAttention,
   evaluateMssrTraceOwnerCompatibility,
+  evaluateMssrTraceTaskCompatibility,
   getMssrTraceClosureState,
   hasFreshMaintenanceClose,
   missingRequiredSkills,
@@ -22,6 +23,7 @@ import {
   type MssrProjectKnowledgeOperationalProjection,
   type MssrTraceLifecycleOperationalProjection,
   type MssrTraceLifecycleState,
+  type MssrTraceTaskIdentity,
   type StructuredSkillIntent,
 } from "@mauroprime/mssr";
 import { adaptMssrOperationalDecision } from "./operational-notices.js";
@@ -46,6 +48,9 @@ type ActiveTraceState = {
   workflowKey: string;
   stage: string;
   taskHash: string;
+  taskKey: string | null;
+  parentTraceId: string | null;
+  supersedesTraceId: string | null;
   caller: string;
   model: string;
   reasoningEffort: string;
@@ -269,6 +274,28 @@ function validTraceId(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z0-9._:-]{6,128}$/.test(value.trim());
 }
 
+function taskIdentityText(value: unknown, max: number): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, max) : null;
+}
+
+function taskIdentityFromRecord(value: JsonRecord | null | undefined): MssrTraceTaskIdentity {
+  return {
+    taskKey: taskIdentityText(value?.taskKey, 160),
+    parentTraceId: validTraceId(value?.parentTraceId) ? String(value?.parentTraceId).trim() : null,
+    supersedesTraceId: validTraceId(value?.supersedesTraceId) ? String(value?.supersedesTraceId).trim() : null,
+  };
+}
+
+function stateTaskIdentity(state: ActiveTraceState): MssrTraceTaskIdentity {
+  return {
+    taskKey: state.taskKey,
+    parentTraceId: state.parentTraceId,
+    supersedesTraceId: state.supersedesTraceId,
+  };
+}
+
 function schemaPropertyExists(schema: ToolSchemaLike, propertyName: string): boolean {
   const input = asRecord(schema.inputSchema);
   const properties = asRecord(input?.properties);
@@ -356,6 +383,9 @@ export type MssrTraceSessionSnapshot = {
   traceId: string | null;
   workflowKey: string | null;
   taskHash: string | null;
+  taskKey: string | null;
+  parentTraceId: string | null;
+  supersedesTraceId: string | null;
   stage: string | null;
   caller: string | null;
   model: string | null;
@@ -826,6 +856,35 @@ export function createMssrTraceSessionCoordinator(
     if (compatibility.bound.workflowKey) state.workflowKey = compatibility.bound.workflowKey;
   }
 
+  function bindCompatibleTraceTask(state: ActiveTraceState, args: JsonRecord): MssrTracePreparation["blocked"] | null {
+    const requested = taskIdentityFromRecord(args);
+    const compatibility = evaluateMssrTraceTaskCompatibility(stateTaskIdentity(state), requested);
+    if (!compatibility.compatible) {
+      return {
+        code: "mssr-trace-task-identity-mismatch",
+        message: `La traza ${state.traceId} ya tiene una identidad de tarea incompatible con la solicitada.`,
+        details: {
+          traceId: state.traceId,
+          existingTaskKey: state.taskKey,
+          requestedTaskKey: requested.taskKey ?? null,
+          existingParentTraceId: state.parentTraceId,
+          requestedParentTraceId: requested.parentTraceId ?? null,
+          existingSupersedesTraceId: state.supersedesTraceId,
+          requestedSupersedesTraceId: requested.supersedesTraceId ?? null,
+          mismatchFields: compatibility.mismatchFields,
+          status: compatibility.status,
+        },
+      };
+    }
+    state.taskKey = compatibility.bound.taskKey ?? null;
+    state.parentTraceId = compatibility.bound.parentTraceId ?? null;
+    state.supersedesTraceId = compatibility.bound.supersedesTraceId ?? null;
+    if (state.taskKey && args.taskKey === undefined) args.taskKey = state.taskKey;
+    if (state.parentTraceId && args.parentTraceId === undefined) args.parentTraceId = state.parentTraceId;
+    if (state.supersedesTraceId && args.supersedesTraceId === undefined) args.supersedesTraceId = state.supersedesTraceId;
+    return null;
+  }
+
   function localState(allowClosed = false, enforceOwnerScope = false): ActiveTraceState | null {
     pruneSharedTraces();
     if (!localTraceId) return null;
@@ -1240,6 +1299,10 @@ export function createMssrTraceSessionCoordinator(
           return { args, notices, blocked };
         }
         bindCompatibleTraceOwner(state);
+        if (ROUTE_TOOLS.has(toolName)) {
+          const taskBlocked = bindCompatibleTraceTask(state, args);
+          if (taskBlocked) return { args, notices, blocked: taskBlocked };
+        }
         adopt(state);
       }
     }
@@ -1290,6 +1353,10 @@ export function createMssrTraceSessionCoordinator(
       }
 
       state = localState(false, !explicitTrace);
+      if (state) {
+        const taskBlocked = bindCompatibleTraceTask(state, args);
+        if (taskBlocked) return { args, notices, blocked: taskBlocked };
+      }
       if (toolName !== "skill_bootstrap" && state && TRACE_BOUNDARY_STAGES.has(stage)) {
         notices.push(...boundaryNotice(toolName, stage, state));
       }
@@ -1461,12 +1528,20 @@ export function createMssrTraceSessionCoordinator(
         { ...record, stage },
       );
       const intentParsed = structuredSkillIntentSchema.safeParse(record.intent ?? args.intent);
+      const observedTaskIdentity = taskIdentityFromRecord({ ...args, ...record });
+      const taskCompatibility = evaluateMssrTraceTaskCompatibility(previous ? stateTaskIdentity(previous) : {}, observedTaskIdentity);
+      const taskIdentity = taskCompatibility.compatible
+        ? taskCompatibility.bound
+        : (previous ? stateTaskIdentity(previous) : observedTaskIdentity);
       const state: ActiveTraceState = {
         traceId,
         workflowKey: previous?.workflowKey
           ?? (normalizedText(record.workflowKey, 80) || normalizedText(args.workflowKey, 80) || "unscoped"),
         stage: lifecycle.stage,
         taskHash: taskFingerprint(args.task),
+        taskKey: taskIdentity.taskKey ?? null,
+        parentTraceId: taskIdentity.parentTraceId ?? null,
+        supersedesTraceId: taskIdentity.supersedesTraceId ?? null,
         caller: normalizedCaller(args.caller ?? hostContext.caller),
         model: normalizeModelIdentifier(asRecord(record.agentProfile)?.model ?? args.model),
         reasoningEffort: normalizedText(asRecord(record.agentProfile)?.reasoningEffort, 20)
@@ -1595,6 +1670,9 @@ export function createMssrTraceSessionCoordinator(
       traceId: state?.traceId ?? null,
       workflowKey: state?.workflowKey ?? null,
       taskHash: state?.taskHash ?? null,
+      taskKey: state?.taskKey ?? null,
+      parentTraceId: state?.parentTraceId ?? null,
+      supersedesTraceId: state?.supersedesTraceId ?? null,
       stage: state?.stage ?? null,
       caller: state?.caller ?? null,
       model: state?.model ?? null,

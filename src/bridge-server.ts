@@ -146,6 +146,7 @@ function toolRecoveryActions(toolName: string, error: string | undefined, toolSc
       instruction: "Lee el contrato runtime exacto antes de reconstruir los argumentos; no inventes campos ni enums.",
     }];
   }
+  if (["script-runtime-error", "timeout"].includes(category)) return [];
   const preflightTool = usage?.preflightTools?.[0];
   return preflightTool ? [{
     label: `Usar ${preflightTool}`,
@@ -363,12 +364,6 @@ function projectFromArgs(toolName: string, args: Record<string, unknown>): strin
   return undefined;
 }
 
-function taskKeyFromText(value: unknown): string | undefined {
-  if (typeof value !== "string" || !value.trim()) return undefined;
-  const normalized = value.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
-  return `task_${createHash("sha256").update(normalized).digest("hex").slice(0, 16)}`;
-}
-
 function projectRootScopeKey(sessionKey: string | undefined, workflowKey: string | undefined): string | undefined {
   if (!sessionKey) return undefined;
   return `${sessionKey}:${workflowKey ?? ""}`;
@@ -557,6 +552,8 @@ function emitArchitectureImpactFailure(projectRoot: string, toolName: string, er
 type BridgeServerSurface = {
   setRequestHandler: (...args: any[]) => void;
   getClientVersion: () => { name?: string; version?: string } | undefined;
+  oninitialized?: () => void;
+  sendToolListChanged: () => Promise<void>;
 };
 
 function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
@@ -566,6 +563,23 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
   const pendingContextRoots = new Set<string>();
   let localTaskKey: string | undefined;
   let localWorkflowKey: string | undefined;
+
+  server.oninitialized = () => {
+    void server.sendToolListChanged().catch((error) => {
+      emitBridgeNotice({
+        severity: "warning",
+        code: "tool-catalog-refresh-notification-failed",
+        source: "bridge-server",
+        message: "Bridge could not notify the MCP client that its tool catalog should be refreshed after initialization.",
+        details: {
+          error: error instanceof Error ? error.message : String(error),
+          runtimeBootId: RUNTIME_BOOT_ID,
+          modern,
+        },
+        dedupeKey: `bridge-server:tool-catalog-refresh:${modern ? "modern" : "legacy"}`,
+      });
+    });
+  };
   const mssrTraceSession = createMssrTraceSessionCoordinator(modularToolRegistry.tools, {
     onClosureReminder: (reminder) => {
       emitBridgeNotice(reminder.notice);
@@ -622,23 +636,9 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
     let architectureImpactPrepared: Awaited<ReturnType<typeof prepareBridgeArchitectureImpactHostAdoption>> = null;
     const observedProject = projectFromArgs(name, scopedArgs);
     if (name === "project_context_load") {
-      const nextTaskKey = taskKeyFromText(profiledArgs.task);
       const nextWorkflowKey = normalizeWorkflowKey(profiledArgs.workflowKey);
-      if (nextTaskKey) {
-        localTaskKey = nextTaskKey;
-        if (hostProfile.sessionKey) {
-          sessionTaskKeys.delete(hostProfile.sessionKey);
-          sessionTaskKeys.set(hostProfile.sessionKey, nextTaskKey);
-          while (sessionTaskKeys.size > maxScopedMetricEntries) {
-            const oldest = sessionTaskKeys.keys().next().value;
-            if (typeof oldest !== "string") break;
-            sessionTaskKeys.delete(oldest);
-          }
-        }
-      } else {
-        localTaskKey = undefined;
-        if (hostProfile.sessionKey) sessionTaskKeys.delete(hostProfile.sessionKey);
-      }
+      localTaskKey = undefined;
+      if (hostProfile.sessionKey) sessionTaskKeys.delete(hostProfile.sessionKey);
       if (nextWorkflowKey) {
         localWorkflowKey = nextWorkflowKey;
         if (hostProfile.sessionKey) {
@@ -724,8 +724,8 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
     const taskKey = resolveMetricTaskKey({
       startsNewRoute,
       traceId: traceSnapshot.traceId,
-      traceTaskHash: traceSnapshot.taskHash,
-      explicitTaskKey: taskKeyFromText(effectivePrepared.args.task),
+      traceTaskKey: traceSnapshot.taskKey,
+      explicitTaskKey: effectivePrepared.args.taskKey,
       sessionTaskKey: hostProfile.sessionKey ? sessionTaskKeys.get(hostProfile.sessionKey) : undefined,
       localTaskKey,
     });
@@ -893,12 +893,13 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
 
 function bridgeServerOptions() {
   return {
-    capabilities: { tools: {}, logging: {} },
+    capabilities: { tools: { listChanged: true }, logging: {} },
     instructions: [
       "This server controls MauroPrime. When substantial work begins in a known repository, call project_context_load once with the project root and current task so project rules, context, state, and workflow guides become active.",
       "When a user describes a repeatable multi-step process, says it should happen every time or in future, asks for a skill/pipeline/template/hook, or an existing reusable workflow may apply, call workflow_guide_recommend. Uploaded audio/video requests to listen, transcribe, inspect, or understand also require workflow-guide discovery before any generic ASR fallback; when narrated-media-review matches, load it and use media_review_ingest rather than improvising Whisper while the canonical pipeline is healthy. Follow load_existing with workflow_guide_load, follow use_existing_skill with skill_load, and propose a new guide only when neither a guide nor an existing skill owns the procedure. Call workflow_guide_create only when the user asks or approves.",
       "At the close of substantial or long-running work, when an observable error, incident, repeated friction, manual workaround, routing defect, stale runtime, lifecycle problem, or missing capability occurred, load skill-maintenance-loop for the close phase and persist a concise incident in the canonical owner ledger. Record symptom, reproduction/evidence, cause or unresolved status, correction, regression and follow-up; never record private chain-of-thought.",
-      "For Blender modeling references, distinguish a perspective design master from the orthographic geometric master. Persist generated images with image_asset_save, normalize a generic pack with image_reference_pack_prepare, require semantic visual QA, validate it with blender_validate_reference_pack, and install it with blender_install_reference_pack. Keep blender_setup_character_references only as the four-view compatibility path. Use blender_review_bundle for comparable model evidence before editing.",
+      "For Blender modeling references, distinguish a perspective design master from the orthographic geometric master. Persist ChatGPT-generated references through image_asset_import_files using authorized file parameters, then normalize with image_reference_pack_prepare, require semantic visual QA, validate with blender_validate_reference_pack, and install with blender_install_reference_pack. Keep blender_setup_character_references only as the four-view compatibility path. Use blender_review_bundle for comparable model evidence before editing.",
+      "For images generated or edited by ChatGPT, image_asset_import_files is the default ChatGPT-to-PC transport. If its dedicated connector schema is missing, inspect the runtime schema and use bridge_tool_action with toolName/confirmToolName=image_asset_import_files and the ChatGPT-authorized image files in the wrapper's top-level files parameter; never put those files inside arguments or convert/reconstruct them as Base64. If the current bridge_tool_action schema itself lacks top-level files, treat the connector catalog as stale: preserve the already-generated image, refresh/reopen the connector or start a new chat, and do not regenerate merely to change transport shape. image_asset_save is compatibility-only when direct authorized file transport is genuinely unavailable and actual image bytes already exist natively.",
       "For arbitrary binary payloads, never route base64 through write_text_file. Use binary_file_write for small files or binary_upload_begin/append/status/finish for resumable large transfers, then verify with binary_file_info.",
       "When ChatGPT must visually inspect existing local PNG, JPEG, or WebP files, use image_file_attach. It attaches the original image bytes as MCP image content without printing the encoded payload; do not substitute binary_file_read_chunk, temporary HTTP servers, tunnels, or resized previews unless attachment itself is proven unavailable.",
       "When the user asks you to look at, inspect, read, or review the current TabletWhiteboard view, call whiteboard_capture_pc_view so the connected PC creates a fresh viewport PNG at its exact pan and zoom and the image is attached to the result. Use whiteboard_latest_capture only when the user explicitly wants the last saved image without taking a new one.",

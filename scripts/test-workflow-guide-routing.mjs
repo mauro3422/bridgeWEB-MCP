@@ -86,6 +86,22 @@ for (const name of ['roblox-save-backup-recovery', 'roblox-placement-system-auth
   assert.equal(coverageDiagnostic.existingSkillCoverage.matches.some((item) => item.name === name), false, `${name} must remain diagnostic evidence, not existing coverage`);
 }
 
+const genericBridgeRecoveryTask = 'Verificar las mejoras de calidad de las tools del Bridge y el recovery de procesos síncronos.';
+const genericBridgeRecovery = await registry.call('workflow_guide_recommend', { task: genericBridgeRecoveryTask, maxResults: 5 });
+assert.equal(
+  genericBridgeRecovery.existingSkillCoverage.matches.some((item) => item.name === 'roblox-save-backup-recovery'),
+  false,
+  'generic Bridge recovery work must not claim Roblox save/backup ownership without Roblox context',
+);
+
+const genericBridgeWrapperTask = 'Use bridge_tool_query to inspect project_change_consistency after a Bridge restart.';
+const genericBridgeWrapper = await registry.call('workflow_guide_recommend', { task: genericBridgeWrapperTask, maxResults: 5 });
+assert.equal(
+  genericBridgeWrapper.matches.some((item) => item.name === 'tablet-whiteboard-context'),
+  false,
+  'generic Bridge wrapper/runtime work must not activate the TabletWhiteboard guide',
+);
+
 const positiveCoverageCases = [
   ['In Roblox Studio, implement a placement system with a ghost preview, rotation and snapping.', 'roblox-placement-system-authoring'],
   ['Save and back up my Roblox Studio place so I can recover it after risky edits.', 'roblox-save-backup-recovery'],

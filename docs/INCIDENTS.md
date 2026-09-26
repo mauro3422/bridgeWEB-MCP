@@ -19,6 +19,62 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-09-25 — `DatabaseSync(path, undefined)` rompió el arranque aislado en Node 24
+
+**Estado:** Corregido y verificado en Bridge 0.6.141; runtime live adoptado por restart controlado.
+
+**Capa/owner:** Bridge posee `src/metrics.ts`, `src/mssr-observatory.ts` y el proceso aislado que arma snapshots del dashboard. `node:sqlite` define el contrato de `DatabaseSync`.
+
+**Síntoma observable:** después de introducir el modo read-only del analytics child, el smoke aislado de HTTP/liveness dejaba de llegar a readiness o devolvía `500` en métricas. Un probe mínimo contra una base temporal reprodujo `ERR_INVALID_ARG_TYPE` al construir `DatabaseSync`.
+
+**Causa demostrada:** Node 24 no acepta pasar explícitamente `undefined` como segundo argumento. La rama normal había quedado como `new DatabaseSync(path, readOnly ? { readOnly: true } : undefined)`, por lo que el modo write fallaba aunque semánticamente pretendiera usar el constructor de un argumento.
+
+**Corrección:** ambos owners usan dos ramas explícitas: read-only construye con `{ readOnly: true }`; modo normal usa `new DatabaseSync(path)` sin segundo argumento. El dashboard child sigue siendo read-only y el runtime normal conserva su inicialización/escritura habitual.
+
+**Regresión/evidencia:** `logs/dashboard-final-gates-4.log` pasa TypeScript/build, HTTP liveness, seed persistido, worker reutilizable, Human Cockpit y `git diff --check`; liveness registró cero event-loop stalls. El restart live posterior quedó healthy y el primer snapshot real volvió en ~234 ms desde el last-good seed mientras el refresh frío seguía en background.
+
+**Seguimiento:** mantener el constructor de un argumento para el modo normal y conservar el smoke aislado; no usar `undefined` como placeholder de options al envolver APIs nativas que distinguen aridad.
+
+---
+
+## 2026-09-25 — `tools:list sanity` exigía una tool Blender eliminada deliberadamente
+
+**Estado:** Corregido en `scripts/verify-all.ps1`; gate integral final de Bridge 0.6.141 verificado con `ok=true`, `failedRequired=0` y exit `0`.
+
+**Capa/owner:** Bridge posee su release verifier y la lista mínima de tools que `tools:list sanity` exige. El catálogo runtime y los contratos/regresiones de imágenes/Blender determinan la exposición vigente; el verifier no debe revivir herramientas retiradas intencionalmente.
+
+**Síntoma observable:** el primer gate integral de 0.6.141 pasó doctor, check/build, smoke HTTP, dual-era, regresiones, routing latency, WAL, liveness, skill routing y docs, pero terminó `failedRequired=1` porque `tools:list sanity` reportó `missing tools: blender_store_reference_image` aunque el catálogo live/documentado tenía 175 tools coherentes.
+
+**Causa demostrada:** `scripts/verify-all.ps1` conservaba una expectativa legacy. El incidente vigente del 2026-09-23 documenta que `blender_store_reference_image` fue eliminado completamente para evitar un segundo camino Base64, mientras `image_asset_import_files` quedó como transporte primario y `test-v060-tools.mjs` exige explícitamente la ausencia de la tool eliminada.
+
+**Corrección:** la sanity list dejó de requerir `blender_store_reference_image` y ahora requiere `image_asset_import_files`; `image_asset_save` permanece sólo como fallback de compatibilidad. No se restauró ninguna tool Base64 ni se modificó el catálogo runtime para satisfacer el verifier.
+
+**Regresión/evidencia:** la comprobación focal `verify-mcp-tools-list` pasó con `image_asset_import_files`, `image_asset_save` y `blender_setup_character_references`. Después, la ejecución durable `data/bridge-0.6.141-final-verify.log` completó todos los gates con exit `0`, `ok=true`, `failedRequired=0`; `tools:list sanity` pasó con el contrato corregido.
+
+**Seguimiento:** cuando una tool se elimina deliberadamente, actualizar en la misma tanda las expectativas de sanity/release que la enumeran. La regresión de catálogo debe seguir distinguiendo transporte canónico y fallbacks, en vez de forzar compatibilidad con una superficie retirada.
+
+---
+
+## 2026-09-25 — Context Message receipt en 255 bloqueó `skill_route_plan` y `skill_bootstrap`
+
+**Estado:** Corregido en MSSR 0.2.75, adoptado y verificado en el runtime live de Bridge 0.6.141.
+
+**Capa/owner:** portable MSSR posee el schema y la transición del receipt de Context Messages; Bridge posee el host/control-plane que consume ese estado y expone route/bootstrap. La recuperación del inbox se realizó únicamente mediante la superficie host `mssr_context_ack`.
+
+**Síntoma observable:** el receipt durable de `incident:docs-incidents.md` quedó con `selectedCount=255`. Tanto `skill_route_plan` como `skill_bootstrap` fallaban antes de abrir una ruta con `Number must be less than or equal to 255` en `deliveries[0].selectedCount`. Como las mutaciones normales requieren lifecycle MSSR, el host quedaba en un deadlock de control plane: no podía abrir la traza necesaria para ejecutar la adopción correctiva.
+
+**Reproducción/evidencia:** `.mssr/runtime/context-inbox.json` mostraba el receipt exacto en 255. Cada nueva selección intentaba el siguiente conteo y 0.2.74 rechazaba el estado resultante. `mssr_context_ack` reconoció sólo `incident:docs-incidents.md`; inmediatamente después `skill_bootstrap` volvió a completar y permitió abrir la traza `mssr-20260925054833-988c28fd-699`, sin editar el inbox manualmente.
+
+**Causa demostrada:** MSSR 0.2.74 permitía persistir `selectedCount=255` pero su schema validaba el mismo campo con máximo 255 después de incrementar. La transición válida de uso `255 -> 256` convertía por lo tanto un receipt previamente aceptado en un estado rechazado por el propio loader.
+
+**Corrección:** MSSR 0.2.75 amplía el contrato portable para permitir el crecimiento del contador y saturarlo de forma segura en `Number.MAX_SAFE_INTEGER`. Bridge adopta el tarball exacto `mauroprime-mssr-0.2.75.tgz` (780,931 bytes; SHA-256 `3d7ea50a795b3eaf1ade3fe00be0f497c7891e46608e0d2efb6e7e1fafe1fec9`) y mantiene `mssr_context_ack` como recuperación explícita; no se añadió una segunda autoridad ni un fallback léxico.
+
+**Regresión:** `scripts/test-mssr-context-receipt-count.mjs` ejecuta contra `node_modules/@mauroprime/mssr`, exige `255 -> 256` y saturación segura en `Number.MAX_SAFE_INTEGER`. También pasa `scripts/test-mssr-semantic-r4-adoption.mjs`. Tras el restart controlado del Bridge, un `skill_bootstrap` real volvió a completar sin el error del receipt.
+
+**Seguimiento:** conservar la regresión en la cadena global de Bridge y la cobertura portable en MSSR. Si reaparece un bloqueo semejante, usar superficies control-plane explícitas para recuperación y verificar el receipt exacto; no editar `.mssr/runtime/context-inbox.json` a mano ni relajar R2 para saltar lifecycle.
+
+---
+
 ## 2026-09-19 — `skill_context_next` no actualizaba el lifecycle RAM usado por R2 preflight
 
 **Estado:** Corregido y cubierto por regresión en source/dist 0.6.138; adopción live pendiente al registrar esta entrada.
@@ -1703,3 +1759,41 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Conclusión actual:** existe evidencia de latencia/readiness anómala asociada al smoke, pero todavía no una causa raíz única. No se atribuye el problema a R1/R2 porque owner isolation, automatic lifecycle, dual-era, full regressions y liveness pasaron después de la recuperación.
 
 **Seguimiento:** instrumentar timing por subpaso de `test-bridge-http.ps1` y correlacionarlo con dashboard/telemetry/session lifecycle, event-loop lag y métricas del tunnel antes de cambiar thresholds del watchdog. Distinguir siempre un smoke lento de un runtime realmente no-responsive; no ocultar el síntoma aumentando timeouts sin evidencia.
+
+
+## 2026-09-23 — Generated-image persistence kept falling back to agent-side Base64
+
+**Estado:** Corregido y adoptado en el runtime live. Restart HTTP `93e3246b-ccfa-4398-8563-4d89c3e7bef8` quedó acknowledged el `2026-09-23T14:14:10.3297442Z`; health/tunnel están `live/ready` y el catálogo runtime es de 163 tools. La conversación Web actual conserva un catálogo host cacheado anterior: todavía muestra la tool eliminada y no expone `image_asset_import_files` directamente, por lo que requiere refrescar/reabrir el conector o iniciar un chat nuevo para recibir el catálogo actualizado.
+
+**Capa / owner:** `src/tools/image-tools.ts`, `src/tools/blender-tools.ts`, `src/tool-registry.ts`, instrucciones del Bridge y workflow guides de assets visuales.
+
+**Síntoma observable:** aunque `image_asset_import_files` ya aceptaba `openai/fileParams` y preservaba bytes originales, las instrucciones y workflows seguían recomendando `image_asset_save`, y Blender exponía además `blender_store_reference_image`, otro guardador Base64. En ChatGPT Web esto hacía reaparecer conversiones/decodificaciones lentas aun existiendo el transporte correcto por archivo autorizado.
+
+**Causa demostrada:** coexistían tres señales contradictorias: el camino directo por file parameter, una tool Base64 descrita como camino normal para imágenes generadas y una segunda tool Base64 específica de Blender. El catálogo de una conversación también puede quedar stale después de un restart, por lo que wrapper reachability no sustituye la exposición directa de `_meta["openai/fileParams"]`.
+
+**Corrección:** `image_asset_import_files` queda declarado como camino primario ChatGPT Web → PC y se coloca antes del fallback en el módulo de imágenes; `image_asset_save` conserva compatibilidad pero queda marcado con `role=fallback` y prohíbe convertir una referencia/imagen a Base64 sólo para invocarlo; `blender_store_reference_image` se eliminó completamente. Las instrucciones del servidor, Blender y los workflow guides ahora usan file parameters por defecto.
+
+**Regresión / evidencia:** `test-image-file-import.mjs` verifica bytes originales preservados; `test-image-persistence.mjs` conserva el fallback Base64 y rollback atómico; `test-v060-tools.mjs` exige 163 tools, `image_asset_import_files` como ruta primaria, `image_asset_save` con rol fallback y ausencia de `blender_store_reference_image`. Build y tests focales pasan.
+
+**Invariante:** una imagen generada/editada por ChatGPT que pueda viajar como archivo autorizado no debe convertirse, serializarse ni reconstruirse en Base64 por el agente. Base64 es únicamente un fallback de compatibilidad cuando el transporte directo por file parameter está realmente indisponible y los bytes ya existen en ese formato.
+
+
+## 2026-09-23 — Tool audit exposed contract, taxonomy, synchronous-work and routing friction
+
+**Estado:** Corregido, verificado y adoptado en el runtime live. El restart final HTTP `0134a14e-ab45-46a8-9e1e-1694a48a19a5` quedó acknowledged el `2026-09-23T17:54:30.4776293Z`; health/tunnel están `live/ready`, el catálogo runtime sigue en 163 tools y los smokes live confirman Blender fail-closed, shell observable, routing específico y árbol de procesos sin descendientes fantasma. Los restarts `aa5a0078-db51-4d60-93b9-049896ef80f2` y `60e44beb-414f-44df-8527-23d69c7b3712` fueron adopciones intermedias de esta misma auditoría.
+
+**Evidencia observable:** la auditoría de 30 días separó fallos reales de guards saludables. `work_once`/`run_command` concentraban timeouts y procesos fallidos por trabajo síncrono largo o incierto; `work_feed` recibía IDs de sesiones ya terminadas; errores Base64/hex genéricos podían clasificarse como `invalid-image-payload`; `blender_scene_info` acumulaba fallos de schema sobre `expectedBlendFile`; y la cobertura auxiliar de workflows podía elevar `roblox-save-backup-recovery` sólo por el término genérico `recovery`, aun sin intención Roblox.
+
+**Corrección:** se añadió la categoría estable `invalid-encoded-payload` y su firma de fricción; `binary_file_write` marca errores de encoding y desalienta conversiones artificiales de imágenes; `run_command`/`work_once` declaran explícitamente el límite de trabajo síncrono y un timeout real devuelve recovery hacia `work_begin`/`terminal_start`; sesiones terminadas pasan a `target-not-found` y `terminal_write`/`work_feed` exigen liveness; `blender_scene_info` exige `expectedBlendFile` no vacío y orienta a `blender_status`; el generador de `TOOLS.md` prioriza `image_asset_import_files` y ya no contiene la tool Blender retirada; y las skills narrow quedan por debajo del umbral de cobertura si falta su intención núcleo, incluyendo contexto Roblox/`.rbxl[x]` para `roblox-save-backup-recovery`.
+
+**Segunda pasada sobre fricción histórica:** los chats previos apuntaban además a cuatro clases de error que la métrica agregada no distinguía. El transporte `bridge_tool_query` y el orden `--python ... -- args` de Blender ya estaban sanos y no se tocaron. Sí se reprodujeron y corrigieron: (1) Blender puede finalizar con exit code `0` aunque Python emita traceback, por lo que `blender_batch_script` ahora falla con `script-runtime-error`; (2) `run_command`/`work_once` exponen el shell real y documentan que Windows usa normalmente `ComSpec/cmd.exe`, evitando asumir sintaxis PowerShell; (3) un uso inválido de `edit_lines` se clasifica como `schema-validation` en vez de simular staleness; (4) auditorías de routing que citan una guía/skill como falso positivo no convierten esa cita en intención de ownership. El wrapper tampoco recomienda leer schema ante un `script-runtime-error` o `timeout` sustantivo.
+
+**Observabilidad de procesos:** durante la auditoría, un árbol Windows llegó a atribuir un Godot antiguo con CPU acumulada a una ejecución nueva. La causa era seguir `ParentProcessId` sin identidad temporal, lo que permite unir procesos no relacionados tras reutilización de PID. El traversal ahora valida también `CreationDate` de padre e hijo. Un smoke live posterior mostró sólo el `cmd -> node -> node` esperado, sin procesos fantasma.
+
+**Rendimiento revisado:** un `skill_route_plan` post-restart registró ~3,35 s, con ~2,85 s en discovery; la repetición en caliente bajó a ~0,54 s total y ~3,6 ms de discovery. Se clasificó como cold-cache/transitorio y no se modificó el router por una muestra aislada. Sigue existiendo ruido no vinculante de guides con score bajo en algunas tareas, pero no cambia ownership ni la recomendación efectiva.
+
+**No-cambios deliberados:** no se relajó `apply_patch`: sus conflictos exactos son fail-safe y su tasa histórica de éxito sigue siendo alta. Tampoco se eliminaron tools sólo por no tener evidencia de uso, ni se alteraron contratos protegidos como `project_context_load`/`skill_bootstrap` sin causa reproducible. Los wrappers de fallback permanecen porque la falta o staleness de schemas directos del host no equivale a una falla del runtime Bridge.
+
+**Regresión / evidencia:** `npm run check`, `npm run build`, `test-workflow-guide-routing.mjs`, `test-system-hardening.mjs`, `docs:tools:check`, la suite aislada completa `npm run test:regressions` y `git diff --check` pasan sobre el source final. La suite mantiene 163 tools y verifica además el import directo de imágenes, lifecycle MSSR, Blender, Godot, Whiteboard, observabilidad/liveness y remote-node.
+
+**Invariante:** optimizar según evidencia causal, no según el contador bruto de errores. Un fallo de contrato/caller debe clasificarse como tal; trabajo largo o de duración incierta debe ser persistente e inspeccionable; y una capability especializada no puede ganar ownership por vocabulario genérico cuando falta su señal de dominio núcleo.

@@ -453,7 +453,8 @@ export async function recommendGuide(
 ) {
   const discovery = existingDiscovery ?? await discoverGuides(args.projectRoot);
   const guides = discovery.guides;
-  const ranked = guides
+  const ownershipMetaTask = isSkillCoverageMetaTask(args.task);
+  const ranked = ownershipMetaTask ? [] : guides
     .map((guide) => {
       const scored = scoreGuide(args.task, guide);
       return {
@@ -472,7 +473,6 @@ export async function recommendGuide(
 
   const pattern = reusablePattern(args.task);
   const skillCoverage = existingSkillCoverage ?? await findExistingSkillCoverage(args.task, args.maxResults);
-  const ownershipMetaTask = isSkillCoverageMetaTask(args.task);
   const bestDomainGuide = ranked.find((item) => item.name !== "workflow-guide-builder") ?? null;
   const builderGuide = ranked.find((item) => item.name === "workflow-guide-builder") ?? null;
   const bestSkill = skillCoverage.matches[0] ?? null;
