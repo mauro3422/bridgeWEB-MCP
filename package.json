@@ -75,7 +75,7 @@
     "test:architecture-impact-host-adoption": "npm run build && node scripts/test-architecture-impact-host-adoption.mjs"
   },
   "dependencies": {
-    "@mauroprime/mssr": "file:vendor/mauroprime-mssr-0.2.78.tgz",
+    "@mauroprime/mssr": "file:vendor/mauroprime-mssr-0.2.79.tgz",
     "@modelcontextprotocol/core": "^2.0.0",
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/sdk": "^1.30.0",

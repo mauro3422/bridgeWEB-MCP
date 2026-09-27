@@ -177,22 +177,19 @@ try {
   assert.deepEqual(constrainedByName.get("first-required").contextAssembly.selectedModules, []);
   assert.equal(
     constrainedByName.get("first-required").contextAssembly.moduleDecisions.find((item) => item.id === "low-priority").reason,
-    "deferred-to-next-page",
+    "optional-budget-omitted",
   );
   assert.equal(constrainedPlan.requiredCoreReservedChars, requiredCoreChars);
-  assert.equal(constrainedPlan.status, "partial");
-  assert.equal(constrainedPlan.mustContinue, true);
-  assert.equal(typeof constrainedPlan.cursor, "string");
-  assert.equal(constrainedPlan.budgetExceeded, false, 'Deferring selected optional context must not report a required bootstrap overflow.');
+  assert.equal(constrainedPlan.status, "complete", "optional child pressure must not force continuation once required cores are satisfied");
+  assert.equal(constrainedPlan.mustContinue, false);
+  assert.equal(constrainedPlan.cursor, undefined);
+  assert.equal(constrainedPlan.budgetExceeded, true, "omitted accepted context must remain observable as budget pressure");
   assert.equal(constrainedPlan.requiredBudgetExceeded, false);
-  assert.equal(constrainedPlan.optionalContextOmitted, false);
-  assert.equal(constrainedByName.get("first-required").contextAssembly.budgetExceeded, false);
+  assert.equal(constrainedPlan.optionalContextOmitted, true);
+  assert.equal(constrainedByName.get("first-required").contextAssembly.budgetExceeded, true);
   assert.equal(constrainedByName.get("first-required").contextAssembly.requiredBudgetExceeded, false);
-  assert.equal(constrainedByName.get("first-required").contextAssembly.contextDeferred, true);
+  assert.equal(constrainedByName.get("first-required").contextAssembly.contextDeferred, false);
   assert.equal(constrainedPlan.globallySelectedModules[0].module, "high-priority");
-  const constrainedNext = await continueSkillContextPage({ ...constrainedArgs, skills: plannerSkills.map((item) => ({ ...item, obligation: "required" })), cursor: constrainedPlan.cursor });
-  assert.equal(constrainedNext.status, "complete");
-  assert.deepEqual(constrainedNext.skills.find((item) => item.skill.name === "first-required").contextAssembly.selectedModules, ["low-priority"]);
 
   const overlapDir = path.join(tempRoot, "overlap");
   await fs.mkdir(overlapDir, { recursive: true });
