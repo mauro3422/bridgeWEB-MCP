@@ -476,6 +476,13 @@ try {
   if (auditTool?.metadata?.lifecycle !== 'protected' || auditTool.metadata.family !== 'tool-dispatch' || !registry.riskSummary.readOnly.includes('bridge_tool_audit')) throw new Error('bridge_tool_audit metadata/risk failed');
   const auditSchema = await call('bridge_tool_schema', {toolName:'bridge_tool_audit'});
   if (auditSchema.tool?.metadata?.lifecycle !== 'protected' || !auditSchema.tool?.inputSchema?.properties?.view) throw new Error('bridge_tool_schema did not expose audit metadata');
+  if (auditSchema.provenance?.runtimeBootId !== RUNTIME_BOOT_ID || !/^[0-9a-f]{16}$/.test(auditSchema.provenance?.schemaHash ?? '') || auditSchema.provenance?.source !== 'live-runtime-registry') throw new Error(`bridge_tool_schema runtime provenance failed: ${JSON.stringify(auditSchema.provenance)}`);
+  const auditSchemaRepeat = await call('bridge_tool_schema', {toolName:'bridge_tool_audit'});
+  if (auditSchemaRepeat.provenance?.schemaHash !== auditSchema.provenance.schemaHash) throw new Error('bridge_tool_schema hash must be stable within one runtime boot');
+  const observatorySchema = await call('bridge_tool_schema', {toolName:'mssr_observatory_query'});
+  if (!observatorySchema.tool?.inputSchema?.properties?.detail?.enum?.includes('compact') || !observatorySchema.tool?.inputSchema?.properties?.detail?.enum?.includes('full')) throw new Error('runtime mssr_observatory_query schema must expose detail=compact|full');
+  const catalogHealth = await call('bridge_health', {check:'catalog'});
+  if (catalogHealth.server?.runtimeBootId !== RUNTIME_BOOT_ID || catalogHealth.toolCatalog?.runtimeBootId !== RUNTIME_BOOT_ID || !/^[0-9a-f]{16}$/.test(catalogHealth.toolCatalog?.hash ?? '')) throw new Error(`bridge_health catalog provenance failed: ${JSON.stringify(catalogHealth)}`);
   const terminalReadSchema = await call('bridge_tool_schema', {toolName:'terminal_read'});
   if (!terminalReadSchema.tool?.metadata?.usage?.preflightTools?.includes('terminal_list')) throw new Error('terminal_read usage preflight metadata failed');
   const skillLoadSchema = await call('bridge_tool_schema', {toolName:'skill_load'});
@@ -623,7 +630,7 @@ try {
   if (loadedTraceSkill.traceId !== structuredRoute.traceId || !loadedTraceSkill.content?.includes('Fixture guidance')) throw new Error('traced skill load failed');
   const neutralDispatch = await call('bridge_tool_action', {toolName:'mssr_trace_record',confirmToolName:'mssr_trace_record',arguments:{traceId:structuredRoute.traceId,eventType:'verification',caller:'chatgpt-web',stage:'verify',status:'success',completedPhases:['discovery','safety','implementation','verification'],contextSources:['current-conversation','project-context'],verificationPassed:true,summary:'Fixture route verified.'}});
   if (neutralDispatch.classification !== 'neutral' || neutralDispatch.delegatedTool !== 'mssr_trace_record' || !neutralDispatch.result?.recorded) throw new Error('neutral fallback dispatch failed');
-  const traceResult = await call('mssr_observatory_query', {kind:'trace',traceId:structuredRoute.traceId,limit:30});
+  const traceResult = await call('mssr_observatory_query', {kind:'trace',detail:'full',traceId:structuredRoute.traceId,limit:30});
   if (!traceResult.trace.some((event) => event.eventType === 'route_planned') || !traceResult.trace.some((event) => event.eventType === 'skill_loaded' && event.ok === true) || !traceResult.trace.some((event) => event.eventType === 'verification')) throw new Error('MSSR observatory trace correlation failed');
   const storedRouteIntent = traceResult.trace.find((event) => event.eventType === 'route_planned')?.details?.intent;
   if (!storedRouteIntent || storedRouteIntent.domains?.[0] !== 'roblox' || storedRouteIntent.risk !== 'write') throw new Error('MSSR direct route lost bounded intent dimensions');
@@ -640,6 +647,9 @@ try {
   const photoOutcome = outcomeSummary.top?.skillOutcomes?.find((item) => item.name === 'roblox-photo-rig-capture');
   if (!photoOutcome || photoOutcome.outcomes !== 1 || photoOutcome.successRate !== 100 || photoOutcome.acceptanceRate !== 100 || photoOutcome.averageScore !== 0.9) throw new Error('MSSR per-skill outcome metrics or latest-outcome dedupe failed');
   if (!outcomeSummary.top?.outcomeSupportingSkills?.some((item) => item.name === 'systematic-debugging' && item.count === 1)) throw new Error('MSSR supporting-skill contribution metric failed');
+  if (outcomeSummary.detail !== 'compact' || outcomeSummary.truncation?.fullAvailable !== true || JSON.stringify(outcomeSummary).length > 66000) throw new Error(`MSSR compact summary budget contract failed: ${JSON.stringify(outcomeSummary.truncation)}`);
+  const outcomeSummaryFull = await call('mssr_observatory_query', {kind:'summary',detail:'full',days:30});
+  if (outcomeSummaryFull.detail !== 'full' || outcomeSummaryFull.truncation !== undefined) throw new Error('MSSR full summary must remain explicit and untruncated');
 
   const callerRoute = await call('skill_route_plan', {
     task:'Revisar un proyecto local desde Codex',

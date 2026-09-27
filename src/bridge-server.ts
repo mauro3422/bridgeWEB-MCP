@@ -622,15 +622,25 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
       hostProfile,
     );
     const activeTraceBeforeCall = mssrTraceSession.snapshot();
-    const rootWorkflowKey = normalizeWorkflowKey(profiledArgs.workflowKey)
-      ?? (hostProfile.sessionKey ? sessionWorkflowKeys.get(hostProfile.sessionKey) : undefined)
-      ?? (activeTraceBeforeCall.active && !activeTraceBeforeCall.closed
+    const rawEffectiveCall = delegatedArgs(name, profiledArgs);
+    const explicitControlTraceId = typeof profiledArgs.traceId === "string" && profiledArgs.traceId.trim()
+      ? profiledArgs.traceId.trim()
+      : typeof rawEffectiveCall.args.traceId === "string" && rawEffectiveCall.args.traceId.trim()
+        ? rawEffectiveCall.args.traceId.trim()
+        : undefined;
+    const explicitRootWorkflowKey = normalizeWorkflowKey(rawEffectiveCall.args.workflowKey)
+      ?? normalizeWorkflowKey(profiledArgs.workflowKey);
+    const rootWorkflowKey = explicitRootWorkflowKey
+      ?? (!explicitControlTraceId && hostProfile.sessionKey ? sessionWorkflowKeys.get(hostProfile.sessionKey) : undefined)
+      ?? (!explicitControlTraceId && activeTraceBeforeCall.active && !activeTraceBeforeCall.closed
         ? normalizeWorkflowKey(activeTraceBeforeCall.workflowKey)
         : undefined)
-      ?? localWorkflowKey;
+      ?? (!explicitControlTraceId ? localWorkflowKey : undefined);
     const rootScopeKey = projectRootScopeKey(hostProfile.sessionKey, rootWorkflowKey);
-    const inheritedProjectRoot = (rootScopeKey ? sessionProjectRoots.get(rootScopeKey) : undefined)
-      ?? (pendingContextRoots.size === 1 ? [...pendingContextRoots][0] : undefined);
+    const inheritedProjectRoot = explicitControlTraceId
+      ? undefined
+      : (rootScopeKey ? sessionProjectRoots.get(rootScopeKey) : undefined)
+        ?? (pendingContextRoots.size === 1 ? [...pendingContextRoots][0] : undefined);
     const scopedArgs = withInheritedProjectRoot(name, profiledArgs, inheritedProjectRoot);
     const effectiveCall = delegatedArgs(name, scopedArgs);
     let architectureImpactPrepared: Awaited<ReturnType<typeof prepareBridgeArchitectureImpactHostAdoption>> = null;
@@ -667,7 +677,7 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
       || effectiveCall.toolName === "skill_route_plan"
       || effectiveCall.toolName === "skill_bootstrap")
       && (effectiveCall.args.stage === undefined || effectiveCall.args.stage === "start")
-      && typeof effectiveCall.args.traceId !== "string";
+      && !explicitControlTraceId;
     const pendingProject = startsNewRoute && pendingContextProjects.size > 0
       ? pendingContextProjects.size === 1
         ? [...pendingContextProjects][0]
@@ -686,20 +696,24 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
       ? activeTraceBeforeCall.workflowKey
       : undefined;
     const requestedWorkflowKey = explicitWorkflowKey
-      ?? (hostProfile.sessionKey ? sessionWorkflowKeys.get(hostProfile.sessionKey) : undefined)
-      ?? localWorkflowKey;
-    const workflowOwnerChanged = Boolean(
+      ?? (!explicitControlTraceId && hostProfile.sessionKey ? sessionWorkflowKeys.get(hostProfile.sessionKey) : undefined)
+      ?? (!explicitControlTraceId ? localWorkflowKey : undefined);
+    const workflowOwnerChanged = !explicitControlTraceId && Boolean(
       requestedWorkflowKey
       && activeTraceWorkflowKey
       && requestedWorkflowKey !== activeTraceWorkflowKey,
     );
-    const workflowOwner = workflowOwnerChanged || startsNewRoute
-      ? requestedWorkflowKey
-      : activeTraceWorkflowKey ?? requestedWorkflowKey;
+    const workflowOwner = explicitControlTraceId
+      ? explicitWorkflowKey
+      : workflowOwnerChanged || startsNewRoute
+        ? requestedWorkflowKey
+        : activeTraceWorkflowKey ?? requestedWorkflowKey;
     const resolvedCallProject = resolveProject(name, scopedArgs, hostProfile);
-    const project = startsNewRoute || workflowOwnerChanged
-      ? observedProject ?? pendingProject ?? resolvedCallProject
-      : activeTraceProject ?? resolvedCallProject ?? pendingProject;
+    const project = explicitControlTraceId
+      ? observedProject
+      : startsNewRoute || workflowOwnerChanged
+        ? observedProject ?? pendingProject ?? resolvedCallProject
+        : activeTraceProject ?? resolvedCallProject ?? pendingProject;
     const prepared = mssrTraceSession.prepare(name, scopedArgs, {
       caller: hostProfile.caller,
       sessionKey: hostProfile.sessionKey,

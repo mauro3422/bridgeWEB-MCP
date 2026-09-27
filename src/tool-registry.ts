@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { RUNTIME_BOOT_ID } from "./runtime-identity.js";
 import { binaryFileToolModule } from "./tools/binary-file-tools.js";
 import { blenderToolModule } from "./tools/blender-tools.js";
 import { bridgeOpsToolModule } from "./tools/bridge-ops.js";
@@ -472,7 +474,20 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
     const name = delegatedToolName(args.toolName);
     const tool = tools.find((candidate) => candidate.name === name);
     if (!tool) throw new Error(`Unknown modular tool: ${name}`);
+    const schemaPayload = {
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+      annotations: tool.annotations ?? {},
+      _meta: tool._meta ?? {},
+    };
+    const schemaHash = createHash("sha256").update(JSON.stringify(schemaPayload)).digest("hex").slice(0, 16);
     return {
+      provenance: {
+        runtimeBootId: RUNTIME_BOOT_ID,
+        schemaHash,
+        source: "live-runtime-registry",
+      },
       tool: {
         name: tool.name,
         description: tool.description,

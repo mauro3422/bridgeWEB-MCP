@@ -111,8 +111,10 @@ try {
   const acceptedBody = await accepted.json();
   assert.equal(acceptedBody.duplicate, false);
   const persistedRoute = await waitForJsonlEvent(mssrEventsPath, (event) => event.id === envelope.eventId);
-  assert.deepEqual(persistedRoute?.details?.intent, envelope.event.route.intent,
-    "Bridge must preserve the bounded structured intent projection");
+  assert.deepEqual(persistedRoute?.details?.intent, {
+    summary: "coding: analyze on code.",
+    ...envelope.event.route.intent,
+  }, "Bridge must preserve the bounded structured intent projection and synthesize its canonical summary when omitted");
   const decisionEnvelope = {
     ...envelope,
     eventId: `mssr-ext-http-decision-${Date.now()}`,

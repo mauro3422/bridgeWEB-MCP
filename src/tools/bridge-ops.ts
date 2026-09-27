@@ -9,6 +9,7 @@ import {
   SERVER_NAME,
   SERVER_VERSION,
 } from "../config.js";
+import { RUNTIME_BOOT_ID } from "../runtime-identity.js";
 import type { BridgeToolModule } from "./types.js";
 import { fileExists, resolveToolPath, runShellCommand, summarizeCommand, tailText } from "./shared/process.js";
 import { gitStatus } from "./git-tools.js";
@@ -228,6 +229,7 @@ async function getRuntimeToolCatalog() {
       .map((tool) => tool.name);
     return {
       available: true,
+      runtimeBootId: RUNTIME_BOOT_ID,
       count: names.length,
       hash,
       modules: registry.modules,
@@ -390,7 +392,7 @@ export async function bridgeRestartStatus(cwd?: string) {
 
 async function bridgeHealth(check: "all" | "tunnel" | "restart" | "catalog", cwd?: string) {
   const root = cwd ? resolveToolPath(cwd) : process.cwd();
-  const out: Record<string, unknown> = { server: { name: SERVER_NAME, version: SERVER_VERSION }, cwd: root };
+  const out: Record<string, unknown> = { server: { name: SERVER_NAME, version: SERVER_VERSION, runtimeBootId: RUNTIME_BOOT_ID }, cwd: root };
   if (check === "all" || check === "tunnel") out.tunnel = await tunnelHealth();
   if (check === "all" || check === "restart") out.restart = await bridgeRestartStatus(root);
   if (check === "all" || check === "catalog") out.toolCatalog = await getRuntimeToolCatalog();

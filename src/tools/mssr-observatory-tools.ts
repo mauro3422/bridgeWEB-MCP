@@ -16,6 +16,7 @@ import type { BridgeToolModule } from "./types.js";
 import { startMssrObservabilityEpoch } from "../mssr-observability-epoch.js";
 
 const observatoryKinds = ["status", "summary", "benchmark", "recent", "trace"] as const;
+const observatoryDetails = ["compact", "full"] as const;
 const checkpointStatuses = ["success", "partial", "failed", "skipped"] as const;
 const observatoryScopes = ["active", "all"] as const;
 const reasoningEfforts = ["low", "medium", "high", "xhigh", "max", "ultra", "unknown"] as const;
@@ -31,6 +32,7 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
         properties: {
           kind: { type: "string", enum: observatoryKinds, default: "summary" },
           scope: { type: "string", enum: observatoryScopes, default: "active", description: "active starts at the current trace-contract epoch; all includes preserved legacy telemetry." },
+          detail: { type: "string", enum: observatoryDetails, default: "compact", description: "compact returns a bounded model-facing projection; full is explicit forensic output and may be large." },
           traceId: { type: "string", description: "Required only for kind=trace." },
           days: { type: "number", minimum: 1, maximum: 365, default: 30 },
           limit: { type: "number", minimum: 1, maximum: 200, default: 50 },
@@ -163,6 +165,7 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
       const parsed = z.object({
         kind: z.enum(observatoryKinds).default("summary"),
         scope: z.enum(observatoryScopes).default("active"),
+        detail: z.enum(observatoryDetails).default("compact"),
         traceId: z.string().optional(),
         days: z.number().int().min(1).max(365).default(30),
         limit: z.number().int().min(1).max(200).default(50),

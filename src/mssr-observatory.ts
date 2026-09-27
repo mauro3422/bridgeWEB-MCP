@@ -889,6 +889,13 @@ function boundedRouteIntent(value: unknown, workflowKey?: unknown): JsonRecord |
   };
 }
 
+function portableRouteIntent(value: unknown): JsonRecord | undefined {
+  const parsed = structuredSkillIntentSchema.safeParse(value);
+  if (!parsed.success) return undefined;
+  const { summary: _summary, ...portable } = parsed.data;
+  return portable;
+}
+
 export function recordMssrRoute(args: {
   traceId: string;
   action: "recommend" | "plan" | "bootstrap";
@@ -1794,7 +1801,7 @@ function portableIntentAnalysis(events: readonly MssrStoredEvent[]) {
             deferredSkills: Array.isArray(event.details.deferredSkills) ? event.details.deferredSkills : [],
             loadOrder: Array.isArray(event.details.loadOrder) ? event.details.loadOrder : [],
             deferredLoadOrder: Array.isArray(event.details.deferredLoadOrder) ? event.details.deferredLoadOrder : [],
-            intent: event.details.intent,
+            intent: portableRouteIntent(event.details.intent),
             signals: Array.isArray(event.details.signals) ? event.details.signals : [],
             ambiguity: typeof event.details.ambiguity === "string" ? event.details.ambiguity : undefined,
             requiredPhases: Array.isArray(event.details.requiredPhases) ? event.details.requiredPhases : [],
@@ -2875,20 +2882,207 @@ function summary(days: number, scope: MssrObservatoryScope) {
   };
 }
 
+
+type MssrObservatoryDetail = "compact" | "full";
+
+const COMPACT_OBSERVATORY_EVENT_BUDGET = 12_000;
+const COMPACT_OBSERVATORY_SUMMARY_BUDGET = 64_000;
+
+function compactObservatoryDetails(details: JsonRecord): JsonRecord {
+  const compact: JsonRecord = {};
+  const scalarKeys = [
+    "action", "workflowKey", "taskKey", "parentTraceId", "supersedesTraceId", "status",
+    "evidenceKind", "evidenceRef", "metricName", "score", "accepted", "verificationPassed",
+    "persisted", "requestedContextChars", "deliveredContextChars", "responseChars", "envelopeChars",
+    "remainingRequiredUnits", "remainingAcceptedUnits", "continuationIssued", "chainCompleted", "issueCount",
+  ];
+  for (const key of scalarKeys) {
+    const value = details[key];
+    if (typeof value === "string") compact[key] = value.length > 240 ? `${value.slice(0, 237)}...` : value;
+    else if (typeof value === "number" || typeof value === "boolean") compact[key] = value;
+  }
+  for (const key of ["requiredPhases", "completedPhases", "signals", "workflows", "aliasIds", "changedFields", "unresolvedFields", "issueCodes"] as const) {
+    const value = details[key];
+    if (Array.isArray(value)) compact[key] = value.filter((item) => typeof item === "string").slice(0, 12);
+  }
+  const summary = details.summary;
+  if (typeof summary === "string" && summary.trim()) compact.summary = summary.length > 300 ? `${summary.slice(0, 297)}...` : summary;
+  return compact;
+}
+
+function compactObservatoryEvent(event: MssrStoredEvent) {
+  const details = compactObservatoryDetails(event.details);
+  return {
+    id: event.id,
+    occurredAt: event.occurredAt,
+    traceId: event.traceId,
+    eventType: event.eventType,
+    ...(event.caller ? { caller: event.caller } : {}),
+    ...(event.stage ? { stage: event.stage } : {}),
+    ...(event.classificationMode ? { classificationMode: event.classificationMode } : {}),
+    ...(event.skillName ? { skillName: event.skillName } : {}),
+    ...(typeof event.required === "boolean" ? { required: event.required } : {}),
+    ...(typeof event.ok === "boolean" ? { ok: event.ok } : {}),
+    ...(Object.keys(details).length > 0 ? { details } : {}),
+  };
+}
+
+function boundedCompactObservatoryEvents(events: MssrStoredEvent[], budgetChars = COMPACT_OBSERVATORY_EVENT_BUDGET) {
+  const selected: ReturnType<typeof compactObservatoryEvent>[] = [];
+  let chars = 2;
+  for (const event of events) {
+    const compact = compactObservatoryEvent(event);
+    const eventChars = JSON.stringify(compact).length + (selected.length > 0 ? 1 : 0);
+    if (selected.length > 0 && chars + eventChars > budgetChars) break;
+    selected.push(compact);
+    chars += eventChars;
+    if (chars >= budgetChars) break;
+  }
+  return {
+    events: selected,
+    returnedCount: selected.length,
+    omittedCount: Math.max(0, events.length - selected.length),
+    truncated: selected.length < events.length,
+    approxChars: chars,
+    budgetChars,
+  };
+}
+
+function compactObservatorySummary(full: ReturnType<typeof summary>) {
+  if (!("intentAnalysis" in full)) return full;
+  const learning = full.intentAnalysis.learning;
+  const compact = {
+    ...full,
+    intentAnalysis: {
+      ...full.intentAnalysis,
+      maintenanceCandidates: full.intentAnalysis.maintenanceCandidates.slice(0, 8).map((candidate) => ({
+        ...candidate,
+        traceIds: candidate.traceIds.slice(0, 4),
+      })),
+      learning: {
+        ...learning,
+        skillPriors: learning.skillPriors.slice(0, 12),
+        transitions: learning.transitions.slice(0, 12),
+        contextPriors: learning.contextPriors.slice(0, 12),
+      },
+    },
+    contextAssembly: {
+      ...full.contextAssembly,
+      recentTraces: full.contextAssembly.recentTraces.slice(0, 8),
+      skillPressure: full.contextAssembly.skillPressure.slice(0, 12),
+    },
+    workHistory: {
+      ...full.workHistory,
+      taskStates: full.workHistory.taskStates.slice(0, 20).map((task) => ({
+        ...task,
+        traceIds: task.traceIds.slice(0, 4),
+        openTraceIds: task.openTraceIds.slice(0, 4),
+        closedTraceIds: task.closedTraceIds.slice(0, 4),
+        parentTraceIds: task.parentTraceIds.slice(0, 4),
+        supersedesTraceIds: task.supersedesTraceIds.slice(0, 4),
+        closureDebtTraceIds: task.closureDebtTraceIds.slice(0, 4),
+      })),
+      projects: full.workHistory.projects.slice(0, 12).map((project) => ({
+        ...project,
+        workflowKeys: project.workflowKeys.slice(0, 8),
+      })),
+      openTraces: full.workHistory.openTraces.slice(0, 16),
+      daily: full.workHistory.daily.slice(0, 14),
+    },
+    surfaces: full.surfaces.slice(0, 12),
+    agentProfiles: full.agentProfiles.slice(0, 12),
+    reasoningEffortComparison: full.reasoningEffortComparison.slice(0, 8),
+    top: {
+      ...full.top,
+      selectedSkills: full.top.selectedSkills.slice(0, 12),
+      loadedSkills: full.top.loadedSkills.slice(0, 12),
+      skillOutcomes: full.top.skillOutcomes.slice(0, 12),
+      outcomeSupportingSkills: full.top.outcomeSupportingSkills.slice(0, 12),
+      callers: full.top.callers.slice(0, 8),
+      stages: full.top.stages.slice(0, 8),
+      contextSources: full.top.contextSources.slice(0, 8),
+      normalizedIntentAliases: full.top.normalizedIntentAliases.slice(0, 8),
+    },
+  };
+  let approxChars = JSON.stringify(compact).length;
+  if (approxChars > COMPACT_OBSERVATORY_SUMMARY_BUDGET) {
+    compact.intentAnalysis.learning.skillPriors = compact.intentAnalysis.learning.skillPriors.slice(0, 6);
+    compact.intentAnalysis.learning.transitions = compact.intentAnalysis.learning.transitions.slice(0, 6);
+    compact.intentAnalysis.learning.contextPriors = compact.intentAnalysis.learning.contextPriors.slice(0, 6);
+    compact.intentAnalysis.maintenanceCandidates = compact.intentAnalysis.maintenanceCandidates.slice(0, 6);
+    compact.contextAssembly.recentTraces = compact.contextAssembly.recentTraces.slice(0, 6);
+    compact.contextAssembly.skillPressure = compact.contextAssembly.skillPressure.slice(0, 8);
+    compact.workHistory.taskStates = compact.workHistory.taskStates.slice(0, 8);
+    compact.workHistory.projects = compact.workHistory.projects.slice(0, 8);
+    compact.workHistory.openTraces = compact.workHistory.openTraces.slice(0, 6);
+    compact.agentProfiles = compact.agentProfiles.slice(0, 8);
+    approxChars = JSON.stringify(compact).length;
+  }
+  if (approxChars > COMPACT_OBSERVATORY_SUMMARY_BUDGET - 2_000) {
+    compact.intentAnalysis.learning.skillPriors = compact.intentAnalysis.learning.skillPriors.slice(0, 3);
+    compact.intentAnalysis.learning.transitions = compact.intentAnalysis.learning.transitions.slice(0, 3);
+    compact.intentAnalysis.learning.contextPriors = compact.intentAnalysis.learning.contextPriors.slice(0, 3);
+    compact.intentAnalysis.maintenanceCandidates = compact.intentAnalysis.maintenanceCandidates.slice(0, 4);
+    compact.contextAssembly.recentTraces = compact.contextAssembly.recentTraces.slice(0, 4);
+    compact.contextAssembly.skillPressure = compact.contextAssembly.skillPressure.slice(0, 6);
+    compact.workHistory.taskStates = compact.workHistory.taskStates.slice(0, 5);
+    compact.workHistory.projects = compact.workHistory.projects.slice(0, 6);
+    compact.workHistory.openTraces = compact.workHistory.openTraces.slice(0, 4);
+    compact.agentProfiles = compact.agentProfiles.slice(0, 6);
+    compact.reasoningEffortComparison = compact.reasoningEffortComparison.slice(0, 6);
+    compact.top.skillOutcomes = compact.top.skillOutcomes.slice(0, 8);
+    approxChars = JSON.stringify(compact).length;
+  }
+  return {
+    ...compact,
+    truncation: {
+      fullAvailable: true,
+      approxChars,
+      budgetChars: COMPACT_OBSERVATORY_SUMMARY_BUDGET,
+      originalCounts: {
+        skillPriors: learning.skillPriors.length,
+        transitions: learning.transitions.length,
+        contextPriors: learning.contextPriors.length,
+        maintenanceCandidates: full.intentAnalysis.maintenanceCandidates.length,
+        recentTraces: full.contextAssembly.recentTraces.length,
+        skillPressure: full.contextAssembly.skillPressure.length,
+        taskStates: full.workHistory.taskStates.length,
+        projects: full.workHistory.projects.length,
+        openTraces: full.workHistory.openTraces.length,
+      },
+      returnedCounts: {
+        skillPriors: compact.intentAnalysis.learning.skillPriors.length,
+        transitions: compact.intentAnalysis.learning.transitions.length,
+        contextPriors: compact.intentAnalysis.learning.contextPriors.length,
+        maintenanceCandidates: compact.intentAnalysis.maintenanceCandidates.length,
+        recentTraces: compact.contextAssembly.recentTraces.length,
+        skillPressure: compact.contextAssembly.skillPressure.length,
+        taskStates: compact.workHistory.taskStates.length,
+        projects: compact.workHistory.projects.length,
+        openTraces: compact.workHistory.openTraces.length,
+      },
+    },
+  };
+}
 export function queryMssrObservatory(args: {
   kind?: "status" | "summary" | "benchmark" | "recent" | "trace";
+  detail?: MssrObservatoryDetail;
   traceId?: string;
   days?: number;
   limit?: number;
   scope?: MssrObservatoryScope;
 }) {
   const kind = args.kind ?? "summary";
+  const detail: MssrObservatoryDetail = args.detail === "full" ? "full" : "compact";
   const days = Math.max(1, Math.min(365, Math.trunc(args.days ?? 30)));
   const limit = Math.max(1, Math.min(200, Math.trunc(args.limit ?? 50)));
   const scope: MssrObservatoryScope = args.scope === "all" ? "all" : "active";
   const epoch = getMssrObservabilityEpoch();
-  if (kind === "status") return { ...observatoryStatus(), scope };
-  if (kind === "summary" || kind === "benchmark") return summary(days, scope);
+  if (kind === "status") return { ...observatoryStatus(), scope, detail };
+  if (kind === "summary" || kind === "benchmark") {
+    const fullSummary = summary(days, scope);
+    return { ...(detail === "full" ? fullSummary : compactObservatorySummary(fullSummary)), detail };
+  }
   const database = getDb();
   if (kind === "trace") {
     if (!args.traceId || !validTraceId(args.traceId)) throw new Error("traceId is required for kind=trace and must contain only letters, numbers, dot, underscore, colon, or hyphen.");
@@ -2896,7 +3090,24 @@ export function queryMssrObservatory(args: {
     const trace = scope === "active"
       ? decoded.filter((event) => event.details.observabilityEpoch === epoch.activeEpoch)
       : decoded;
-    return { ...observatoryStatus(), scope, traceId: args.traceId, trace };
+    if (detail === "full") return { ...observatoryStatus(), scope, detail, traceId: args.traceId, trace };
+    const compact = boundedCompactObservatoryEvents(trace);
+    return {
+      ...observatoryStatus(),
+      scope,
+      detail,
+      traceId: args.traceId,
+      trace: compact.events,
+      truncation: {
+        requestedLimit: limit,
+        returnedCount: compact.returnedCount,
+        omittedCount: compact.omittedCount,
+        truncated: compact.truncated,
+        approxEventChars: compact.approxChars,
+        eventBudgetChars: compact.budgetChars,
+        fullAvailable: true,
+      },
+    };
   }
   const persisted = database
     ? database.prepare(`
@@ -2912,7 +3123,23 @@ export function queryMssrObservatory(args: {
   const recent = (scope === "active"
     ? merged.filter((event) => event.details.observabilityEpoch === epoch.activeEpoch)
     : merged).slice(0, limit);
-  return { ...observatoryStatus(), scope, recent };
+  if (detail === "full") return { ...observatoryStatus(), scope, detail, recent };
+  const compact = boundedCompactObservatoryEvents(recent);
+  return {
+    ...observatoryStatus(),
+    scope,
+    detail,
+    recent: compact.events,
+    truncation: {
+      requestedLimit: limit,
+      returnedCount: compact.returnedCount,
+      omittedCount: compact.omittedCount,
+      truncated: compact.truncated,
+      approxEventChars: compact.approxChars,
+      eventBudgetChars: compact.budgetChars,
+      fullAvailable: true,
+    },
+  };
 }
 export function getMssrTraceEvidence(traceId: string, limit = 500) {
   if (!validTraceId(traceId)) {

@@ -470,6 +470,50 @@ function compactSkillSourceHealth(value: unknown): unknown {
   const { discoveryCache: _discoveryCache, ...compactCodex } = codexValue as Record<string, unknown>;
   return { ...health, codex: compactCodex };
 }
+
+function compactWorkflowGuideRecommendation(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const input = value as Record<string, unknown>;
+  const reusable = input.reusablePattern && typeof input.reusablePattern === "object" && !Array.isArray(input.reusablePattern)
+    ? input.reusablePattern as Record<string, unknown>
+    : null;
+  const coverage = input.existingSkillCoverage && typeof input.existingSkillCoverage === "object" && !Array.isArray(input.existingSkillCoverage)
+    ? input.existingSkillCoverage as Record<string, unknown>
+    : null;
+  const compactMatches = (items: unknown, strongOnly = false) => Array.isArray(items)
+    ? items
+      .filter((item) => item && typeof item === "object" && !Array.isArray(item))
+      .map((item) => item as Record<string, unknown>)
+      .filter((item) => !strongOnly || item.strongMatch === true)
+      .slice(0, 3)
+      .map((item) => ({
+        name: item.name,
+        title: item.title,
+        source: item.source,
+        score: item.score,
+        strongMatch: item.strongMatch === true,
+        reasons: Array.isArray(item.reasons) ? item.reasons.filter((reason): reason is string => typeof reason === "string").slice(0, 2) : [],
+      }))
+    : [];
+  return {
+    searchedScopes: Array.isArray(input.searchedScopes) ? input.searchedScopes.slice(0, 4) : [],
+    guideCount: input.guideCount,
+    guideWarnings: Array.isArray(input.guideWarnings) ? input.guideWarnings.slice(0, 3) : [],
+    reusablePattern: reusable ? {
+      detected: reusable.detected === true,
+      score: reusable.score,
+      signals: Array.isArray(reusable.signals) ? reusable.signals.slice(0, 4) : [],
+    } : null,
+    existingSkillCoverage: coverage ? {
+      covered: coverage.covered === true,
+      threshold: coverage.threshold,
+      matches: compactMatches(coverage.matches),
+      warningCount: Array.isArray(coverage.warnings) ? coverage.warnings.length : 0,
+    } : null,
+    matches: compactMatches(input.matches, true),
+    recommendation: input.recommendation ?? null,
+  };
+}
 function compactSkillRoute<T extends Record<string, unknown>>(route: T): Record<string, unknown> {
   const compactSkills = (value: unknown) => Array.isArray(value)
     ? value.map(compactRoutedSkill).filter((item): item is Record<string, unknown> => Boolean(item))
@@ -506,7 +550,7 @@ function compactSkillRoute<T extends Record<string, unknown>>(route: T): Record<
     systemAwareness: route.systemAwareness,
     contextPlane: compactRouteContextPlane(route.contextPlane),
     contextMessages: compactBootstrapContextMessages(route.contextMessages),
-    workflowGuideRecommendation: route.workflowGuideRecommendation,
+    workflowGuideRecommendation: compactWorkflowGuideRecommendation(route.workflowGuideRecommendation),
     workflowGuide: route.workflowGuide,
     bridgeTiming: route.bridgeTiming,
     __bridgeNotices: route.__bridgeNotices,
@@ -1632,16 +1676,24 @@ export const skillCatalogToolModule: BridgeToolModule = {
         ? path.resolve(args.projectRoot.trim())
         : null;
       if (projectRoot) await assertPathAllowedAsync(projectRoot, "read");
+      const requestedProjectContextChars = z.number().int().min(2_000).max(80_000).catch(12_000).parse(args.maxProjectContextChars ?? 12_000);
+      const requestedProjectContextModules = z.number().int().min(0).max(32).catch(8).parse(args.maxProjectContextModules ?? 8);
+      const requestedContextMessages = z.number().int().min(0).max(32).catch(12).parse(args.maxContextMessages ?? 12);
+      const requestedContextMessageChars = z.number().int().min(0).max(20_000).catch(6_000).parse(args.maxContextMessageChars ?? 6_000);
+      const maxProjectContextChars = responseMode === "debug" ? requestedProjectContextChars : Math.min(requestedProjectContextChars, 6_000);
+      const maxProjectContextModules = responseMode === "debug" ? requestedProjectContextModules : Math.min(requestedProjectContextModules, 4);
+      const maxContextMessages = responseMode === "debug" ? requestedContextMessages : Math.min(requestedContextMessages, 4);
+      const maxContextMessageChars = responseMode === "debug" ? requestedContextMessageChars : Math.min(requestedContextMessageChars, 2_000);
       const contextPlane = projectRoot
         ? await timing.measure("context.plane", () => prepareMssrContextPlane({
             projectRoot,
             intent: routedIntent,
             stage: route.stage,
             contextNow: args.contextNow,
-            maxProjectContextChars: z.number().int().min(2_000).max(80_000).catch(12_000).parse(args.maxProjectContextChars ?? 12_000),
-            maxProjectContextModules: z.number().int().min(0).max(32).catch(8).parse(args.maxProjectContextModules ?? 8),
-            maxContextMessages: z.number().int().min(0).max(32).catch(12).parse(args.maxContextMessages ?? 12),
-            maxContextMessageChars: z.number().int().min(0).max(20_000).catch(6_000).parse(args.maxContextMessageChars ?? 6_000),
+            maxProjectContextChars,
+            maxProjectContextModules,
+            maxContextMessages,
+            maxContextMessageChars,
             inboxConfig: args.inboxConfig,
             contextMessages: args.contextMessages,
           }))
@@ -1650,8 +1702,8 @@ export const skillCatalogToolModule: BridgeToolModule = {
         messages: args.contextMessages,
         intent: routedIntent,
         stage: route.stage,
-        maxMessages: args.maxContextMessages,
-        maxChars: args.maxContextMessageChars,
+        maxMessages: maxContextMessages,
+        maxChars: maxContextMessageChars,
       });
       const contextMessages = contextPlane?.contextMessages ?? inlineContextMessages?.selection ?? null;
       const contextMessageNotices = contextPlane
@@ -1759,10 +1811,14 @@ export const skillCatalogToolModule: BridgeToolModule = {
       }).strict()).max(128).parse(args.retainedContextObligations ?? []) as SkillContextRetentionReceipt[];
       const responseMode = z.enum(routeResponseModes).catch("compact").parse(args.responseMode ?? "compact");
       const requestedProjectContextChars = z.number().int().min(2_000).max(80_000).catch(12_000).parse(args.maxProjectContextChars ?? 12_000);
+      const requestedProjectContextModules = z.number().int().min(0).max(32).catch(8).parse(args.maxProjectContextModules ?? 8);
+      const requestedContextMessages = z.number().int().min(0).max(32).catch(12).parse(args.maxContextMessages ?? 12);
       const requestedContextMessageChars = z.number().int().min(0).max(20_000).catch(6_000).parse(args.maxContextMessageChars ?? 6_000);
       const maxProjectContextChars = responseMode === "debug"
         ? requestedProjectContextChars
         : Math.min(requestedProjectContextChars, Math.max(2_000, Math.floor(maxEnvelopeChars * 0.22)));
+      const maxProjectContextModules = responseMode === "debug" ? requestedProjectContextModules : Math.min(requestedProjectContextModules, 4);
+      const maxContextMessages = responseMode === "debug" ? requestedContextMessages : Math.min(requestedContextMessages, 4);
       const maxContextMessageChars = responseMode === "debug"
         ? requestedContextMessageChars
         : Math.min(requestedContextMessageChars, Math.max(0, Math.floor(maxEnvelopeChars * 0.10)));
@@ -1778,8 +1834,8 @@ export const skillCatalogToolModule: BridgeToolModule = {
             stage: route.stage,
             contextNow: args.contextNow,
             maxProjectContextChars,
-            maxProjectContextModules: z.number().int().min(0).max(32).catch(8).parse(args.maxProjectContextModules ?? 8),
-            maxContextMessages: z.number().int().min(0).max(32).catch(12).parse(args.maxContextMessages ?? 12),
+            maxProjectContextModules,
+            maxContextMessages,
             maxContextMessageChars,
             inboxConfig: args.inboxConfig,
             contextMessages: args.contextMessages,
@@ -1789,7 +1845,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         messages: args.contextMessages,
         intent: routedIntent,
         stage: route.stage,
-        maxMessages: args.maxContextMessages,
+        maxMessages: maxContextMessages,
         maxChars: maxContextMessageChars,
       });
       const contextMessages = contextPlane?.contextMessages ?? inlineContextMessages?.selection ?? null;
@@ -1952,7 +2008,9 @@ export const skillCatalogToolModule: BridgeToolModule = {
         selection,
         projectContext: compactProjectContext,
         contextMessages: compactBootstrapContextMessages(contextMessages),
-        workflowGuideRecommendation: workflowGuideResolution.recommendation,
+        workflowGuideRecommendation: responseMode === "debug"
+          ? workflowGuideResolution.recommendation
+          : compactWorkflowGuideRecommendation(workflowGuideResolution.recommendation),
         workflowGuide: postContextAction ? null : workflowGuideResolution.workflowGuide,
         workflowGuideDelivery,
         sourceHealth: compactSkillSourceHealth(discovered.sourceHealth),
