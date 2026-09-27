@@ -154,15 +154,33 @@ Final safety evidence:
 
 No remote push was performed. Remote publication remains a separate explicit decision. The reusable rule remains unchanged: never use `git add -A`, blind restore, reset or cleanup on a shared dirty tree until ownership, rollback and parity are observable.
 
-## Current execution checkpoint — 2026-09-26
+## P7 — MSSR control-plane proportionality / friction audit — ACTIVE
+
+The continuity layer has proven useful under interrupted/compacted conversational surfaces, but the control plane must stay proportional to the operation. The evidence-backed audit is tracked in `docs/MSSR_FRICTION_AUDIT_2026-09-27.md`.
+
+Current findings:
+
+- R2 already intends trivial reads/inspection to stay lightweight; the problem is not a missing lightweight concept but how agent/host intent, managed routing and lifecycle obligations compose after activation;
+- one real audit bootstrap returned 31,638 characters on its first page plus 13,004 on continuation to deliver 10,420 procedural characters, showing that a caller-visible skill budget is not the same thing as the real total control envelope;
+- cold guide recommendation can dominate `project_context_load` even when it selects no guide;
+- semantic fields such as `review` and `repeated-friction` can legitimately but unexpectedly ratchet verification/maintenance requirements when the agent over-classifies a small task;
+- observability itself is currently unsafe for model attention at large bounds: one live query took ~81 s and emitted 463,716 characters, while another audit summary took ~92 s;
+- a synthetic route in a sibling project can become the sticky implicit session attribution for later calls; R1 correctly blocks cross-owner adoption, but observability/debt provenance can still become noisy until the owner is explicitly restored;
+- R3 retention safety is correct, but compaction/restart can force procedural re-delivery and therefore amplify context pressure after a conversational interruption.
+
+P7 must extend the existing R2/R3 contracts instead of creating a parallel router. Priorities are bounded observatory output + durable async/export recovery, explicit/scoped multi-project trace attribution, one surfaced total control-context budget, telemetry/synthetic routing without human lifecycle debt, a first-class cheap retire/cancel path for synthetic traces plus close-intent scope guards, lazy guide discovery, intent-escalation explainability, and idle-reminder backoff around known progress. Existing R1/R2/R3 safety gates remain non-negotiable.
+
+Success gate: trivial operations remain truly lightweight; bounded read-only inquiries have a visible small total context cost; synthetic/audit probes do not pollute human backlog/debt; cross-project attribution remains exact; and deep observability requires explicit opt-in rather than returning unbounded context by default.
+
+## Current execution checkpoint — 2026-09-27
 
 Current status and follow-up priority:
 
 1. **P1 + P2 + P3 adopted live:** `Al volver` separates forensic/support recovery from the human backlog, MSSR 0.2.77 provides explicit task identity/lineage, capability inventory stays dynamically derived from runtime tools/Skill Health/workflow guides, and the new response-time terminal overlay prevents a genuinely progressing Bridge process from masquerading as abandoned lifecycle debt without persisting liveness as project truth;
 2. **P4 phase B adopted live:** bounded context inventory + daily snapshots feed both weekly reconstruction and **Últimos 30 días**. Live evidence after restart `fba9953d-78cf-4578-bd06-b4458c03fbf3` is 9/30 retained days (30% truthful coverage), 19 projects, 144 workflows and 470 trace-day observations; the view becomes more complete automatically as daily snapshots accumulate;
 3. **P5A + P5B adopted live:** the Cockpit classifies observed projects conservatively and terminal states have an explicit owner contract in `.mssr/PROJECT_STATE.md`, with invalid-metadata REVIEW and stale-state conflict detection. No terminal labels are mass-written;
-4. **P6 completed locally:** the former 92-path shared dirty tree was reconstructed with durable rollback and ownership-safe commits. The old shared mess is no longer the blocker; the current Context Director slice is a small scoped worktree intended for one reviewed local commit, while remote publication remains deliberately separate;
-5. **next product priority:** optimize the explicit missing/corrupt context-cache recovery path now that profiling isolated the heavy owners (~32.0 s active 30-day MSSR summary + ~40.2 s seven-day `scope=all`), then define snapshot retention/quota policy, and finally make lifecycle-debt triage/aging easier to review. Capability/schema freshness stays dynamic rather than copied into AGENTS or assistant memory.
+4. **P6 + Context Director persistence completed locally:** the former 92-path shared dirty tree was reconstructed with durable rollback and ownership-safe commits, and the runtime/30-day Context Director slice was subsequently persisted as scoped local commit `d4a5fe2`; remote publication remains deliberately separate;
+5. **current product priority:** complete P7 MSSR proportionality hardening first—bound observability, fix scoped trace attribution, expose total context cost and prevent synthetic/read-only work from creating disproportionate lifecycle debt—then return to the already-isolated P4 missing/corrupt-cache recovery cost (~32.0 s active 30-day MSSR summary + ~40.2 s seven-day `scope=all`) and snapshot retention/quota policy. Capability/schema freshness stays dynamic rather than copied into AGENTS or assistant memory.
 
 A new workspace-level `D:\Dev\AGENTS.md` owns only transversal procedure: Bridge-first local recovery, MSSR lifecycle, dynamic capability discovery, support-trace handling and safe shared-tree rules. It deliberately contains no static tool/skill catalog; repository-local `AGENTS.md` and `.mssr/` remain the project authorities.
 

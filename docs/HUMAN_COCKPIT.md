@@ -61,6 +61,23 @@ Forensic/support workflows used only to reconstruct other work—currently bound
 
 Both active work and lifecycle-debt items retain a privacy-safe `resumePacket` with project, task identity plus its source (`explicit-mssr` or legacy fallback), workflow key(s), related trace ids and lineage refs, last human summary, last lifecycle stage, required/completed phases, next gate, latest bounded evidence reference, and latest activity time. The packet contains no raw prompt, transcript, secret, or private reasoning. Its purpose is to recover after a chat is truncated, compacted, abandoned, or resumed in another conversation: load the owning project, correlate MSSR/Git evidence, and continue from the smallest verified state instead of asking Mauro to reconstruct the whole chat manually.
 
+## MSSR proportionality and control-plane cost — planned P7
+
+The Cockpit must not summarize MSSR efficiency only as a relative percentage saved against a theoretical full load. A task can save a large percentage and still consume an excessive absolute control payload. The P7 projection should therefore expose, when observable, a bounded **MSSR cost** block with:
+
+- total returned control/envelope characters and page count;
+- procedural skill-context characters;
+- Project Context characters;
+- Context Message characters;
+- routing and workflow-guide latency;
+- retained/suppressed vs re-delivered procedural characters after replan/compaction;
+- lifecycle phases/events created by the route;
+- a compact `why loaded` explanation naming the exact intent/phase/effect signal that escalated each required skill or phase.
+
+Normal UI should remain compact and show warnings only when thresholds are crossed; detailed source breakdown belongs behind expansion/debug. A synthetic routing probe, observability audit or support trace must be explicitly identifiable as technical evidence and must not inflate Mauro's human active-work or **Deuda MSSR** lanes. Existing `synthetic-test` and support-work classification is the starting point, but P7 must generalize it to intentional telemetry/audit probes rather than relying only on known fixture-name patterns.
+
+The cost projection is diagnostic, not authority. It must not change routing or auto-close traces. Its purpose is to make disproportionate control-plane behavior visible: for example, a tiny read-only task that caused multiple context pages, guide discovery, verification/maintenance requirements or a large re-delivery after compaction.
+
 ## Capability inventory
 
 The Cockpit exposes **Qué puede hacer el sistema hoy** as a dynamic owner projection rather than a manually maintained capability list. It groups the registered Bridge runtime catalog by tool family, joins the latest persisted Skill Health counts/status, and reports the number of installed Bridge workflow guides. Stable capability discovery therefore follows the live owners instead of duplicating volatile tool/skill names into `AGENTS.md` or assistant memory.
