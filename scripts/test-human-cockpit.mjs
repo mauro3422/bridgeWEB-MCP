@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { buildCapabilityInventory, buildHumanCockpitSnapshot } from "../dist/dashboard-cockpit.js";
+import { buildCapabilityInventory, buildHumanCockpitSnapshot, enrichHumanCockpitWithRuntimeTerminals } from "../dist/dashboard-cockpit.js";
 import { renderDashboardHtml } from "../dist/dashboard.js";
 
 const now = new Date("2026-09-24T04:00:00.000Z");
@@ -473,6 +473,60 @@ assert.equal(cutChatTask.resumePacket.project, "bridge-mcp");
 assert.equal(cutChatTask.resumePacket.lastKnownSummary, "Chat ended after implementation; verification was not recorded.");
 assert.deepEqual(cutChatTask.resumePacket.completedPhases, ["discovery", "implementation"]);
 assert.equal(cutChatTask.resumePacket.evidenceRef, "docs/context-cut-evidence.md");
+
+const runtimeActiveCockpit = enrichHumanCockpitWithRuntimeTerminals({
+  cockpit,
+  now,
+  terminals: [{
+    id: "term-cut-chat-live",
+    traceId: "trace-cut-chat",
+    state: "timed-out-alive",
+    activityState: "progressing",
+    running: true,
+    timedOut: true,
+    startedAtIso: "2026-09-24T03:30:00.000Z",
+    lastProgressAtIso: "2026-09-24T03:59:30.000Z",
+    lastOutputAtIso: "2026-09-24T03:59:30.000Z",
+  }],
+});
+assert.equal(runtimeActiveCockpit.morningBrief.rawLifecycleDebtTaskCount, 1);
+assert.equal(runtimeActiveCockpit.morningBrief.lifecycleDebtTaskCount, 0, "progressing runtime work must be deferred from visible closure debt");
+assert.equal(runtimeActiveCockpit.morningBrief.runtimeDeferredLifecycleDebtTaskCount, 1);
+assert.equal(runtimeActiveCockpit.morningBrief.openTaskCount, 2);
+assert.equal(runtimeActiveCockpit.morningBrief.runtimeOverlay.persisted, false);
+assert.equal(runtimeActiveCockpit.morningBrief.runtimeOverlay.activeTerminalCount, 1);
+const runtimeActiveTask = runtimeActiveCockpit.morningBrief.tasks.find((task) => task.workflowKey === "cut-chat-recovery");
+assert.ok(runtimeActiveTask, "progressing runtime debt should project back into active tasks");
+assert.equal(runtimeActiveTask.canonicalNeedsClosureReview, true);
+assert.equal(runtimeActiveTask.needsClosureReview, false);
+assert.equal(runtimeActiveTask.lifecycleDebtDeferredByRuntime, true);
+assert.equal(runtimeActiveTask.classification.state, "active");
+assert.equal(runtimeActiveTask.classification.basis, "runtime-terminal");
+assert.equal(runtimeActiveTask.runtimeActivity.timedOutAlive, true);
+assert.equal(runtimeActiveTask.resumePacket.nextGate, "proceso vivo: esperar / inspeccionar progreso");
+
+const runtimeStaleCockpit = enrichHumanCockpitWithRuntimeTerminals({
+  cockpit,
+  now,
+  recentProgressMs: 5 * 60 * 1000,
+  terminals: [{
+    id: "term-cut-chat-idle",
+    traceId: "trace-cut-chat",
+    state: "timed-out-alive",
+    activityState: "idle",
+    running: true,
+    timedOut: true,
+    startedAtIso: "2026-09-24T03:00:00.000Z",
+    lastProgressAtIso: "2026-09-24T03:40:00.000Z",
+    lastOutputAtIso: "2026-09-24T03:40:00.000Z",
+  }],
+});
+assert.equal(runtimeStaleCockpit.morningBrief.lifecycleDebtTaskCount, 1, "alive but stale runtime work must remain closure debt");
+assert.equal(runtimeStaleCockpit.morningBrief.runtimeDeferredLifecycleDebtTaskCount, 0);
+const runtimeStaleDebt = runtimeStaleCockpit.morningBrief.lifecycleDebt.find((task) => task.workflowKey === "cut-chat-recovery");
+assert.equal(runtimeStaleDebt.runtimeActivity.active, true);
+assert.equal(runtimeStaleDebt.runtimeActivity.progressing, false);
+assert.equal(runtimeStaleDebt.needsClosureReview, true);
 assert.equal(cockpit.workspaceMap.scope, "observed-7d-plus-open");
 assert.equal(cockpit.workspaceMap.projectCount, 1);
 assert.equal(cockpit.workspaceMap.counts.active, 1);
@@ -547,6 +601,9 @@ assert.match(html, /id="cockpit-traces"/);
 assert.match(html, /id=\"cockpit-weekly-summary\"/);
 assert.match(html, /id=\"cockpit-weekly-projects\"/);
 assert.match(html, /Qué hicimos esta semana/);
+assert.match(html, /id=\"cockpit-history-summary\"/);
+assert.match(html, /id=\"cockpit-history-projects\"/);
+assert.match(html, /Últimos 30 días/);
 assert.match(html, /cockpit-return-summary/);
 assert.match(html, /cockpit-yesterday/);
 assert.match(html, /cockpit-open-tasks/);

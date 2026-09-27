@@ -7,6 +7,48 @@ import { fileURLToPath } from "node:url";
 
 const workerPath = fileURLToPath(new URL("../dist/dashboard-mssr-worker.js", import.meta.url));
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "bridge-dashboard-worker-reuse-"));
+const inventoryStatePath = path.join(sandbox, "context-inventory-state.json");
+const now = new Date();
+const today = now.toISOString().slice(0, 10);
+const since = new Date(now.getTime() - 7 * 86_400_000).toISOString();
+fs.writeFileSync(inventoryStatePath, JSON.stringify({
+  schemaVersion: 1,
+  savedAt: now.toISOString(),
+  refreshedAt: now.toISOString(),
+  refreshReason: "test-fixture",
+  sourceLatestAt: "9999-12-31T23:59:59.999Z",
+  weeklySummary: {
+    scope: "all",
+    days: 7,
+    since,
+    workHistory: {
+      scope: "all",
+      days: 7,
+      since,
+      traceCount: 0,
+      substantiveTraceCount: 0,
+      projectCount: 0,
+      projects: [],
+    },
+  },
+  weeklyGitStates: [],
+  dailySnapshots: [{
+    date: today,
+    capturedAt: now.toISOString(),
+    latestAt: null,
+    traceCount: 0,
+    projectCount: 0,
+    projects: [],
+    workflowKeys: [],
+    openTraceCount: 0,
+    humanOpenTraceCount: 0,
+    supportOpenTraceCount: 0,
+    needsClosureReviewCount: 0,
+    humanNeedsClosureReviewCount: 0,
+    supportNeedsClosureReviewCount: 0,
+    latestSummaries: [],
+  }],
+}, null, 2));
 const child = fork(workerPath, [], {
   stdio: ["ignore", "ignore", "ignore", "ipc"],
   execArgv: [],

@@ -5,6 +5,7 @@ import { parentPort } from "node:worker_threads";
 import { buildCapabilityInventory, buildHumanCockpitSnapshot, collectCockpitGitStates, collectWeeklyGitStates } from "./dashboard-cockpit.js";
 import {
   buildContextInventoryCacheState,
+  buildContextInventoryRollingWindow,
   contextInventoryRefreshDecision,
   loadContextInventoryCacheState,
   persistContextInventoryCacheState,
@@ -84,6 +85,10 @@ async function buildSnapshot() {
     skillHealth,
     workflowGuideCount,
   });
+  const rolling30d = buildContextInventoryRollingWindow({
+    dailySnapshots: inventoryState.dailySnapshots,
+    days: 30,
+  });
   const contextInventory = {
     schemaVersion: 1,
     mode: inventoryDecision.refresh ? "refreshed" : "cached",
@@ -93,6 +98,7 @@ async function buildSnapshot() {
     maxAgeMs: CONTEXT_INVENTORY_MAX_AGE_MS,
     dailySnapshotCount: inventoryState.dailySnapshots.length,
     oldestDailySnapshot: inventoryState.dailySnapshots.at(-1)?.date ?? null,
+    rolling30d,
     newestDailySnapshot: inventoryState.dailySnapshots[0]?.date ?? null,
     recoveryMode: "scope-all-rebuild",
   };

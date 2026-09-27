@@ -964,6 +964,7 @@ function renderCockpit(cockpit) {
   const openTasks = brief.tasks || [];
   const lifecycleDebt = brief.lifecycleDebt || [];
   const contextInventory = root.contextInventory || {};
+  const rolling30d = contextInventory.rolling30d || {};
   const closureReviewCount = Number(brief.lifecycleDebtTaskCount || brief.needsClosureReviewCount || 0);
   const activeTaskCount = Number(brief.openTaskCount || openTasks.length || 0);
   setPill(
@@ -980,7 +981,7 @@ function renderCockpit(cockpit) {
     returnSummaryTarget.innerHTML = [
       { label: 'Ayer', value: num(yesterday.projectCount || 0) + ' proyectos', detail: num(yesterday.traceCount || 0) + ' trazas sustantivas observadas' },
       { label: 'Trabajo activo', value: num(activeTaskCount), detail: 'tareas sin recordatorio de cierre pendiente' },
-      { label: 'Deuda MSSR', value: num(closureReviewCount), detail: 'sin outcome; requiere revisar, no continuar automáticamente' },
+      { label: 'Deuda MSSR', value: num(closureReviewCount), detail: num(brief.runtimeDeferredLifecycleDebtTaskCount || 0) + ' diferida(s) por proceso vivo · sin outcome visible requiere revisión explícita' },
       { label: 'Inventario', value: contextInventory.mode === 'cached' ? 'cache' : contextInventory.mode === 'refreshed' ? 'actualizado' : 'sin estado', detail: num(contextInventory.dailySnapshotCount || 0) + ' días guardados · ' + (contextInventory.refreshedAt ? dateTime(contextInventory.refreshedAt) : 'sin snapshot durable') },
     ].map((item) => '<div class="cockpit-return-stat"><span>' + esc(item.label) + '</span><strong>' + esc(item.value) + '</strong><small>' + esc(item.detail) + '</small></div>').join('');
   }
@@ -1011,11 +1012,15 @@ function renderCockpit(cockpit) {
           ? 'fallback legacy proyecto + workflow'
           : 'fallback legacy por traza';
       const lineageCount = Number((task.parentTraceIds || []).length) + Number((task.supersedesTraceIds || []).length);
+      const runtimeActivity = task.runtimeActivity || {};
+      const runtimeLabel = runtimeActivity.active === true
+        ? runtimeActivity.progressing === true ? ' · proceso vivo/progresando' : ' · proceso vivo/sin progreso reciente'
+        : '';
       return '<div class="cockpit-open-task" data-needs-closure="' + (needsClosure ? 'true' : 'false') + '">' +
         '<div class="cockpit-open-task-head"><div><strong>' + esc(projectLabel) + '</strong><span>' + esc(taskLabel) + '</span></div>' +
         '<span class="status-pill" data-tone="' + tone + '"><span class="dot ' + tone + '"></span><span>' + esc(needsClosure ? 'revisar cierre' : task.nextGate || 'continuar') + '</span></span></div>' +
         '<div class="cockpit-open-task-summary">' + esc(task.latestSummary || 'Sin summary humano explícito; se conserva la procedencia de las trazas.') + '</div>' +
-        '<div class="recent-detail">' + num((task.traceIds || []).length) + ' traza(s) · última actividad ' + esc(dateTime(task.latestAt)) + ' · ' + esc(identityLabel) + (lineageCount > 0 ? ' · ' + num(lineageCount) + ' enlace(s) de lineage' : '') + '</div>' +
+        '<div class="recent-detail">' + num((task.traceIds || []).length) + ' traza(s) · última actividad ' + esc(dateTime(task.latestAt)) + ' · ' + esc(identityLabel) + (lineageCount > 0 ? ' · ' + num(lineageCount) + ' enlace(s) de lineage' : '') + esc(runtimeLabel) + '</div>' +
       '</div>';
     }).join('') : '<div class="empty-state">No hay tareas sustantivas abiertas observables en la ventana semanal.</div>';
   }
@@ -1023,12 +1028,25 @@ function renderCockpit(cockpit) {
   const lifecycleDebtTarget = byId('cockpit-lifecycle-debt');
   if (lifecycleDebtTarget) {
     lifecycleDebtTarget.innerHTML = lifecycleDebt.length ? lifecycleDebt.slice(0, 10).map((task) => {
-      const taskLabel = task.workflowKey || task.latestSummary || task.taskKey || 'deuda de lifecycle';
+      const packet = task.resumePacket || {};
+      const taskLabel = task.taskKeySource === 'explicit-mssr'
+        ? task.taskKey
+        : packet.workflowKey || task.workflowKey || packet.lastKnownSummary || task.latestSummary || task.taskKey || 'deuda de lifecycle';
+      const completedPhases = packet.completedPhases || task.completedPhases || [];
+      const requiredPhases = packet.requiredPhases || task.requiredPhases || [];
+      const phaseProgress = requiredPhases.length
+        ? num(completedPhases.length) + '/' + num(requiredPhases.length) + ' fases · hechas: ' + (completedPhases.length ? completedPhases.map(phaseLabel).join(', ') : 'ninguna registrada')
+        : completedPhases.length ? 'hechas: ' + completedPhases.map(phaseLabel).join(', ') : 'sin contrato de fases observable';
+      const nextGate = packet.nextGate || task.nextGate || 'revisar si retomar / cerrar outcome';
+      const evidence = packet.evidenceRef || task.evidenceRef;
+      const lastStage = packet.lastKnownStage || task.latestStage || 'stage no registrado';
       return '<div class="cockpit-open-task" data-needs-closure="true">' +
-        '<div class="cockpit-open-task-head"><div><strong>' + esc(task.project || 'Proyecto') + '</strong><span>' + esc(taskLabel) + '</span></div>' +
-        '<span class="status-pill" data-tone="warn"><span class="dot warn"></span><span>revisar outcome</span></span></div>' +
-        '<div class="cockpit-open-task-summary">' + esc(task.latestSummary || 'Trabajo sustantivo sin outcome posterior observable.') + '</div>' +
-        '<div class="recent-detail">' + num((task.traceIds || []).length) + ' traza(s) · última actividad ' + esc(dateTime(task.latestAt)) + ' · no se considera trabajo activo hasta revisión explícita</div>' +
+        '<div class="cockpit-open-task-head"><div><strong>' + esc(packet.project || task.project || 'Proyecto') + '</strong><span>' + esc(taskLabel) + '</span></div>' +
+        '<span class="status-pill" data-tone="warn"><span class="dot warn"></span><span>' + esc(nextGate) + '</span></span></div>' +
+        '<div class="cockpit-open-task-summary">' + esc(packet.lastKnownSummary || task.latestSummary || 'Trabajo sustantivo sin outcome posterior observable.') + '</div>' +
+        '<div class="recent-detail">último stage: ' + esc(lastStage) + ' · ' + esc(phaseProgress) + ' · actividad ' + esc(dateTime(packet.latestAt || task.latestAt)) + '</div>' +
+        (evidence ? '<div class="recent-detail">evidencia: ' + esc(evidence) + '</div>' : '') +
+        '<div class="recent-detail">procedencia: ' + num((packet.traceIds || task.traceIds || []).length) + ' traza(s) · revisar antes de retomar o cerrar</div>' +
       '</div>';
     }).join('') : '<div class="empty-state">No hay deuda MSSR humana separada del trabajo activo.</div>';
   }
@@ -1170,6 +1188,39 @@ function renderCockpit(cockpit) {
         '<td>' + esc(project.pendingHint || '—') + '</td>' +
       '</tr>';
     }).join('') : '<tr><td colspan="6" class="muted">No hay proyectos MSSR correlacionados en la ventana semanal.</td></tr>';
+  }
+
+  const historyCoverage = Math.max(0, Math.min(1, Number(rolling30d.coverageRatio || 0)));
+  const historyCoveragePct = Math.round(historyCoverage * 100);
+  const historySnapshots = Number(rolling30d.snapshotCount || 0);
+  const historyDays = Number(rolling30d.days || 30);
+  setPill(
+    'cockpit-history-window',
+    rolling30d.coverage === 'complete' ? 'ok' : historySnapshots > 0 ? 'warn' : 'info',
+    num(historyDays) + ' días · ' + num(historyCoveragePct) + '% cobertura',
+  );
+  const historySummaryTarget = byId('cockpit-history-summary');
+  if (historySummaryTarget) {
+    historySummaryTarget.innerHTML = [
+      { label: 'Cobertura', value: num(historySnapshots) + '/' + num(historyDays) + ' días', detail: rolling30d.coverage === 'complete' ? 'ventana diaria completa' : 'parcial · se completa con snapshots diarios' },
+      { label: 'Días con actividad', value: num(rolling30d.activityDayCount || 0), detail: num(rolling30d.traceDayObservations || 0) + ' observaciones de trazas por día' },
+      { label: 'Proyectos', value: num(rolling30d.projectCount || 0), detail: 'únicos observados en snapshots retenidos' },
+      { label: 'Workflows', value: num(rolling30d.workflowCount || 0), detail: 'identidades observadas sin nuevo scope=all' },
+    ].map((item) => '<div class="cockpit-weekly-stat"><span>' + esc(item.label) + '</span><strong>' + esc(item.value) + '</strong><small>' + esc(item.detail) + '</small></div>').join('');
+  }
+  const historyProjectTarget = byId('cockpit-history-projects');
+  if (historyProjectTarget) {
+    const historySummaries = new Map((rolling30d.latestSummaries || []).map((item) => [String(item.project || '').toLowerCase(), item]));
+    const historyProjects = rolling30d.projects || [];
+    historyProjectTarget.innerHTML = historyProjects.length ? historyProjects.slice(0, 24).map((project) => {
+      const summary = historySummaries.get(String(project.name || '').toLowerCase());
+      return '<tr>' +
+        '<td><strong>' + esc(project.name || 'Proyecto') + '</strong></td>' +
+        '<td>' + num(project.activeDays || 0) + '</td>' +
+        '<td>' + esc(project.lastSeenDate || '—') + '</td>' +
+        '<td>' + esc(summary?.summary || 'Sin resumen diario retenido para este proyecto.') + (summary?.date ? '<div class="recent-detail">snapshot ' + esc(summary.date) + '</div>' : '') + '</td>' +
+      '</tr>';
+    }).join('') : '<tr><td colspan="4" class="muted">Todavía no hay snapshots diarios suficientes para una vista de 30 días.</td></tr>';
   }
 
   const traceTarget = byId('cockpit-traces');

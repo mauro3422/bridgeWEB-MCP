@@ -13,6 +13,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { createBridgeServer, createModernBridgeServer } from "./bridge-server.js";
 import { getBridgeHttpConfig, SERVER_NAME, SERVER_VERSION } from "./config.js";
 import { renderDashboardHtml } from "./dashboard.js";
+import { enrichHumanCockpitWithRuntimeTerminals } from "./dashboard-cockpit.js";
 import { closeRobloxMcpConnection } from "./integrations/roblox-mcp-client.js";
 import { getMetricsErrors, getMetricsOverview, getMetricsStatus, getMetricsSummary, getMetricsTimeline, getRecentMetrics } from "./metrics.js";
 import { emitBridgeNotice, peekBridgeNoticeHistory } from "./notices.js";
@@ -26,6 +27,7 @@ import { getProjectHealthReport, startProjectHealthScheduler } from "./project-h
 import { buildProjectHealthNoticeInputs, buildSkillHealthNoticeInputs } from "./operational-notices.js";
 import { getRuntimeHealthReport, observeBridgeRuntimeHealth, startRuntimeHealthScheduler } from "./runtime-health.js";
 import { getReleaseConsistencyReport, startReleaseConsistencyScheduler } from "./release-consistency.js";
+import { terminalList } from "./tools/process-tools.js";
 import { buildProjectSituationNoticeInputs, getProjectSituationReport, startProjectSituationScheduler } from "./project-situation.js";
 
 const config = getBridgeHttpConfig();
@@ -416,10 +418,26 @@ function refreshDashboardSnapshot(): Promise<Record<string, unknown>> {
   return dashboardSnapshotInFlight;
 }
 
+function withDashboardRuntimeOverlay(value: Record<string, unknown>): Record<string, unknown> {
+  const cockpit = value.cockpit;
+  if (!cockpit || typeof cockpit !== "object") return value;
+  try {
+    return {
+      ...value,
+      cockpit: enrichHumanCockpitWithRuntimeTerminals({
+        cockpit,
+        terminals: terminalList(),
+      }),
+    };
+  } catch (error) {
+    log("warn", "dashboard runtime terminal overlay failed", { error: error instanceof Error ? error.message : String(error) });
+    return value;
+  }
+}
 async function getDashboardSnapshot(): Promise<Record<string, unknown>> {
   const now = Date.now();
   if (dashboardSnapshotCache && dashboardSnapshotCache.expiresAtMs > now) {
-    return { ...dashboardSnapshotCache.value, status: getStatus(), cache: { hit: true, stale: false, refreshing: false, ttlMs: DASHBOARD_CACHE_MS, buildMs: dashboardSnapshotCache.buildMs } };
+    return withDashboardRuntimeOverlay({ ...dashboardSnapshotCache.value, status: getStatus(), cache: { hit: true, stale: false, refreshing: false, ttlMs: DASHBOARD_CACHE_MS, buildMs: dashboardSnapshotCache.buildMs } });
   }
 
   if (dashboardSnapshotCache) {
@@ -429,14 +447,14 @@ async function getDashboardSnapshot(): Promise<Record<string, unknown>> {
         log("warn", "dashboard background refresh failed", { error: error instanceof Error ? error.message : String(error) });
       });
     }
-    return {
+    return withDashboardRuntimeOverlay({
       ...dashboardSnapshotCache.value,
       status: getStatus(),
       cache: { hit: true, stale: true, refreshing: refreshing || Boolean(dashboardSnapshotInFlight), ttlMs: DASHBOARD_CACHE_MS, buildMs: dashboardSnapshotCache.buildMs },
-    };
+    });
   }
 
-  return await refreshDashboardSnapshot();
+  return withDashboardRuntimeOverlay(await refreshDashboardSnapshot());
 }
 
 async function closeTransport(transport: BridgeHttpTransport, reason: string, sessionId?: string) {

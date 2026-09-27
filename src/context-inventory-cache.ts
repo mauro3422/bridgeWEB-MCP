@@ -31,6 +31,22 @@ export type ContextInventoryCacheState = {
   dailySnapshots: ContextInventoryDailySnapshot[];
 };
 
+export type ContextInventoryRollingWindow = {
+  days: number;
+  sinceDate: string;
+  untilDate: string;
+  snapshotCount: number;
+  activityDayCount: number;
+  coverageRatio: number;
+  coverage: "complete" | "partial";
+  traceDayObservations: number;
+  projectCount: number;
+  projects: Array<{ name: string; activeDays: number; lastSeenDate: string }>;
+  workflowCount: number;
+  workflowKeys: string[];
+  latestSummaries: Array<{ project: string; summary: string; date: string }>;
+};
+
 const MATERIAL_EVENT_TYPES = new Set([
   "route_planned",
   "phase_completed",
@@ -71,6 +87,11 @@ function localDayKey(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+
+function localDayKeyOffset(now: Date, offsetDays: number): string {
+  return localDayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() + offsetDays, 12, 0, 0, 0));
 }
 
 function compactDailyRow(value: unknown, capturedAt: string): ContextInventoryDailySnapshot | null {
@@ -196,6 +217,77 @@ export function buildContextInventoryCacheState(input: {
     dailySnapshots: [...dailyByDate.values()]
       .sort((left, right) => right.date.localeCompare(left.date))
       .slice(0, maxDailySnapshots),
+  };
+}
+
+export function buildContextInventoryRollingWindow(input: {
+  dailySnapshots: ContextInventoryDailySnapshot[];
+  days?: number;
+  now?: Date;
+}): ContextInventoryRollingWindow {
+  const now = input.now ?? new Date();
+  const days = Math.max(1, Math.min(90, Math.floor(input.days ?? 30)));
+  const untilDate = localDayKey(now);
+  const sinceDate = localDayKeyOffset(now, -(days - 1));
+  const snapshots = input.dailySnapshots
+    .filter((snapshot) => snapshot.date >= sinceDate && snapshot.date <= untilDate)
+    .sort((left, right) => right.date.localeCompare(left.date));
+
+  const projectActivity = new Map<string, { name: string; activeDays: number; lastSeenDate: string }>();
+  const workflowKeys = new Set<string>();
+  const latestSummaries = new Map<string, { project: string; summary: string; date: string }>();
+  let activityDayCount = 0;
+  let traceDayObservations = 0;
+
+  for (const snapshot of snapshots) {
+    const dayProjects = new Map<string, string>();
+    for (const project of snapshot.projects) dayProjects.set(project.toLowerCase(), project);
+    const dayWorkflows = new Set(snapshot.workflowKeys);
+    if (snapshot.traceCount > 0 || dayProjects.size > 0 || dayWorkflows.size > 0) activityDayCount += 1;
+    traceDayObservations += snapshot.traceCount;
+
+    for (const [projectKey, project] of dayProjects) {
+      const current = projectActivity.get(projectKey);
+      projectActivity.set(projectKey, {
+        name: current?.name ?? project,
+        activeDays: (current?.activeDays ?? 0) + 1,
+        lastSeenDate: current?.lastSeenDate && current.lastSeenDate > snapshot.date ? current.lastSeenDate : snapshot.date,
+      });
+    }
+    for (const workflowKey of dayWorkflows) workflowKeys.add(workflowKey);
+    for (const summary of snapshot.latestSummaries) {
+      const projectKey = summary.project.toLowerCase();
+      if (!latestSummaries.has(projectKey)) {
+        latestSummaries.set(projectKey, { project: summary.project, summary: summary.summary, date: snapshot.date });
+      }
+    }
+  }
+
+  const coveredDays = new Set(snapshots.map((snapshot) => snapshot.date)).size;
+  const coverageRatio = Math.max(0, Math.min(1, coveredDays / days));
+
+  const projects = [...projectActivity.entries()]
+    .map(([, value]) => value)
+    .sort((left, right) => right.activeDays - left.activeDays
+      || right.lastSeenDate.localeCompare(left.lastSeenDate)
+      || left.name.localeCompare(right.name))
+    .slice(0, 40);
+  const workflows = [...workflowKeys].sort().slice(0, 80);
+
+  return {
+    days,
+    sinceDate,
+    untilDate,
+    snapshotCount: snapshots.length,
+    activityDayCount,
+    coverageRatio: Number(coverageRatio.toFixed(3)),
+    coverage: coverageRatio >= 1 ? "complete" : "partial",
+    traceDayObservations,
+    projectCount: projectActivity.size,
+    projects,
+    workflowCount: workflowKeys.size,
+    workflowKeys: workflows,
+    latestSummaries: [...latestSummaries.values()].slice(0, 20),
   };
 }
 

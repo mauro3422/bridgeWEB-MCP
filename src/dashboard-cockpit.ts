@@ -1280,3 +1280,186 @@ export async function collectWeeklyGitStates(input: {
     return [collectGitState({ projectName: name, relativeRoot, root, observedAt, since })];
   }));
 }
+
+
+type CockpitRuntimeTerminal = {
+  sessionId: string;
+  traceId: string;
+  state: string | null;
+  activityState: string | null;
+  lastProgressAt: string | null;
+  lastOutputAt: string | null;
+  startedAt: string | null;
+  timedOut: boolean;
+  progressingRecently: boolean;
+};
+
+function taskTraceIdsForRuntime(task: UnknownRecord): string[] {
+  const packet = asRecord(task.resumePacket);
+  return [...new Set([
+    ...stringArray(task.traceIds),
+    ...stringArray(packet.traceIds),
+  ])];
+}
+
+function runtimeTerminalRows(value: unknown, now: Date, recentProgressMs: number): CockpitRuntimeTerminal[] {
+  return asArray(value).map(asRecord).flatMap((terminal) => {
+    const sessionId = stringValue(terminal.id) ?? stringValue(terminal.sessionId);
+    const traceId = stringValue(terminal.traceId);
+    if (!sessionId || !traceId || terminal.running !== true) return [];
+    const activityState = stringValue(terminal.activityState);
+    const lastProgressAt = stringValue(terminal.lastProgressAtIso) ?? stringValue(terminal.lastProgressAt);
+    const progressAt = timestamp(lastProgressAt);
+    const progressingRecently = activityState === "progressing"
+      || (progressAt > 0 && Math.max(0, now.getTime() - progressAt) <= recentProgressMs);
+    return [{
+      sessionId,
+      traceId,
+      state: stringValue(terminal.state),
+      activityState,
+      lastProgressAt,
+      lastOutputAt: stringValue(terminal.lastOutputAtIso) ?? stringValue(terminal.lastOutputAt),
+      startedAt: stringValue(terminal.startedAtIso) ?? stringValue(terminal.startedAt),
+      timedOut: terminal.timedOut === true,
+      progressingRecently,
+    }];
+  });
+}
+
+function attachRuntimeTerminalEvidence(task: UnknownRecord, byTrace: Map<string, CockpitRuntimeTerminal[]>) {
+  const matches = taskTraceIdsForRuntime(task).flatMap((traceId) => byTrace.get(traceId) ?? []);
+  if (matches.length === 0) return { task: { ...task }, progressing: false };
+  const latestProgressAt = matches
+    .map((terminal) => terminal.lastProgressAt)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1) ?? null;
+  const progressing = matches.some((terminal) => terminal.progressingRecently);
+  const runtimeActivity = {
+    source: "main-process-terminal-registry",
+    active: true,
+    progressing,
+    sessionIds: matches.map((terminal) => terminal.sessionId),
+    traceIds: [...new Set(matches.map((terminal) => terminal.traceId))],
+    states: [...new Set(matches.flatMap((terminal) => terminal.state ? [terminal.state] : []))],
+    activityStates: [...new Set(matches.flatMap((terminal) => terminal.activityState ? [terminal.activityState] : []))],
+    timedOutAlive: matches.some((terminal) => terminal.timedOut),
+    latestProgressAt,
+    note: progressing
+      ? "Hay un proceso local vivo con progreso reciente. Un timeout del wrapper no autoriza a tratar esta tarea como huérfana ni a registrar outcome."
+      : "Hay un proceso local vivo pero sin progreso reciente observable. Inspeccionarlo antes de decidir cierre o recuperación.",
+  };
+  const packet = asRecord(task.resumePacket);
+  const nextGate = progressing ? "proceso vivo: esperar / inspeccionar progreso" : stringValue(packet.nextGate) ?? stringValue(task.nextGate) ?? "inspeccionar proceso vivo";
+  return {
+    task: {
+      ...task,
+      runtimeActivity,
+      resumePacket: {
+        ...packet,
+        runtimeSessionIds: runtimeActivity.sessionIds,
+        runtimeTraceIds: runtimeActivity.traceIds,
+        runtimeActivitySource: runtimeActivity.source,
+        nextGate,
+      },
+      ...(progressing ? {
+        nextGate,
+        classification: {
+          state: "active",
+          confidence: "high",
+          basis: "runtime-terminal",
+          observed: true,
+          reason: runtimeActivity.note,
+        },
+      } : {}),
+    },
+    progressing,
+  };
+}
+
+/**
+ * Overlay volatile main-process terminal evidence onto the read-only Cockpit projection.
+ * This must run after loading/building the persisted dashboard snapshot so terminal liveness
+ * is never written into the last-good seed and cannot survive a Bridge restart as stale truth.
+ */
+export function enrichHumanCockpitWithRuntimeTerminals(input: {
+  cockpit: unknown;
+  terminals: unknown;
+  now?: Date;
+  recentProgressMs?: number;
+}) {
+  const root = asRecord(input.cockpit);
+  const morningBrief = asRecord(root.morningBrief);
+  if (Object.keys(morningBrief).length === 0) return { ...root };
+
+  const now = input.now ?? new Date();
+  const recentProgressMs = Math.max(30_000, input.recentProgressMs ?? 5 * 60 * 1000);
+  const terminals = runtimeTerminalRows(input.terminals, now, recentProgressMs);
+  const byTrace = new Map<string, CockpitRuntimeTerminal[]>();
+  for (const terminal of terminals) {
+    const bucket = byTrace.get(terminal.traceId) ?? [];
+    bucket.push(terminal);
+    byTrace.set(terminal.traceId, bucket);
+  }
+
+  const activeTasks = asArray(morningBrief.tasks).map(asRecord).map((task) => attachRuntimeTerminalEvidence(task, byTrace).task);
+  const remainingDebt: UnknownRecord[] = [];
+  const deferredDebt: UnknownRecord[] = [];
+  for (const debt of asArray(morningBrief.lifecycleDebt).map(asRecord)) {
+    const decorated = attachRuntimeTerminalEvidence(debt, byTrace);
+    if (decorated.progressing) {
+      const runtimeTask = {
+        ...decorated.task,
+        canonicalNeedsClosureReview: debt.needsClosureReview === true,
+        needsClosureReview: false,
+        lifecycleDebtDeferredByRuntime: true,
+      };
+      deferredDebt.push(runtimeTask);
+    } else {
+      remainingDebt.push(decorated.task);
+    }
+  }
+
+  const taskIdentity = (task: UnknownRecord) => stringValue(task.taskKey)
+    ?? stringValue(task.workflowKey)
+    ?? taskTraceIdsForRuntime(task).join("|");
+  const combinedTasks = new Map<string, UnknownRecord>();
+  for (const task of [...activeTasks, ...deferredDebt]) {
+    const key = taskIdentity(task) || `runtime:${combinedTasks.size}`;
+    combinedTasks.set(key, task);
+  }
+
+  const rawLifecycleDebtTaskCount = Number(morningBrief.lifecycleDebtTaskCount ?? morningBrief.needsClosureReviewCount ?? remainingDebt.length + deferredDebt.length) || 0;
+  const visibleLifecycleDebtTaskCount = Math.max(0, rawLifecycleDebtTaskCount - deferredDebt.length);
+  const rawOpenTaskCount = Number(morningBrief.openTaskCount ?? activeTasks.length) || 0;
+  const runtimeActiveTaskCount = [...combinedTasks.values()].filter((task) => asRecord(task.runtimeActivity).active === true).length;
+
+  return {
+    ...root,
+    morningBrief: {
+      ...morningBrief,
+      tasks: [...combinedTasks.values()].slice(0, 24),
+      lifecycleDebt: remainingDebt.slice(0, 24),
+      openTaskCount: rawOpenTaskCount + deferredDebt.length,
+      returnedTaskCount: Math.min(24, combinedTasks.size),
+      lifecycleDebtTaskCount: visibleLifecycleDebtTaskCount,
+      lifecycleDebtReturnedCount: remainingDebt.length,
+      needsClosureReviewCount: visibleLifecycleDebtTaskCount,
+      rawLifecycleDebtTaskCount,
+      runtimeDeferredLifecycleDebtTaskCount: deferredDebt.length,
+      runtimeActiveTaskCount,
+      runtimeOverlay: {
+        source: "main-process-terminal-registry",
+        observedAt: now.toISOString(),
+        activeTerminalCount: terminals.length,
+        matchedTaskCount: runtimeActiveTaskCount,
+        deferredLifecycleDebtTaskCount: deferredDebt.length,
+        persisted: false,
+        note: "La evidencia de terminales es efímera y se aplica al responder el dashboard; nunca se persiste como verdad de lifecycle.",
+      },
+      lifecycleDebtNote: deferredDebt.length > 0
+        ? `${stringValue(morningBrief.lifecycleDebtNote) ?? "La deuda MSSR requiere revisión explícita."} ${deferredDebt.length} tarea(s) con proceso vivo y progreso reciente quedan temporalmente fuera de la cola de cierre.`
+        : morningBrief.lifecycleDebtNote,
+    },
+  };
+}

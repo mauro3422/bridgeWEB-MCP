@@ -43,6 +43,7 @@ Rules:
 - Active-work and lifecycle-debt items both keep bounded resume packets; no raw prompts/transcripts/private reasoning are stored.
 - A newer trace for the same explicit task may supersede/retry an older execution in the UI, but provenance remains visible and lifecycle state is never rewritten by the dashboard.
 - Unknown transcript labels (for example a bad speech transcription) are not promoted into project names without repository/MSSR evidence.
+- A Bridge-managed terminal correlated to the task and still alive with recent progress is projected as runtime-active. If the durable lifecycle says it needs closure review, that debt is temporarily deferred from the visible debt lane while the process progresses; terminal liveness is ephemeral response-time evidence, never persisted and never allowed to rewrite MSSR lifecycle.
 
 Success gate met: after opening the dashboard, Mauro can see yesterday, real work to continue, and separate lifecycle debt without reading handoffs/README files or confusing an administrative missing outcome with a feature still pending.
 
@@ -102,7 +103,7 @@ Success gate: the system can show `available / degraded / unavailable / review` 
 
 Persist bounded context-inventory snapshots so weekly/daily summaries are incremental rather than rebuilt from scratch.
 
-**Status:** PHASE A LIVE. Bridge now persists `data/context-inventory-state.json` as a bounded derived cache, refreshes it on material MSSR lifecycle changes or a one-hour TTL, keeps rolling daily resume snapshots, and reuses the stored weekly MSSR+Git projection between dashboard refreshes. Focused source gates have measured roughly 4.0 s for a forced rebuild and ~1.0 s for a warm cached snapshot, but a real busy post-restart cold analytics refresh on 2026-09-26 took ~117 s. The persisted last-good seed kept first paint/readiness available throughout, so this is performance debt rather than a liveness failure. Remaining P4 work is therefore: (1) optional 30-day derived view, (2) profile/trim the true cold reconstruction path, and (3) refine event/freshness triggers only where evidence shows the hourly fallback is too coarse.
+**Status:** PHASE B LIVE. Bridge persists `data/context-inventory-state.json` as a bounded derived cache, refreshes it on material MSSR lifecycle changes or a one-hour TTL, keeps rolling daily resume snapshots, and reuses the stored weekly MSSR+Git projection between dashboard refreshes. The dashboard now exposes **Últimos 30 días** directly from those retained daily snapshots—unique projects/workflows, active-day counts, latest bounded project summaries and truthful `snapshotCount / days` coverage—without a routine 30-day `scope=all` scan. Controlled restart `fba9953d-78cf-4578-bd06-b4458c03fbf3` adopted the slice live; readback showed 9/30 snapshots (30% partial coverage), 19 projects, 144 workflows and 470 trace-day observations. A direct cold/recovery profile isolated the dominant costs to MSSR summaries: active 30-day summary ~32.0 s and seven-day `scope=all` ~40.2 s on the busy workstation, while recent/Project Health/Skill Health/Runtime Health were each below 100 ms. With a valid cached inventory, a standalone persistent-worker run measured ~9.2 s first / ~1.0 s second; the final aggregate gate under heavier contention measured ~71.5 s first / ~1.3 s second, showing that warm reuse is stable while cold cost remains load-sensitive. HTTP liveness still passed with zero event-loop stalls. Remaining P4 work is therefore optimization/recovery policy, not basic product availability: trim the explicit missing/corrupt-cache reconstruction path, refine freshness triggers only where evidence requires it, and define an auditable snapshot-retention/quota policy.
 
 Cadence target:
 
@@ -120,7 +121,7 @@ Constraints:
 
 Success gate: `ayer`, `esta semana`, and `dónde quedamos` are fast even after restart.
 
-## P5 — cross-project organization — PHASE B SOURCE IMPLEMENTED
+## P5 — cross-project organization — PHASE B LIVE
 
 The Cockpit builds a bounded **En qué está cada proyecto** map from projects observed in the rolling seven-day MSSR history. It joins current human tasks, last meaningful activity, Project Health, Git pressure and the next observable gate.
 
@@ -157,11 +158,11 @@ No remote push was performed. Remote publication remains a separate explicit dec
 
 Current status and follow-up priority:
 
-1. **P1 + P2 + P3 adopted live:** `Al volver` separates forensic/support recovery from the human backlog, MSSR 0.2.77 provides explicit task identity/lineage, and capability inventory is dynamically derived from runtime tools, Skill Health and workflow guides;
-2. **P4 phase A adopted live:** bounded context inventory + daily snapshots prevent weekly `scope=all` reconstruction on every refresh; a 30-day derived view/background cadence remains optional follow-up rather than a blocker;
-3. **P5A + P5B adopted live:** the Cockpit classifies observed projects conservatively and terminal states now have an explicit owner contract in `.mssr/PROJECT_STATE.md`, with invalid-metadata REVIEW and stale-state conflict detection. Restart `7920eaff-0bbe-4fc3-81f9-18c5699dc4db` adopted the source; fresh Project Health readback exposes `workspaceStatus` metadata and no terminal labels were mass-written;
-4. **P6 completed locally:** the former 92-path shared dirty tree was reconstructed with durable rollback and ownership-safe commits. Before this P5B slice, local `main` was clean and 11 commits ahead of `origin/main`; remote publication remains deliberately separate;
-5. **next product priority after P5B adoption:** review genuine lifecycle debt with resume packets instead of raw trace lists, then add optional 30-day derived summaries and profile/trim cold reconstruction. Capability/schema freshness stays dynamic rather than copied into AGENTS or assistant memory.
+1. **P1 + P2 + P3 adopted live:** `Al volver` separates forensic/support recovery from the human backlog, MSSR 0.2.77 provides explicit task identity/lineage, capability inventory stays dynamically derived from runtime tools/Skill Health/workflow guides, and the new response-time terminal overlay prevents a genuinely progressing Bridge process from masquerading as abandoned lifecycle debt without persisting liveness as project truth;
+2. **P4 phase B adopted live:** bounded context inventory + daily snapshots feed both weekly reconstruction and **Últimos 30 días**. Live evidence after restart `fba9953d-78cf-4578-bd06-b4458c03fbf3` is 9/30 retained days (30% truthful coverage), 19 projects, 144 workflows and 470 trace-day observations; the view becomes more complete automatically as daily snapshots accumulate;
+3. **P5A + P5B adopted live:** the Cockpit classifies observed projects conservatively and terminal states have an explicit owner contract in `.mssr/PROJECT_STATE.md`, with invalid-metadata REVIEW and stale-state conflict detection. No terminal labels are mass-written;
+4. **P6 completed locally:** the former 92-path shared dirty tree was reconstructed with durable rollback and ownership-safe commits. The old shared mess is no longer the blocker; the current Context Director slice is a small scoped worktree intended for one reviewed local commit, while remote publication remains deliberately separate;
+5. **next product priority:** optimize the explicit missing/corrupt context-cache recovery path now that profiling isolated the heavy owners (~32.0 s active 30-day MSSR summary + ~40.2 s seven-day `scope=all`), then define snapshot retention/quota policy, and finally make lifecycle-debt triage/aging easier to review. Capability/schema freshness stays dynamic rather than copied into AGENTS or assistant memory.
 
 A new workspace-level `D:\Dev\AGENTS.md` owns only transversal procedure: Bridge-first local recovery, MSSR lifecycle, dynamic capability discovery, support-trace handling and safe shared-tree rules. It deliberately contains no static tool/skill catalog; repository-local `AGENTS.md` and `.mssr/` remain the project authorities.
 

@@ -173,6 +173,15 @@ export const dashboardMarkup = `
         <div id="cockpit-weekly-summary" class="cockpit-weekly-summary"><div class="empty-state">Reconstruyendo la semana…</div></div>
         <div class="table-wrap"><table><thead><tr><th>Proyecto</th><th>Evidencia MSSR</th><th>Git local</th><th>Commits 7d</th><th>Remote / tracking</th><th>Pendiente observable</th></tr></thead><tbody id="cockpit-weekly-projects"><tr><td colspan="6" class="muted">Cargando semana…</td></tr></tbody></table></div>
       </article>
+      <article class="card span-12 cockpit-history-card">
+        <div class="card-header">
+          <div><div class="card-kicker">Contexto acumulado</div><h2 class="card-title">Últimos 30 días</h2><p class="card-description">Vista incremental derivada de snapshots diarios ya guardados. Muestra cobertura real, proyectos con actividad y último contexto observable sin disparar otro scan histórico largo.</p></div>
+          <span id="cockpit-history-window" class="status-pill" data-tone="info"><span class="dot info"></span><span>30 días · cargando</span></span>
+        </div>
+        <div id="cockpit-history-summary" class="cockpit-weekly-summary"><div class="empty-state">Armando orientación de 30 días…</div></div>
+        <div class="table-wrap"><table><thead><tr><th>Proyecto</th><th>Días activos</th><th>Última vez</th><th>Último contexto</th></tr></thead><tbody id="cockpit-history-projects"><tr><td colspan="4" class="muted">Cargando historial incremental…</td></tr></tbody></table></div>
+      </article>
+
 
       <article class="card span-12">
         <div class="card-header">
