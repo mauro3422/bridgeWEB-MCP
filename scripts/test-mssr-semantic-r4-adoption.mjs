@@ -12,12 +12,12 @@ import {
 const installedPackage = JSON.parse(
   await fs.readFile(new URL("../node_modules/@mauroprime/mssr/package.json", import.meta.url), "utf8"),
 );
-assert.equal(installedPackage.version, "0.2.79", "Bridge must consume the exact MSSR 0.2.79 package");
-const vendorTarball = await fs.readFile(new URL("../vendor/mauroprime-mssr-0.2.79.tgz", import.meta.url));
+assert.equal(installedPackage.version, "0.2.80", "Bridge must consume the exact MSSR 0.2.80 package");
+const vendorTarball = await fs.readFile(new URL("../vendor/mauroprime-mssr-0.2.80.tgz", import.meta.url));
 assert.equal(
   createHash("sha256").update(vendorTarball).digest("hex"),
-  "569385015f5f2636be6c3fec43034e485ac49e64809103e53c62bab9b250eb19",
-  "Bridge must vendor the exact MSSR 0.2.79 release-gate artifact",
+  "2ed92e4a7093d290f6ee37371d7b613e0174c9c9dc88b676f6868aaedffa7394",
+  "Bridge must vendor the exact MSSR 0.2.80 release-gate artifact",
 );
 
 const roadmapEvaluation = evaluateMssrSemanticConsistency({
@@ -129,4 +129,4 @@ assert.equal(shadow.truthAuthority, false);
 assert.equal(shadow.directNoticeAuthority, false);
 assert.equal(shadow.canonicalRewriteAllowed, false);
 
-console.log("Bridge MSSR 0.2.79 R4 host-consumption adoption test passed.");
+console.log("Bridge MSSR 0.2.80 R4 host-consumption adoption test passed.");
