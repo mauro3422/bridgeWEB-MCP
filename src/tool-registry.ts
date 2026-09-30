@@ -33,6 +33,7 @@ import { whiteboardToolModule } from "./tools/whiteboard-tools.js";
 import { windowsAdminToolModule } from "./tools/windows-admin-tools.js";
 import { quietDeskToolModule } from "./tools/quietdesk-tools.js";
 import { storageGrowthToolModule } from "./tools/storage-growth-tools.js";
+import { mssrSemanticEvidenceToolModule } from "./tools/mssr-semantic-evidence-tools.js";
 import { buildToolAudit, TOOL_AUDIT_VIEWS, type ToolAuditArgs, type ToolAuditView } from "./tool-audit.js";
 import { getToolAuditMetrics, getToolFrictionMetrics, type BridgeMetricsScope } from "./metrics.js";
 import { buildBridgeToolFrictionProjection } from "./mssr-tool-friction.js";
@@ -40,6 +41,7 @@ import type { BridgeMssrLifecycleMetadata, BridgeToolMetadata, BridgeToolModule,
 
 const readOnlyToolNames = new Set([
   "system_info", "list_dir", "read_text_file", "list_files_smart", "read_file_lines", "read_many_files", "search_files", "storage_growth_scan",
+  "mssr_librarian_search", "mssr_librarian_fetch", "mssr_semantic_evidence_synthesis_preview",
   "terminal_read", "terminal_list", "work_peek", "work_show",
   "git_status", "git_diff", "git_log", "git_show_commit", "git_compare_branches",
   "tunnel_health", "bridge_health", "bridge_connector_catalog_compare", "bridge_self_check", "bridge_restart_status",
@@ -100,6 +102,7 @@ const mssrControlPlaneToolNames = new Set([
 ]);
 
 const mssrSubstantialReadToolNames = new Set([
+  "mssr_librarian_search", "mssr_librarian_fetch", "mssr_semantic_evidence_synthesis_preview",
   "analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code",
   "python_validate", "python_symbols", "python_impact_analysis", "python_import_graph", "python_call_graph", "python_dead_code", "python_test_plan", "pytest_testmon",
   "project_context_audit", "project_context_health", "project_context_modularization_plan", "project_change_consistency", "bridge_verify_status",
@@ -112,6 +115,7 @@ const mssrExternalSideEffectToolNames = new Set([
   "remote_node_exec", "remote_node_upload_file", "roblox_mcp_action", "godot_mcp_action", "godot_scene_open",
   "whiteboard_add_text", "whiteboard_add_svg", "whiteboard_add_diagram", "whiteboard_insert_image",
   "quietdesk_execute_semantic",
+  "mssr_semantic_evidence_relation_review",
 ]);
 const mssrTrivialInspectToolNames = new Set(["whiteboard_capture_pc_view", "quietdesk_desktop_capture"]);
 
@@ -624,6 +628,7 @@ const defaultToolModules: readonly BridgeToolModule[] = [
   godotToolModule,
   whiteboardToolModule,
   quietDeskToolModule,
+  mssrSemanticEvidenceToolModule,
   windowsAdminToolModule,
   bridgeWorkflowToolModule,
 ];

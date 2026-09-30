@@ -790,6 +790,9 @@ export function recordExternalMssrTelemetry(input: unknown): { event: MssrStored
     }) };
   }
 
+  if (envelope.event.kind !== "checkpoint") {
+    throw new Error(`Unsupported MSSR telemetry event kind: ${envelope.event.kind}.`);
+  }
   const checkpoint = envelope.event.checkpoint;
   const persisted = readPersistedMssrTraceState(envelope.traceId);
   const violations = validateMssrCheckpointLifecycle(persisted ? {

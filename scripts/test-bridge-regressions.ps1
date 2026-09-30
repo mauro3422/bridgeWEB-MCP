@@ -1,9 +1,13 @@
 param(
-  [string]$ProjectRoot = "D:\Dev\bridge-mcp",
+  [string]$ProjectRoot,
   [string]$ExpectedTunnelAdminBaseUrl = "http://127.0.0.1:8081"
 )
 
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+  $ProjectRoot = Split-Path -Parent $PSScriptRoot
+}
 
 function Invoke-Check {
   param(
