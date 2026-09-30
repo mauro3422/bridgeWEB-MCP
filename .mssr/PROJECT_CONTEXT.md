@@ -14,6 +14,7 @@
 - Versioned release history lives under `changelogs/`; the root `CHANGELOG.md` is a compatibility entry point.
 - Packaged MSSR owns routing, lifecycle, context-selection and semantic policies; Bridge owns host integration, observation, persistence, transport and delivery. Detailed contracts stay in indexed `.mssr/knowledge/` modules and are loaded only when relevant.
 - Dashboard analytics and the Context Director/Human Cockpit are read-only projections over canonical owners. Analytics stay isolated from the HTTP/MCP event loop; derived caches/snapshots are acceleration only, and volatile capability lists remain live-discovered rather than copied into durable instructions or memory.
+- MSSR Librarian/Jev semantics stay in the versioned `@mauroprime/mssr` package; Bridge owns explicit project-root authorization, bounded Markdown reads, exact revision revalidation, and on-demand Windows Credential Manager transport. Relation judgments and synthesis previews remain advisory; Bridge never applies them to canonical files.
 
 ## Project knowledge governance
 

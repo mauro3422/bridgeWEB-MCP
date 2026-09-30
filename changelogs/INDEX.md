@@ -4,6 +4,7 @@ Versioned release notes are the canonical change-history surface for MSSR debugg
 
 ## Current releases
 
+- [0.6.142](0.6.142.md) - Adopt MSSR 0.2.93 Librarian/Jev tools through bounded host-owned source reads, exact revalidation, protected credentials, and immutable synthesis previews.
 - [0.6.141](0.6.141.md) - Add persistent incremental filesystem-growth diagnostics with safe watcher fallback, growth attribution, and focused storage regression coverage.
 - [0.6.140](0.6.140.md) - Adopt MSSR 0.2.72 and prove Bridge host consumption of the portable R4 evaluator/retrieval/message/shadow contracts while keeping longitudinal QA as an evidence-accumulation gate.
 - [0.6.139](0.6.139.md) - Adopt MSSR 0.2.71 and prepare controlled Bridge host adoption of the portable R4 semantic-consistency slice without claiming unwired host semantic producers.
