@@ -1,10 +1,15 @@
 param(
-  [string]$ProjectRoot = "D:\Dev\bridge-mcp",
+  [string]$ProjectRoot = "",
   [string]$ExpectedServerVersion = "",
   [switch]$StrictGit
 )
 
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+  $ProjectRoot = Split-Path -Parent $PSScriptRoot
+}
+$ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
 
 if ([string]::IsNullOrWhiteSpace($ExpectedServerVersion)) {
   $packagePath = Join-Path $ProjectRoot "package.json"

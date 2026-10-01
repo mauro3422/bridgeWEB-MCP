@@ -115,7 +115,7 @@ const mssrExternalSideEffectToolNames = new Set([
   "remote_node_exec", "remote_node_upload_file", "roblox_mcp_action", "godot_mcp_action", "godot_scene_open",
   "whiteboard_add_text", "whiteboard_add_svg", "whiteboard_add_diagram", "whiteboard_insert_image",
   "quietdesk_execute_semantic",
-  "mssr_semantic_evidence_relation_review",
+  "mssr_semantic_evidence_relation_review", "mssr_librarian_jev_select",
 ]);
 const mssrTrivialInspectToolNames = new Set(["whiteboard_capture_pc_view", "quietdesk_desktop_capture"]);
 
