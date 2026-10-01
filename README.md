@@ -7,11 +7,13 @@ El objetivo es tener un puente local controlado por nosotros para operar filesys
 ## Estado actual
 
 ```text
-bridge-mcp current source release v0.6.137
-Live runtime: v0.6.136 until controlled adoption completes
-Packaged MSSR: 0.2.70
-Mode: Streamable HTTP live; R1/R2 remain live, R3 retained-context receipt adoption is release-gated before restart
-Project root: D:\Dev\bridge-mcp
+Published source release: v0.6.140
+Isolated candidate: v0.6.144 at D:\Dev\bridge-mcp-jev-0.6.144
+Live runtime: v0.6.144 from the shared D:\Dev\bridge-mcp checkout (185 tools)
+Candidate package: MSSR 0.2.96 (181 generated tools)
+Candidate gate: verify:all passes; adoption remains gated on four extra live tools
+Candidate runtime: not deployed; do not infer deployment from the shared version string
+Production project root: D:\Dev\bridge-mcp
 Bridge MCP: http://127.0.0.1:3001/mcp
 Bridge status: http://127.0.0.1:3001/status
 Tunnel admin: http://127.0.0.1:8081
@@ -31,6 +33,8 @@ ChatGPT
 ```
 
 `stdio` sigue disponible solamente como rollback estable.
+
+El estado del candidato, el contrato de verificación Jev y los casos actuales/propuestos están en [MSSR Librarian and Jev](docs/MSSR_LIBRARIAN_JEV.md) y [MSSR Jev use-case catalog](docs/MSSR_JEV_USE_CASE_CATALOG.md).
 
 ## Stack
 
@@ -323,11 +327,14 @@ npm install
 npm run check
 npm run build
 npm run smoke:http
+npm run smoke:http:isolated
 npm run test:regressions
 npm run verify:all
 npm run start
 npm run start:http
 ```
+
+`smoke:http` valida el runtime HTTP activo en `127.0.0.1:3001` y puede enviar eventos sintéticos autenticados. `smoke:http:isolated` inicia el `dist/http.js` del checkout actual en un puerto loopback efímero, usa métricas, logs y token bajo una carpeta temporal, ejecuta el mismo contrato HTTP y limpia el proceso y los datos al finalizar. `verify:all` usa el smoke aislado para no atribuir al checkout el runtime compartido.
 
 `npm run verify:all` ejecuta:
 
@@ -335,7 +342,7 @@ npm run start:http
 bridge-doctor.ps1
 npm run check
 npm run build
-smoke:http
+smoke:http:isolated
 test:regressions
 docs:tools:check
 tools/list sanity
