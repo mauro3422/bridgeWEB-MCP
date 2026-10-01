@@ -3,6 +3,9 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 
 import {
+  MSSR_SEMANTIC_EXPERIENCE_MODE,
+  classifyMssrSemanticExperienceDeterministically,
+  createMssrSemanticExperienceObservation,
   evaluateMssrSemanticConsistency,
   evaluateMssrSemanticShadowEvidence,
   produceMssrSemanticContextMessages,
@@ -17,8 +20,7 @@ const vendorTarball = await fs.readFile(new URL("../vendor/mauroprime-mssr-0.2.9
 assert.equal(
   createHash("sha256").update(vendorTarball).digest("hex"),
   "e9d3af566d3a1a334f0b66ec87a2cdaeccac3e1af45a90b6ba51c19f4b3c78a5",
-  "Bridge must vendor the exact MSSR 0.2.96 release-gate artifact",
-);
+  "Bridge must vendor the exact MSSR 0.2.96 release-gate artifact",);
 
 const roadmapEvaluation = evaluateMssrSemanticConsistency({
   boundary: "ordinary",
@@ -129,4 +131,35 @@ assert.equal(shadow.truthAuthority, false);
 assert.equal(shadow.directNoticeAuthority, false);
 assert.equal(shadow.canonicalRewriteAllowed, false);
 
-console.log("Bridge MSSR 0.2.96 R4 host-consumption adoption test passed.");
+const semanticExperience = createMssrSemanticExperienceObservation({
+  projectKey: "bridge-mcp",
+  decisionKind: "context-selection",
+  feature: {
+    subjectKind: "project-context",
+    candidateKinds: ["baseline", "reference"],
+    signals: ["host-adoption"],
+    flags: { installed: true },
+    buckets: { release: "0.2.89" },
+  },
+  proposal: {
+    value: "baseline",
+    confidence: 0.9,
+    provider: "bridge-host",
+    modelId: "adoption-smoke",
+  },
+});
+assert.equal(MSSR_SEMANTIC_EXPERIENCE_MODE, "verified-shadow-experience");
+assert.equal(semanticExperience.verification.status, "unknown");
+assert.equal(semanticExperience.authorityInfluence, false);
+assert.equal(semanticExperience.routingInfluence, false);
+assert.equal(semanticExperience.autoApplyAllowed, false);
+const semanticFallback = classifyMssrSemanticExperienceDeterministically({
+  decisionKind: "context-selection",
+  feature: semanticExperience.feature,
+});
+assert.equal(semanticFallback.basis, "abstain");
+assert.equal(semanticFallback.value, null);
+assert.equal(semanticFallback.reviewRequired, true);
+assert.equal(semanticFallback.autoApplyAllowed, false);
+
+console.log("Bridge MSSR 0.2.96 R4 and semantic-shadow host-consumption tests passed.");

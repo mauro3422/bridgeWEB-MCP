@@ -46,11 +46,11 @@ const readOnlyToolNames = new Set([
   "git_status", "git_diff", "git_log", "git_show_commit", "git_compare_branches",
   "tunnel_health", "bridge_health", "bridge_connector_catalog_compare", "bridge_self_check", "bridge_restart_status",
   "bridge_metrics_status", "bridge_metrics_summary", "bridge_metrics_recent", "bridge_metrics_query", "bridge_verify_status", "mssr_observatory_query", "mssr_trace_evidence", "bridge_visualization_catalog", "bridge_visualize_metrics", "bridge_notice_status", "bridge_notice_history", "bridge_notice_drain",
-  "path_policy_status", "project_profile", "workspace_diff", "workspace_snapshot_list", "cache_status", "windows_admin_cache_status", "windows_admin_storage_audit",
+  "path_policy_status", "project_profile", "project_reference_resolve", "workspace_diff", "workspace_snapshot_list", "cache_status", "windows_admin_cache_status", "windows_admin_storage_audit",
   "analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code",
   "project_context_load", "project_context_audit", "project_context_health", "project_context_modularization_plan", "project_change_consistency", "workflow_guide_recommend", "workflow_guide_load", "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query",
   "skill_catalog", "skill_recommend", "skill_route_audit", "skill_route_vocabulary", "skill_route_plan", "skill_bootstrap", "skill_context_next", "skill_load", "mssr_context_proposal_review", "roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list", "roblox_mcp_query",
-  "binary_file_info", "binary_file_read_chunk", "binary_upload_status", "image_file_attach",
+  "binary_file_info", "binary_file_attach", "binary_file_read_chunk", "binary_upload_status", "image_file_attach",
   "blender_status", "blender_scene_info", "blender_rig_inspect", "blender_validate_reference_pack", "blender_character_loop_status",
   "godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list", "godot_mcp_query",
   "whiteboard_latest_capture", "whiteboard_capture_list",
@@ -64,9 +64,9 @@ const destructiveToolNames = new Set([
   "work_once", "work_begin", "work_feed", "work_finish",
   "git_create_branch", "git_restore_file", "git_set_remote", "git_commit_all", "git_push_current_branch", "git_multi_repo_publish",
   "project_profile_save", "project_context_initialize", "project_context_update", "project_context_capture", "workspace_snapshot", "workspace_rollback", "cache_prune", "windows_admin_cache_cleanup",
-  "bridge_request_restart", "bridge_verify_all", "workflow_guide_create", "bridge_tool_action", "roblox_mcp_action", "roblox_studio_window_capture_save", "roblox_screen_capture_save", "roblox_photo_capture_job", "roblox_place_save",
+  "bridge_request_restart", "bridge_verify_all", "workflow_guide_create", "mssr_skill_maintenance_index", "bridge_tool_action", "roblox_mcp_action", "roblox_studio_window_capture_save", "roblox_screen_capture_save", "roblox_photo_capture_job", "roblox_place_save",
   "roblox_asset_upload",
-  "image_asset_save", "image_asset_import_files", "image_character_views_prepare", "image_reference_pack_prepare",
+  "image_asset_save", "image_asset_import_files", "image_chat_preview_prepare", "image_character_views_prepare", "image_reference_pack_prepare",
   "media_review_ingest",
   "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_finish", "binary_upload_abort",
   "blender_open", "blender_viewport_screenshot", "blender_focus_review", "blender_review_bundle", "blender_animation_review", "blender_ik_keyframe", "blender_execute_code", "blender_batch_script", "blender_install_reference_pack", "blender_setup_character_references",
@@ -93,16 +93,16 @@ const providerProxyToolNames = new Set([
 ]);
 const protectedToolNames = new Set([
   "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query", "bridge_tool_action", "bridge_connector_catalog_compare", "project_context_load", "project_context_audit", "project_context_health", "project_context_modularization_plan", "project_context_initialize", "project_context_update", "project_context_capture",
-  "skill_route_plan", "skill_bootstrap", "skill_context_next", "skill_load", "mssr_context_proposal_review", "mssr_trace_record", "mssr_trace_evidence", "bridge_verify_all", "git_multi_repo_publish", "roblox_place_save",
+  "skill_route_plan", "skill_bootstrap", "skill_context_next", "skill_load", "mssr_context_proposal_review", "mssr_trace_record", "mssr_trace_evidence", "mssr_skill_maintenance_index", "bridge_verify_all", "git_multi_repo_publish", "roblox_place_save",
 ]);
 
 const mssrControlPlaneToolNames = new Set([
   "skill_catalog", "skill_recommend", "skill_route_audit", "skill_route_vocabulary", "skill_route_plan", "skill_bootstrap", "skill_context_next", "skill_load",
-  "mssr_context_ack", "mssr_context_proposal_review", "mssr_trace_working_update", "mssr_trace_record", "mssr_trace_evidence", "mssr_observatory_query", "mssr_observatory_epoch_start",
+  "mssr_context_ack", "mssr_context_proposal_review", "mssr_trace_working_update", "mssr_trace_record", "mssr_trace_evidence", "mssr_observatory_query", "mssr_observatory_epoch_start", "mssr_skill_maintenance_index",
 ]);
 
 const mssrSubstantialReadToolNames = new Set([
-  "mssr_librarian_search", "mssr_librarian_fetch", "mssr_semantic_evidence_synthesis_preview",
+  "mssr_librarian_search", "mssr_librarian_fetch", "mssr_librarian_jev_select", "mssr_semantic_evidence_synthesis_preview",
   "analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code",
   "python_validate", "python_symbols", "python_impact_analysis", "python_import_graph", "python_call_graph", "python_dead_code", "python_test_plan", "pytest_testmon",
   "project_context_audit", "project_context_health", "project_context_modularization_plan", "project_change_consistency", "bridge_verify_status",
@@ -115,7 +115,8 @@ const mssrExternalSideEffectToolNames = new Set([
   "remote_node_exec", "remote_node_upload_file", "roblox_mcp_action", "godot_mcp_action", "godot_scene_open",
   "whiteboard_add_text", "whiteboard_add_svg", "whiteboard_add_diagram", "whiteboard_insert_image",
   "quietdesk_execute_semantic",
-  "mssr_semantic_evidence_relation_review", "mssr_librarian_jev_select",
+  "mssr_librarian_jev_select",
+  "mssr_semantic_evidence_relation_review",
 ]);
 const mssrTrivialInspectToolNames = new Set(["whiteboard_capture_pc_view", "quietdesk_desktop_capture"]);
 
@@ -539,12 +540,13 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
     const delegatedResult = await handler(delegatedArguments(args.arguments));
     if (delegatedResult && typeof delegatedResult === "object" && !Array.isArray(delegatedResult)) {
       const record = delegatedResult as Record<string, unknown>;
-      const { __bridgeImages, __bridgeNotices, ...publicResult } = record;
+      const { __bridgeImages, __bridgeContent, __bridgeNotices, ...publicResult } = record;
       return {
         delegatedTool: name,
         classification: "read-only",
         result: publicResult,
         ...(Array.isArray(__bridgeImages) ? { __bridgeImages } : {}),
+        ...(Array.isArray(__bridgeContent) ? { __bridgeContent } : {}),
         ...(Array.isArray(__bridgeNotices) ? { __bridgeNotices } : {}),
       };
     }
@@ -571,12 +573,13 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
     const delegatedResult = await handler(delegated);
     if (delegatedResult && typeof delegatedResult === "object" && !Array.isArray(delegatedResult)) {
       const record = delegatedResult as Record<string, unknown>;
-      const { __bridgeImages, __bridgeNotices, ...publicResult } = record;
+      const { __bridgeImages, __bridgeContent, __bridgeNotices, ...publicResult } = record;
       return {
         delegatedTool: name,
         classification,
         result: publicResult,
         ...(Array.isArray(__bridgeImages) ? { __bridgeImages } : {}),
+        ...(Array.isArray(__bridgeContent) ? { __bridgeContent } : {}),
         ...(Array.isArray(__bridgeNotices) ? { __bridgeNotices } : {}),
       };
     }

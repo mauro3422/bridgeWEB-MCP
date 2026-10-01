@@ -1,4 +1,4 @@
-import { compactRouteContextPlane } from "../compact-route-context.js";
+import { compactRouteContextPlane, compactRouteNearMatches } from "../compact-route-context.js";
 import { createHash } from "node:crypto";
 import { watch, type Dirent, type FSWatcher } from "node:fs";
 import fs from "node:fs/promises";
@@ -533,6 +533,8 @@ function compactSkillRoute<T extends Record<string, unknown>>(route: T): Record<
     intent: route.intent,
     intentResolution: route.intentResolution,
     workflows: route.workflows,
+    nearMatches: compactRouteNearMatches(route.nearMatches),
+    routingDiagnostics: route.routingDiagnostics,
     activeSkills: compactSkills(route.activeSkills),
     deferredSkills: compactSkills(route.deferredSkills),
     matches: compactSkills(route.matches),
@@ -624,7 +626,7 @@ function mssrConnectorPaths(traceId: string): Record<string, unknown> {
       "mssr_observatory_query",
       "mssr_trace_evidence",
     ],
-    action: ["mssr_trace_record", "mssr_observatory_epoch_start"],
+    action: ["mssr_trace_record", "mssr_observatory_epoch_start", "mssr_skill_maintenance_index"],
     wrapperControl: { traceId },
     schemaPolicy: "The route-produced fallback arguments are authoritative. Call bridge_tool_schema only after schema-validation or when no exact fallback arguments were supplied.",
   };
@@ -1413,6 +1415,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
                 decision: { type: "string", enum: [...MSSR_SKILL_DECISIONS] },
                 reasonCode: { type: "string", enum: [...MSSR_SKILL_DECISION_REASONS] },
                 reasonSummary: { type: "string", minLength: 1, maxLength: 240 },
+                relatedSkillName: { type: "string", minLength: 1, maxLength: 160, description: "For skipped redundant decisions, the exact peer skill the host observed as covering the same need. Evidence only; never mutates routing or skill ownership." },
                 stage: { type: "string", enum: [...SKILL_STAGES] },
               },
               required: ["skillName", "decision", "reasonCode"],

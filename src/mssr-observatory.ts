@@ -3,12 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
+import { Worker } from "node:worker_threads";
 import {
   analyzeMssrTelemetry,
   createMssrLearningDigest,
   getMssrTraceClosureState,
   mssrLearningDigestSchema,
   mssrSemanticSignature,
+  persistMssrLearningDigestSemanticExperiences,
   MSSR_CHECKPOINT_TYPES,
   MSSR_OUTCOME_DIMENSION_STATUSES,
   MSSR_OUTCOME_EVIDENCE_KINDS,
@@ -45,6 +47,7 @@ import {
 } from "./mssr-observability-epoch.js";
 
 type JsonRecord = Record<string, unknown>;
+type MssrSemanticExperiencePersistence = Awaited<ReturnType<typeof persistMssrLearningDigestSemanticExperiences>>;
 type StatementSync = {
   run: (...args: unknown[]) => unknown;
   get: (...args: unknown[]) => JsonRecord | undefined;
@@ -203,6 +206,7 @@ let insertEvent: StatementSync | null = null;
 const recentMssrEventOverlay: MssrStoredEvent[] = [];
 const RECENT_MSSR_EVENT_OVERLAY_LIMIT = 2_000;
 const ephemeralTraceWorkingMemory = new Map<string, MssrTraceWorkingMemory>();
+const skillMaintenanceProjectionPendingEventIds = new Set<string>();
 
 function rememberRecentMssrEvent(event: MssrStoredEvent): void {
   recentMssrEventOverlay.push(event);
@@ -215,6 +219,7 @@ onObservabilityPersistenceAck((timing) => {
   if (timing.kind !== "mssr" || !timing.ok) return;
   const index = recentMssrEventOverlay.findIndex((event) => event.id === timing.id);
   if (index >= 0) recentMssrEventOverlay.splice(index, 1);
+  if (skillMaintenanceProjectionPendingEventIds.delete(timing.id)) scheduleMssrSkillMaintenanceIndexRefresh();
 });
 
 function mergeStoredEvents(persisted: MssrStoredEvent[], overlay: MssrStoredEvent[], limit: number): MssrStoredEvent[] {
@@ -278,6 +283,7 @@ function readMssrStoredTraceEvents(traceId: string, limit = 2_000): MssrStoredEv
 }
 
 export function recordMssrProjectContextSelection(args: {
+  eventId?: string;
   traceId: string;
   caller?: string;
   stage?: string;
@@ -294,6 +300,7 @@ export function recordMssrProjectContextSelection(args: {
     }];
   });
   return recordMssrEvent({
+    eventId: args.eventId,
     traceId: args.traceId,
     eventType: "project_context_selection",
     caller: args.caller,
@@ -354,6 +361,7 @@ export function distillMssrLearningDigest(traceId: string): MssrStoredEvent | nu
       decision: event.details.decision,
       reasonCode: event.details.reasonCode,
       reasonSummary: typeof event.details.reasonSummary === "string" && event.details.reasonSummary.trim() ? event.details.reasonSummary : undefined,
+      relatedSkillName: typeof event.details.relatedSkillName === "string" && event.details.relatedSkillName.trim() ? event.details.relatedSkillName : undefined,
       stage: event.stage,
     });
     if (parsed.success) decisionByKey.set(`${parsed.data.stage ?? "start"}|${parsed.data.skillName}`, parsed.data);
@@ -478,6 +486,62 @@ export function finalizeMssrOutcomeLearning(traceId: string): { digestEvent: Mss
   return { digestEvent, warning, purged };
 }
 
+function resolveMssrSemanticExperienceTraceIdentity(traceId: string): { projectKey: string; workflowKey?: string } {
+  const events = readMssrStoredTraceEvents(traceId);
+  let projectKey: string | undefined;
+  let workflowKey: string | undefined;
+  for (const event of [...events].reverse()) {
+    if (!workflowKey && typeof event.details.workflowKey === "string" && event.details.workflowKey.trim()) {
+      workflowKey = event.details.workflowKey.trim();
+    }
+    if (!projectKey) {
+      const direct = [event.details.projectName, event.details.project].find((value) => typeof value === "string" && value.trim());
+      if (typeof direct === "string") projectKey = direct.trim();
+      if (!projectKey && typeof event.details.projectRoot === "string" && event.details.projectRoot.trim()) {
+        projectKey = path.basename(event.details.projectRoot.trim().replace(/[\\/]+$/, ""));
+      }
+    }
+    if (projectKey && workflowKey) break;
+  }
+  return { projectKey: projectKey || SERVER_NAME, ...(workflowKey ? { workflowKey } : {}) };
+}
+
+export async function persistMssrOutcomeSemanticExperience(
+  traceId: string,
+  digestEvent: MssrStoredEvent | null,
+): Promise<{ result: MssrSemanticExperiencePersistence | null; warning?: string }> {
+  if (!digestEvent) return { result: null };
+  const parsedDigest = mssrLearningDigestSchema.safeParse(digestEvent.details.digest);
+  if (!parsedDigest.success) return { result: null, warning: "Outcome learning digest could not be parsed for Semantic Experience projection." };
+  try {
+    const identity = resolveMssrSemanticExperienceTraceIdentity(traceId);
+    const result = await persistMssrLearningDigestSemanticExperiences({
+      traceId,
+      projectKey: identity.projectKey,
+      ...(identity.workflowKey ? { workflowKey: identity.workflowKey } : {}),
+      digest: parsedDigest.data,
+    });
+    return { result };
+  } catch (error) {
+    return { result: null, warning: redactText(error instanceof Error ? error.message : String(error), 300) };
+  }
+}
+
+export async function finalizeMssrOutcomeLearningWithSemanticExperience(traceId: string): Promise<{
+  digestEvent: MssrStoredEvent | null;
+  warning?: string;
+  purged: boolean;
+  semanticExperience: MssrSemanticExperiencePersistence | null;
+  semanticExperienceWarning?: string;
+}> {
+  const learning = finalizeMssrOutcomeLearning(traceId);
+  const semantic = await persistMssrOutcomeSemanticExperience(traceId, learning.digestEvent);
+  return {
+    ...learning,
+    semanticExperience: semantic.result,
+    ...(semantic.warning ? { semanticExperienceWarning: semantic.warning } : {}),
+  };
+}
 function ensureDirs(): void {
   fs.mkdirSync(metricsDir, { recursive: true });
   fs.mkdirSync(logsDir, { recursive: true });
@@ -648,7 +712,10 @@ export function recordMssrEvent(input: MssrEventInput): MssrStoredEvent {
   // the HTTP/MCP event loop. The worker is the only steady-state writer.
   const database = getDb();
   if (!database || !insertEvent) return event;
-  enqueueObservabilityPersistence({
+  const needsSkillMaintenanceProjection = event.eventType === "skill_decision"
+    && (event.details.reasonCode === "redundant" || event.details.reasonCode === "irrelevant-domain");
+  if (needsSkillMaintenanceProjection) skillMaintenanceProjectionPendingEventIds.add(event.id);
+  const queued = enqueueObservabilityPersistence({
     kind: "mssr",
     id: event.id,
     eventType: event.eventType,
@@ -675,6 +742,7 @@ export function recordMssrEvent(input: MssrEventInput): MssrStoredEvent {
       os.platform(),
     ],
   });
+  if (!queued && needsSkillMaintenanceProjection) skillMaintenanceProjectionPendingEventIds.delete(event.id);
   return event;
 }
 
@@ -776,6 +844,7 @@ export function recordExternalMssrTelemetry(input: unknown): { event: MssrStored
         decision: decision.decision,
         reasonCode: decision.reasonCode,
         reasonSummary: decision.reasonSummary ? redactText(decision.reasonSummary, 240) : undefined,
+        relatedSkillName: decision.relatedSkillName,
         externalSource: envelope.source,
         emittedAt: envelope.emittedAt,
       },
@@ -790,9 +859,43 @@ export function recordExternalMssrTelemetry(input: unknown): { event: MssrStored
     }) };
   }
 
-  if (envelope.event.kind !== "checkpoint") {
-    throw new Error(`Unsupported MSSR telemetry event kind: ${envelope.event.kind}.`);
+  if (envelope.event.kind === "context_assembly") {
+    const assembly = envelope.event;
+    return { duplicate: false, event: recordMssrContextAssembly({
+      eventId: envelope.eventId,
+      traceId: envelope.traceId,
+      caller: envelope.caller,
+      stage: assembly.stage,
+      mode: assembly.mode,
+      page: assembly.page,
+      requestedContextChars: assembly.requestedContextChars,
+      deliveredContextChars: assembly.deliveredContextChars,
+      estimatedCharsSaved: assembly.estimatedCharsSaved,
+      retainedContextCharsSaved: assembly.retainedContextCharsSaved,
+      requiredOverflowChars: assembly.requiredOverflowChars,
+      acceptedOverflowChars: assembly.acceptedOverflowChars,
+      remainingRequiredUnits: assembly.remainingRequiredUnits,
+      remainingAcceptedUnits: assembly.remainingAcceptedUnits,
+      requiredBudgetExceeded: assembly.requiredBudgetExceeded,
+      optionalContextOmitted: assembly.optionalContextOmitted,
+      continuationIssued: assembly.continuationIssued,
+      continuationConsumed: assembly.continuationConsumed,
+      chainCompleted: assembly.chainCompleted,
+    }) };
   }
+
+  if (envelope.event.kind === "project_context_selection") {
+    const selection = envelope.event;
+    return { duplicate: false, event: recordMssrProjectContextSelection({
+      eventId: envelope.eventId,
+      traceId: envelope.traceId,
+      caller: envelope.caller,
+      stage: selection.stage,
+      projectName: selection.projectName,
+      decisions: selection.decisions,
+    }) };
+  }
+
   const checkpoint = envelope.event.checkpoint;
   const persisted = readPersistedMssrTraceState(envelope.traceId);
   const violations = validateMssrCheckpointLifecycle(persisted ? {
@@ -820,7 +923,10 @@ export function recordExternalMssrTelemetry(input: unknown): { event: MssrStored
     externalSource: envelope.source,
     emittedAt: envelope.emittedAt,
   });
-  if (checkpoint.eventType === "outcome") finalizeMssrOutcomeLearning(envelope.traceId);
+  if (checkpoint.eventType === "outcome") {
+    const learning = finalizeMssrOutcomeLearning(envelope.traceId);
+    if (learning.digestEvent) void persistMssrOutcomeSemanticExperience(envelope.traceId, learning.digestEvent);
+  }
   return { event: stored, duplicate: false };
 }
 
@@ -1026,17 +1132,24 @@ export function recordMssrSkillLoad(args: {
  * never their procedural text.
  */
 export function recordMssrContextAssembly(args: {
+  eventId?: string;
   traceId: string;
   caller?: string;
   stage?: string;
+  mode?: "selective" | "full";
+  page?: number;
   requestedContextChars?: number;
   deliveredContextChars?: number;
+  estimatedCharsSaved?: number;
+  retainedContextCharsSaved?: number;
   responseChars?: number;
   envelopeChars?: number;
   requiredOverflowChars?: number;
   acceptedOverflowChars?: number;
   remainingRequiredUnits?: number;
   remainingAcceptedUnits?: number;
+  requiredBudgetExceeded?: boolean;
+  optionalContextOmitted?: boolean;
   continuationIssued?: boolean;
   continuationConsumed?: boolean;
   chainCompleted?: boolean;
@@ -1048,20 +1161,27 @@ export function recordMssrContextAssembly(args: {
   );
   const boundedUnits = (value: number | undefined) => boundedNumber(value, 10_000);
   return recordMssrEvent({
+    eventId: args.eventId,
     traceId: args.traceId,
     eventType: "context_assembly",
     caller: args.caller,
     stage: args.stage,
     ok: true,
     details: {
+      mode: args.mode,
+      page: boundedNumber(args.page, 10_000),
       requestedContextChars: boundedNumber(args.requestedContextChars),
       deliveredContextChars: boundedNumber(args.deliveredContextChars),
+      estimatedCharsSaved: boundedNumber(args.estimatedCharsSaved),
+      retainedContextCharsSaved: boundedNumber(args.retainedContextCharsSaved),
       responseChars: boundedNumber(args.responseChars),
       envelopeChars: boundedNumber(args.envelopeChars),
       requiredOverflowChars: boundedNumber(args.requiredOverflowChars),
       acceptedOverflowChars: boundedNumber(args.acceptedOverflowChars),
       remainingRequiredUnits: boundedUnits(args.remainingRequiredUnits),
       remainingAcceptedUnits: boundedUnits(args.remainingAcceptedUnits),
+      requiredBudgetExceeded: args.requiredBudgetExceeded === true,
+      optionalContextOmitted: args.optionalContextOmitted === true,
       continuationIssued: args.continuationIssued === true,
       continuationConsumed: args.continuationConsumed === true,
       chainCompleted: args.chainCompleted === true,
@@ -1086,6 +1206,7 @@ export function recordMssrSkillDecision(args: {
       decision: decision.decision,
       reasonCode: decision.reasonCode,
       reasonSummary: decision.reasonSummary ? redactText(decision.reasonSummary, 240) : undefined,
+      relatedSkillName: decision.relatedSkillName,
     },
   });
 }
@@ -1839,6 +1960,7 @@ function portableIntentAnalysis(events: readonly MssrStoredEvent[]) {
         decision: event.details.decision,
         reasonCode: event.details.reasonCode,
         reasonSummary: typeof event.details.reasonSummary === "string" && event.details.reasonSummary.trim() ? event.details.reasonSummary : undefined,
+        relatedSkillName: typeof event.details.relatedSkillName === "string" && event.details.relatedSkillName.trim() ? event.details.relatedSkillName : undefined,
         stage: event.stage,
       });
       if (!parsedDecision.success) return [];
@@ -3142,6 +3264,199 @@ export function queryMssrObservatory(args: {
       eventBudgetChars: compact.budgetChars,
       fullAvailable: true,
     },
+  };
+}
+
+const skillMaintenanceIndexDefaultDelayMs = Math.max(100, Math.min(60_000, Number(process.env.BRIDGE_MCP_SKILL_MAINTENANCE_DELAY_MS || 10_000) || 10_000));
+let skillMaintenanceIndexRefreshTimer: NodeJS.Timeout | null = null;
+let skillMaintenanceIndexRefreshInFlight = false;
+let skillMaintenanceIndexRefreshDirty = false;
+let skillMaintenanceIndexRefreshCount = 0;
+let skillMaintenanceIndexRefreshFailureCount = 0;
+let skillMaintenanceIndexLastStartedAt: string | null = null;
+let skillMaintenanceIndexLastCompletedAt: string | null = null;
+let skillMaintenanceIndexLastDurationMs: number | null = null;
+let lastSkillMaintenanceIndexRefresh: { ok: boolean; at: string; result?: JsonRecord; error?: string } | null = null;
+
+function defaultMssrWorkspaceRoot(): string {
+  return path.resolve(process.env.MSSR_WORKSPACE_ROOT || path.dirname(process.cwd()));
+}
+
+export function refreshMssrSkillMaintenanceIndex(options: {
+  workspaceRoot?: string;
+  scope?: MssrObservatoryScope;
+  days?: number;
+  now?: Date;
+} = {}) {
+  const workspaceRoot = path.resolve(options.workspaceRoot ?? defaultMssrWorkspaceRoot());
+  const mssrRoot = path.join(workspaceRoot, ".mssr");
+  const manifestPath = path.join(mssrRoot, "project-context.json");
+  const filePath = path.join(mssrRoot, "runtime", "skill-maintenance-candidates.json");
+  if (!fs.existsSync(manifestPath)) {
+    return {
+      written: false,
+      reason: "workspace-mssr-uninitialized" as const,
+      workspaceRoot,
+      filePath,
+      reviewOnly: true,
+    };
+  }
+
+  const scope: MssrObservatoryScope = options.scope === "all" ? "all" : "active";
+  const days = Math.max(1, Math.min(365, Math.trunc(options.days ?? 30)));
+  const report = summary(days, scope);
+  const intentAnalysis = "intentAnalysis" in report ? report.intentAnalysis : null;
+  const candidates = (intentAnalysis?.maintenanceCandidates ?? [])
+    .filter((candidate) => candidate.kind === "skill-overlap" || candidate.kind === "skill-domain-mismatch")
+    .slice(0, 200);
+  const feedback = (intentAnalysis?.selectionFeedback ?? [])
+    .filter((item) => (item.reasonCounts?.redundant ?? 0) > 0 || (item.reasonCounts?.["irrelevant-domain"] ?? 0) > 0)
+    .map((item) => ({
+      skillName: item.skillName,
+      redundant: item.reasonCounts?.redundant ?? 0,
+      irrelevantDomain: item.reasonCounts?.["irrelevant-domain"] ?? 0,
+      total: item.total,
+      acceptanceRate: item.acceptanceRate,
+    }))
+    .sort((left, right) => (right.redundant + right.irrelevantDomain) - (left.redundant + left.irrelevantDomain)
+      || left.skillName.localeCompare(right.skillName))
+    .slice(0, 100);
+  const epoch = getMssrObservabilityEpoch();
+  const generatedAt = (options.now ?? new Date()).toISOString();
+  const projection = {
+    schemaVersion: 1,
+    generatedAt,
+    workspaceRoot,
+    source: {
+      kind: "mssr-observatory" as const,
+      scope,
+      days,
+      activeEpoch: epoch.activeEpoch,
+      contractVersion: epoch.contractVersion,
+    },
+    reviewOnly: true,
+    authorityInfluence: false,
+    routingInfluence: false,
+    canonicalRewriteAllowed: false,
+    autoApplyAllowed: false,
+    candidateCount: candidates.length,
+    feedbackSkillCount: feedback.length,
+    candidates,
+    feedback,
+    policy: {
+      explicitRelatedSkillIsEvidenceNotEquivalence: true,
+      legacyCandidateSkillsAreHypothesesOnly: true,
+      allowedReviewedResolutions: [
+        "tighten-routing-gates",
+        "add-or-adjust-negative-intents",
+        "requires",
+        "complements",
+        "excludes",
+        "keep-distinct",
+        "owner-reviewed-merge-split-supersede-remove",
+      ],
+    },
+  };
+
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const serialized = `${JSON.stringify(projection, null, 2)}\n`;
+  const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(temporaryPath, serialized, "utf8");
+  fs.renameSync(temporaryPath, filePath);
+  const sha256 = createHash("sha256").update(serialized).digest("hex");
+  lastSkillMaintenanceIndexRefresh = { ok: true, at: generatedAt };
+  return {
+    written: true,
+    workspaceRoot,
+    filePath,
+    generatedAt,
+    sha256,
+    candidateCount: candidates.length,
+    feedbackSkillCount: feedback.length,
+    reviewOnly: true,
+    candidates,
+  };
+}
+
+function runMssrSkillMaintenanceIndexRefreshWorker(): void {
+  if (skillMaintenanceIndexRefreshInFlight || !skillMaintenanceIndexRefreshDirty) return;
+  skillMaintenanceIndexRefreshInFlight = true;
+  skillMaintenanceIndexRefreshDirty = false;
+  skillMaintenanceIndexLastStartedAt = new Date().toISOString();
+  const startedAt = performance.now();
+  const worker = new Worker(new URL("./mssr-skill-maintenance-index-worker.js", import.meta.url), {
+    workerData: { workspaceRoot: defaultMssrWorkspaceRoot(), scope: "active", days: 30 },
+    execArgv: process.execArgv.filter((arg) => !arg.startsWith("--input-type")),
+  });
+  worker.unref();
+  let settled = false;
+
+  const finish = (ok: boolean, result?: JsonRecord, error?: string) => {
+    if (settled) return;
+    settled = true;
+    skillMaintenanceIndexRefreshInFlight = false;
+    skillMaintenanceIndexLastCompletedAt = new Date().toISOString();
+    skillMaintenanceIndexLastDurationMs = Math.round((performance.now() - startedAt) * 100) / 100;
+    if (ok) {
+      skillMaintenanceIndexRefreshCount += 1;
+      lastSkillMaintenanceIndexRefresh = { ok: true, at: skillMaintenanceIndexLastCompletedAt, ...(result ? { result } : {}) };
+    } else {
+      skillMaintenanceIndexRefreshFailureCount += 1;
+      lastSkillMaintenanceIndexRefresh = { ok: false, at: skillMaintenanceIndexLastCompletedAt, error: (error ?? "skill maintenance index worker failed").slice(0, 240) };
+    }
+    void worker.terminate();
+    if (skillMaintenanceIndexRefreshDirty) scheduleMssrSkillMaintenanceIndexRefresh();
+  };
+
+  worker.once("message", (message: unknown) => {
+    const payload = message && typeof message === "object" ? message as JsonRecord : {};
+    if (payload.ok === true) {
+      const result = payload.result && typeof payload.result === "object" && !Array.isArray(payload.result)
+        ? payload.result as JsonRecord
+        : undefined;
+      finish(true, result);
+      return;
+    }
+    finish(false, undefined, typeof payload.error === "string" ? payload.error : "skill maintenance index worker failed");
+  });
+  worker.once("error", (error) => finish(false, undefined, error.message));
+  worker.once("exit", (code) => {
+    if (!settled) finish(false, undefined, `skill maintenance index worker exited without a result (code ${code})`);
+  });
+}
+
+export function scheduleMssrSkillMaintenanceIndexRefresh(delayMs = skillMaintenanceIndexDefaultDelayMs): void {
+  if (process.env.BRIDGE_MCP_DISABLE_GLOBAL_SKILL_MAINTENANCE === "1") return;
+  skillMaintenanceIndexRefreshDirty = true;
+  if (skillMaintenanceIndexRefreshInFlight) return;
+  if (skillMaintenanceIndexRefreshTimer) clearTimeout(skillMaintenanceIndexRefreshTimer);
+  const boundedDelay = Math.max(100, Math.min(60_000, Math.trunc(delayMs)));
+  skillMaintenanceIndexRefreshTimer = setTimeout(() => {
+    skillMaintenanceIndexRefreshTimer = null;
+    runMssrSkillMaintenanceIndexRefreshWorker();
+  }, boundedDelay);
+  skillMaintenanceIndexRefreshTimer.unref?.();
+}
+
+export function getMssrSkillMaintenanceIndexStatus() {
+  const workspaceRoot = defaultMssrWorkspaceRoot();
+  return {
+    mode: "background-worker" as const,
+    pending: skillMaintenanceIndexRefreshTimer !== null || skillMaintenanceIndexRefreshInFlight || skillMaintenanceIndexRefreshDirty,
+    scheduled: skillMaintenanceIndexRefreshTimer !== null,
+    inFlight: skillMaintenanceIndexRefreshInFlight,
+    dirty: skillMaintenanceIndexRefreshDirty,
+    delayMs: skillMaintenanceIndexDefaultDelayMs,
+    refreshCount: skillMaintenanceIndexRefreshCount,
+    failureCount: skillMaintenanceIndexRefreshFailureCount,
+    lastStartedAt: skillMaintenanceIndexLastStartedAt,
+    lastCompletedAt: skillMaintenanceIndexLastCompletedAt,
+    lastDurationMs: skillMaintenanceIndexLastDurationMs,
+    pendingDurableEvidence: skillMaintenanceProjectionPendingEventIds.size,
+    lastRefresh: lastSkillMaintenanceIndexRefresh,
+    workspaceRoot,
+    filePath: path.join(workspaceRoot, ".mssr", "runtime", "skill-maintenance-candidates.json"),
+    reviewOnly: true,
   };
 }
 export function getMssrTraceEvidence(traceId: string, limit = 500) {

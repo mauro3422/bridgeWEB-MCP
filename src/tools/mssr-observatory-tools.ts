@@ -6,8 +6,10 @@ import {
   MSSR_OUTCOME_DIMENSION_STATUSES,
   MSSR_OUTCOME_EVIDENCE_KINDS,
   getMssrTraceEvidence,
-  finalizeMssrOutcomeLearning,
+  finalizeMssrOutcomeLearningWithSemanticExperience,
   queryMssrObservatory,
+  getMssrSkillMaintenanceIndexStatus,
+  refreshMssrSkillMaintenanceIndex,
   readPersistedMssrTraceState,
   recordMssrCheckpoint,
   updateMssrTraceWorkingMemory,
@@ -36,6 +38,20 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
           traceId: { type: "string", description: "Required only for kind=trace." },
           days: { type: "number", minimum: 1, maximum: 365, default: 30 },
           limit: { type: "number", minimum: 1, maximum: 200, default: 50 },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "mssr_skill_maintenance_index",
+      description: "Inspect or explicitly refresh the generated cross-project skill-maintenance index under the workspace .mssr runtime. It projects repeated redundant and irrelevant-domain feedback as review-only candidates and never mutates routing, skills, or canonical project knowledge.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          mode: { type: "string", enum: ["status", "refresh"], default: "status" },
+          workspaceRoot: { type: "string", description: "Optional workspace root. Defaults to MSSR_WORKSPACE_ROOT or the parent of the Bridge working directory." },
+          scope: { type: "string", enum: observatoryScopes, default: "active" },
+          days: { type: "number", minimum: 1, maximum: 365, default: 30 },
         },
         additionalProperties: false,
       },
@@ -172,6 +188,16 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
       }).parse(args);
       return queryMssrObservatory(parsed);
     },
+    mssr_skill_maintenance_index: (args) => {
+      const parsed = z.object({
+        mode: z.enum(["status", "refresh"]).default("status"),
+        workspaceRoot: z.string().trim().min(1).optional(),
+        scope: z.enum(observatoryScopes).default("active"),
+        days: z.number().int().min(1).max(365).default(30),
+      }).parse(args);
+      if (parsed.mode === "status") return getMssrSkillMaintenanceIndexStatus();
+      return refreshMssrSkillMaintenanceIndex(parsed);
+    },
     mssr_trace_evidence: (args) => {
       const parsed = z.object({
         traceId: z.string().regex(/^[A-Za-z0-9._:-]{6,128}$/),
@@ -197,7 +223,7 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
         privacy: "RAM-only until outcome or Bridge restart; no raw prompt, transcript, secret, or private chain-of-thought.",
       };
     },
-    mssr_trace_record: (args) => {
+    mssr_trace_record: async (args) => {
       const parsed = z.object({
         traceId: z.string().regex(/^[A-Za-z0-9._:-]{6,128}$/),
         eventType: z.enum(MSSR_CHECKPOINT_TYPES),
@@ -242,7 +268,7 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
         throw new Error("leaseMs is allowed only for eventType=progress.");
       }
       const event = recordMssrCheckpoint(parsed);
-      const learning = parsed.eventType === "outcome" ? finalizeMssrOutcomeLearning(parsed.traceId) : null;
+      const learning = parsed.eventType === "outcome" ? await finalizeMssrOutcomeLearningWithSemanticExperience(parsed.traceId) : null;
       return {
         recorded: true,
         traceId: event.traceId,
@@ -254,6 +280,21 @@ export const mssrObservatoryToolModule: BridgeToolModule = {
           eventId: learning.digestEvent?.id ?? null,
           warning: learning.warning ?? null,
           workingMemoryPurged: learning.purged,
+          semanticExperience: {
+            persisted: Boolean(learning.semanticExperience),
+            added: learning.semanticExperience?.added ?? 0,
+            total: learning.semanticExperience?.total ?? 0,
+            hydratedMatched: learning.semanticExperience?.hydratedMatched ?? 0,
+            hydratedUpdated: learning.semanticExperience?.hydratedUpdated ?? 0,
+            counts: learning.semanticExperience?.counts ?? {},
+            warning: learning.semanticExperienceWarning ?? null,
+            verificationStateChanged: learning.semanticExperience?.verificationStateChanged ?? false,
+            advisoryOnly: true,
+            authorityInfluence: false,
+            routingInfluence: false,
+            canonicalRewriteAllowed: false,
+            autoApplyAllowed: false,
+          },
         } : null,
         privacy: "No raw prompt or transcript stored; outcome learning keeps only the strict durable digest and purges ephemeral working memory.",
       };

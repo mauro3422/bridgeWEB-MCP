@@ -10,6 +10,8 @@ const MAX_BASE64_CHARS = 15 * 1024 * 1024;
 const MAX_BATCH_ITEMS = 8;
 const MAX_ATTACH_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_ATTACH_TOTAL_BYTES = 24 * 1024 * 1024;
+const MAX_CHAT_PREVIEW_SOURCE_BYTES = 32 * 1024 * 1024;
+const MAX_CHAT_PREVIEW_BYTES = 512 * 1024;
 
 const assetTargetSchema = z.object({
   outputPath: z.string().min(1),
@@ -224,6 +226,101 @@ async function attachLocalImages(args: { items: LocalImageInput[] }) {
     attached,
     __bridgeImages: imageAttachments,
   };
+}
+
+async function prepareChatPreview(args: {
+  inputPath: string;
+  outputPath: string;
+  maxWidth: number;
+  maxHeight: number;
+  maxBytes: number;
+  jpegQuality: number;
+  minJpegQuality: number;
+  background: string;
+  timeoutMs: number;
+}) {
+  const inputPath = resolveToolPath(args.inputPath, { access: "read" });
+  const outputPath = resolveToolPath(args.outputPath, { access: "write" });
+  if (path.extname(outputPath).toLowerCase() !== ".jpg" && path.extname(outputPath).toLowerCase() !== ".jpeg") {
+    throw new Error("Chat preview outputPath must use .jpg or .jpeg");
+  }
+  if (inputPath.toLowerCase() === outputPath.toLowerCase()) throw new Error("Chat preview outputPath must differ from inputPath");
+
+  const sourceStat = await fs.stat(inputPath);
+  if (!sourceStat.isFile()) throw new Error(`Chat preview source is not a file: ${inputPath}`);
+  if (sourceStat.size <= 0 || sourceStat.size > MAX_CHAT_PREVIEW_SOURCE_BYTES) {
+    throw new Error(`Chat preview source must be between 1 and ${MAX_CHAT_PREVIEW_SOURCE_BYTES} bytes: ${inputPath}`);
+  }
+  const sourceBytes = await fs.readFile(inputPath);
+  if (sourceBytes.length !== sourceStat.size) throw new Error(`Chat preview source changed while it was being read: ${inputPath}`);
+  const sourceMetadata = inspectImageBytes(inputPath, sourceBytes);
+  const sourceSha256 = sha256(sourceBytes);
+
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  const scriptPath = path.resolve(process.cwd(), "integrations", "images", "prepare_chat_preview.py");
+  await ensureImageFile(scriptPath, "Chat preview preparation script");
+  const configPath = path.join(path.dirname(outputPath), `.chat-preview-${crypto.randomUUID()}.json`);
+  await fs.writeFile(configPath, JSON.stringify({
+    inputPath,
+    outputPath,
+    maxWidth: args.maxWidth,
+    maxHeight: args.maxHeight,
+    maxBytes: args.maxBytes,
+    jpegQuality: args.jpegQuality,
+    minJpegQuality: args.minJpegQuality,
+    background: args.background,
+  }, null, 2), "utf8");
+
+  try {
+    const pythonExecutable = process.env.BRIDGE_PYTHON_EXE || "python";
+    const processResult = await runProcess(pythonExecutable, [scriptPath, "--config", configPath], process.cwd(), args.timeoutMs);
+    if (processResult.code !== 0 || processResult.timedOut) {
+      throw new Error(`Chat preview preparation failed: ${processResult.stderr || processResult.stdout || processResult.error || "unknown error"}`);
+    }
+    const marker = String(processResult.stdout ?? "").split(/\r?\n/).find((line) => line.startsWith("CHAT_PREVIEW_PREPARED="));
+    if (!marker) throw new Error("Chat preview preparation did not return its completion marker");
+    const prepared = JSON.parse(marker.slice("CHAT_PREVIEW_PREPARED=".length));
+    const previewBytes = await fs.readFile(outputPath);
+    if (previewBytes.length > args.maxBytes || previewBytes.length > MAX_CHAT_PREVIEW_BYTES) {
+      throw new Error(`Prepared chat preview exceeds byte budget: ${previewBytes.length}`);
+    }
+    const previewMetadata = inspectImageBytes(outputPath, previewBytes);
+    const previewSha256 = sha256(previewBytes);
+    if (prepared.sha256 !== previewSha256) throw new Error("Prepared chat preview hash does not match helper receipt");
+
+    return {
+      source: {
+        path: inputPath,
+        bytes: sourceBytes.length,
+        sha256: sourceSha256,
+        mime: sourceMetadata.mime,
+        width: sourceMetadata.width,
+        height: sourceMetadata.height,
+        transformed: false,
+      },
+      preview: {
+        path: outputPath,
+        bytes: previewBytes.length,
+        sha256: previewSha256,
+        mime: previewMetadata.mime,
+        width: previewMetadata.width,
+        height: previewMetadata.height,
+        jpegQuality: prepared.jpegQuality,
+        transformed: true,
+      },
+      transfer: {
+        purpose: "user-visible-chat-preview",
+        encoding: "base64",
+        recommendedChunkBytes: 12 * 1024,
+        estimatedChunks: Math.ceil(previewBytes.length / (12 * 1024)),
+        nextTool: "binary_file_read_chunk",
+        instruction: "Read preview.path in bounded chunks and reconstruct/render it in the host's user-visible file or Python sandbox. Do not claim MCP image content itself was shown to the user.",
+      },
+      __bridgeImages: [{ type: "image", mimeType: previewMetadata.mime, data: previewBytes.toString("base64") }],
+    };
+  } finally {
+    await fs.rm(configPath, { force: true }).catch(() => undefined);
+  }
 }
 
 async function persistImages(decoded: DecodedImage[], args: {
@@ -726,6 +823,26 @@ export const imageToolModule: BridgeToolModule = {
       },
     },
     {
+      name: "image_chat_preview_prepare",
+      description: "Prepare a bounded high-resolution JPEG copy of an existing local PNG/JPEG/WebP specifically for user-visible ChatGPT evidence. The source is never modified. The preview is attached for model inspection and its path/hash/size plus a bounded binary_file_read_chunk handoff are returned so a host with a visible Python/file sandbox can reconstruct and render the same bytes for the user without fragile one-shot Base64 copying.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          inputPath: { type: "string", description: "Allowed local source PNG/JPEG/WebP path. The original is read-only." },
+          outputPath: { type: "string", description: "Allowed .jpg/.jpeg path for the transport preview; normally a generated .bridge preview path." },
+          maxWidth: { type: "integer", minimum: 256, maximum: 4096, default: 1600 },
+          maxHeight: { type: "integer", minimum: 256, maximum: 4096, default: 1600 },
+          maxBytes: { type: "integer", minimum: 16384, maximum: MAX_CHAT_PREVIEW_BYTES, default: 180000, description: "Target upper byte budget. Lower values reduce the number of cross-sandbox transfer chunks." },
+          jpegQuality: { type: "integer", minimum: 50, maximum: 95, default: 90 },
+          minJpegQuality: { type: "integer", minimum: 40, maximum: 90, default: 58 },
+          background: { type: "string", pattern: "^[0-9a-fA-F]{6}$", default: "101217", description: "RGB hex background used only when flattening source alpha." },
+          timeoutMs: { type: "integer", minimum: 1000, maximum: 120000, default: 30000 },
+        },
+        required: ["inputPath", "outputPath"],
+        additionalProperties: false,
+      },
+    },
+    {
       name: "image_asset_import_files",
       description: "Primary ChatGPT Web path for persisting generated or edited images on MauroPrime. Receives ChatGPT-authorized image file parameters, downloads the original bytes without recompression or agent-side base64 conversion, validates signatures, MIME, dimensions and byte limits, saves atomically, records SHA-256 provenance, and can write a JSON manifest.",
       inputSchema: {
@@ -925,6 +1042,21 @@ export const imageToolModule: BridgeToolModule = {
         items: z.array(localImageItemSchema).min(1).max(MAX_BATCH_ITEMS),
       }).parse(raw);
       return await attachLocalImages(parsed);
+    },
+    image_chat_preview_prepare: async (raw) => {
+      const parsed = z.object({
+        inputPath: z.string().min(1),
+        outputPath: z.string().min(1),
+        maxWidth: z.number().int().min(256).max(4096).default(1600),
+        maxHeight: z.number().int().min(256).max(4096).default(1600),
+        maxBytes: z.number().int().min(16 * 1024).max(MAX_CHAT_PREVIEW_BYTES).default(180_000),
+        jpegQuality: z.number().int().min(50).max(95).default(90),
+        minJpegQuality: z.number().int().min(40).max(90).default(58),
+        background: z.string().regex(/^[0-9a-fA-F]{6}$/).default("101217"),
+        timeoutMs: z.number().int().min(1000).max(120000).default(30000),
+      }).parse(raw);
+      if (parsed.minJpegQuality > parsed.jpegQuality) throw new Error("minJpegQuality must be less than or equal to jpegQuality");
+      return await prepareChatPreview(parsed);
     },
     image_asset_save: async (raw) => {
       const parsed = z.object({

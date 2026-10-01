@@ -10,9 +10,9 @@ const registry = createDefaultToolRegistry();
 const groupRules = [
   ["Core / navegacion", ["system_info", "list_dir", "read_text_file", "read_file_lines", "read_many_files", "list_files_smart", "search_files", "storage_growth_scan"]],
   ["Escritura segura", ["write_text_file", "apply_patch", "edit_lines"]],
-  ["Archivos binarios", ["binary_file_info", "binary_file_read_chunk", "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_status", "binary_upload_finish", "binary_upload_abort"]],
+  ["Archivos binarios", ["binary_file_info", "binary_file_attach", "binary_file_read_chunk", "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_status", "binary_upload_finish", "binary_upload_abort"]],
   ["Guias reutilizables", ["project_context_load", "workflow_guide_recommend", "workflow_guide_load", "workflow_guide_create"]],
-  ["Imagenes", ["image_file_attach", "image_asset_import_files", "image_asset_save", "image_character_views_prepare", "image_reference_pack_prepare"]],
+  ["Imagenes", ["image_file_attach", "image_chat_preview_prepare", "image_asset_import_files", "image_asset_save", "image_character_views_prepare", "image_reference_pack_prepare"]],
   ["Ejecucion / terminal", ["run_command", "terminal_start", "terminal_write", "terminal_read", "terminal_stop", "terminal_list"]],
   ["Blender", ["blender_status", "blender_open", "blender_scene_info", "blender_viewport_screenshot", "blender_focus_review", "blender_review_bundle", "blender_execute_code", "blender_batch_script", "blender_validate_reference_pack", "blender_install_reference_pack", "blender_setup_character_references", "blender_character_loop_status"]],
   ["Tablet Whiteboard", ["whiteboard_capture_pc_view", "whiteboard_latest_capture", "whiteboard_capture_list"]],

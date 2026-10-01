@@ -656,6 +656,54 @@
       "maxChars": 7000
     },
     {
+      "id": "bridge-skill-maintenance-projection",
+      "kind": "memory",
+      "description": "Cross-project skill-selection feedback projection, redundant-peer evidence boundary, owner-review authority, and background refresh liveness contract.",
+      "source": {
+        "path": ".mssr/knowledge/architecture/bridge-skill-maintenance-projection.md"
+      },
+      "topic": "architecture",
+      "area": "skill-maintenance",
+      "stages": [
+        "start",
+        "implement",
+        "verify",
+        "persist",
+        "close",
+        "resume"
+      ],
+      "domains": [
+        "skill-system",
+        "agent-orchestration",
+        "coding"
+      ],
+      "actions": [
+        "analyze",
+        "review",
+        "verify",
+        "maintain",
+        "document"
+      ],
+      "artifacts": [
+        "skill",
+        "mcp",
+        "project",
+        "document"
+      ],
+      "needs": [
+        "integrity-verification",
+        "cross-agent"
+      ],
+      "signals": [
+        "repeated-friction",
+        "reusable-pattern",
+        "warning-observed"
+      ],
+      "required": false,
+      "priority": 84,
+      "maxChars": 2600
+    },
+    {
       "id": "bridge-context-ack-provider-lifecycle",
       "kind": "memory",
       "description": "Context Plane receipt/tombstone semantics plus the provider-instance selection boundary carried by the historical project memory.",

@@ -51,12 +51,18 @@ const envelope = {
 };
 
 async function modernRequest(id, method, params = {}) {
+  const selectorHeaders = method === "tools/call" && typeof params.name === "string"
+    ? { "mcp-name": params.name }
+    : method === "resources/read" && typeof params.uri === "string"
+      ? { "mcp-name": params.uri }
+      : {};
   return fetch(`${baseUrl}/mcp`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "mcp-protocol-version": "2026-07-28",
       "mcp-method": method,
+      ...selectorHeaders,
     },
     body: JSON.stringify({
       jsonrpc: "2.0",
@@ -92,6 +98,7 @@ async function openLegacySession(id, clientName) {
     ? JSON.parse(initializeDataLine.slice('data: '.length))
     : JSON.parse(initializeText);
   assert.equal(initializeBody.result.capabilities.tools.listChanged, true, 'Legacy initialize must advertise tools.listChanged so clients can refresh stale tool schemas.');
+  assert.ok(initializeBody.result.capabilities.resources, 'Legacy initialize must advertise resources so clients can resolve binary_file_attach resource links.');
   const sessionId = initializeResponse.headers.get("mcp-session-id");
   assert.ok(sessionId);
 
@@ -275,6 +282,25 @@ try {
   assert.deepEqual(actionFallbackTool._meta?.["openai/fileParams"], ["files"]);
   assert.ok(actionFallbackTool.inputSchema?.properties?.files, "bridge_tool_action must preserve top-level authorized file passthrough when dedicated schemas are omitted by a host catalog.");
 
+  const fixtureBinaryPath = path.join(process.cwd(), "package.json");
+  const fixtureBinaryBytes = fs.readFileSync(fixtureBinaryPath);
+  const binaryAttachResponse = await modernRequest(3, "tools/call", {
+    name: "binary_file_attach",
+    arguments: { path: fixtureBinaryPath, mode: "both" },
+  });
+  const binaryAttachText = await binaryAttachResponse.text();
+  assert.equal(binaryAttachResponse.status, 200, binaryAttachText);
+  const binaryAttachBody = JSON.parse(binaryAttachText);
+  const binaryResourceLink = binaryAttachBody.result.content.find((part) => part.type === "resource_link");
+  const binaryEmbeddedResource = binaryAttachBody.result.content.find((part) => part.type === "resource");
+  assert.ok(binaryResourceLink?.uri?.startsWith("mauroprime://local-file/"), "binary_file_attach must return an opaque MCP resource_link URI.");
+  assert.equal(Buffer.from(binaryEmbeddedResource?.resource?.blob || "", "base64").compare(fixtureBinaryBytes), 0, "Embedded MCP resource must preserve the exact local file bytes.");
+  const resourceReadResponse = await modernRequest(4, "resources/read", { uri: binaryResourceLink.uri });
+  const resourceReadText = await resourceReadResponse.text();
+  assert.equal(resourceReadResponse.status, 200, resourceReadText);
+  const resourceReadBody = JSON.parse(resourceReadText);
+  assert.equal(Buffer.from(resourceReadBody.result.contents[0].blob, "base64").compare(fixtureBinaryBytes), 0, "resources/read must return the same verified bytes as the embedded resource.");
+
   const mismatchResponse = await fetch(`${baseUrl}/mcp`, {
     method: "POST",
     headers: {
@@ -284,7 +310,7 @@ try {
     },
     body: JSON.stringify({
       jsonrpc: "2.0",
-      id: 3,
+      id: 5,
       method: "tools/list",
       params: { _meta: envelope },
     }),
@@ -295,6 +321,10 @@ try {
   await sleep(25);
   const reusedResponse = await legacyRequest(reusableSession, 11, "tools/list");
   assert.equal(reusedResponse.status, 200, "A low-pressure legacy session must remain reusable beyond the reclaim grace window");
+  const legacyResourcesList = await legacyRequest(reusableSession, 12, "resources/list");
+  assert.equal(legacyResourcesList.status, 200, "Legacy resources/list must expose registered binary resources.");
+  const legacyResourceRead = await legacyRequest(reusableSession, 13, "resources/read", { uri: binaryResourceLink.uri });
+  assert.equal(legacyResourceRead.status, 200, "Legacy resources/read must resolve a binary_file_attach resource URI.");
   const reusableClose = await closeLegacySession(reusableSession);
   assert.ok([200, 202, 204].includes(reusableClose.status));
 
@@ -322,7 +352,7 @@ try {
   assert.equal(status.transport, "streamable-http-dual-era");
   assert.match(statusResponse.headers.get("keep-alive") || "", /timeout=120/, "Bridge should advertise the long keep-alive window used by the tunnel client");
   assert.equal(status.protocols.modern.revision, "2026-07-28");
-  assert.equal(status.protocols.modern.requests, 3);
+  assert.equal(status.protocols.modern.requests, 5);
   assert.equal(status.limits.softSessionLimit, 4);
   assert.equal(status.limits.httpKeepAliveTimeoutMs, 120000);
   assert.equal(status.limits.httpKeepAliveTimeoutBufferMs, 5000);

@@ -4,7 +4,9 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import {
   CallToolRequestSchema,
+  ListResourcesRequestSchema,
   ListToolsRequestSchema,
+  ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { SERVER_NAME, SERVER_VERSION } from "./config.js";
 import { beginToolMetric, classifyMssrRoutingStatus, classifyToolAuditError, extractToolResultMetric, finishToolMetric, type BridgeMetricProfile } from "./metrics.js";
@@ -16,6 +18,7 @@ import {
   type BridgeNoticeInput,
 } from "./notices.js";
 import { createDefaultToolRegistry } from "./tool-registry.js";
+import { listLocalFileResources, readLocalFileResource } from "./local-resource-registry.js";
 import {
   evaluatePreparedBridgeArchitectureImpact,
   prepareBridgeArchitectureImpactHostAdoption,
@@ -33,13 +36,29 @@ export { bridgeRestartStatus } from "./tools/bridge-ops.js";
 
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
 type BridgeImageAttachment = { type: "image"; data: string; mimeType: string };
-type ToolContentPart = { type: "text"; text: string } | BridgeImageAttachment;
+type BridgeResourceLink = {
+  type: "resource_link";
+  uri: string;
+  name: string;
+  description?: string;
+  mimeType?: string;
+  size?: number;
+  annotations?: Record<string, unknown>;
+};
+type BridgeEmbeddedResource = {
+  type: "resource";
+  resource: { uri: string; mimeType?: string; blob: string };
+  annotations?: Record<string, unknown>;
+};
+type BridgeSupplementalContent = BridgeResourceLink | BridgeEmbeddedResource;
+type ToolContentPart = { type: "text"; text: string } | BridgeImageAttachment | BridgeSupplementalContent;
 
 const slowToolThresholdMs = Math.max(1000, Number(process.env.BRIDGE_MCP_NOTICE_SLOW_TOOL_MS || 45_000));
 const slowRoutingThresholdMs = Math.max(250, Number(process.env.BRIDGE_MCP_NOTICE_SLOW_ROUTING_MS || 1_500));
 const largeOutputThresholdChars = Math.max(10_000, Number(process.env.BRIDGE_MCP_NOTICE_LARGE_OUTPUT_CHARS || 250_000));
 const largeOutputExemptTools = new Set([
   "image_file_attach",
+  "image_chat_preview_prepare",
   "whiteboard_capture_pc_view",
   "whiteboard_latest_capture",
   "blender_review_bundle",
@@ -85,9 +104,29 @@ function extractInternalNotices(data: unknown): { payload: unknown; notices: Bri
   return { payload, notices };
 }
 
+function validSupplementalContent(value: unknown): value is BridgeSupplementalContent {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  if (item.type === "resource_link") {
+    return typeof item.uri === "string"
+      && typeof item.name === "string"
+      && (item.description === undefined || typeof item.description === "string")
+      && (item.mimeType === undefined || typeof item.mimeType === "string")
+      && (item.size === undefined || (typeof item.size === "number" && Number.isFinite(item.size) && item.size >= 0));
+  }
+  if (item.type === "resource") {
+    if (!item.resource || typeof item.resource !== "object" || Array.isArray(item.resource)) return false;
+    const resource = item.resource as Record<string, unknown>;
+    return typeof resource.uri === "string"
+      && typeof resource.blob === "string"
+      && (resource.mimeType === undefined || typeof resource.mimeType === "string");
+  }
+  return false;
+}
 function toolContent(data: JsonValue | unknown, delivery?: BridgeNoticeDeliveryBatch) {
   let payload = data;
   let images: BridgeImageAttachment[] = [];
+  let supplemental: BridgeSupplementalContent[] = [];
   if (data && typeof data === "object" && !Array.isArray(data)) {
     const record = data as Record<string, unknown>;
     if (Array.isArray(record.__bridgeImages)) {
@@ -99,7 +138,15 @@ function toolContent(data: JsonValue | unknown, delivery?: BridgeNoticeDeliveryB
           && typeof candidate.mimeType === "string";
       });
     }
-    const { __bridgeImages: _internalImages, __bridgeNotices: _internalNotices, ...publicPayload } = record;
+    if (Array.isArray(record.__bridgeContent)) {
+      supplemental = record.__bridgeContent.filter(validSupplementalContent);
+    }
+    const {
+      __bridgeImages: _internalImages,
+      __bridgeContent: _internalContent,
+      __bridgeNotices: _internalNotices,
+      ...publicPayload
+    } = record;
     payload = publicPayload;
   }
 
@@ -123,6 +170,7 @@ function toolContent(data: JsonValue | unknown, delivery?: BridgeNoticeDeliveryB
   const content: ToolContentPart[] = [
     { type: "text", text: JSON.stringify(payload, null, 2) },
     ...images,
+    ...supplemental,
   ];
   return { content };
 }
@@ -600,6 +648,32 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
     },
   });
 
+  const listResources = async () => ({
+    resources: listLocalFileResources().map((resource) => ({
+      uri: resource.uri,
+      name: resource.name,
+      description: resource.description,
+      mimeType: resource.mimeType,
+      size: resource.size,
+      annotations: {
+        audience: ["user", "assistant"],
+        priority: 0.9,
+        lastModified: resource.modifiedAt,
+      },
+    })),
+  });
+  const readResource = async (request: { params: { uri: string } }) => ({
+    contents: [await readLocalFileResource(request.params.uri)],
+  });
+
+  if (modern) {
+    server.setRequestHandler("resources/list", listResources);
+    server.setRequestHandler("resources/read", readResource);
+  } else {
+    server.setRequestHandler(ListResourcesRequestSchema, listResources);
+    server.setRequestHandler(ReadResourceRequestSchema, readResource);
+  }
+
   const listTools = async () => ({
     tools: modularToolRegistry.tools,
   });
@@ -804,7 +878,10 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
       const preview = toolContent(extracted.payload);
       const hasImages = preview.content.some((part) => part.type === "image");
       const outputChars = preview.content.reduce((total, part) => {
-        return total + (part.type === "text" ? part.text.length : part.data.length);
+        if (part.type === "text") return total + part.text.length;
+        if (part.type === "image") return total + part.data.length;
+        if (part.type === "resource") return total + part.resource.blob.length;
+        return total + part.uri.length + part.name.length;
       }, 0);
       const event = finishToolMetric(metric, ok, outputChars, error, extractToolResultMetric(name, rawData));
       const bridgeTiming = bridgeTimingFromResult(rawData);
@@ -907,15 +984,15 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
 
 function bridgeServerOptions() {
   return {
-    capabilities: { tools: { listChanged: true }, logging: {} },
+    capabilities: { tools: { listChanged: true }, resources: {}, logging: {} },
     instructions: [
       "This server controls MauroPrime. When substantial work begins in a known repository, call project_context_load once with the project root and current task so project rules, context, state, and workflow guides become active.",
       "When a user describes a repeatable multi-step process, says it should happen every time or in future, asks for a skill/pipeline/template/hook, or an existing reusable workflow may apply, call workflow_guide_recommend. Uploaded audio/video requests to listen, transcribe, inspect, or understand also require workflow-guide discovery before any generic ASR fallback; when narrated-media-review matches, load it and use media_review_ingest rather than improvising Whisper while the canonical pipeline is healthy. Follow load_existing with workflow_guide_load, follow use_existing_skill with skill_load, and propose a new guide only when neither a guide nor an existing skill owns the procedure. Call workflow_guide_create only when the user asks or approves.",
       "At the close of substantial or long-running work, when an observable error, incident, repeated friction, manual workaround, routing defect, stale runtime, lifecycle problem, or missing capability occurred, load skill-maintenance-loop for the close phase and persist a concise incident in the canonical owner ledger. Record symptom, reproduction/evidence, cause or unresolved status, correction, regression and follow-up; never record private chain-of-thought.",
       "For Blender modeling references, distinguish a perspective design master from the orthographic geometric master. Persist ChatGPT-generated references through image_asset_import_files using authorized file parameters, then normalize with image_reference_pack_prepare, require semantic visual QA, validate with blender_validate_reference_pack, and install with blender_install_reference_pack. Keep blender_setup_character_references only as the four-view compatibility path. Use blender_review_bundle for comparable model evidence before editing.",
       "For images generated or edited by ChatGPT, image_asset_import_files is the default ChatGPT-to-PC transport. If its dedicated connector schema is missing, inspect the runtime schema and use bridge_tool_action with toolName/confirmToolName=image_asset_import_files and the ChatGPT-authorized image files in the wrapper's top-level files parameter; never put those files inside arguments or convert/reconstruct them as Base64. If the current bridge_tool_action schema itself lacks top-level files, treat the connector catalog as stale: preserve the already-generated image, refresh/reopen the connector or start a new chat, and do not regenerate merely to change transport shape. image_asset_save is compatibility-only when direct authorized file transport is genuinely unavailable and actual image bytes already exist natively.",
-      "For arbitrary binary payloads, never route base64 through write_text_file. Use binary_file_write for small files or binary_upload_begin/append/status/finish for resumable large transfers, then verify with binary_file_info.",
-      "When ChatGPT must visually inspect existing local PNG, JPEG, or WebP files, use image_file_attach. It attaches the original image bytes as MCP image content without printing the encoded payload; do not substitute binary_file_read_chunk, temporary HTTP servers, tunnels, or resized previews unless attachment itself is proven unavailable.",
+      "For existing local binary evidence that must cross from MauroPrime into the MCP client, prefer binary_file_attach for bounded files: it verifies the source, registers an opaque read-only MCP resource, and returns standard embedded-resource/resource_link content without exposing Base64 in the text payload. Use binary_file_read_chunk only when the client cannot consume MCP resources or the file exceeds the bounded resource limit. For ChatGPT-to-PC writes, use binary_file_write for small payloads or binary_upload_begin/append/status/finish for resumable large transfers, then verify with binary_file_info.",
+      "When ChatGPT must visually inspect existing local PNG, JPEG, or WebP files for its own reasoning, use image_file_attach so the original bytes reach the model unchanged. When the user explicitly needs the same local evidence rendered visibly in ChatGPT, first prepare a bounded high-resolution copy with image_chat_preview_prepare and expose that preview with binary_file_attach mode=both so the client can render or materialize standard MCP resource content in one call. If the current host does not surface MCP resources to the user or sandbox, fall back to binary_file_read_chunk plus host-side reconstruction, or an MCP App UI when available. Verify SHA-256 across any reconstruction and do not claim UI visibility merely because the model received the bytes.",
       "When the user asks you to look at, inspect, read, or review the current TabletWhiteboard view, call whiteboard_capture_pc_view so the connected PC creates a fresh viewport PNG at its exact pan and zoom and the image is attached to the result. Use whiteboard_latest_capture only when the user explicitly wants the last saved image without taking a new one.",
       "When the user asks you to write, explain, diagram, annotate, or place an existing image inside TabletWhiteboard, use whiteboard_add_text for structured prose, whiteboard_add_diagram for safe shapes, arrows, polylines and Bezier paths, whiteboard_add_svg only for sanitized SVG markup, and whiteboard_insert_image only for an existing local PNG, JPEG, or WebP. These tools write to ChatGPT's separate locked layer; do not claim an object exists until the tool confirms it.",
       "Bridge anomaly notices are delivered inside normal tool responses as bridgeNotices and are removed from the pending queue after delivery. Their bounded actions are suggested preflights or recovery steps, never authorization. Delivered notices remain visible in the dashboard recent-history view for 24 hours so unresolved triggers are not lost.",

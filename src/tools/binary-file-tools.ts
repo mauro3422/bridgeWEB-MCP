@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import type { BridgeToolModule } from "./types.js";
+import { registerLocalFileResource, LOCAL_RESOURCE_MAX_BYTES } from "../local-resource-registry.js";
 import { resolveToolPath } from "./shared/path.js";
 
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
@@ -224,6 +225,64 @@ async function fileInfo(inputPath: string) {
     modifiedAt: stat.mtime.toISOString(),
   };
 }
+async function attachBinaryFile(inputPath: string, mode: "embedded" | "link" | "both", expectedSha256?: string) {
+  const info = await fileInfo(inputPath);
+  if (info.bytes > LOCAL_RESOURCE_MAX_BYTES) {
+    throw new Error(`Binary MCP attachment exceeds ${LOCAL_RESOURCE_MAX_BYTES} bytes; use binary_file_read_chunk for larger files`);
+  }
+  const bytes = await fs.readFile(info.path);
+  const actualSha256 = sha256Bytes(bytes);
+  if (actualSha256 !== info.sha256) throw new Error(`Binary file changed while it was being attached: ${info.path}`);
+  if (expectedSha256 && actualSha256 !== expectedSha256.toLowerCase()) {
+    throw new Error(`SHA-256 mismatch: expected ${expectedSha256.toLowerCase()}, actual ${actualSha256}`);
+  }
+
+  const resource = registerLocalFileResource({
+    path: info.path,
+    mimeType: info.mime,
+    size: info.bytes,
+    sha256: actualSha256,
+    modifiedAt: info.modifiedAt,
+    description: `Read-only MauroPrime local file: ${path.basename(info.path)}`,
+  });
+  const content: Array<Record<string, unknown>> = [];
+  if (mode === "link" || mode === "both") {
+    content.push({
+      type: "resource_link",
+      uri: resource.uri,
+      name: resource.name,
+      description: resource.description,
+      mimeType: resource.mimeType,
+      size: resource.size,
+      annotations: { audience: ["user", "assistant"], priority: 0.9, lastModified: resource.modifiedAt },
+    });
+  }
+  if (mode === "embedded" || mode === "both") {
+    content.push({
+      type: "resource",
+      resource: { uri: resource.uri, mimeType: resource.mimeType, blob: bytes.toString("base64") },
+      annotations: { audience: ["user", "assistant"], priority: 0.9, lastModified: resource.modifiedAt },
+    });
+  }
+
+  return {
+    path: info.path,
+    bytes: info.bytes,
+    sha256: actualSha256,
+    mime: info.mime,
+    modifiedAt: info.modifiedAt,
+    transport: "mcp-resource-content",
+    mode,
+    resource: {
+      uri: resource.uri,
+      name: resource.name,
+      expiresAt: resource.expiresAt,
+      readableVia: "resources/read",
+    },
+    encodedPayloadExposedInText: false,
+    __bridgeContent: content,
+  };
+}
 
 export const binaryFileToolModule: BridgeToolModule = {
   name: "binary-files",
@@ -234,6 +293,20 @@ export const binaryFileToolModule: BridgeToolModule = {
       inputSchema: {
         type: "object",
         properties: { path: { type: "string" } },
+        required: ["path"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "binary_file_attach",
+      description: "Attach one allowed local file as MCP resource content without printing its encoded payload in the text result. mode=embedded sends one verified blob content block, mode=link returns a resource_link resolved by resources/read, and mode=both provides both paths. Use for bounded PC-to-MCP evidence; keep binary_file_read_chunk as the large-file fallback.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          mode: { type: "string", enum: ["embedded", "link", "both"], default: "both" },
+          expectedSha256: { type: "string", pattern: "^[0-9a-fA-F]{64}$" },
+        },
         required: ["path"],
         additionalProperties: false,
       },
@@ -335,6 +408,14 @@ export const binaryFileToolModule: BridgeToolModule = {
     binary_file_info: async (raw) => {
       const parsed = z.object({ path: z.string().min(1) }).parse(raw);
       return await fileInfo(parsed.path);
+    },
+    binary_file_attach: async (raw) => {
+      const parsed = z.object({
+        path: z.string().min(1),
+        mode: z.enum(["embedded", "link", "both"]).default("both"),
+        expectedSha256: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
+      }).parse(raw);
+      return await attachBinaryFile(parsed.path, parsed.mode, parsed.expectedSha256);
     },
     binary_file_read_chunk: async (raw) => {
       const parsed = z.object({
