@@ -3,6 +3,13 @@ const numberFormat = new Intl.NumberFormat('es-AR');
 const decimalFormat = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 });
 let refreshing = false;
 let toolAuditData = null;
+let activityRecentRows = [];
+let activityRecentMode = 'aggregate';
+let activityTimelineRows = [];
+let selectedActivityBucket = '';
+let workSnapshot = null;
+let workRange = 'now';
+let workProjectFilter = 'current';
 
 const byId = (id) => document.getElementById(id);
 const num = (value) => numberFormat.format(Number(value || 0));
@@ -67,26 +74,56 @@ function percentageTone(value, goodAt, warnAt) {
   return 'bad';
 }
 
+function renderActivityTimelineDetail(rows) {
+  const target = byId('activity-timeline-detail');
+  if (!target) return;
+  const selected = rows.find((row) => String(row.bucket || '') === selectedActivityBucket);
+  if (!selected) {
+    target.innerHTML = '<span class="muted">Seleccioná un bloque para ver sus llamadas y errores agregados.</span>';
+    return;
+  }
+  const calls = Number(selected.calls || 0);
+  const errors = Number(selected.errors || 0);
+  const errorRate = calls > 0 ? (errors / calls) * 100 : 0;
+  const start = new Date(selected.bucket);
+  const end = new Date(start.getTime() + 5 * 60 * 1000);
+  target.innerHTML = '<div class="activity-timeline-detail-grid">' +
+    '<div><span class="activity-detail-label">Bloque</span><strong>' + esc(clock(start.toISOString())) + '–' + esc(clock(end.toISOString())) + '</strong></div>' +
+    '<div><span class="activity-detail-label">Llamadas</span><strong>' + num(calls) + '</strong></div>' +
+    '<div><span class="activity-detail-label">Errores</span><strong>' + num(errors) + '</strong></div>' +
+    '<div><span class="activity-detail-label">Tasa de error</span><strong>' + decimalFormat.format(errorRate) + '%</strong></div>' +
+  '</div><div class="activity-detail-note">El bloque usa la misma evidencia agregada del timeline; no implica que las últimas 20 filas Raw cubran todo ese intervalo.</div>';
+}
+
 function renderTimeline(targetId, startId, endId, inputRows) {
   const target = byId(targetId);
   if (!target) return;
   const rows = [...(inputRows || [])].sort((a, b) => new Date(a.bucket).getTime() - new Date(b.bucket).getTime());
+  const interactive = targetId === 'activity-timeline';
   if (!rows.length) {
     target.innerHTML = '<div class="empty-state">Sin actividad registrada en el período disponible.<br />El panel se completará cuando existan llamadas operativas.</div>';
     setText(startId, 'sin datos');
     setText(endId, 'sin datos');
+    if (interactive) renderActivityTimelineDetail([]);
     return;
   }
+  if (interactive && selectedActivityBucket && !rows.some((row) => String(row.bucket || '') === selectedActivityBucket)) selectedActivityBucket = '';
   const maxCalls = Math.max(1, ...rows.map((row) => Number(row.calls || 0)));
   target.innerHTML = rows.map((row) => {
     const calls = Number(row.calls || 0);
     const errors = Number(row.errors || 0);
     const height = 8 + (calls / maxCalls) * 136;
     const label = clock(row.bucket) + ' · ' + calls + ' llamadas · ' + errors + ' errores';
+    if (interactive) {
+      const bucket = String(row.bucket || '');
+      const selected = bucket === selectedActivityBucket;
+      return '<button type="button" class="timeline-bar timeline-bar-button" data-activity-bucket="' + esc(bucket) + '" data-errors="' + (errors > 0 ? 'true' : 'false') + '" style="--height:' + height.toFixed(1) + 'px" title="' + esc(label) + '" aria-label="' + esc(label) + '" aria-pressed="' + (selected ? 'true' : 'false') + '"></button>';
+    }
     return '<span class="timeline-bar" data-errors="' + (errors > 0 ? 'true' : 'false') + '" style="--height:' + height.toFixed(1) + 'px" title="' + esc(label) + '" aria-label="' + esc(label) + '"></span>';
   }).join('');
   setText(startId, dateTime(rows[0].bucket));
   setText(endId, dateTime(rows[rows.length - 1].bucket));
+  if (interactive) renderActivityTimelineDetail(rows);
 }
 
 function renderTools(targetId, inputRows, limit) {
@@ -185,6 +222,77 @@ function renderRecent(targetId, inputRows, limit, includeDetail) {
   }).join('');
 }
 
+function activityCallFailed(row) {
+  if (Number(row.ok) !== 1) return true;
+  return row.result_ok !== null && row.result_ok !== undefined && Number(row.result_ok) !== 1;
+}
+
+function aggregateActivityCalls(inputRows) {
+  const groups = new Map();
+  (inputRows || []).slice(0, 20).forEach((row) => {
+    const key = String(row.tool || 'unknown');
+    const current = groups.get(key) || { tool: key, calls: 0, errors: 0, duration: 0, firstAt: row.started_at, lastAt: row.started_at, subjects: new Set(), profiles: new Set() };
+    current.calls += 1;
+    if (activityCallFailed(row)) current.errors += 1;
+    current.duration += Number(row.duration_ms || 0);
+    if (row.started_at && (!current.firstAt || new Date(row.started_at) < new Date(current.firstAt))) current.firstAt = row.started_at;
+    if (row.started_at && (!current.lastAt || new Date(row.started_at) > new Date(current.lastAt))) current.lastAt = row.started_at;
+    const subject = operationSubjectLabel(row);
+    if (subject) current.subjects.add(subject);
+    const profile = [row.caller, row.model, row.reasoning_effort].filter((value) => value && value !== 'unknown').join(' · ');
+    if (profile) current.profiles.add(profile);
+    groups.set(key, current);
+  });
+  return [...groups.values()].sort((a, b) => b.errors - a.errors || b.calls - a.calls || a.tool.localeCompare(b.tool));
+}
+
+function renderActivityRecentAggregate() {
+  const target = byId('activity-recent-aggregate');
+  if (!target) return;
+  const groups = aggregateActivityCalls(activityRecentRows);
+  if (!groups.length) {
+    target.innerHTML = '<div class="empty-state">Sin llamadas registradas en la ventana reciente.</div>';
+    return;
+  }
+  target.innerHTML = groups.map((item) => {
+    const avg = item.calls ? item.duration / item.calls : 0;
+    const errorRate = item.calls ? (item.errors / item.calls) * 100 : 0;
+    const tone = item.errors > 0 ? (errorRate >= 20 ? 'bad' : 'warn') : 'ok';
+    const subjects = [...item.subjects].slice(0, 3);
+    const profiles = [...item.profiles].slice(0, 3);
+    return '<details class="activity-call-group" data-tone="' + tone + '">' +
+      '<summary class="activity-call-summary">' +
+        '<span class="activity-call-main"><code title="' + esc(toolHint(item.tool)) + '">' + esc(item.tool) + '</code><span class="activity-call-last">última ' + esc(clock(item.lastAt)) + '</span></span>' +
+        '<span class="activity-call-metrics"><strong>' + num(item.calls) + '</strong> llamadas · <strong>' + num(item.errors) + '</strong> errores · avg ' + esc(ms(avg)) + '</span>' +
+      '</summary>' +
+      '<div class="activity-call-detail" data-ux-layer="detail">' +
+        '<div><span class="activity-detail-label">Ventana observada</span><strong>' + esc(clock(item.firstAt)) + '–' + esc(clock(item.lastAt)) + '</strong></div>' +
+        '<div><span class="activity-detail-label">Éxitos</span><strong>' + num(item.calls - item.errors) + '</strong></div>' +
+        '<div><span class="activity-detail-label">Tasa de error</span><strong>' + decimalFormat.format(errorRate) + '%</strong></div>' +
+        '<div><span class="activity-detail-label">Perfiles observados</span><span>' + esc(profiles.length ? profiles.join(' · ') : 'sin perfil expuesto') + '</span></div>' +
+        (subjects.length ? '<div class="activity-call-subjects"><span class="activity-detail-label">Objetivos recientes</span><span>' + esc(subjects.join(' · ')) + '</span></div>' : '') +
+      '</div>' +
+    '</details>';
+  }).join('');
+}
+
+function syncActivityRecentMode() {
+  const aggregate = byId('activity-recent-aggregate');
+  const raw = byId('activity-recent-raw');
+  if (aggregate) aggregate.hidden = activityRecentMode !== 'aggregate';
+  if (raw) raw.hidden = activityRecentMode !== 'raw';
+  document.querySelectorAll('[data-activity-mode]').forEach((button) => {
+    const active = button.dataset.activityMode === activityRecentMode;
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+}
+
+function renderActivityRecent() {
+  renderActivityRecentAggregate();
+  renderRecent('activity-recent', activityRecentRows, 20, true);
+  syncActivityRecentMode();
+}
+
 function renderAgentProfiles(inputRows) {
   const target = byId('agent-profiles');
   if (!target) return;
@@ -231,14 +339,14 @@ function renderErrors(inputRows) {
   target.innerHTML = rows.map((row) => {
     const raw = String(row.error || 'Error sin detalle');
     const profile = [row.caller || 'other', row.model || 'unknown', row.reasoning_effort || 'unknown'].join(' · ');
-    return '<details class="error-item">' +
+    return '<details class="error-item" data-ux-layer="detail">' +
       '<summary class="error-summary">' +
         '<span class="error-time">' + esc(clock(row.started_at)) + '</span>' +
         '<span class="error-tool">' + esc(row.tool) + '</span>' +
         '<span class="error-message">' + esc(compactErrorMessage(raw)) + '</span>' +
         '<span class="error-duration">' + esc(ms(row.duration_ms)) + '</span>' +
       '</summary>' +
-      '<div class="error-detail"><div class="muted">' + esc(profile) + '</div><pre>' + esc(raw) + '</pre></div>' +
+      '<div class="error-detail" data-ux-layer="raw"><div class="muted">' + esc(profile) + '</div><pre>' + esc(raw) + '</pre></div>' +
     '</details>';
   }).join('');
 }
@@ -592,6 +700,20 @@ function setPortfolioSelectOptions(id, values, formatter) {
   if (options.includes(current)) select.value = current;
 }
 
+function toolPortfolioGroup(item) {
+  if (item.status === 'no-evidence') return 'no-evidence';
+  if (['repair', 'fix-ux-schema', 'prefer-dedicated', 'deprecation-candidate', 'clarify'].includes(item.status)) return 'attention';
+  return 'healthy';
+}
+
+function toolPortfolioGroupMeta(group) {
+  return ({
+    attention: { label: 'Requiere atención', note: 'Excepciones y decisiones pendientes', tone: 'warn' },
+    'no-evidence': { label: 'Sin evidencia', note: 'Requieren observación o smoke test antes de decidir', tone: 'info' },
+    healthy: { label: 'Sano con evidencia', note: 'Contratos sin señal actual de cambio', tone: 'ok' }
+  })[group];
+}
+
 function renderToolPortfolioRows() {
   const target = byId('tools-portfolio-body');
   if (!target) return;
@@ -601,6 +723,7 @@ function renderToolPortfolioRows() {
   const role = String(byId('tools-role')?.value || '');
   const status = String(byId('tools-status')?.value || '');
   const lifecycle = String(byId('tools-lifecycle')?.value || '');
+  const filtersActive = Boolean(query || family || role || status || lifecycle);
   const rows = source.filter((item) => {
     const metadata = item.metadata || {};
     if (family && metadata.family !== family) return false;
@@ -614,56 +737,128 @@ function renderToolPortfolioRows() {
 
   setPill('tools-result-count', rows.length ? 'info' : 'warn', num(rows.length) + ' de ' + num(source.length));
   if (!rows.length) {
-    target.innerHTML = '<tr><td colspan="5" class="muted">Ninguna tool coincide con los filtros actuales.</td></tr>';
+    target.innerHTML = '<div class="notice-empty portfolio-empty">Ninguna tool coincide con los filtros actuales.</div>';
     return;
   }
 
-  target.innerHTML = rows.map((item) => {
-    const metadata = item.metadata || {};
-    const evidence = item.evidence || {};
-    const alias = metadata.aliasOf ? '<div class="portfolio-subline">alias de <code>' + esc(metadata.aliasOf) + '</code></div>' : '';
-    const preferred = metadata.preferredTool && metadata.preferredTool !== metadata.aliasOf ? '<div class="portfolio-subline">preferida: <code>' + esc(metadata.preferredTool) + '</code></div>' : '';
-    const contractBadges = [
-      portfolioBadge(metadata.family || 'sin familia', 'info'),
-      portfolioBadge(metadata.role || 'dedicated', metadata.role === 'fallback' ? 'warn' : metadata.role === 'alias' ? 'info' : 'ok'),
-      portfolioBadge(metadata.lifecycle || 'stable', metadata.lifecycle === 'protected' ? 'ok' : metadata.lifecycle === 'deprecated' ? 'bad' : 'info'),
-      portfolioBadge(item.risk || 'neutral', item.risk === 'destructive' ? 'warn' : item.risk === 'read-only' ? 'ok' : 'info')
-    ].join('');
-    const errorCategories = (evidence.errorCategories || []).map((entry) => entry.name + ' ' + num(entry.count)).join(' · ');
-    const duration = evidence.avgDurationMs === null || evidence.avgDurationMs === undefined ? '—' : ms(evidence.avgDurationMs);
-    const lastEvidence = evidence.lastSuccessAt
-      ? 'último ok ' + dateTime(evidence.lastSuccessAt)
-      : evidence.lastErrorAt
-        ? 'último error ' + dateTime(evidence.lastErrorAt)
-        : 'sin ejecución observada';
-    return '<tr>' +
-      '<td class="portfolio-tool"><code title="' + esc(item.tool) + '">' + esc(item.tool) + '</code><div class="portfolio-description">' + esc(item.description || '') + '</div>' + alias + preferred + '</td>' +
-      '<td><div class="portfolio-badges">' + contractBadges + '</div></td>' +
-      '<td><strong>' + num(evidence.calls) + ' llamadas</strong><div class="portfolio-subline">' + pct(evidence.successRate) + ' éxito · ' + num(evidence.errorCalls) + ' errores · avg ' + esc(duration) + '</div><div class="portfolio-subline">' + esc(lastEvidence) + ' · ' + num(evidence.uniqueSessions) + ' sesiones · ' + num(evidence.uniqueProjects) + ' proyectos</div>' + (errorCategories ? '<div class="portfolio-errors">' + esc(errorCategories) + '</div>' : '') + '</td>' +
-      '<td>' + portfolioBadge(auditStatusLabel(item.status), auditTone(item.status)) + '<div class="portfolio-subline">confianza ' + esc(item.confidence || '—') + '</div></td>' +
-      '<td><div class="portfolio-recommendation">' + esc(item.recommendation || '') + '</div><div class="portfolio-reason">' + esc(item.reason || '') + '</div></td>' +
-    '</tr>';
+  const buckets = ['attention', 'no-evidence', 'healthy'].map((key) => ({
+    key,
+    meta: toolPortfolioGroupMeta(key),
+    items: rows.filter((item) => toolPortfolioGroup(item) === key)
+  })).filter((bucket) => bucket.items.length);
+
+  target.innerHTML = buckets.map((bucket) => {
+    const groupOpen = filtersActive || bucket.key === 'attention' ? ' open' : '';
+    const itemsMarkup = bucket.items.map((item) => {
+      const metadata = item.metadata || {};
+      const evidence = item.evidence || {};
+      const alias = metadata.aliasOf ? '<div class="portfolio-subline">alias de <code>' + esc(metadata.aliasOf) + '</code></div>' : '';
+      const preferred = metadata.preferredTool && metadata.preferredTool !== metadata.aliasOf ? '<div class="portfolio-subline">preferida: <code>' + esc(metadata.preferredTool) + '</code></div>' : '';
+      const contractBadges = [
+        portfolioBadge(metadata.family || 'sin familia', 'info'),
+        portfolioBadge(metadata.role || 'dedicated', metadata.role === 'fallback' ? 'warn' : metadata.role === 'alias' ? 'info' : 'ok'),
+        portfolioBadge(metadata.lifecycle || 'stable', metadata.lifecycle === 'protected' ? 'ok' : metadata.lifecycle === 'deprecated' ? 'bad' : 'info'),
+        portfolioBadge(item.risk || 'neutral', item.risk === 'destructive' ? 'warn' : item.risk === 'read-only' ? 'ok' : 'info')
+      ].join('');
+      const errorCategories = (evidence.errorCategories || []).map((entry) => entry.name + ' ' + num(entry.count)).join(' · ');
+      const duration = evidence.avgDurationMs === null || evidence.avgDurationMs === undefined ? '—' : ms(evidence.avgDurationMs);
+      const lastEvidence = evidence.lastSuccessAt
+        ? 'último ok ' + dateTime(evidence.lastSuccessAt)
+        : evidence.lastErrorAt
+          ? 'último error ' + dateTime(evidence.lastErrorAt)
+          : 'sin ejecución observada';
+      const errorTone = Number(evidence.errorCalls || 0) > 0 ? 'warn' : Number(evidence.calls || 0) > 0 ? 'ok' : 'info';
+      return '<details class="portfolio-item" data-status="' + esc(item.status || '') + '" data-ux-layer="detail">' +
+        '<summary class="portfolio-item-summary">' +
+          '<span class="portfolio-item-identity"><code title="' + esc(item.tool) + '">' + esc(item.tool) + '</code><span>' + esc(metadata.family || 'sin familia') + '</span></span>' +
+          '<span class="portfolio-item-metrics"><strong>' + num(evidence.calls) + '</strong><span>llamadas</span><strong data-tone="' + errorTone + '">' + num(evidence.errorCalls) + '</strong><span>errores</span><span class="portfolio-item-latency">avg ' + esc(duration) + '</span></span>' +
+          portfolioBadge(auditStatusLabel(item.status), auditTone(item.status)) +
+        '</summary>' +
+        '<div class="portfolio-item-detail">' +
+          '<div class="portfolio-detail-block"><div class="portfolio-detail-label">Descripción</div><div class="portfolio-description">' + esc(item.description || 'Sin descripción registrada.') + '</div>' + alias + preferred + '</div>' +
+          '<div class="portfolio-detail-block"><div class="portfolio-detail-label">Contrato</div><div class="portfolio-badges">' + contractBadges + '</div><div class="portfolio-subline">confianza ' + esc(item.confidence || '—') + '</div></div>' +
+          '<div class="portfolio-detail-block"><div class="portfolio-detail-label">Evidencia</div><strong>' + num(evidence.calls) + ' llamadas · ' + pct(evidence.successRate) + ' éxito</strong><div class="portfolio-subline">' + num(evidence.errorCalls) + ' errores · avg ' + esc(duration) + ' · ' + num(evidence.uniqueSessions) + ' sesiones · ' + num(evidence.uniqueProjects) + ' proyectos</div><div class="portfolio-subline">' + esc(lastEvidence) + '</div>' + (errorCategories ? '<div class="portfolio-errors">' + esc(errorCategories) + '</div>' : '') + '</div>' +
+          '<div class="portfolio-detail-block portfolio-detail-recommendation"><div class="portfolio-detail-label">Recomendación</div><div class="portfolio-recommendation">' + esc(item.recommendation || 'Sin recomendación adicional.') + '</div><div class="portfolio-reason">' + esc(item.reason || '') + '</div></div>' +
+        '</div>' +
+      '</details>';
+    }).join('');
+    return '<details class="portfolio-group" data-group="' + bucket.key + '" data-tone="' + bucket.meta.tone + '" data-ux-layer="aggregate"' + groupOpen + '>' +
+      '<summary class="portfolio-group-summary"><span><strong>' + esc(bucket.meta.label) + '</strong><small>' + esc(bucket.meta.note) + '</small></span><span class="portfolio-group-count">' + num(bucket.items.length) + '</span></summary>' +
+      '<div class="portfolio-group-items">' + itemsMarkup + '</div>' +
+    '</details>';
   }).join('');
+}
+
+function noticeSeverityRank(severity) {
+  if (severity === 'error') return 3;
+  if (severity === 'warning') return 2;
+  return 1;
+}
+
+function groupToolNotices(items) {
+  const groups = new Map();
+  items.forEach((item) => {
+    const code = item.code || 'bridge-notice';
+    const source = item.source || 'bridge';
+    const key = code + '||' + source;
+    const existing = groups.get(key) || { code, source, severity: item.severity || 'info', updatedAt: item.updatedAt, occurrences: 0, items: [], actions: new Map() };
+    existing.items.push(item);
+    existing.occurrences += Math.max(1, Number(item.occurrences || 1));
+    if (noticeSeverityRank(item.severity) > noticeSeverityRank(existing.severity)) existing.severity = item.severity;
+    if (!existing.updatedAt || (item.updatedAt && new Date(item.updatedAt).getTime() > new Date(existing.updatedAt).getTime())) existing.updatedAt = item.updatedAt;
+    (Array.isArray(item.actions) ? item.actions : []).forEach((action) => {
+      const actionKey = [action.label, action.toolName, action.instruction].filter(Boolean).join('|');
+      if (actionKey && !existing.actions.has(actionKey)) existing.actions.set(actionKey, action);
+    });
+    groups.set(key, existing);
+  });
+  const result = [...groups.values()];
+  result.forEach((group) => group.items.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()));
+  return result.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
+}
+
+function renderNoticeAction(action) {
+  return '<div class="notice-action"><strong>' + esc(action.label || action.toolName || 'Siguiente paso') + '</strong>' + (action.toolName ? '<code>' + esc(action.toolName) + '</code>' : '') + (action.instruction ? '<span>' + esc(action.instruction) + '</span>' : '') + '</div>';
+}
+
+function renderRawNotice(item) {
+  const actions = Array.isArray(item.actions) ? item.actions : [];
+  return '<article class="notice-item notice-raw-item" data-tone="' + esc(item.severity || 'info') + '">' +
+    '<div class="notice-item-head"><div><code>' + esc(item.code || 'bridge-notice') + '</code><span>' + esc(item.source || 'bridge') + '</span></div><time>' + esc(dateTime(item.updatedAt)) + '</time></div>' +
+    '<div class="notice-message">' + esc(item.message || '') + '</div>' +
+    (Number(item.occurrences || 0) > 1 ? '<div class="notice-occurrences">' + num(item.occurrences) + ' ocurrencias en este evento</div>' : '') +
+    (actions.length ? '<div class="notice-actions">' + actions.map(renderNoticeAction).join('') + '</div>' : '') +
+  '</article>';
 }
 
 function updateToolNotices(payload) {
   const target = byId('tools-notices');
   if (!target) return;
   const items = payload && Array.isArray(payload.items) ? payload.items : [];
-  setPill('tools-notice-count', items.some((item) => item.severity === 'error') ? 'bad' : items.length ? 'warn' : 'ok', items.length ? num(items.length) + ' recientes' : 'sin avisos');
   if (!items.length) {
+    setPill('tools-notice-count', 'ok', 'sin avisos');
     target.innerHTML = '<div class="notice-empty">No hay recordatorios recientes. Los avisos entregados al agente aparecerán aquí durante 24 horas.</div>';
     return;
   }
-  target.innerHTML = items.slice(0, 12).map((item) => {
-    const actions = Array.isArray(item.actions) ? item.actions : [];
-    const actionMarkup = actions.map((action) => '<div class="notice-action"><strong>' + esc(action.label || action.toolName || 'Siguiente paso') + '</strong>' + (action.toolName ? '<code>' + esc(action.toolName) + '</code>' : '') + (action.instruction ? '<span>' + esc(action.instruction) + '</span>' : '') + '</div>').join('');
-    return '<article class="notice-item" data-tone="' + esc(item.severity || 'info') + '">' +
-      '<div class="notice-item-head"><div><code>' + esc(item.code || 'bridge-notice') + '</code><span>' + esc(item.source || 'bridge') + '</span></div><time>' + esc(dateTime(item.updatedAt)) + '</time></div>' +
-      '<div class="notice-message">' + esc(item.message || '') + '</div>' +
-      (Number(item.occurrences || 0) > 1 ? '<div class="notice-occurrences">' + num(item.occurrences) + ' ocurrencias</div>' : '') +
-      (actionMarkup ? '<div class="notice-actions">' + actionMarkup + '</div>' : '') +
-    '</article>';
+
+  const visibleItems = items.slice(0, 12);
+  const groups = groupToolNotices(visibleItems);
+  const totalOccurrences = groups.reduce((total, group) => total + group.occurrences, 0);
+  const hasError = groups.some((group) => group.severity === 'error');
+  setPill('tools-notice-count', hasError ? 'bad' : 'warn', num(groups.length) + ' grupos · ' + num(totalOccurrences) + ' ocurrencias');
+  target.innerHTML = groups.map((group) => {
+    const latest = group.items[0] || {};
+    const actions = [...group.actions.values()];
+    const open = group.severity === 'error' ? ' open' : '';
+    return '<details class="notice-group" data-tone="' + esc(group.severity) + '" data-ux-layer="aggregate"' + open + '>' +
+      '<summary class="notice-group-summary"><span class="notice-group-main"><code>' + esc(group.code) + '</code><span class="notice-group-message">' + esc(latest.message || '') + '</span></span><span class="notice-group-meta"><strong>' + num(group.occurrences) + '</strong><span>ocurrencias</span><time>' + esc(dateTime(group.updatedAt)) + '</time></span></summary>' +
+      '<div class="notice-group-detail" data-ux-layer="detail">' +
+        '<div class="notice-group-source">Fuente <code>' + esc(group.source) + '</code> · ' + num(group.items.length) + ' eventos visibles en la ventana</div>' +
+        '<div class="notice-message">' + esc(latest.message || '') + '</div>' +
+        (actions.length ? '<div class="notice-actions">' + actions.map(renderNoticeAction).join('') + '</div>' : '') +
+        '<details class="notice-raw" data-ux-layer="raw"><summary>Eventos raw (' + num(group.items.length) + ')</summary><div class="notice-raw-list">' + group.items.map(renderRawNotice).join('') + '</div></details>' +
+      '</div>' +
+    '</details>';
   }).join('');
 }
 
@@ -704,6 +899,732 @@ function setupToolPortfolioFilters() {
       if (field) field.value = '';
     });
     renderToolPortfolioRows();
+  });
+}
+
+function setupActivityControls() {
+  document.querySelectorAll('[data-activity-mode]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const mode = button.dataset.activityMode;
+      if (mode !== 'aggregate' && mode !== 'raw') return;
+      activityRecentMode = mode;
+      syncActivityRecentMode();
+    });
+  });
+  const timeline = byId('activity-timeline');
+  if (timeline) timeline.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-activity-bucket]');
+    if (!button || !timeline.contains(button)) return;
+    selectedActivityBucket = button.dataset.activityBucket || '';
+    timeline.querySelectorAll('[data-activity-bucket]').forEach((candidate) => {
+      candidate.setAttribute('aria-pressed', candidate === button ? 'true' : 'false');
+    });
+    renderActivityTimelineDetail(activityTimelineRows);
+  });
+}
+function setupMssrControls() {
+  const panel = byId('panel-mssr');
+  if (!panel || panel.dataset.mssrGrouped === 'true') return;
+  const nav = panel.querySelector('.mssr-local-nav');
+  if (!nav) return;
+
+  const families = [
+    {
+      id: 'context',
+      kicker: 'Contexto + mantenimiento',
+      title: 'Contexto y health',
+      description: 'Presión de contexto, salud estructural, control plane, runtime y evidencia por traza.',
+      selectors: ['#mssr-context-planner', '#mssr-skill-health-status', '#mssr-project-health-status', '#mssr-runtime-health-status', '#mssr-context-traces', '#mssr-context-pressure'],
+    },
+    {
+      id: 'routing',
+      kicker: 'Selección y aprendizaje',
+      title: 'Routing y skills',
+      description: 'Qué seleccionó el router, qué cargó el host y qué feedback histórico quedó observable.',
+      selectors: ['#mssr-selected-skills', '#mssr-loaded-skills', '#mssr-selection-feedback', '#mssr-learning-priors'],
+    },
+    {
+      id: 'identity',
+      kicker: 'Host observable',
+      title: 'Identidad y host',
+      description: 'Perfiles correlacionados, resultados, transporte físico y comparación por esfuerzo observado.',
+      selectors: ['#mssr-agent-activation', '#mssr-agent-results', '#mssr-agent-transport', '#mssr-effort-comparison'],
+    },
+    {
+      id: 'outcomes',
+      kicker: 'Cierre atribuido',
+      title: 'Outcomes',
+      description: 'Resultado por skill primaria sin multiplicar atribución entre skills de apoyo.',
+      selectors: ['#mssr-skill-outcomes'],
+    },
+  ];
+
+  let anchor = nav;
+  families.forEach((family) => {
+    const details = document.createElement('details');
+    details.className = 'mssr-family-group';
+    details.dataset.mssrFamily = family.id;
+    details.dataset.uxLayer = 'detail';
+    details.innerHTML = '<summary class="mssr-family-summary"><div><span class="mssr-family-kicker">' + esc(family.kicker) + '</span><strong>' + esc(family.title) + '</strong><small>' + esc(family.description) + '</small></div><span id="mssr-family-' + family.id + '-status" class="mssr-family-status">cargando…</span></summary><div class="mssr-family-grid grid"></div>';
+    anchor.insertAdjacentElement('afterend', details);
+    anchor = details;
+    const grid = details.querySelector('.mssr-family-grid');
+    const cards = [];
+    family.selectors.forEach((selector) => {
+      const card = panel.querySelector(selector)?.closest('article.card');
+      if (card && !cards.includes(card)) cards.push(card);
+    });
+    cards.forEach((card) => grid.appendChild(card));
+  });
+
+  const setCurrent = (familyId) => {
+    nav.querySelectorAll('[data-mssr-nav]').forEach((button) => {
+      if (button.dataset.mssrNav === familyId) button.setAttribute('aria-current', 'true');
+      else button.removeAttribute('aria-current');
+    });
+  };
+  nav.querySelectorAll('[data-mssr-nav]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const familyId = button.dataset.mssrNav || 'overview';
+      setCurrent(familyId);
+      if (familyId === 'overview') {
+        panel.querySelector('.card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+      const details = panel.querySelector('[data-mssr-family="' + familyId + '"]');
+      if (!details) return;
+      details.open = true;
+      details.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+  panel.dataset.mssrGrouped = 'true';
+}
+
+function syncMssrFamilySummaries(mssr) {
+  const root = mssr || {};
+  const context = root.contextAssembly || {};
+  const top = root.top || {};
+  const benchmark = root.benchmark || {};
+  const text = (id) => String(byId(id)?.textContent || '—').trim() || '—';
+  setText('mssr-family-context-status', pct(context.savingsRate) + ' ahorro · skills ' + text('mssr-skill-health-review') + 'R/' + text('mssr-skill-health-watch') + 'W · proyectos ' + text('mssr-project-health-review') + 'R/' + text('mssr-project-health-watch') + 'W');
+  setText('mssr-family-routing-status', num((top.selectedSkills || []).length) + ' seleccionadas · ' + num((top.loadedSkills || []).length) + ' cargadas');
+  setText('mssr-family-identity-status', num((root.agentProfiles || []).length) + ' perfiles · ' + num((root.reasoningEffortComparison || []).length) + ' buckets');
+  setText('mssr-family-outcomes-status', num(benchmark.attributedOutcomeTraces || 0) + ' outcomes · ' + pct(benchmark.outcomeSuccessRate) + ' éxito');
+}
+
+
+function relativeAge(iso) {
+  if (!iso) return '—';
+  const timestamp = new Date(iso).getTime();
+  if (!Number.isFinite(timestamp)) return '—';
+  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return 'hace ' + seconds + ' s';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return 'hace ' + minutes + ' min';
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return 'hace ' + hours + ' h';
+  const days = Math.floor(hours / 24);
+  return 'hace ' + days + ' d';
+}
+
+function humanizeKey(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return 'Trabajo actual';
+  const text = raw.replace(/[-_]+/g, ' ').replace(/ +/g, ' ').trim();
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function signedNumber(value, suffix) {
+  const numeric = Number(value || 0);
+  const prefix = numeric > 0 ? '+' : numeric < 0 ? '−' : '±';
+  return prefix + num(Math.abs(numeric)) + (suffix || '');
+}
+
+function pulseTone(targetId, tone) {
+  const target = byId(targetId);
+  const card = target ? target.closest('.home-pulse-card') : null;
+  if (card) card.dataset.tone = tone;
+}
+
+function semanticTraceEvent(row) {
+  const event = String(row && row.latestEventType || '').toLowerCase();
+  if (row && row.closed) return 'Trabajo cerrado';
+  if (event.includes('verification')) return 'Verificación registrada';
+  if (event.includes('persistence')) return 'Persistencia registrada';
+  if (event.includes('outcome')) return 'Outcome registrado';
+  if (event.includes('friction')) return 'Fricción registrada';
+  if (event.includes('replan') || event.includes('route')) return 'Plan actualizado';
+  if (event.includes('context')) return 'Contexto preparado';
+  return 'Trabajo actualizado';
+}
+
+function renderHomeChanges(cockpit, status) {
+  const target = byId('home-changes');
+  if (!target) return;
+  const rows = [];
+  for (const row of Array.isArray(cockpit && cockpit.traces) ? cockpit.traces : []) {
+    if (!row || !row.latestAt || row.setupOnly === true) continue;
+    rows.push({
+      at: row.latestAt,
+      label: semanticTraceEvent(row),
+      title: row.displayName || row.workflowLabel || humanizeKey(row.workflowKey),
+      detail: row.closed ? 'Trabajo cerrado con evidencia observable.' : (row.summary || (row.stage ? 'Etapa ' + row.stage : '')),
+      tone: row.closed ? 'ok' : 'info',
+    });
+  }
+  if (status && status.startedAt) {
+    rows.push({
+      at: status.startedAt,
+      label: 'Runtime iniciado',
+      title: 'Bridge ' + (status.server && status.server.version ? 'v' + status.server.version : ''),
+      detail: 'Nueva generación de runtime observable.',
+      tone: 'info',
+    });
+  }
+  rows.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+  const seen = new Set();
+  const selected = rows.filter((row) => {
+    const key = row.label + '|' + row.title;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 5);
+  if (!selected.length) {
+    target.innerHTML = '<div class="home-empty">No hay cambios humanos recientes en la ventana observable.</div>';
+    return;
+  }
+  target.innerHTML = selected.map((row) => '<article class="home-change-row">' +
+    '<span class="dot ' + esc(row.tone) + '"></span>' +
+    '<div class="home-change-main"><span class="home-change-label">' + esc(row.label) + '</span><strong>' + esc(row.title) + '</strong><span>' + esc(row.detail || '') + '</span></div>' +
+    '<time datetime="' + esc(row.at) + '">' + esc(relativeAge(row.at)) + '</time>' +
+  '</article>').join('');
+}
+
+function renderHomeAttention(snapshot) {
+  const target = byId('home-attention-list');
+  if (!target) return;
+  const status = snapshot.status || {};
+  const overview = snapshot.overview || {};
+  const mssr = snapshot.mssr || {};
+  const cockpit = snapshot.cockpit || {};
+  const benchmark = mssr.benchmark || {};
+  const morning = cockpit.morningBrief || {};
+  const persistence = overview.persistence || {};
+  const items = [];
+  const add = (tone, title, detail, legacyTab) => items.push({ tone, title, detail, legacyTab });
+
+  if (!Boolean(status.ready) || Boolean(status.closing)) {
+    add('bad', 'Bridge no está ready', status.closing ? 'El runtime está cerrando conexiones.' : 'El endpoint de servicio no reporta ready.', 'system');
+  }
+  const persistenceFailures = Number(persistence.failed || 0);
+  const persistenceDrops = Number(persistence.dropped || 0);
+  if (persistenceFailures > 0 || persistenceDrops > 0) {
+    add('bad', 'Persistencia de métricas', num(persistenceFailures) + ' fallos · ' + num(persistenceDrops) + ' descartes observados.', 'system');
+  }
+  const requiredExpected = Number(benchmark.requiredSkillLoadsExpected || 0);
+  const requiredSatisfied = Number(benchmark.requiredSkillLoadsSatisfied || 0);
+  const requiredMissing = Math.max(0, requiredExpected - requiredSatisfied);
+  if (requiredExpected > 0 && requiredMissing > 0) {
+    add('warn', 'Cargas requeridas pendientes', num(requiredMissing) + ' de ' + num(requiredExpected) + ' cargas obligatorias no quedaron satisfechas en la época activa.', 'mssr');
+  }
+  const closureDebt = Number(morning.needsClosureReviewCount ?? morning.lifecycleDebtTaskCount ?? 0);
+  if (closureDebt > 0) {
+    add('warn', 'Cierres para revisar', num(closureDebt) + (closureDebt === 1 ? ' tarea humana necesita confirmar si sigue activa o cerrar su resultado.' : ' tareas humanas necesitan confirmar si siguen activas o cerrar su resultado.'), 'cockpit');
+  }
+  const projectReview = Number(cockpit.counts && cockpit.counts.projectReview || 0);
+  if (projectReview > 0) {
+    add('warn', 'Project Health en REVIEW', num(projectReview) + ' entradas de salud de proyecto están en estado REVIEW y requieren revisión explícita.', 'cockpit');
+  }
+
+  const closureNotice = (snapshot.toolNotices && Array.isArray(snapshot.toolNotices.items) ? snapshot.toolNotices.items : []).find((item) =>
+    item && item.code === 'mssr-trace-closure-due' && Array.isArray(item.actions) && item.actions.length > 0
+  );
+  if (closureNotice && closureDebt === 0) add(closureNotice.severity === 'error' ? 'bad' : 'warn', 'Cierre MSSR pendiente', 'Hay trabajo sustantivo sin outcome observable. Revisá si la tarea sigue activa o si corresponde cerrarla.', 'cockpit');
+
+  const limited = items.slice(0, 5);
+  if (!limited.length) {
+    setPill('home-attention-count', 'ok', 'sin acciones');
+    target.innerHTML = '<div class="home-attention-clear"><span class="dot ok"></span><div><strong>Sin acciones urgentes</strong><span>Los contratos observables no requieren intervención inmediata.</span></div></div>';
+    return;
+  }
+  const worst = limited.some((item) => item.tone === 'bad') ? 'bad' : 'warn';
+  setPill('home-attention-count', worst, limited.length + (limited.length === 1 ? ' punto' : ' puntos'));
+  target.innerHTML = limited.map((item) => '<article class="home-attention-row" data-tone="' + esc(item.tone) + '">' +
+    '<span class="dot ' + esc(item.tone) + '"></span>' +
+    '<div><strong>' + esc(item.title) + '</strong><span>' + esc(item.detail) + '</span></div>' +
+    (item.legacyTab ? '<button type="button" class="home-row-action" data-open-legacy-tab="' + esc(item.legacyTab) + '">Ver</button>' : '') +
+  '</article>').join('');
+}
+
+function renderHomePulse(snapshot) {
+  const status = snapshot.status || {};
+  const timeline = Array.isArray(snapshot.timeline && snapshot.timeline.timeline) ? [...snapshot.timeline.timeline] : [];
+  timeline.sort((a, b) => new Date(a.bucket).getTime() - new Date(b.bucket).getTime());
+  const latest = timeline.at(-1) || {};
+  const previous = timeline.at(-2) || null;
+  const latestCalls = Number(latest.calls || 0);
+  const previousCalls = previous ? Number(previous.calls || 0) : null;
+  const latestErrors = Number(latest.errors || 0);
+  const previousErrors = previous ? Number(previous.errors || 0) : null;
+  const latestErrorRate = latestCalls > 0 ? (latestErrors / latestCalls) * 100 : 0;
+  const previousErrorRate = previous && previousCalls > 0 ? (previousErrors / previousCalls) * 100 : null;
+
+  setText('home-pulse-activity', num(latestCalls) + ' / 5 min');
+  setText('home-pulse-activity-note', previousCalls === null ? 'último bloque observable' : signedNumber(latestCalls - previousCalls, '') + ' vs bloque anterior');
+  pulseTone('home-pulse-activity', 'info');
+
+  setText('home-pulse-errors', decimalFormat.format(latestErrorRate) + '%');
+  setText('home-pulse-errors-note', previousErrorRate === null ? num(latestErrors) + ' errores' : signedNumber(Number((latestErrorRate - previousErrorRate).toFixed(1)), ' pp') + ' · ' + num(latestErrors) + ' errores');
+  pulseTone('home-pulse-errors', 'info');
+
+  const sessions = Number(status.sessions || 0);
+  const activeSessions = Number(status.activeSessions || 0);
+  const maxSessions = Number(status.limits && status.limits.maxSessions || 0);
+  setText('home-pulse-sessions', maxSessions > 0 ? num(sessions) + ' / ' + num(maxSessions) : num(sessions));
+  setText('home-pulse-sessions-note', num(activeSessions) + ' activas · ' + num(Math.max(0, sessions - activeSessions)) + ' idle');
+  const capacityRatio = maxSessions > 0 ? sessions / maxSessions : 0;
+  pulseTone('home-pulse-sessions', capacityRatio >= 1 ? 'bad' : capacityRatio >= 0.9 ? 'warn' : 'ok');
+
+  const persistence = snapshot.overview && snapshot.overview.persistence || {};
+  const failed = Number(persistence.failed || 0);
+  const dropped = Number(persistence.dropped || 0);
+  const pending = Number(persistence.pending || 0);
+  setText('home-pulse-persistence', failed || dropped ? num(failed + dropped) + ' incidencias' : 'sin fallos');
+  setText('home-pulse-persistence-note', num(pending) + ' pendientes · ' + num(dropped) + ' descartes');
+  pulseTone('home-pulse-persistence', failed || dropped ? 'bad' : 'ok');
+}
+
+function updateV2Inspector(snapshot) {
+  const status = snapshot.status || {};
+  const observability = snapshot.mssr && snapshot.mssr.observability || {};
+  setText('inspector-server', (status.server && status.server.name ? status.server.name : '—') + (status.server && status.server.version ? ' v' + status.server.version : ''));
+  setText('inspector-pid', status.pid || '—');
+  setText('inspector-boot', status.runtimeBootId || '—');
+  setText('inspector-started', dateTime(status.startedAt));
+  setText('inspector-transport', status.transport || '—');
+  setText('inspector-epoch', observability.activeEpoch || '—');
+  setText('inspector-snapshot', dateTime(snapshot.generatedAt));
+  setText('inspector-build', snapshot.cache && snapshot.cache.buildMs !== undefined ? decimalFormat.format(snapshot.cache.buildMs) + ' ms' : '—');
+}
+
+function updateHome(snapshot) {
+  const status = snapshot.status || {};
+  const cockpit = snapshot.cockpit || {};
+  const morning = cockpit.morningBrief || {};
+  const runtime = snapshot.runtimeHealth && snapshot.runtimeHealth.latest || {};
+  const runtimeLevel = String(runtime.projection && runtime.projection.level || 'ok').toLowerCase();
+  const ready = Boolean(status.ready) && !Boolean(status.closing);
+  const systemNeedsAttention = !ready || ['review', 'critical', 'error', 'failed'].includes(runtimeLevel);
+  const systemWatch = !systemNeedsAttention && runtimeLevel === 'watch';
+  const activeCount = Number(morning.openTaskCount ?? (cockpit.counts && cockpit.counts.active) ?? 0);
+  const closureDebt = Number(morning.needsClosureReviewCount ?? morning.lifecycleDebtTaskCount ?? 0);
+
+  setText('server-subtitle', 'Bridge dashboard · UX v2-B · actualización cada 5 s');
+  setText('home-active-work', num(activeCount) + (activeCount === 1 ? ' activo' : ' activos'));
+  setText('home-closure-debt', num(closureDebt) + (closureDebt === 1 ? ' cierre' : ' cierres'));
+  const systemSentence = systemNeedsAttention ? 'Bridge requiere atención.' : systemWatch ? 'Bridge está operativo con una observación.' : 'Bridge está operativo.';
+  const workSentence = activeCount || closureDebt
+    ? ' Hay ' + num(activeCount) + (activeCount === 1 ? ' trabajo activo' : ' trabajos activos') + ' y ' + num(closureDebt) + (closureDebt === 1 ? ' tarea con cierre para revisar.' : ' tareas con cierre para revisar.')
+    : ' No hay trabajo humano pendiente en la proyección actual.';
+  setText('home-status-sentence', systemSentence + workSentence);
+  setPill('shell-work-status', closureDebt > 0 ? 'warn' : activeCount > 0 ? 'info' : 'ok', num(activeCount) + ' activos · ' + num(closureDebt) + ' cierres');
+
+  const tasks = Array.isArray(morning.tasks) ? morning.tasks : [];
+  const current = tasks.find((task) => task && task.classification && task.classification.state === 'active') || tasks[0] || null;
+  if (current) {
+    const title = current.workflowKey ? humanizeKey(current.workflowKey) : current.project ? humanizeKey(current.project) : 'Trabajo actual';
+    setText('home-continue-title', title);
+    setText('home-continue-project', current.project || (Array.isArray(current.projects) ? current.projects.join(' · ') : 'MauroPrime'));
+    setText('home-continue-summary', current.latestSummary || 'Trabajo activo sin resumen humano adicional.');
+    setPill('home-continue-stage', 'info', current.latestStage || (current.classification && current.classification.state) || 'activo');
+    setText('home-continue-next', current.nextGate || 'continuar');
+    setText('home-continue-latest', relativeAge(current.latestAt));
+  } else if (cockpit.focus) {
+    const focus = cockpit.focus;
+    setText('home-continue-title', focus.displayName || humanizeKey(focus.workflowKey));
+    setText('home-continue-project', focus.project || 'MauroPrime');
+    setText('home-continue-summary', focus.summary || 'Trabajo técnico activo.');
+    setPill('home-continue-stage', 'info', focus.stage || focus.status || 'activo');
+    setText('home-continue-next', focus.nextPhase || focus.attentionKind || 'continuar');
+    setText('home-continue-latest', relativeAge(focus.latestAt));
+  } else {
+    setText('home-continue-title', 'Sin trabajo activo');
+    setText('home-continue-project', 'MauroPrime');
+    setText('home-continue-summary', 'La proyección actual no tiene una tarea humana activa para reanudar.');
+    setPill('home-continue-stage', 'ok', 'libre');
+    setText('home-continue-next', '—');
+    setText('home-continue-latest', '—');
+  }
+
+  renderHomeAttention(snapshot);
+  renderHomePulse(snapshot);
+  renderHomeChanges(cockpit, status);
+  updateV2Inspector(snapshot);
+}
+
+function workStateLabel(state) {
+  const labels = {
+    active: 'activo',
+    'review-needed': 'revisar',
+    paused: 'pausado',
+    experimental: 'experimental',
+    finished: 'terminado',
+    'abandoned-or-replaced': 'reemplazado',
+    observed: 'observado',
+    historical: 'histórico',
+  };
+  return labels[state] || String(state || 'observado');
+}
+
+function workStateTone(state) {
+  if (state === 'review-needed') return 'warn';
+  if (state === 'active' || state === 'finished') return 'ok';
+  return 'info';
+}
+
+function workProjectBlockerSummary(reason) {
+  const text = String(reason || '').trim();
+  if (!text) return 'Necesita revisión humana.';
+  const lower = text.toLowerCase();
+  if (lower.includes('evidencia disponible no alcanza') || lower.includes('clasificación explícita del owner')) return 'Falta una clasificación explícita del owner.';
+  if (lower.includes('project context health') || lower.includes('salud de contexto')) return 'Project Context requiere revisión antes de clasificar.';
+  if (lower.includes('trazas sustantivas') && lower.includes('cerraron')) return 'Las trazas cerraron; falta clasificar el proyecto.';
+  const firstSentence = text.split(/(?<=[.!?])\s+/)[0] || text;
+  return firstSentence.length > 150 ? firstSentence.slice(0, 147).trimEnd() + '…' : firstSentence;
+}
+
+function workGitDecision(project, includeDirty = false) {
+  if (!project) return null;
+  const remoteState = String(project.remoteState || '');
+  const localChanges = Number(project.gitPressure || 0) + Number(project.trackedChanges || 0) + Number(project.untrackedChanges || 0);
+  if (remoteState === 'diverged-local-tracking') return { tone: 'warn', text: 'Git divergente' };
+  if (remoteState === 'behind-local-tracking') return { tone: 'warn', text: 'Git por detrás' };
+  if (includeDirty && (project.gitClean === false || localChanges > 0)) return { tone: 'info', text: 'cambios locales' };
+  return null;
+}
+
+function workCurrentTasks(cockpit) {
+  const root = cockpit || {};
+  const brief = root.morningBrief || {};
+  const active = Array.isArray(brief.tasks) ? brief.tasks : [];
+  const debt = Array.isArray(brief.lifecycleDebt) ? brief.lifecycleDebt : [];
+  const debtKeys = new Set(debt.map((task, index) => cockpitTaskIdentity(task, index)));
+  const seen = new Set();
+  const rows = [];
+  [...active, ...debt].forEach((task, index) => {
+    if (!task) return;
+    const key = cockpitTaskIdentity(task, index);
+    if (seen.has(key)) return;
+    seen.add(key);
+    rows.push({ task, needsClosure: task.needsClosureReview === true || debtKeys.has(key) });
+  });
+  return rows;
+}
+
+function renderWorkTask(row, workspaceProjects, index) {
+  const task = row.task || {};
+  const projectLabel = cockpitTaskProjectLabel(task);
+  const taskLabel = humanizeKey(task.workflowKey || task.taskKey || projectLabel);
+  const stage = task.latestStage || (task.classification && task.classification.state) || 'activo';
+  const nextGate = task.nextGate || (row.needsClosure ? 'revisar cierre' : 'continuar');
+  const latest = task.latestAt ? relativeAge(task.latestAt) : 'sin hora observable';
+  const project = (workspaceProjects || []).find((item) => String(item && item.name || '').toLowerCase() === String(task.project || '').toLowerCase()) || null;
+  const gitDecision = workGitDecision(project);
+  const runtime = task.runtimeActivity || {};
+  const attention = row.needsClosure
+    ? '<span class="work-task-attention"><span class="dot warn"></span>Confirmar si continúa o cerrar resultado</span>'
+    : runtime.active === true && runtime.progressing === false
+      ? '<span class="work-task-attention work-task-attention-info"><span class="dot info"></span>Proceso vivo sin progreso reciente</span>'
+      : '';
+  const git = gitDecision ? '<span class="work-task-git" data-tone="' + esc(gitDecision.tone) + '">' + esc(gitDecision.text) + '</span>' : '';
+  return '<article class="work-task-card' + (index === 0 ? ' work-task-primary' : '') + '" data-work-task data-tone="' + (row.needsClosure ? 'warn' : 'info') + '">' +
+    '<div class="work-task-head"><div><span class="work-task-project">' + esc(projectLabel) + '</span><strong>' + esc(taskLabel) + '</strong></div>' +
+    '<span class="status-pill" data-tone="' + (row.needsClosure ? 'warn' : 'info') + '"><span class="dot ' + (row.needsClosure ? 'warn' : 'info') + '"></span><span>' + esc(stage) + '</span></span></div>' +
+    '<p>' + esc(task.latestSummary || 'Trabajo activo sin resumen humano adicional.') + '</p>' +
+    (attention || git ? '<div class="work-task-signals">' + attention + git + '</div>' : '') +
+    '<div class="work-task-footer"><div><span>Siguiente</span><strong>' + esc(nextGate) + '</strong></div><time>' + esc(latest) + '</time></div>' +
+  '</article>';
+}
+
+function workProjectsForRange(cockpit, range) {
+  const root = cockpit || {};
+  if (range === 'now') {
+    return (root.workspaceMap && Array.isArray(root.workspaceMap.projects) ? root.workspaceMap.projects : []).map((project) => ({
+      name: project.name || 'Proyecto',
+      state: project.classification && project.classification.state || 'review-needed',
+      summary: ((project.currentTasks || [])[0] || {}).summary || project.latestSummary || 'Sin resumen humano reciente.',
+      nextGate: project.nextGate || 'revisar',
+      latestAt: project.latestAt,
+      blocker: project.classification && project.classification.state === 'review-needed' ? workProjectBlockerSummary(project.classification.reason) : '',
+      git: workGitDecision(project, true),
+    }));
+  }
+
+  if (range === '24h') {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const grouped = new Map();
+    for (const trace of Array.isArray(root.traces) ? root.traces : []) {
+      if (!trace || trace.setupOnly === true || !trace.latestAt || new Date(trace.latestAt).getTime() < cutoff) continue;
+      const name = trace.project || 'MauroPrime';
+      const key = String(name).toLowerCase();
+      const previous = grouped.get(key);
+      if (!previous || new Date(trace.latestAt).getTime() > new Date(previous.latestAt || 0).getTime()) {
+        grouped.set(key, {
+          name,
+          state: 'observed',
+          summary: trace.summary || 'Actividad MSSR observada durante las últimas 24 h.',
+          nextGate: trace.closed ? 'cerrado' : trace.nextPhase ? 'toca ' + phaseLabel(trace.nextPhase) : 'continuar',
+          latestAt: trace.latestAt,
+          blocker: '',
+          git: null,
+        });
+      }
+    }
+    return [...grouped.values()];
+  }
+
+  if (range === '7d') {
+    const weekly = root.weekly || {};
+    return (Array.isArray(weekly.projects) ? weekly.projects : []).map((project) => ({
+      name: project.name || 'Proyecto',
+      state: 'observed',
+      summary: project.latestSummary || 'Proyecto observado en la ventana semanal.',
+      nextGate: project.pendingHint || 'sin gate histórico explícito',
+      latestAt: project.latestAt,
+      blocker: '',
+      git: workGitDecision(project),
+    }));
+  }
+
+  const rolling = root.contextInventory && root.contextInventory.rolling30d || {};
+  const summaries = new Map((rolling.latestSummaries || []).map((item) => [String(item.project || '').toLowerCase(), item]));
+  return (Array.isArray(rolling.projects) ? rolling.projects : []).map((project) => {
+    const summary = summaries.get(String(project.name || '').toLowerCase());
+    return {
+      name: project.name || 'Proyecto',
+      state: 'historical',
+      summary: summary && summary.summary || 'Proyecto observado en snapshots retenidos.',
+      nextGate: 'sin gate histórico explícito',
+      latestAt: summary && summary.date ? summary.date + 'T12:00:00' : project.lastSeenDate ? project.lastSeenDate + 'T12:00:00' : null,
+      blocker: '',
+      git: null,
+      activeDays: Number(project.activeDays || 0),
+    };
+  });
+}
+
+function renderWorkProjects(cockpit) {
+  const target = byId('work-project-list');
+  if (!target) return;
+  const filterGroup = byId('work-project-filter-group');
+  if (filterGroup) filterGroup.hidden = workRange !== 'now';
+  const allRows = workProjectsForRange(cockpit, workRange);
+  const rows = workRange === 'now' && workProjectFilter === 'current'
+    ? allRows.filter((project) => ['active', 'review-needed'].includes(project.state))
+    : allRows;
+  const rangeLabels = {
+    now: 'estado actual',
+    '24h': 'últimas 24 h · evidencia retenida',
+    '7d': 'últimos 7 días · proyectos observados',
+    '30d': 'últimos 30 días · snapshots retenidos',
+  };
+  setText('work-range-note', rangeLabels[workRange] || 'ventana seleccionada');
+  if (!rows.length) {
+    target.innerHTML = '<div class="home-empty">No hay proyectos con evidencia para esta vista.</div>';
+    return;
+  }
+  target.innerHTML = rows.slice(0, 24).map((project) => {
+    const tone = workStateTone(project.state);
+    const git = project.git ? '<span class="work-project-git" data-tone="' + esc(project.git.tone) + '">' + esc(project.git.text) + '</span>' : '';
+    const extra = project.activeDays ? '<span>' + num(project.activeDays) + ' días activos</span>' : '';
+    return '<article class="work-project-row" data-work-project data-work-state="' + esc(project.state) + '">' +
+      '<div class="work-project-main"><div class="work-project-head"><strong>' + esc(project.name) + '</strong><span class="status-pill" data-tone="' + tone + '"><span class="dot ' + tone + '"></span><span>' + esc(workStateLabel(project.state)) + '</span></span></div>' +
+      '<p>' + esc(project.summary) + '</p>' +
+      (project.blocker ? '<span class="work-project-blocker"><span class="dot warn"></span>' + esc(project.blocker) + '</span>' : '') + '</div>' +
+      '<div class="work-project-next"><span>Siguiente</span><strong>' + esc(project.nextGate) + '</strong><small>' + esc(project.latestAt ? relativeAge(project.latestAt) : 'sin tiempo observable') + '</small>' + git + extra + '</div>' +
+    '</article>';
+  }).join('');
+}
+
+function workSemanticEvents(cockpit, range) {
+  const root = cockpit || {};
+  const cutoffHours = range === '24h' ? 24 : range === '7d' ? 24 * 7 : range === '30d' ? 24 * 30 : null;
+  const cutoff = cutoffHours ? Date.now() - cutoffHours * 60 * 60 * 1000 : null;
+  const rows = [];
+  for (const trace of Array.isArray(root.traces) ? root.traces : []) {
+    if (!trace || trace.setupOnly === true || !trace.latestAt) continue;
+    const at = new Date(trace.latestAt).getTime();
+    if (cutoff && at < cutoff) continue;
+    const label = semanticTraceEvent(trace);
+    rows.push({
+      at: trace.latestAt,
+      label,
+      title: trace.displayName || trace.workflowLabel || humanizeKey(trace.workflowKey || trace.project),
+      detail: trace.closed ? 'Trabajo cerrado con evidencia observable.' : (trace.summary || (trace.stage ? 'Etapa ' + trace.stage : 'Trabajo actualizado.')),
+      tone: label === 'Fricción registrada' ? 'warn' : trace.closed ? 'ok' : 'info',
+    });
+  }
+
+  if (range === '7d') {
+    for (const project of Array.isArray(root.weekly && root.weekly.projects) ? root.weekly.projects : []) {
+      if (!project || !project.latestAt) continue;
+      rows.push({ at: project.latestAt, label: 'Proyecto observado', title: project.name || 'Proyecto', detail: project.latestSummary || 'Actividad semanal observada.', tone: 'info' });
+    }
+  }
+  if (range === '30d') {
+    const rolling = root.contextInventory && root.contextInventory.rolling30d || {};
+    for (const item of Array.isArray(rolling.latestSummaries) ? rolling.latestSummaries : []) {
+      if (!item || !item.date) continue;
+      rows.push({ at: item.date + 'T12:00:00', label: 'Resumen diario', title: item.project || 'Proyecto', detail: item.summary || 'Actividad preservada en snapshot diario.', tone: 'info' });
+    }
+  }
+
+  rows.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+  const seen = new Set();
+  return rows.filter((row) => {
+    const key = row.label + '|' + row.title + '|' + String(row.at).slice(0, 10);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 12);
+}
+
+function renderWorkTimeline(cockpit) {
+  const target = byId('work-timeline');
+  if (!target) return;
+  const rows = workSemanticEvents(cockpit, workRange);
+  setPill('work-event-count', rows.length > 0 ? 'info' : 'ok', num(rows.length) + (rows.length === 1 ? ' evento' : ' eventos'));
+  if (!rows.length) {
+    target.innerHTML = '<div class="home-empty">No hay eventos humanos retenidos para esta ventana.</div>';
+    return;
+  }
+  target.innerHTML = rows.map((row) => '<article class="work-event-row" data-work-event>' +
+    '<span class="dot ' + esc(row.tone) + '"></span>' +
+    '<div class="work-event-main"><span>' + esc(row.label) + '</span><strong>' + esc(row.title) + '</strong><small>' + esc(row.detail) + '</small></div>' +
+    '<time datetime="' + esc(row.at) + '">' + esc(relativeAge(row.at)) + '</time>' +
+  '</article>').join('');
+}
+
+function updateWork(snapshot) {
+  workSnapshot = snapshot || workSnapshot;
+  if (!workSnapshot) return;
+  const cockpit = workSnapshot.cockpit || {};
+  const brief = cockpit.morningBrief || {};
+  const activeCount = Number(brief.openTaskCount ?? (cockpit.counts && cockpit.counts.active) ?? 0);
+  const closureCount = Number(brief.needsClosureReviewCount ?? brief.lifecycleDebtTaskCount ?? 0);
+  const rows = workCurrentTasks(cockpit);
+  const workspaceProjects = cockpit.workspaceMap && Array.isArray(cockpit.workspaceMap.projects) ? cockpit.workspaceMap.projects : [];
+
+  document.querySelectorAll('[data-work-range]').forEach((button) => button.setAttribute('aria-pressed', button.dataset.workRange === workRange ? 'true' : 'false'));
+  document.querySelectorAll('[data-work-project-filter]').forEach((button) => button.setAttribute('aria-pressed', button.dataset.workProjectFilter === workProjectFilter ? 'true' : 'false'));
+
+  const currentSentence = activeCount || closureCount
+    ? 'Hay ' + num(activeCount) + (activeCount === 1 ? ' trabajo activo' : ' trabajos activos') + ' y ' + num(closureCount) + (closureCount === 1 ? ' cierre para revisar.' : ' cierres para revisar.')
+    : 'No hay trabajo humano pendiente en la proyección actual.';
+  const rangeSentence = workRange === 'now' ? ' El mapa muestra el estado actual.' : workRange === '24h' ? ' El mapa muestra evidencia retenida de las últimas 24 horas.' : workRange === '7d' ? ' El mapa muestra proyectos observados durante 7 días.' : ' El mapa histórico usa snapshots retenidos de hasta 30 días.';
+  setText('work-status-sentence', currentSentence + rangeSentence);
+  setPill('work-active-count', closureCount > 0 ? 'warn' : activeCount > 0 ? 'info' : 'ok', num(activeCount) + ' activos · ' + num(closureCount) + ' cierres');
+
+  const activeTarget = byId('work-active-list');
+  if (activeTarget) {
+    activeTarget.innerHTML = rows.length
+      ? rows.slice(0, 12).map((row, index) => renderWorkTask(row, workspaceProjects, index)).join('')
+      : '<div class="home-empty work-empty-current"><strong>Sin trabajo activo</strong><span>No hay una tarea humana abierta para reanudar en el snapshot actual.</span></div>';
+  }
+
+  renderWorkProjects(cockpit);
+  renderWorkTimeline(cockpit);
+}
+
+function setupWorkControls() {
+  document.querySelectorAll('[data-work-range]').forEach((button) => {
+    button.addEventListener('click', () => {
+      workRange = button.dataset.workRange || 'now';
+      if (workSnapshot) updateWork(workSnapshot);
+    });
+  });
+  document.querySelectorAll('[data-work-project-filter]').forEach((button) => {
+    button.addEventListener('click', () => {
+      workProjectFilter = button.dataset.workProjectFilter || 'current';
+      if (workSnapshot) updateWork(workSnapshot);
+    });
+  });
+  document.querySelectorAll('[data-open-v2-tab]').forEach((button) => {
+    button.addEventListener('click', () => {
+      activateV2Tab(button.dataset.openV2Tab || 'home', false);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+}
+
+function activateV2Tab(name, focusButton) {
+  const buttons = [...document.querySelectorAll('[data-v2-tab]')];
+  const panels = [...document.querySelectorAll('[data-v2-panel]')];
+  const valid = buttons.some((button) => button.dataset.v2Tab === name);
+  const targetName = valid ? name : 'home';
+  buttons.forEach((button) => {
+    const active = button.dataset.v2Tab === targetName;
+    button.setAttribute('aria-selected', active ? 'true' : 'false');
+    button.tabIndex = active ? 0 : -1;
+    if (active && focusButton) button.focus();
+  });
+  panels.forEach((panel) => { panel.hidden = panel.dataset.v2Panel !== targetName; });
+}
+
+function setupV2Tabs() {
+  const buttons = [...document.querySelectorAll('[data-v2-tab]')];
+  buttons.forEach((button, index) => {
+    button.addEventListener('click', () => activateV2Tab(button.dataset.v2Tab || 'home', false));
+    button.addEventListener('keydown', (event) => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      let nextIndex = index;
+      if (event.key === 'ArrowLeft') nextIndex = (index - 1 + buttons.length) % buttons.length;
+      if (event.key === 'ArrowRight') nextIndex = (index + 1) % buttons.length;
+      if (event.key === 'Home') nextIndex = 0;
+      if (event.key === 'End') nextIndex = buttons.length - 1;
+      activateV2Tab(buttons[nextIndex].dataset.v2Tab || 'home', true);
+    });
+  });
+  activateV2Tab('home', false);
+}
+
+function openLegacyTab(name) {
+  const legacy = byId('legacy-dashboard');
+  if (!legacy) return;
+  legacy.open = true;
+  activateTab(name || 'summary', false);
+  requestAnimationFrame(() => legacy.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+}
+
+function setupLegacyControls() {
+  document.addEventListener('click', (event) => {
+    const trigger = event.target && event.target.closest ? event.target.closest('[data-open-legacy-tab]') : null;
+    if (!trigger) return;
+    openLegacyTab(trigger.dataset.openLegacyTab || 'summary');
+  });
+}
+
+function setInspectorOpen(open) {
+  const inspector = byId('v2-inspector');
+  const backdrop = byId('v2-inspector-backdrop');
+  const button = byId('inspector-open');
+  if (!inspector || !backdrop) return;
+  inspector.hidden = !open;
+  backdrop.hidden = !open;
+  inspector.setAttribute('aria-hidden', open ? 'false' : 'true');
+  if (button) button.setAttribute('aria-expanded', open ? 'true' : 'false');
+  document.body.classList.toggle('inspector-open', open);
+  if (open) byId('inspector-close')?.focus();
+  else button?.focus();
+}
+
+function setupInspector() {
+  byId('inspector-open')?.addEventListener('click', () => setInspectorOpen(true));
+  byId('inspector-close')?.addEventListener('click', () => setInspectorOpen(false));
+  byId('v2-inspector-backdrop')?.addEventListener('click', () => setInspectorOpen(false));
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && byId('v2-inspector') && !byId('v2-inspector').hidden) setInspectorOpen(false);
   });
 }
 
@@ -761,12 +1682,15 @@ function updateSummary(status, overview, summary, recent, timeline, mssr) {
   renderTools('summary-tools', summary.summary || [], 8);
   renderRecent('summary-recent', recent.recent || [], 8, false);
   renderAgentProfiles(summary.agentProfiles || []);
+  setPill('summary-forensic-status', 'info', num(Math.min((recent.recent || []).length, 8)) + ' operaciones · ' + num((summary.agentProfiles || []).length) + ' perfiles');
 }
 
 function updateActivity(summary, recent, timeline) {
-  renderTimeline('activity-timeline', 'activity-timeline-start', 'activity-timeline-end', timeline.timeline || []);
+  activityRecentRows = (recent.recent || []).slice(0, 20);
+  activityTimelineRows = timeline.timeline || [];
+  renderTimeline('activity-timeline', 'activity-timeline-start', 'activity-timeline-end', activityTimelineRows);
   renderTools('activity-tools', summary.summary || [], 12);
-  renderRecent('activity-recent', recent.recent || [], 20, true);
+  renderActivityRecent();
 }
 
 function renderMssrContextAssembly(context) {
@@ -934,16 +1858,136 @@ function renderCockpitChecklist(checklist) {
   }).join('');
 }
 
+function cockpitTaskIdentity(task, index) {
+  return task && (task.taskKey || task.workflowKey || (task.traceIds || []).join('|')) || 'task-' + num(index || 0);
+}
+
+function cockpitTaskProjectLabel(task) {
+  if (!task) return 'Proyecto';
+  return (task.projects || []).length > 1 ? task.projects.join(' + ') : task.project || 'Proyecto';
+}
+
+function cockpitTaskLabel(task) {
+  if (!task) return 'tarea observable';
+  return task.workflowKey || task.taskKey || task.latestSummary || 'tarea observable';
+}
+
+function cockpitTraceNextLabel(trace) {
+  const labels = { closed: 'cerrada', verify: 'toca verificar', persist: 'toca persistir', close: 'falta cerrar', intermediate: 'traza intermedia', continue: trace && trace.nextPhase ? 'toca ' + phaseLabel(trace.nextPhase) : 'continuar' };
+  return labels[trace && trace.attentionKind] || (trace && trace.nextPhase ? 'toca ' + phaseLabel(trace.nextPhase) : 'continuar');
+}
+
+function renderCockpitTraceCard(trace, compact) {
+  const tone = cockpitTraceTone(trace.status);
+  const roleLabel = trace.traceRole === 'synthetic-test' ? 'prueba técnica' : trace.traceRole === 'technical-intermediate' ? 'traza técnica' : trace.traceRole === 'workflow-member' ? 'miembro de workflow' : null;
+  const meta = [trace.project, trace.stage, roleLabel ? roleLabel + (trace.workflowTraceCount > 1 ? ' · ' + trace.workflowTraceCount + ' trazas relacionadas' : '') : (trace.workflowTraceCount > 1 ? trace.workflowTraceCount + ' trazas relacionadas' : null), clock(trace.latestAt), trace.model].filter(Boolean).join(' · ');
+  return '<article class="cockpit-trace' + (compact ? ' cockpit-trace-compact' : '') + '" data-status="' + esc(trace.status) + '">' +
+    '<div class="cockpit-trace-head"><div><strong>' + esc(trace.displayName || trace.workflowKey || trace.project || 'Tarea MSSR sin nombre') + '</strong><div class="cockpit-meta">' + esc(meta) + '</div></div>' +
+    '<span class="status-pill" data-tone="' + tone + '"><span class="dot ' + tone + '"></span><span>' + esc(cockpitTraceNextLabel(trace)) + '</span></span></div>' +
+    '<div class="cockpit-trace-summary">' + esc(trace.summary || 'Traza MSSR técnica o intermedia sin descripción específica registrada.') + '</div>' +
+    (compact ? '' : '<div class="cockpit-phase-row">' + renderCockpitChecklist(trace.checklist) + '</div>') +
+    '</article>';
+}
+
+function groupCockpitTracesByTask(tasks, traces) {
+  const byTask = new Map();
+  const assigned = new Set();
+  (tasks || []).forEach((task, index) => {
+    const key = cockpitTaskIdentity(task, index);
+    const ids = new Set(task.traceIds || []);
+    const matched = (traces || []).filter((trace) => ids.has(trace.traceId));
+    matched.forEach((trace) => assigned.add(trace.traceId));
+    byTask.set(key, matched);
+  });
+  return { byTask, unassigned: (traces || []).filter((trace) => !assigned.has(trace.traceId)) };
+}
+
+function renderCockpitHumanTask(task, traceRows, index) {
+  const needsClosure = task.needsClosureReview === true;
+  const tone = needsClosure ? 'warn' : 'info';
+  const projectLabel = cockpitTaskProjectLabel(task);
+  const taskLabel = cockpitTaskLabel(task);
+  const lineageCount = Number((task.parentTraceIds || []).length) + Number((task.supersedesTraceIds || []).length);
+  const runtimeActivity = task.runtimeActivity || {};
+  const runtimeLabel = runtimeActivity.active === true
+    ? runtimeActivity.progressing === true ? ' · proceso vivo/progresando' : ' · proceso vivo/sin progreso reciente'
+    : '';
+  const openAttr = index === 0 ? ' open' : '';
+  return '<details class="cockpit-human-task" data-needs-closure="' + (needsClosure ? 'true' : 'false') + '"' + openAttr + '>' +
+    '<summary class="cockpit-human-task-summary"><div><strong>' + esc(projectLabel) + '</strong><span>' + esc(taskLabel) + '</span></div>' +
+    '<span class="status-pill" data-tone="' + tone + '"><span class="dot ' + tone + '"></span><span>' + esc(needsClosure ? 'revisar cierre' : task.nextGate || 'continuar') + '</span></span></summary>' +
+    '<div class="cockpit-human-task-detail"><div class="cockpit-open-task-summary">' + esc(task.latestSummary || 'Sin summary humano explícito; se conserva la procedencia MSSR.') + '</div>' +
+    '<div class="recent-detail">' + num((task.traceIds || []).length) + ' traza(s) vinculada(s) · última actividad ' + esc(dateTime(task.latestAt)) + (lineageCount > 0 ? ' · ' + num(lineageCount) + ' enlace(s) de lineage' : '') + esc(runtimeLabel) + '</div>' +
+    (traceRows && traceRows.length ? '<details class="cockpit-task-evidence" data-ux-layer="detail"><summary>' + num(traceRows.length) + ' traza(s) técnica(s) vinculada(s)</summary><div class="cockpit-task-evidence-list">' + traceRows.map((trace) => renderCockpitTraceCard(trace, true)).join('') + '</div></details>' : '') +
+    '</div></details>';
+}
+
 function renderCockpit(cockpit) {
   const root = cockpit || {};
   const counts = root.counts || {};
   const authority = root.authority || {};
+  const focus = root.focus;
+  const brief = root.morningBrief || {};
+  const yesterday = brief.yesterday || {};
+  const openTasks = brief.tasks || [];
+  const lifecycleDebt = brief.lifecycleDebt || [];
+  const contextInventory = root.contextInventory || {};
+  const rolling30d = contextInventory.rolling30d || {};
+  const closureReviewCount = Number(brief.lifecycleDebtTaskCount || brief.needsClosureReviewCount || 0);
+  const activeTaskCount = Number(brief.openTaskCount || openTasks.length || 0);
+  const traces = root.traces || [];
+  const traceGroups = groupCockpitTracesByTask([...openTasks, ...lifecycleDebt], traces);
+
   setPill('cockpit-authority', authority.writesProjectTruth === false ? 'ok' : 'warn', authority.mode || 'projection-only');
   setPill('cockpit-trace-count', Number(counts.active || 0) + Number(counts.idle || 0) > 0 ? 'info' : 'ok',
     num(counts.active || 0) + ' activas · ' + num(counts.idle || 0) + ' pausadas');
 
+  const orientationTarget = byId('cockpit-orientation');
+  if (orientationTarget) {
+    const humanNow = openTasks[0] || lifecycleDebt[0] || null;
+    const currentTitle = humanNow
+      ? cockpitTaskProjectLabel(humanNow) + ' · ' + cockpitTaskLabel(humanNow)
+      : focus
+        ? focus.displayName || focus.workflowKey || focus.project || 'Traza reciente'
+        : 'Sin tarea humana abierta';
+    const currentDetail = humanNow
+      ? humanNow.latestSummary || 'Tarea MSSR abierta sin summary explícito.'
+      : focus
+        ? focus.summary || 'Sólo hay evidencia de traza reciente; no una tarea humana agrupada.'
+        : 'No hay trabajo sustantivo abierto en la ventana observable.';
+    const nextTitle = humanNow && humanNow.nextGate
+      ? humanNow.nextGate
+      : focus && focus.nextPhase
+        ? phaseLabel(focus.nextPhase)
+        : closureReviewCount > 0 ? 'revisar cierres pendientes' : 'sin gate pendiente';
+    const nextDetail = humanNow
+      ? 'Siguiente gate de la tarea humana · ' + num((humanNow.traceIds || []).length) + ' traza(s) agrupada(s).'
+      : focus
+        ? 'Derivado de la traza técnica más reciente; abrí lifecycle para auditarlo.'
+        : 'La proyección no observa una continuación obligatoria.';
+    const projectReviewCount = Number(counts.projectReview || 0);
+    const projectWatchCount = Number(counts.projectWatch || 0);
+    const attentionTitle = closureReviewCount > 0
+      ? num(closureReviewCount) + ' tarea(s) con cierre para revisar'
+      : projectReviewCount > 0
+        ? num(projectReviewCount) + ' proyecto(s) en REVIEW'
+        : projectWatchCount > 0
+          ? num(projectWatchCount) + ' proyecto(s) en WATCH'
+          : 'Sin decisión humana prioritaria';
+    const attentionDetail = lifecycleDebt.length
+      ? lifecycleDebt[0].latestSummary || 'Hay trabajo sustantivo sin outcome posterior observable.'
+      : projectReviewCount > 0 || projectWatchCount > 0
+        ? 'Project Health conserva la evidencia debajo; esta tarjeta sólo prioriza la señal.'
+        : 'No se detecta deuda de lifecycle ni Project Health de atención inmediata.';
+    const items = [
+      { kind: 'now', label: 'Ahora', tone: humanNow ? 'ok' : focus ? 'info' : 'ok', title: currentTitle, detail: currentDetail },
+      { kind: 'next', label: 'Siguiente', tone: humanNow || focus ? 'info' : 'ok', title: nextTitle, detail: nextDetail },
+      { kind: 'attention', label: 'Atención', tone: closureReviewCount > 0 || projectReviewCount > 0 ? 'warn' : projectWatchCount > 0 ? 'info' : 'ok', title: attentionTitle, detail: attentionDetail },
+    ];
+    orientationTarget.innerHTML = items.map((item) => '<section class="cockpit-orientation-card" data-orientation="' + item.kind + '" data-tone="' + item.tone + '"><span>' + esc(item.label) + '</span><strong>' + esc(item.title) + '</strong><small>' + esc(item.detail) + '</small></section>').join('');
+  }
+
   const focusTarget = byId('cockpit-focus');
-  const focus = root.focus;
   if (focusTarget) {
     if (!focus) {
       focusTarget.innerHTML = '<div class="empty-state">No hay trazas recientes para orientar.</div>';
@@ -958,15 +2002,6 @@ function renderCockpit(cockpit) {
       '</div>';
     }
   }
-
-  const brief = root.morningBrief || {};
-  const yesterday = brief.yesterday || {};
-  const openTasks = brief.tasks || [];
-  const lifecycleDebt = brief.lifecycleDebt || [];
-  const contextInventory = root.contextInventory || {};
-  const rolling30d = contextInventory.rolling30d || {};
-  const closureReviewCount = Number(brief.lifecycleDebtTaskCount || brief.needsClosureReviewCount || 0);
-  const activeTaskCount = Number(brief.openTaskCount || openTasks.length || 0);
   setPill(
     'cockpit-return-status',
     activeTaskCount > 0 ? 'info' : closureReviewCount > 0 ? 'warn' : 'ok',
@@ -999,30 +2034,12 @@ function renderCockpit(cockpit) {
 
   const openTaskTarget = byId('cockpit-open-tasks');
   if (openTaskTarget) {
-    openTaskTarget.innerHTML = openTasks.length ? openTasks.slice(0, 10).map((task) => {
-      const needsClosure = task.needsClosureReview === true;
-      const tone = needsClosure ? 'warn' : 'info';
-      const taskLabel = task.taskKeySource === 'explicit-mssr'
-        ? task.taskKey
-        : task.workflowKey || task.latestSummary || task.taskKey || 'tarea observable';
-      const projectLabel = (task.projects || []).length > 1 ? task.projects.join(' + ') : task.project || 'Proyecto';
-      const identityLabel = task.taskKeySource === 'explicit-mssr'
-        ? 'taskKey MSSR explícito'
-        : task.taskKeySource === 'derived-project-workflow'
-          ? 'fallback legacy proyecto + workflow'
-          : 'fallback legacy por traza';
-      const lineageCount = Number((task.parentTraceIds || []).length) + Number((task.supersedesTraceIds || []).length);
-      const runtimeActivity = task.runtimeActivity || {};
-      const runtimeLabel = runtimeActivity.active === true
-        ? runtimeActivity.progressing === true ? ' · proceso vivo/progresando' : ' · proceso vivo/sin progreso reciente'
-        : '';
-      return '<div class="cockpit-open-task" data-needs-closure="' + (needsClosure ? 'true' : 'false') + '">' +
-        '<div class="cockpit-open-task-head"><div><strong>' + esc(projectLabel) + '</strong><span>' + esc(taskLabel) + '</span></div>' +
-        '<span class="status-pill" data-tone="' + tone + '"><span class="dot ' + tone + '"></span><span>' + esc(needsClosure ? 'revisar cierre' : task.nextGate || 'continuar') + '</span></span></div>' +
-        '<div class="cockpit-open-task-summary">' + esc(task.latestSummary || 'Sin summary humano explícito; se conserva la procedencia de las trazas.') + '</div>' +
-        '<div class="recent-detail">' + num((task.traceIds || []).length) + ' traza(s) · última actividad ' + esc(dateTime(task.latestAt)) + ' · ' + esc(identityLabel) + (lineageCount > 0 ? ' · ' + num(lineageCount) + ' enlace(s) de lineage' : '') + esc(runtimeLabel) + '</div>' +
-      '</div>';
-    }).join('') : '<div class="empty-state">No hay tareas sustantivas abiertas observables en la ventana semanal.</div>';
+    openTaskTarget.innerHTML = openTasks.length
+      ? openTasks.slice(0, 10).map((task, index) => {
+        const traceRows = traceGroups.byTask.get(cockpitTaskIdentity(task, index)) || [];
+        return renderCockpitHumanTask(task, traceRows, index);
+      }).join('')
+      : '<div class="empty-state">No hay tareas sustantivas abiertas observables en la ventana semanal.</div>';
   }
 
   const lifecycleDebtTarget = byId('cockpit-lifecycle-debt');
@@ -1224,24 +2241,10 @@ function renderCockpit(cockpit) {
   }
 
   const traceTarget = byId('cockpit-traces');
-  const traces = root.traces || [];
   if (traceTarget) {
-    if (!traces.length) {
-      traceTarget.innerHTML = '<div class="empty-state">Sin trazas MSSR recientes.</div>';
-    } else {
-      traceTarget.innerHTML = traces.map((trace) => {
-        const tone = cockpitTraceTone(trace.status);
-        const attentionLabels = { closed: 'cerrada', verify: 'toca verificar', persist: 'toca persistir', close: 'falta cerrar', intermediate: 'traza intermedia', continue: trace.nextPhase ? 'toca ' + phaseLabel(trace.nextPhase) : 'continuar' };
-        const next = attentionLabels[trace.attentionKind] || (trace.nextPhase ? 'toca ' + phaseLabel(trace.nextPhase) : 'continuar');
-        const roleLabel = trace.traceRole === 'synthetic-test' ? 'prueba técnica' : trace.traceRole === 'technical-intermediate' ? 'traza técnica' : trace.traceRole === 'workflow-member' ? 'miembro de workflow' : null;
-        return '<article class="cockpit-trace" data-status="' + esc(trace.status) + '">' +
-          '<div class="cockpit-trace-head"><div><strong>' + esc(trace.displayName || trace.workflowKey || trace.project || 'Tarea MSSR sin nombre') + '</strong><div class="cockpit-meta">' + esc([trace.project, trace.stage, roleLabel ? roleLabel + (trace.workflowTraceCount > 1 ? ' · ' + trace.workflowTraceCount + ' trazas relacionadas' : '') : (trace.workflowTraceCount > 1 ? trace.workflowTraceCount + ' trazas relacionadas' : null), clock(trace.latestAt), trace.model].filter(Boolean).join(' · ')) + '</div></div>' +
-          '<span class="status-pill" data-tone="' + tone + '"><span class="dot ' + tone + '"></span><span>' + esc(next) + '</span></span></div>' +
-          '<div class="cockpit-trace-summary">' + esc(trace.summary || 'Traza MSSR técnica o intermedia sin descripción específica registrada.') + '</div>' +
-          '<div class="cockpit-phase-row">' + renderCockpitChecklist(trace.checklist) + '</div>' +
-        '</article>';
-      }).join('');
-    }
+    traceTarget.innerHTML = traces.length
+      ? traces.map((trace) => renderCockpitTraceCard(trace, false)).join('')
+      : '<div class="empty-state">Sin trazas MSSR recientes.</div>';
   }
 
   const projectTarget = byId('cockpit-projects');
@@ -1315,6 +2318,13 @@ function activateTab(name, focusButton) {
     button.setAttribute('aria-selected', active ? 'true' : 'false');
     button.tabIndex = active ? 0 : -1;
     if (active && focusButton) button.focus();
+    if (active) {
+      const rail = button.parentElement;
+      if (rail && rail.scrollWidth > rail.clientWidth + 4) {
+        const left = button.offsetLeft - Math.max(0, (rail.clientWidth - button.offsetWidth) / 2);
+        rail.scrollTo({ left: Math.max(0, left), behavior: focusButton ? 'smooth' : 'auto' });
+      }
+    }
   });
   panels.forEach((panel) => { panel.hidden = panel.dataset.panel !== targetName; });
   if (location.hash !== '#' + targetName) history.replaceState(null, '', '#' + targetName);
@@ -1358,17 +2368,22 @@ async function refresh() {
     renderSkillHealth(skillHealth);
     renderProjectHealth(projectHealth);
     renderRuntimeHealth(runtimeHealth);
+    syncMssrFamilySummaries(mssr);
     updateToolPortfolio(toolAudit);
     updateToolNotices(toolNotices);
     renderCockpit(cockpit);
     updateSystem(status, overview, mssr);
     renderErrors(errors.errors || []);
+    updateHome(snapshot);
+    updateWork(snapshot);
     setText('updated-at', 'actualizado ' + new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
   } catch (error) {
     setDot('overall-dot', 'bad');
     const overall = byId('overall-status');
     if (overall) overall.dataset.tone = 'bad';
     setText('overall-text', 'error de actualización');
+    setText('home-status-sentence', 'No se pudo actualizar el snapshot del dashboard. Revisá el estado técnico en Inspector.');
+    setPill('shell-work-status', 'bad', 'snapshot con error');
     setText('updated-at', String(error && error.message ? error.message : error));
   } finally {
     refreshing = false;
@@ -1376,6 +2391,12 @@ async function refresh() {
 }
 
 setupToolPortfolioFilters();
+setupActivityControls();
+setupMssrControls();
+setupV2Tabs();
+setupWorkControls();
+setupLegacyControls();
+setupInspector();
 setupTabs();
 refresh();
 setInterval(() => { if (!document.hidden) refresh(); }, 5000);

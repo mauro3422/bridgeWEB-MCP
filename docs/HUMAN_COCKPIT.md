@@ -14,6 +14,8 @@ The **Dónde estoy** dashboard tab is a human-orientation projection for ongoing
 
 The Cockpit is deliberately not another memory database. MSSR remains the lifecycle/project-context owner, Bridge remains the host/runtime observability owner, and Git remains repository-state authority. The Cockpit only joins and renders bounded evidence with freshness metadata.
 
+Cross-dashboard presentation and interaction rules are owned by `docs/DASHBOARD_UX_IDENTITY.md`. This document defines what Cockpit evidence means; the UX identity defines how that evidence is layered, aggregated, disclosed and navigated for a human without changing its authority.
+
 ## Data flow
 
 `dashboard browser → /api/dashboard/snapshot → isolated dashboard worker → bounded projections`

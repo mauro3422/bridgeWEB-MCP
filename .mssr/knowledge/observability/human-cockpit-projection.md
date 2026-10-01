@@ -8,4 +8,4 @@ Trace cards prefer bounded MSSR summaries and explicit task identity when availa
 
 Detailed **Al volver**, resume-packet, lifecycle-debt, periodic inventory, dynamic capability and workspace-classification contracts live in `.mssr/knowledge/operations/bridge-context-resume-inventory.md`.
 
-Project-document candidates remain advisory. Implementation: `src/dashboard-cockpit.ts`; full UX contract: `docs/HUMAN_COCKPIT.md`; roadmap: `docs/CONTEXT_LAYER_ROADMAP.md`.
+Project-document candidates remain advisory. Implementation: `src/dashboard-cockpit.ts`; Cockpit semantic/data contract: `docs/HUMAN_COCKPIT.md`; cross-dashboard human presentation contract: `docs/DASHBOARD_UX_IDENTITY.md`; roadmap: `docs/CONTEXT_LAYER_ROADMAP.md`.
