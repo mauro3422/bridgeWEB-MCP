@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { TextDecoder } from "node:util";
 import { TypeSafeClient, choice, noul, type Questions } from "@typesafe-ai/sdk";
 import {
+  MSSR_LIBRARIAN_JEV_SELECTION_LIMITS,
   buildMssrSemanticSynthesisProposal,
   fetchMssrLibrarianEvidence,
   mssrEvidenceAtomSchema,
@@ -15,6 +16,7 @@ import {
   mssrSemanticSynthesisSourceEvidenceSchema,
   reviewMssrSemanticEvidenceRelations,
   searchMssrLibrarianEvidence,
+  selectMssrLibrarianEvidenceWithJev,
   validateMssrJevDecisionResponse,
   type MssrJevDecisionProvider,
   type MssrJevDecisionRequest,
@@ -307,6 +309,14 @@ const searchInputSchema = z.object({
   query: querySchema,
 }).strict();
 
+const jevSelectionInputSchema = z.object({
+  projectRoot: projectRootSchema,
+  sourceRefs: z.array(sourceRefSchema).min(1).max(MAX_SOURCE_FILES),
+  query: z.string().trim().min(1).max(500),
+  candidateHandles: z.array(mssrLibrarianEvidenceHandleSchema).min(1).max(MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles).optional(),
+  model: z.string().trim().min(1).max(120).optional(),
+}).strict();
+
 const fetchInputSchema = z.object({ projectRoot: projectRootSchema, handle: mssrLibrarianEvidenceHandleSchema }).strict();
 
 const relationInputSchema = z.object({
@@ -360,6 +370,22 @@ function createMssrSemanticEvidenceToolModule(options: MssrSemanticEvidenceToolM
         name: "mssr_librarian_fetch",
         description: "Re-read and validate one exact Librarian handle against the current file revision under the selected managed project root. Only project-metadata Markdown is accepted; no caller-provided source text is trusted.",
         inputSchema: { type: "object", properties: { projectRoot: { type: "string", minLength: 1, maxLength: 4096 }, handle: exactHandleObjectSchema }, required: ["projectRoot", "handle"], additionalProperties: false },
+      },
+      {
+        name: "mssr_librarian_jev_select",
+        description: `Make one live TypeSafe Jev Choice call over explicitly selected project Markdown files. By default it offers heading sections; callers may instead pass up to ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles} exact candidateHandles returned by mssr_librarian_search, so Jev can choose query-matched blocks and deeper evidence. Bridge reads only sourceRefs and MSSR revalidates each handle against the current owner, source, revision, range, fingerprint, and privacy class before the provider call. The result is advisory; call mssr_librarian_fetch before using source text. This external request may incur account usage. It does not crawl, establish truth, generate prose, or write files. At most ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxHeadingCandidates} heading sections or ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles} exact handles plus none are offered; oversized sets are rejected without truncation.`,
+        inputSchema: {
+          type: "object",
+          properties: {
+            projectRoot: { type: "string", minLength: 1, maxLength: 4096 },
+            sourceRefs: { type: "array", items: { type: "string", minLength: 1, maxLength: 1000 }, minItems: 1, maxItems: MAX_SOURCE_FILES, description: "Explicit project-relative .md paths. This tool does not crawl directories." },
+            query: { type: "string", minLength: 1, maxLength: 500 },
+            candidateHandles: { type: "array", items: exactHandleObjectSchema, minItems: 1, maxItems: MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles, description: "Optional exact revision-bound handles returned by mssr_librarian_search. Every handle must refer to one of the explicitly supplied sourceRefs and is revalidated before calling Jev." },
+            model: { type: "string", minLength: 1, maxLength: 120 },
+          },
+          required: ["projectRoot", "sourceRefs", "query"],
+          additionalProperties: false,
+        },
       },
       {
         name: "mssr_semantic_evidence_relation_review",
@@ -422,6 +448,18 @@ function createMssrSemanticEvidenceToolModule(options: MssrSemanticEvidenceToolM
         const { documents } = await readProjectMarkdownBatch(project, args.sourceRefs);
         const query = mssrLibrarianRetrievalQuerySchema.parse(args.query);
         const result = searchMssrLibrarianEvidence({ documents, query });
+        return { projectOwner: project.owner, sourceCount: documents.length, ...result };
+      },
+      mssr_librarian_jev_select: async (raw) => {
+        const args = jevSelectionInputSchema.parse(raw);
+        const project = await resolveManagedProject(args.projectRoot);
+        const { documents } = await readProjectMarkdownBatch(project, args.sourceRefs);
+        const result = await selectMssrLibrarianEvidenceWithJev({
+          documents,
+          query: args.query,
+          ...(args.candidateHandles ? { candidateHandles: args.candidateHandles } : {}),
+          ...(args.model ? { model: args.model } : {}),
+        }, decisionProvider);
         return { projectOwner: project.owner, sourceCount: documents.length, ...result };
       },
       mssr_librarian_fetch: async (raw) => {

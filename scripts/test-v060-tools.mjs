@@ -236,11 +236,12 @@ try {
   await call('work_finish',{sessionId:backgroundB.id,traceId:'mssr-fixture-background'});
   clearBridgeNotices();
 
-  if (registry.tools.length !== 180) throw new Error(`expected 180 tools, got ${registry.tools.length}`);
+  if (registry.tools.length !== 181) throw new Error(`expected 181 tools, got ${registry.tools.length}`);
+  if (!registry.has('mssr_librarian_jev_select')) throw new Error('Jev Librarian selector missing from Bridge registry');
   const catalogComparison = await call('bridge_connector_catalog_compare', {
     exposedToolNames: ['skill_catalog', 'skill_recommend', 'skill_load', 'host_private_tool'],
   });
-  if (catalogComparison.runtime.count !== 180 || catalogComparison.mssr.runtime !== 14) throw new Error('connector catalog comparison runtime baseline failed');
+  if (catalogComparison.runtime.count !== 181 || catalogComparison.mssr.runtime !== 14) throw new Error('connector catalog comparison runtime baseline failed');
   if (catalogComparison.mssr.directCoveragePercent !== 21.43) throw new Error(`unexpected MSSR direct coverage: ${catalogComparison.mssr.directCoveragePercent}`);
   if (!catalogComparison.mssr.delegatedViaQuery.includes('skill_bootstrap') || !catalogComparison.mssr.delegatedViaAction.includes('mssr_trace_record') || !catalogComparison.mssr.delegatedViaAction.includes('mssr_trace_working_update')) throw new Error('connector catalog wrapper classification failed');
   if (!catalogComparison.connectorObservation.unrecognized.includes('host_private_tool') || catalogComparison.interpretation.wrapperReachabilityIsDirectExposure !== false) throw new Error('connector catalog boundary classification failed');
@@ -249,7 +250,7 @@ try {
   if (!delegatedQueryTool?.description?.includes('use them without another discovery call')) throw new Error('bridge_tool_query must support route-provided immediate fallback');
   if (!delegatedActionTool?.description?.includes('use them without another discovery call')) throw new Error('bridge_tool_action must support route-provided immediate fallback');
   if (!delegatedQueryTool?.inputSchema?.properties?.traceId || !delegatedActionTool?.inputSchema?.properties?.traceId) throw new Error('delegated wrappers must expose optional MSSR trace control');
-  const expectedNeutral = ['mssr_context_ack','mssr_semantic_evidence_relation_review','blender_activity_trace','godot_scene_open','whiteboard_capture_pc_view', 'whiteboard_add_text', 'whiteboard_add_svg', 'whiteboard_add_diagram', 'whiteboard_insert_image', 'quietdesk_desktop_capture', 'mssr_trace_working_update', 'mssr_trace_record', 'mssr_observatory_epoch_start'];
+  const expectedNeutral = ['mssr_context_ack','mssr_semantic_evidence_relation_review','mssr_librarian_jev_select','blender_activity_trace','godot_scene_open','whiteboard_capture_pc_view', 'whiteboard_add_text', 'whiteboard_add_svg', 'whiteboard_add_diagram', 'whiteboard_insert_image', 'quietdesk_desktop_capture', 'mssr_trace_working_update', 'mssr_trace_record', 'mssr_observatory_epoch_start'];
   if (registry.riskSummary.neutral.length !== expectedNeutral.length || expectedNeutral.some((name) => !registry.riskSummary.neutral.includes(name))) throw new Error(`unexpected neutral tools: ${registry.riskSummary.neutral.join(', ')}`);
   if (!registry.riskSummary.readOnly.includes('project_context_audit') || !registry.riskSummary.readOnly.includes('project_change_consistency')) throw new Error('project context audit/consistency tools must be classified as read-only Bridge tools');
   if (!registry.riskSummary.destructive.includes('project_context_update') || !registry.riskSummary.destructive.includes('project_context_maintain')) throw new Error('project_context_update/project_context_maintain must be classified as write/destructive Bridge tools');
@@ -488,7 +489,7 @@ try {
   const skillLoadSchema = await call('bridge_tool_schema', {toolName:'skill_load'});
   if (!skillLoadSchema.tool?.metadata?.usage?.recovery?.some((rule) => rule.code === 'mssr-orphan-skill-load' && rule.toolName === 'skill_bootstrap')) throw new Error('skill_load MSSR recovery metadata failed');
   const aliasAudit = await call('bridge_tool_audit', {view:'aliases',scope:'active',days:30,limit:20});
-  if (aliasAudit.summary?.registeredTools !== 180 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
+  if (aliasAudit.summary?.registeredTools !== 181 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
   const delegatedMetric = beginToolMetric('bridge_tool_query', {toolName:'bridge_tool_audit',arguments:{view:'all'}}, {caller:'chatgpt-web',sessionKey:'fixture-session',project:'fixture-project'});
   finishToolMetric(delegatedMetric, true, 128);
   const delegatedSnapshot = getToolAuditMetrics(30, 'active');
