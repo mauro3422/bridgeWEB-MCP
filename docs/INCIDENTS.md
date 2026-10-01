@@ -1797,3 +1797,21 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Regresión / evidencia:** `npm run check`, `npm run build`, `test-workflow-guide-routing.mjs`, `test-system-hardening.mjs`, `docs:tools:check`, la suite aislada completa `npm run test:regressions` y `git diff --check` pasan sobre el source final. La suite mantiene 163 tools y verifica además el import directo de imágenes, lifecycle MSSR, Blender, Godot, Whiteboard, observabilidad/liveness y remote-node.
 
 **Invariante:** optimizar según evidencia causal, no según el contador bruto de errores. Un fallo de contrato/caller debe clasificarse como tal; trabajo largo o de duración incierta debe ser persistente e inspeccionable; y una capability especializada no puede ganar ownership por vocabulario genérico cuando falta su señal de dominio núcleo.
+
+---
+
+## 2026-10-01 — Jev release gate exposed stale lifecycle/version checks and a shared-root verifier
+
+**Estado:** Selector lifecycle y verificaciones obsoletas corregidos; el candidato Bridge 0.6.144 está commiteado y pusheado. Gate integral pendiente por un HTTP smoke de Dashboard separado del candidato.
+
+**Capa/owner:** Bridge posee la clasificación de lifecycle del MCP, la prueba de adopción del paquete MSSR, `scripts/verify-all.ps1` y el smoke HTTP. MSSR 0.2.96 posee la selección portable Jev; no se duplicó su implementación en Bridge.
+
+**Síntoma observable:** la primera regresión aislada dejó el nuevo `mssr_librarian_jev_select` como `mssrLifecycle.effect=unknown` pese a llamar al proveedor Jev; la prueba de adopción exigía MSSR 0.2.93 aunque el candidato instalaba .96; y ejecutar el verificador sin `-ProjectRoot` podía validar `D:\Dev\bridge-mcp` en vez del worktree limpio. Tras corregirlo, `npm run verify:all` resolvió la raíz a `D:\Dev\bridge-mcp-jev-0.6.144`, pasó build, dual-era, regresiones, routing, liveness y docs, pero terminó con `failedRequired=1` porque `smoke:http` exige secciones MSSR/per-agent del Dashboard que el baseline de este candidato no contiene.
+
+**Causa demostrada:** el nombre del selector Jev no estaba en `mssrExternalSideEffectToolNames`; el fixture de adopción quedó fijado al tarball y hash históricos `.93`; y el parámetro por defecto del verificador apuntaba a una ruta de checkout compartida. El fallo HTTP es una brecha entre el contrato afirmado por el smoke sin cambios y el markup Dashboard de la base aislada; el candidato no modifica ni ese markup ni ese test.
+
+**Corrección:** se añadió el selector a la clasificación externa no destructiva, se actualizó la prueba R4 para verificar la versión/hash actuales `.96`, y `verify-all.ps1` ahora deriva su raíz predeterminada desde `$PSScriptRoot`. El selector sigue siendo advisory, sin escritura de archivos ni umbral de confianza calibrado.
+
+**Regresión/evidencia:** `npm run test:mssr-semantic-evidence`, el `npm run test:regressions` completo, `npm run check`, build, dual-era con 181 herramientas y `docs:tools:check` pasan. El benchmark real MSSR/Bridge congelado en `D:\Dev\mssr\experiments\jev-mssr-live\runs\mssr-bridge-real-docs-exact-handles-20261001T045022Z-6dc93a\` seleccionó 3/3 handles preferidos y exact-fetch pasó 3/3; la revisión ciega halló rangos equivalentes superpuestos, así que no acredita calibración de confianza. Los cambios están en `codex/jev-bridge-0.6.144-release` (`77593cf`) y el run MSSR en `codex/jev-confidence-merge-evaluation` (`5163dce`), ambos con refs remotos verificados.
+
+**Seguimiento:** resolver el contrato/markup faltante del Dashboard en su lote propio y repetir `npm run verify:all`; hasta entonces mantener 0.6.144 como candidato y no declararlo release integralmente verificado.
