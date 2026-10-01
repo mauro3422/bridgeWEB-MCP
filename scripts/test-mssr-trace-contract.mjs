@@ -1698,6 +1698,82 @@ try {
     assert.deepEqual(freshEvidence.workflowKeys, ['fresh-route-project-isolation']);
   });
 
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  await withClientSession('Codex', async (call) => {
+    const projectRoot = path.join(sandbox, 'explicit-trace-identity-isolation');
+    const workflowKey = 'explicit-trace-identity-isolation';
+    fs.mkdirSync(projectRoot, { recursive: true });
+
+    await call('project_context_load', {
+      projectRoot,
+      task: 'Load the project before opening the first task trace.',
+    });
+    const previousRoute = await call('skill_route_plan', {
+      task: 'Keep an existing task open while a second task begins.',
+      context: 'This trace is intentionally left open to check explicit trace isolation.',
+      intent,
+      caller: 'codex-local',
+      stage: 'start',
+      workflowKey,
+      taskKey: 'task-old',
+      sources: ['codex-local'],
+      maxSkills: 12,
+    });
+    assert.ok(previousRoute.traceId);
+
+    // Context loading must not make a fresh explicit ID inherit the prior task identity.
+    await call('project_context_load', {
+      projectRoot,
+      task: 'Refresh project context while the previous task trace remains open.',
+    });
+    const freshTraceId = 'trace-explicit-fresh-task-001';
+    const freshRoute = await call('skill_bootstrap', {
+      task: 'Begin an independent task with an explicitly selected fresh trace ID.',
+      context: 'The previous trace remains active; this task has a distinct task key.',
+      intent,
+      caller: 'codex-local',
+      stage: 'start',
+      workflowKey,
+      taskKey: 'task-new',
+      traceId: freshTraceId,
+      sources: ['codex-local'],
+      maxSkills: 12,
+    });
+    assert.equal(freshRoute.traceId, freshTraceId);
+
+    const childTraceId = 'trace-explicit-same-task-child-001';
+    const childRoute = await call('skill_route_plan', {
+      task: 'Continue the original task in a related child trace.',
+      context: 'The child explicitly belongs to the same task as its parent trace.',
+      intent,
+      caller: 'codex-local',
+      stage: 'start',
+      workflowKey,
+      taskKey: 'task-old',
+      parentTraceId: previousRoute.traceId,
+      traceId: childTraceId,
+      sources: ['codex-local'],
+      maxSkills: 12,
+    });
+    assert.equal(childRoute.traceId, childTraceId);
+
+    await assert.rejects(
+      () => call('skill_route_plan', {
+        task: 'Attempt to reuse an existing trace for a different task.',
+        context: 'A known trace must preserve its bound task identity.',
+        intent,
+        caller: 'codex-local',
+        stage: 'resume',
+        workflowKey,
+        taskKey: 'task-incompatible',
+        traceId: previousRoute.traceId,
+        sources: ['codex-local'],
+        maxSkills: 12,
+      }),
+      /mssr-trace-task-identity-mismatch/,
+    );
+  });
+
   observatory.recordMssrSkillLoad({
     traceId: 'fixture-context-required-overflow',
     skillName: 'required-context-fixture',

@@ -6,6 +6,8 @@ A Bridge MSSR trace has an authoritative owner when `project` and/or `workflowKe
 
 Implicit recovery and explicit `traceId` resume use the same portable `evaluateMssrTraceOwnerCompatibility(...)` contract **before** adoption. Unknown/unscoped dimensions may bind to the current owner; equivalent known owners may resume across connector/session rotation; a known project/workflow mismatch fails closed without mutating the trace. Legitimate cross-project work uses a separately owned/delegated trace or bounded `related_project` evidence, never owner migration.
 
+An explicitly supplied `traceId` is the only trace allowed to provide task identity or lifecycle state for that call. If the ID is unknown, treat its state as absent; never borrow the coordinator's `localTraceId` to validate `taskKey`, parent/supersedes lineage, or clear another trace's closure timer. A mismatch against the active local trace may remain a diagnostic for an ordinary trace-aware operation, but it must not substitute that trace as the operation's state. Omitting `traceId` remains the normal way to start a generated-ID route.
+
 The invariant applies to local state, process-shared recovery, persisted recovery, metric attribution and evidence projection so unrelated work cannot contaminate learning or maintenance evidence.
 
 ## Lifecycle reconciliation

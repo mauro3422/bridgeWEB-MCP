@@ -19,6 +19,46 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-10-01 — An unknown explicit MSSR trace ID inherited the active task identity
+
+**Estado:** Corregido en la rama candidata Bridge 0.6.144; el runtime live no fue reiniciado ni adoptó este cambio.
+
+**Capa/owner:** Bridge trace coordinator (`src/mssr-trace-context.ts`); portable MSSR continues to own task-identity compatibility.
+
+**Síntoma observable:** after loading project context while one trace remained active, `skill_bootstrap` with a new explicit `traceId` and a different `taskKey` returned `mssr-trace-task-identity-mismatch` naming the old trace.
+
+**Reproducción/evidencia:** the exact-ID lookup returned no state for the requested ID, but the route path then called `localState(false, !explicitTrace)`. With an explicit ID, owner-scope filtering was disabled and the coordinator's old `localTraceId` was used for task compatibility. The prior trace timer could also be cleared by that fallback. Luna's read-only source review independently confirmed this path. The regression now exercises a fresh explicit task, a same-task child with its parent ID, and preservation of mismatch rejection for an existing ID.
+
+**Causa demostrada:** Bridge treated the explicit ID as a lookup hint in the route path instead of as the authoritative identity selected by the caller.
+
+**Corrección:** route/task and lifecycle checks now use only the exact state found for an explicit ID; an unknown ID has no prior state. A local-trace mismatch can still be surfaced as diagnostic evidence for ordinary trace-aware calls, without borrowing that trace or clearing its timer.
+
+**Regresión/evidencia:** `npm run check`, `npm run build`, and `node scripts/test-mssr-trace-contract.mjs` pass on the candidate. The test asserts the requested fresh trace ID is returned, same-task parent lineage works, and an existing trace still rejects an incompatible task key.
+
+**Seguimiento:** run the complete candidate verification and review the pushed branch before any controlled runtime adoption.
+
+---
+
+## 2026-09-30 — HTTP smoke pinned to obsolete dashboard copy
+
+**Estado:** Corregido en `scripts/test-bridge-http.ps1`; el smoke HTTP completo pasó después de reiniciar y adoptar MSSR 0.2.89.
+
+**Capa/owner:** Bridge owns the HTTP dashboard smoke assertion and current dashboard markup.
+
+**Síntoma observable:** después de un reinicio sano, el smoke pasó readiness, health, readyz y status, pero falló al inspeccionar el dashboard aunque todos los IDs requeridos estaban presentes.
+
+**Reproducción/evidencia:** `powershell -NoProfile -File .\scripts\test-bridge-http.ps1` fallaba sólo en la aserción de copy del bloque MSSR. El dashboard servido contenía `Su uso correcto se demuestra...`, no el literal anterior `cargarla no demuestra`. El literal actualizado con acentos también falló bajo Windows PowerShell 5.1 al leer el script UTF-8 sin BOM; la subcadena ASCII estable pasó.
+
+**Causa demostrada:** el smoke fijaba una redacción anterior del dashboard y dependía de un literal acentuado que Windows PowerShell 5.1 interpretaba distinto al texto servido.
+
+**Corrección:** la comprobación conserva los IDs y etiquetas estructurales existentes y valida la frase ASCII `Su uso correcto se demuestra`, alineada con el copy actual.
+
+**Regresión/evidencia:** el smoke post-restart pasó el dashboard MSSR (`2357` rutas, `230` outcomes), telemetría autenticada/idempotente, tools portfolio (`180` registradas), métricas activas, y lifecycle MCP (`initialize/initialized/delete`, sesión liberada).
+
+**Seguimiento:** volver a ejecutar el smoke HTTP tras cambios futuros de copy; no se requiere cambiar dashboard UI por esta discrepancia.
+
+---
+
 ## 2026-09-25 — `DatabaseSync(path, undefined)` rompió el arranque aislado en Node 24
 
 **Estado:** Corregido y verificado en Bridge 0.6.141; runtime live adoptado por restart controlado.
@@ -1798,20 +1838,34 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 
 **Invariante:** optimizar según evidencia causal, no según el contador bruto de errores. Un fallo de contrato/caller debe clasificarse como tal; trabajo largo o de duración incierta debe ser persistente e inspeccionable; y una capability especializada no puede ganar ownership por vocabulario genérico cuando falta su señal de dominio núcleo.
 
----
+## 2026-09-30 — Cross-project MSSR trace owner passed to the wrong repository
 
-## 2026-10-01 — Jev release gate exposed stale lifecycle/version checks and a shared-root verifier
+**Estado:** Causa reproducida y recuperada; no queda defecto de código demostrado.
 
-**Estado:** Selector lifecycle y verificaciones obsoletas corregidos; el candidato Bridge 0.6.144 está commiteado y pusheado. Gate integral pendiente por un HTTP smoke de Dashboard separado del candidato.
+**Capa / owner:** Correlación de trazas entre el proyecto Bridge (`D:\Dev\bridge-mcp`) y el proyecto MSSR (`D:\Dev\mssr`).
 
-**Capa/owner:** Bridge posee la clasificación de lifecycle del MCP, la prueba de adopción del paquete MSSR, `scripts/verify-all.ps1` y el smoke HTTP. MSSR 0.2.96 posee la selección portable Jev; no se duplicó su implementación en Bridge.
+**Síntoma observable:** `mssr_librarian_jev_select` rechazó una traza Bridge al operar sobre el root de MSSR. Una consulta posterior a `project_change_consistency` también rechazó la traza MSSR al operar sobre Bridge. Ambos errores fueron `mssr-trace-owner-mismatch` y ocurrieron antes de ejecutar el target; el intento rechazado no llamó Jev. Después se usaron trazas separadas por owner: selección Jev más exact-fetch pasó para documentos MSSR y `project_change_consistency(mode=persist)` pasó para Bridge.
 
-**Síntoma observable:** la primera regresión aislada dejó el nuevo `mssr_librarian_jev_select` como `mssrLifecycle.effect=unknown` pese a llamar al proveedor Jev; la prueba de adopción exigía MSSR 0.2.93 aunque el candidato instalaba .96; y ejecutar el verificador sin `-ProjectRoot` podía validar `D:\Dev\bridge-mcp` en vez del worktree limpio. Tras corregirlo, `npm run verify:all` resolvió la raíz a `D:\Dev\bridge-mcp-jev-0.6.144`, pasó build, dual-era, regresiones, routing, liveness y docs, pero terminó con `failedRequired=1` porque `smoke:http` exige secciones MSSR/per-agent del Dashboard que el baseline de este candidato no contiene.
+**Causa demostrada:** el caller pasó explícitamente un `traceId` cuyo owner de proyecto no coincidía con el `projectRoot` del tool. El rechazo protege el aislamiento de trazas y es el comportamiento correcto.
 
-**Causa demostrada:** el nombre del selector Jev no estaba en `mssrExternalSideEffectToolNames`; el fixture de adopción quedó fijado al tarball y hash históricos `.93`; y el parámetro por defecto del verificador apuntaba a una ruta de checkout compartida. El fallo HTTP es una brecha entre el contrato afirmado por el smoke sin cambios y el markup Dashboard de la base aislada; el candidato no modifica ni ese markup ni ese test.
+**Corrección:** conservar una traza por proyecto y replanificar en el owner correcto cuando una tarea cruza repositorios. No compartir un `traceId` entre MSSR y Bridge ni omitir el mismatch con reintentos adivinados. No se modificó el router ni las reglas de ownership.
 
-**Corrección:** se añadió el selector a la clasificación externa no destructiva, se actualizó la prueba R4 para verificar la versión/hash actuales `.96`, y `verify-all.ps1` ahora deriva su raíz predeterminada desde `$PSScriptRoot`. El selector sigue siendo advisory, sin escritura de archivos ni umbral de confianza calibrado.
+**Regresión / evidencia:** Bridge `0.6.143` / MSSR `0.2.95`, boot `fef12ad4-e879-4c78-bfb2-54b3d4cdfcba`; runtime selector y exact-fetch pasaron; la puerta Bridge quedó `ok=true`, `publishReady=true`. El smoke Jev exitoso tuvo una sola llamada provider adicional; los intentos rechazados no se contaron como llamadas Jev.
 
-**Regresión/evidencia:** `npm run test:mssr-semantic-evidence`, el `npm run test:regressions` completo, `npm run check`, build, dual-era con 181 herramientas y `docs:tools:check` pasan. El benchmark real MSSR/Bridge congelado en `D:\Dev\mssr\experiments\jev-mssr-live\runs\mssr-bridge-real-docs-exact-handles-20261001T045022Z-6dc93a\` seleccionó 3/3 handles preferidos y exact-fetch pasó 3/3; la revisión ciega halló rangos equivalentes superpuestos, así que no acredita calibración de confianza. Los cambios están en `codex/jev-bridge-0.6.144-release` (`77593cf`) y el run MSSR en `codex/jev-confidence-merge-evaluation` (`5163dce`), ambos con refs remotos verificados.
+**Invariante:** el owner del proyecto, el `projectRoot` y la traza explícita deben coincidir. Un flujo multi-repositorio usa trazas separadas y evidencia enlazada, no una traza transferida entre owners.
 
-**Seguimiento:** resolver el contrato/markup faltante del Dashboard en su lote propio y repetir `npm run verify:all`; hasta entonces mantener 0.6.144 como candidato y no declararlo release integralmente verificado.
+## 2026-09-30 — Outcome remained blocked until maintenance completed after the final close replan
+
+**Estado:** Recuperado; el guard lifecycle se comportó correctamente.
+
+**Capa / owner:** Secuencia de checkpoints MCP MSSR del caller, con persistencia en el ledger de Bridge.
+
+**Síntoma observable:** `mssr_trace_record(eventType=outcome)` devolvió `mssr-success-outcome-blocked-stale-close` después de una persistencia posterior a la replanificación de cierre. Una primera recuperación todavía carecía de un checkpoint `phase_completed` de maintenance posterior a la replanificación más reciente.
+
+**Causa demostrada:** la revisión de cierre queda obsoleta cuando llega trabajo o persistencia posterior. Para cerrar con éxito, el owner exige route/bootstrap en `stage=close`, checkpoint `phase_completed` de maintenance con la revisión vigente y luego un único outcome sin trabajo intermedio.
+
+**Corrección:** se replanificó tras la última escritura de `.mssr/PROJECT_STATE.md`, se cargó la fase, se registró maintenance y el outcome MSSR se aceptó (`muoxm739-fd51626d-5f2`, `muoxm73k-4a42261f-94d`). No se cambió el código del guard.
+
+**Regresión / evidencia:** el resultado aceptado cerró la traza de verificación real de documentos; la puerta Bridge `project_change_consistency` seguía en `ok=true`, `publishReady=true`. El error fue de orden del caller, no un fallo de runtime.
+
+**Invariante:** después de la última escritura, replanificar cierre; registrar maintenance tras esa replanificación y antes del outcome; no continuar trabajando entre ambos checkpoints.

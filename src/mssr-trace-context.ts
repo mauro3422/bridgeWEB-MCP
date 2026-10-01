@@ -1260,6 +1260,7 @@ export function createMssrTraceSessionCoordinator(
     }
 
     const explicitTrace = validTraceId(args.traceId) ? String(args.traceId).trim() : null;
+    let explicitState: ActiveTraceState | null = null;
     if (explicitTrace) {
       const sharedState = sharedTraces.get(explicitTrace);
       const lifecycleSensitiveCall = ROUTE_TOOLS.has(toolName) || toolName === "skill_load" || toolName === "mssr_trace_record";
@@ -1267,6 +1268,7 @@ export function createMssrTraceSessionCoordinator(
         ? reconcilePersistedLifecycle(sharedState)
         : sharedState ?? restore(explicitTrace);
       if (state) {
+        explicitState = state;
         const compatibility = traceOwnerCompatibility(state);
         if (!compatibility.compatible) {
           const blocked = {
@@ -1306,13 +1308,17 @@ export function createMssrTraceSessionCoordinator(
         adopt(state);
       }
     }
-    const activeBeforeCall = localState(toolName === "mssr_trace_record", !explicitTrace);
+    // An explicit trace ID is authoritative, including when it is not known yet.
+    // Falling back to localTraceId here can leak another task's identity into a fresh route.
+    const activeBeforeCall = explicitTrace
+      ? explicitState
+      : localState(toolName === "mssr_trace_record", true);
     if (activeBeforeCall) clearClosureTimer(activeBeforeCall.traceId);
 
     if (ROUTE_TOOLS.has(toolName)) {
       const stage = typeof args.stage === "string" ? args.stage : "start";
       const fingerprint = taskFingerprint(args.task);
-      let state = localState(false, !explicitTrace);
+      let state = explicitTrace ? explicitState : localState(false, true);
       const sameTask = Boolean(state && fingerprint && fingerprint === state.taskHash);
       const continuingStage = stage !== "start";
 
@@ -1352,7 +1358,7 @@ export function createMssrTraceSessionCoordinator(
         if (projected) notices.push(projected);
       }
 
-      state = localState(false, !explicitTrace);
+      state = explicitTrace ? explicitState : localState(false, true);
       if (state) {
         const taskBlocked = bindCompatibleTraceTask(state, args);
         if (taskBlocked) return { args, notices, blocked: taskBlocked };
@@ -1365,7 +1371,12 @@ export function createMssrTraceSessionCoordinator(
 
     if (!traceAwareTools.has(toolName)) return { args, notices };
 
-    let state = localState(toolName === "mssr_trace_record", !explicitTrace);
+    let state = explicitTrace
+      ? explicitState
+      : localState(toolName === "mssr_trace_record", true);
+    const localTraceForMismatch = explicitTrace
+      ? localState(toolName === "mssr_trace_record", false)
+      : null;
     if (!explicitTrace && !state) state = findToolCandidate(toolName, args, notices);
     if (state) clearClosureTimer(state.traceId);
 
@@ -1394,14 +1405,18 @@ export function createMssrTraceSessionCoordinator(
         );
         if (projected) notices.push(projected);
       }
-    } else if (state && explicitTrace !== state.traceId && !state.closed) {
+    } else if (
+      explicitTrace && !state && localTraceForMismatch &&
+      explicitTrace !== localTraceForMismatch.traceId && !localTraceForMismatch.closed
+    ) {
+      const mismatchState = localTraceForMismatch;
       const projected = routingComplianceNotice(
         toolName,
-        `routing-trace:${state.traceId}`,
+        `routing-trace:${mismatchState.traceId}`,
         { trace: "mismatch", route: "present", boundary: toolName === "skill_load" ? "skill-load" : "ordinary" },
-        state.traceId,
-        { activeTraceId: state.traceId, suppliedTraceId: explicitTrace, stage: state.stage },
-        `${toolName} recibió ${explicitTrace}, pero la sesión tenía activa ${state.traceId}.`,
+        mismatchState.traceId,
+        { activeTraceId: mismatchState.traceId, suppliedTraceId: explicitTrace, stage: mismatchState.stage },
+        `${toolName} recibió ${explicitTrace}, pero la sesión tenía activa ${mismatchState.traceId}.`,
         `${toolName} volvió a usar una traza compatible con la sesión.`,
         { code: "mssr-trace-mismatch", errorCode: "mssr-trace-mismatch" },
       );
