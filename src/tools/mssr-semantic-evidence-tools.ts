@@ -1,10 +1,13 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { TextDecoder } from "node:util";
 import { TypeSafeClient, choice, noul, type Questions } from "@typesafe-ai/sdk";
 import {
+  MSSR_PROJECT_CONTROL_FILES,
+  MSSR_PROJECT_HOME_DIR,
   MSSR_LIBRARIAN_JEV_SELECTION_LIMITS,
   buildMssrSemanticSynthesisProposal,
   fetchMssrLibrarianEvidence,
@@ -14,6 +17,7 @@ import {
   mssrLibrarianRetrievalQuerySchema,
   mssrSemanticEvidenceRelationReviewInputSchema,
   mssrSemanticSynthesisSourceEvidenceSchema,
+  projectContextManifestSchema,
   reviewMssrSemanticEvidenceRelations,
   searchMssrLibrarianEvidence,
   selectMssrLibrarianEvidenceWithJev,
@@ -21,14 +25,21 @@ import {
   type MssrJevDecisionProvider,
   type MssrJevDecisionRequest,
   type MssrJevDecisionResponse,
+  type ProjectContextManifest,
 } from "@mauroprime/mssr";
 import { z } from "zod";
+import {
+  bindProjectContextMetadataToLibrarianDocuments,
+  MSSR_PROJECT_CONTEXT_LIBRARIAN_METADATA_MODE,
+  type ProjectContextMetadataIndex,
+} from "../mssr-project-context-librarian-metadata.js";
 import { resolveToolPath } from "./shared/process.js";
 import type { BridgeToolModule } from "./types.js";
 
 const MAX_MARKDOWN_FILE_BYTES = 2_000_000;
 const MAX_TOTAL_MARKDOWN_BYTES = 4_000_000;
 const MAX_SOURCE_FILES = 32;
+const MAX_PROJECT_CONTEXT_MANIFEST_BYTES = 1_000_000;
 const MAX_CREDENTIAL_OUTPUT_BYTES = 16_384;
 const MAX_CREDENTIAL_READ_MS = 10_000;
 const DEFAULT_CREDENTIAL_TARGET = "TypeSafe:MSSR:JevLab";
@@ -78,7 +89,39 @@ function normalizeProjectSourceRef(value: string): string {
   return value;
 }
 
-type ResolvedProject = { root: string; owner: string };
+type ResolvedProject = {
+  root: string;
+  owner: string;
+  projectContextManifest: ProjectContextManifest;
+  projectContextManifestRevision: string;
+};
+
+function sha256(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+async function loadCanonicalProjectContextManifest(projectRoot: string): Promise<{ manifest: ProjectContextManifest; revision: string }> {
+  const expectedPath = path.join(projectRoot, MSSR_PROJECT_HOME_DIR, MSSR_PROJECT_CONTROL_FILES.projectContextManifest);
+  const realPath = await fs.realpath(expectedPath).catch(() => null);
+  if (!realPath || !isWithin(projectRoot, realPath)) {
+    throw new Error("Librarian requires the canonical .mssr/project-context.json inside the selected project root.");
+  }
+  const before = await fs.stat(realPath).catch(() => null);
+  if (!before?.isFile()) throw new Error("Canonical .mssr/project-context.json must be a regular file.");
+  if (before.size > MAX_PROJECT_CONTEXT_MANIFEST_BYTES) throw new Error(`Canonical .mssr/project-context.json exceeds ${MAX_PROJECT_CONTEXT_MANIFEST_BYTES} bytes.`);
+  const bytes = await fs.readFile(realPath);
+  const after = await fs.stat(realPath);
+  if (bytes.byteLength !== before.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs) {
+    throw new Error("Canonical .mssr/project-context.json changed while it was being read; retry against a stable revision.");
+  }
+  let parsed: unknown;
+  try { parsed = JSON.parse(bytes.toString("utf8")); }
+  catch { throw new Error("Canonical .mssr/project-context.json is invalid JSON."); }
+  let manifest: ProjectContextManifest;
+  try { manifest = projectContextManifestSchema.parse(parsed); }
+  catch { throw new Error("Canonical .mssr/project-context.json does not satisfy the supported MSSR project-context schema."); }
+  return { manifest, revision: sha256(bytes) };
+}
 
 async function resolveManagedProject(projectRootInput: string): Promise<ResolvedProject> {
   const requestedRoot = resolveToolPath(projectRootSchema.parse(projectRootInput), { access: "read" });
@@ -87,18 +130,24 @@ async function resolveManagedProject(projectRootInput: string): Promise<Resolved
   if (!rootStat.isDirectory()) throw new Error("Librarian projectRoot must resolve to a directory.");
 
   const gitMetadataPath = path.join(root, ".git");
-  const manifestPath = path.join(root, ".mssr", "project-context.json");
-  const [gitMetadata, manifestBytes] = await Promise.all([
-    fs.stat(gitMetadataPath).catch(() => null),
-    fs.readFile(manifestPath).catch(() => null),
-  ]);
-  if (!gitMetadata || !manifestBytes) throw new Error("Librarian requires a Git project initialized with canonical .mssr/project-context.json.");
-  let manifest: unknown;
-  try { manifest = JSON.parse(manifestBytes.toString("utf8")); } catch { throw new Error("Canonical .mssr/project-context.json is invalid JSON."); }
-  if (!manifest || typeof manifest !== "object" || (manifest as { schemaVersion?: unknown }).schemaVersion !== 1) {
-    throw new Error("Canonical .mssr/project-context.json has an unsupported schema.");
+  const gitMetadata = await fs.stat(gitMetadataPath).catch(() => null);
+  if (!gitMetadata) throw new Error("Librarian requires a Git project initialized with canonical .mssr/project-context.json.");
+  const context = await loadCanonicalProjectContextManifest(root);
+  return {
+    root,
+    owner: canonicalOwner(root),
+    projectContextManifest: context.manifest,
+    projectContextManifestRevision: context.revision,
+  };
+}
+
+async function projectContextManifestStillMatches(project: ResolvedProject): Promise<boolean> {
+  try {
+    const current = await loadCanonicalProjectContextManifest(project.root);
+    return current.revision === project.projectContextManifestRevision;
+  } catch {
+    return false;
   }
-  return { root, owner: canonicalOwner(root) };
 }
 
 async function readProjectMarkdown(project: ResolvedProject, sourceRefInput: string): Promise<{ sourceRef: string; markdown: string; bytes: number }> {
@@ -141,7 +190,53 @@ async function readProjectMarkdownBatch(project: ResolvedProject, sourceRefs: re
     markdownByRef.set(read.sourceRef, read.markdown);
     documents.push({ owner: project.owner, sourceRef: read.sourceRef, markdown: read.markdown, privacyClass: "project-metadata" });
   }
-  return { documents, markdownByRef };
+  return { documents, markdownByRef, observedAt: new Date().toISOString() };
+}
+
+type ProjectContextMetadataStatus = "applied" | "no-exact-section-bindings" | "manifest-changed" | "limits-exceeded";
+
+function emptyProjectContextMetadataIndex(project: ResolvedProject, status: ProjectContextMetadataStatus): ProjectContextMetadataIndex & { status: ProjectContextMetadataStatus } {
+  return {
+    mode: MSSR_PROJECT_CONTEXT_LIBRARIAN_METADATA_MODE,
+    status,
+    manifestRevision: project.projectContextManifestRevision,
+    sourceCount: 0,
+    moduleCount: 0,
+    rangeCount: 0,
+    atomCount: 0,
+    skipped: {
+      unselectedSource: 0,
+      nonSingleSection: 0,
+      unsupportedKind: 0,
+      noSearchSelectors: 0,
+      ambiguousOrMissingSection: 0,
+      unbindableRange: 0,
+    },
+    advisoryOnly: true,
+    truthAuthority: false,
+    canonicalRewriteAllowed: false,
+  };
+}
+
+async function documentsWithProjectContextMetadata(project: ResolvedProject, sourceRefs: readonly string[]) {
+  const batch = await readProjectMarkdownBatch(project, sourceRefs);
+  if (!(await projectContextManifestStillMatches(project))) {
+    return {
+      documents: batch.documents,
+      bindingsByAtomId: new Map(),
+      metadataIndex: emptyProjectContextMetadataIndex(project, "manifest-changed"),
+    };
+  }
+  const bound = bindProjectContextMetadataToLibrarianDocuments({
+    documents: batch.documents,
+    manifest: project.projectContextManifest,
+    manifestRevision: project.projectContextManifestRevision,
+    observedAt: batch.observedAt,
+  });
+  const status: ProjectContextMetadataStatus = bound.limitExceeded
+    ? "limits-exceeded"
+    : bound.index.atomCount > 0 ? "applied" : "no-exact-section-bindings";
+  return { documents: bound.documents, bindingsByAtomId: bound.bindingsByAtomId, metadataIndex: { ...bound.index, status } };
 }
 
 async function revalidateHandle(project: ResolvedProject, handleInput: unknown) {
@@ -301,12 +396,16 @@ const querySchema = z.object({
   query: z.string().trim().min(1).max(500),
   maxResults: z.number().int().min(1).max(100).default(20),
   maxSnippetChars: z.number().int().min(40).max(240).default(160),
+  metadata: z.record(z.string().regex(/^[A-Za-z][A-Za-z0-9_.-]{0,79}$/), z.union([z.string().max(240), z.number().finite(), z.boolean()])).optional().superRefine((value, ctx) => {
+    if (value && Object.keys(value).length > 64) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Librarian metadata filters are limited to 64 fields." });
+  }),
 }).strict();
 
 const searchInputSchema = z.object({
   projectRoot: projectRootSchema,
   sourceRefs: z.array(sourceRefSchema).min(1).max(MAX_SOURCE_FILES),
   query: querySchema,
+  metadataMode: z.enum(["off", MSSR_PROJECT_CONTEXT_LIBRARIAN_METADATA_MODE]).default("off"),
 }).strict();
 
 const jevSelectionInputSchema = z.object({
@@ -354,13 +453,14 @@ function createMssrSemanticEvidenceToolModule(options: MssrSemanticEvidenceToolM
     tools: [
       {
         name: "mssr_librarian_search",
-        description: "Search explicitly selected UTF-8 Markdown files in a Git project with canonical .mssr/project-context.json. Bridge reads only those paths; data/, logs/, .mssr/runtime/, .git and non-Markdown files are excluded. Returns advisory revision-bound candidate handles.",
+        description: "Search explicitly selected UTF-8 Markdown files in a Git project with canonical .mssr/project-context.json. Bridge reads only those paths; data/, logs/, .mssr/runtime/, .git and non-Markdown files are excluded. Optional metadataMode=project-context-single-section uses only owner-declared selectors from one unique, explicitly named heading in the canonical project-context manifest; it does not crawl or infer tags from prose. Returns advisory revision-bound candidate handles.",
         inputSchema: {
           type: "object",
           properties: {
             projectRoot: { type: "string", minLength: 1, maxLength: 4096 },
             sourceRefs: { type: "array", items: { type: "string", minLength: 1, maxLength: 1000 }, minItems: 1, maxItems: MAX_SOURCE_FILES, description: "Explicit project-relative .md paths. This tool does not crawl directories." },
-            query: { type: "object", properties: { query: { type: "string", minLength: 1, maxLength: 500 }, maxResults: { type: "integer", minimum: 1, maximum: 100, default: 20 }, maxSnippetChars: { type: "integer", minimum: 40, maximum: 240, default: 160 } }, required: ["query"], additionalProperties: false },
+            query: { type: "object", properties: { query: { type: "string", minLength: 1, maxLength: 500 }, maxResults: { type: "integer", minimum: 1, maximum: 100, default: 20 }, maxSnippetChars: { type: "integer", minimum: 40, maximum: 240, default: 160 }, metadata: { type: "object", maxProperties: 64, additionalProperties: { oneOf: [{ type: "string", maxLength: 240 }, { type: "number" }, { type: "boolean" }] }, description: "Optional typed metadata filters; project-context selector filters apply only when metadataMode opts in." } }, required: ["query"], additionalProperties: false },
+            metadataMode: { type: "string", enum: ["off", MSSR_PROJECT_CONTEXT_LIBRARIAN_METADATA_MODE], default: "off", description: "Opt in to exact single-heading project-context selectors. Default off preserves lexical-only behavior." },
           },
           required: ["projectRoot", "sourceRefs", "query"],
           additionalProperties: false,
@@ -373,7 +473,7 @@ function createMssrSemanticEvidenceToolModule(options: MssrSemanticEvidenceToolM
       },
       {
         name: "mssr_librarian_jev_select",
-        description: `Make one live TypeSafe Jev Choice call over explicitly selected project Markdown files. By default it offers heading sections; callers may instead pass up to ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles} exact candidateHandles returned by mssr_librarian_search, so Jev can choose query-matched blocks and deeper evidence. Bridge reads only sourceRefs and MSSR revalidates each handle against the current owner, source, revision, range, fingerprint, and privacy class before the provider call. The result is advisory; call mssr_librarian_fetch before using source text. This external request may incur account usage. It does not crawl, establish truth, generate prose, or write files. At most ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxHeadingCandidates} heading sections or ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles} exact handles plus none are offered; oversized sets are rejected without truncation.`,
+        description: `Make one live TypeSafe Jev Choice call over explicitly selected project Markdown files. By default it offers heading sections; callers may instead pass up to ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles} exact candidateHandles returned by mssr_librarian_search, so Jev can choose query-matched blocks and deeper evidence. To use project-context selectors, first call mssr_librarian_search with metadataMode=project-context-single-section, then pass the returned exact handles here; this keeps metadata retrieval and Jev selection as separately inspectable steps. Bridge reads only sourceRefs and MSSR revalidates each handle against the current owner, source, revision, range, fingerprint, and privacy class before the provider call. The result is advisory; call mssr_librarian_fetch before using source text. This external request may incur account usage. It does not crawl, establish truth, generate prose, or write files. At most ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxHeadingCandidates} heading sections or ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles} exact handles plus none are offered; oversized sets are rejected without truncation.`,
         inputSchema: {
           type: "object",
           properties: {
@@ -445,22 +545,40 @@ function createMssrSemanticEvidenceToolModule(options: MssrSemanticEvidenceToolM
       mssr_librarian_search: async (raw) => {
         const args = searchInputSchema.parse(raw);
         const project = await resolveManagedProject(args.projectRoot);
-        const { documents } = await readProjectMarkdownBatch(project, args.sourceRefs);
+        const prepared = args.metadataMode === "off"
+          ? await readProjectMarkdownBatch(project, args.sourceRefs)
+          : await documentsWithProjectContextMetadata(project, args.sourceRefs);
+        const documents = prepared.documents;
         const query = mssrLibrarianRetrievalQuerySchema.parse(args.query);
         const result = searchMssrLibrarianEvidence({ documents, query });
-        return { projectOwner: project.owner, sourceCount: documents.length, ...result };
+        const results = "bindingsByAtomId" in prepared
+          ? result.results.map((item) => {
+            const bindings = [...new Map((item.metadataProjectionMatches ?? []).flatMap((match) => {
+              const binding = prepared.bindingsByAtomId.get(match.atomId);
+              return binding ? [[`${binding.moduleId}:${binding.selectorField}:${binding.selectorValue}`, binding] as const] : [];
+            })).values()];
+            return bindings.length > 0 ? { ...item, projectContextMetadataBindings: bindings } : item;
+          })
+          : result.results;
+        return {
+          projectOwner: project.owner,
+          sourceCount: args.sourceRefs.length,
+          ...( "metadataIndex" in prepared ? { metadataIndex: prepared.metadataIndex } : {}),
+          ...result,
+          results,
+        };
       },
       mssr_librarian_jev_select: async (raw) => {
         const args = jevSelectionInputSchema.parse(raw);
         const project = await resolveManagedProject(args.projectRoot);
-        const { documents } = await readProjectMarkdownBatch(project, args.sourceRefs);
+        const prepared = await readProjectMarkdownBatch(project, args.sourceRefs);
         const result = await selectMssrLibrarianEvidenceWithJev({
-          documents,
+          documents: prepared.documents,
           query: args.query,
           ...(args.candidateHandles ? { candidateHandles: args.candidateHandles } : {}),
           ...(args.model ? { model: args.model } : {}),
         }, decisionProvider);
-        return { projectOwner: project.owner, sourceCount: documents.length, ...result };
+        return { projectOwner: project.owner, sourceCount: args.sourceRefs.length, ...result };
       },
       mssr_librarian_fetch: async (raw) => {
         const args = fetchInputSchema.parse(raw);

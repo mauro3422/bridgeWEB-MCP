@@ -4,6 +4,7 @@ Versioned release notes are the canonical change-history surface for MSSR debugg
 
 ## Current releases
 
+- [0.6.146](0.6.146.md) - Add opt-in, exact-section project-context metadata to Librarian search and compose its revision-bound handles explicitly with Jev selection.
 - [0.6.145](0.6.145.md) - Adopt MSSR 0.2.100's exact-fetchable Jev candidate contract and query-dense excerpt selection; document the EvidenceAtom ingress boundary without adding duplicate MCP tools.
 - [0.6.144](0.6.144.md) - Adopt MSSR 0.2.96, complete Jev exact-range selection/fetch, and prevent unknown explicit trace IDs from inheriting another task's identity.
 - [0.6.143](0.6.143.md) - Adopt MSSR 0.2.95 and add explicit bounded Jev selection with exact-fetch verification through the Bridge Librarian.

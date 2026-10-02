@@ -27,7 +27,51 @@ const policyMarkdown = [
 try {
   await fs.mkdir(path.join(root, ".git"), { recursive: true });
   await fs.mkdir(path.join(root, ".mssr"), { recursive: true });
-  await fs.writeFile(path.join(root, ".mssr", "project-context.json"), JSON.stringify({ schemaVersion: 1, core: [], modules: [] }));
+  await fs.writeFile(path.join(root, ".mssr", "project-context.json"), JSON.stringify({
+    schemaVersion: 1,
+    core: [],
+    modules: [
+      {
+        id: "policy-preserve-records",
+        kind: "context",
+        description: "Owner-declared routing selectors for one exact policy heading.",
+        source: { path: "policy.md", sections: ["## Preserve operational records"] },
+        domains: ["godot"],
+        actions: ["review"],
+        artifacts: ["repository"],
+        needs: ["version-control"],
+        signals: ["tool-chain-needed"],
+      },
+      {
+        id: "policy-multiple-sections",
+        kind: "memory",
+        description: "A whole-module selector with more than one source heading.",
+        source: { path: "policy.md", sections: ["## Preserve operational records", "## Review retention windows"] },
+        domains: ["filesystem"],
+      },
+      {
+        id: "policy-whole-file",
+        kind: "memory",
+        description: "A whole-file selector has no exact heading scope.",
+        source: { path: "policy.md" },
+        domains: ["browser"],
+      },
+      {
+        id: "policy-missing-heading",
+        kind: "context",
+        description: "A missing heading cannot be bound to source bytes.",
+        source: { path: "policy.md", sections: ["## Missing heading"] },
+        domains: ["roblox"],
+      },
+      {
+        id: "policy-directive",
+        kind: "directive",
+        description: "Conditional procedure is not indexed as evidence.",
+        source: { path: "policy.md", sections: ["## Preserve operational records"] },
+        domains: ["browser"],
+      },
+    ],
+  }));
   await fs.writeFile(path.join(root, "policy.md"), policyMarkdown, "utf8");
   await fs.writeFile(path.join(root, "other-policy.md"), "## Unrelated source\nThis file does not contain the selected search handle.\n", "utf8");
   await fs.mkdir(path.join(root, "docs"), { recursive: true });
@@ -71,6 +115,7 @@ try {
   });
   assert.equal(selected.advisoryOnly, true);
   assert.equal(selected.sourceCount, 1);
+  assert.equal(selected.metadataIndex, undefined, "metadata-assisted search remains opt-in");
   assert.ok(selected.results.length >= 1);
   const preserveHandle = (selected.results.find((item) => item.handle.rangeKind === "block") ?? selected.results[0]).handle;
 
@@ -101,6 +146,54 @@ try {
   assert.equal(jevExact.handle.fingerprint, jevSelection.selected.handle.fingerprint);
   assert.match(jevExact.text, /Keep benchmark results/);
 
+  const metadataOff = await registry.call("mssr_librarian_search", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    query: { query: "godot", maxResults: 10 },
+  });
+  assert.equal(metadataOff.results.length, 0, "manifest selectors do not affect default lexical-only search");
+  const metadataSearch = await registry.call("mssr_librarian_search", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    query: { query: "godot", maxResults: 10 },
+    metadataMode: "project-context-single-section",
+  });
+  assert.equal(metadataSearch.metadataIndex.status, "applied");
+  assert.equal(metadataSearch.metadataIndex.manifestRevision.length, 64);
+  assert.equal(metadataSearch.metadataIndex.moduleCount, 1, "only the exact one-heading context module is projected");
+  assert.equal(metadataSearch.metadataIndex.rangeCount, 1);
+  assert.equal(metadataSearch.metadataIndex.atomCount, 5);
+  assert.equal(metadataSearch.metadataIndex.advisoryOnly, true);
+  assert.equal(metadataSearch.metadataIndex.truthAuthority, false);
+  assert.equal(metadataSearch.metadataIndex.canonicalRewriteAllowed, false);
+  assert.equal(metadataSearch.metadataIndex.skipped.nonSingleSection, 2);
+  assert.equal(metadataSearch.metadataIndex.skipped.ambiguousOrMissingSection, 1);
+  assert.equal(metadataSearch.metadataIndex.skipped.unsupportedKind, 1);
+  assert.equal(metadataSearch.results.length, 1);
+  assert.equal(metadataSearch.results[0].title, "Preserve operational records");
+  assert.ok(metadataSearch.results[0].metadataProjectionMatches.some((match) => match.producer === "project-context-manifest"
+    && match.provenanceIsCallerAsserted === true
+    && match.matches.some((entry) => entry.field === "domain" && entry.value === "godot")));
+  assert.ok(metadataSearch.results[0].projectContextMetadataBindings.some((binding) => binding.moduleId === "policy-preserve-records"
+    && binding.selectorField === "domain" && binding.selectorValue === "godot"));
+  assert.equal(metadataSearch.results[0].handle.rangeKind, "section");
+  assert.match((await registry.call("mssr_librarian_fetch", { projectRoot: root, handle: metadataSearch.results[0].handle })).text, /Keep benchmark results/);
+
+  const metadataFiltered = await registry.call("mssr_librarian_search", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    query: { query: "benchmark", metadata: { domain: "godot" }, maxResults: 10 },
+    metadataMode: "project-context-single-section",
+  });
+  assert.equal(metadataFiltered.results.length, 1, "manifest metadata filters the exact bound heading");
+  const rejectedMultiSectionTag = await registry.call("mssr_librarian_search", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    query: { query: "filesystem", maxResults: 10 },
+    metadataMode: "project-context-single-section",
+  });
+  assert.equal(rejectedMultiSectionTag.results.length, 0, "selectors from multi-section modules are not spread across headings");
+
   const blockSelection = await registry.call("mssr_librarian_jev_select", {
     projectRoot: root,
     sourceRefs: ["policy.md"],
@@ -122,6 +215,18 @@ try {
     /explicitly supplied document owned by the same caller/,
   );
   assert.equal(providerCalls.length, 2, "a handle outside the selected sourceRefs must be rejected before calling Jev");
+
+  const jevFromMetadataSearch = await registry.call("mssr_librarian_jev_select", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    query: "Select the exact policy about preserving benchmark records that matched the Godot domain selector.",
+    candidateHandles: metadataSearch.results.map((result) => result.handle),
+  });
+  assert.equal(jevFromMetadataSearch.status, "selected", "Jev can select from exact handles returned by metadata-assisted search");
+  assert.equal(jevFromMetadataSearch.selected.title, "Preserve operational records");
+  assert.equal(jevFromMetadataSearch.verification, "unverified");
+  assert.equal(jevFromMetadataSearch.truthAuthority, false);
+  assert.deepEqual(jevFromMetadataSearch.selected.handle, metadataSearch.results[0].handle);
 
   const abstained = await registry.call("mssr_librarian_jev_select", {
     projectRoot: root,
@@ -219,7 +324,7 @@ try {
   };
   mssrJevDecisionRequestSchema.parse({ state: { test: true }, questions: { q: { kind: "noul", prompt: "test" } } });
   const reviewed = await registry.call("mssr_semantic_evidence_relation_review", { projectRoot: root, input: reviewInput });
-  assert.equal(providerCalls.length, 4);
+  assert.equal(providerCalls.length, 5, "two exact selections, one metadata-driven selection, one abstention, and one relation review each call the provider");
   assert.match(JSON.stringify(providerCalls.at(-1).state), /Keep benchmark results/);
   assert.doesNotMatch(JSON.stringify(providerCalls.at(-1).state), /caller supplied text must be ignored/);
   assert.equal(reviewed.policy.judgmentsVerified, false);
@@ -246,7 +351,7 @@ try {
     query: "select a stale search result",
     candidateHandles: [preserveHandle],
   }), /stale/);
-  assert.equal(providerCalls.length, 4, "a stale search handle must be rejected before calling Jev");
+  assert.equal(providerCalls.length, 5, "a stale search handle must be rejected before calling Jev");
 
   const credentialBytes = Buffer.from("test-only-credential", "utf16le");
   let suppliedApiKey;
@@ -299,6 +404,7 @@ try {
   assert.ok(defaultRegistry.has("mssr_semantic_evidence_relation_review"));
   const selectorSchema = defaultRegistry.tools.find((tool) => tool.name === "mssr_librarian_jev_select");
   assert.equal(selectorSchema.inputSchema.properties.candidateHandles.maxItems, 100);
+  assert.equal("metadataMode" in selectorSchema.inputSchema.properties, false, "metadata retrieval is an explicit prior search step");
   assert.equal(selectorSchema.annotations.readOnlyHint, false);
   assert.equal(selectorSchema.annotations.destructiveHint, false);
   assert.equal(selectorSchema.metadata.mssrLifecycle.effect, "external-side-effect");
