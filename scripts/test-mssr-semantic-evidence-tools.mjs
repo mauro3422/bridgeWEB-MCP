@@ -44,10 +44,18 @@ try {
     async executeSystemOne(request) {
       providerCalls.push(request);
       const answers = Object.fromEntries(Object.entries(request.questions).map(([key, question]) => {
+        if (question.kind === "noul") return [key, { type: "noul", noul: 0.97 }];
         if (key === "selection") {
           const selectedOption = request.state.query.includes("absent-case")
             ? "none"
-            : Object.entries(question.options).find(([optionId, value]) => optionId !== "none" && JSON.parse(value)[2].includes("Preserve operational records"))?.[0] ?? "none";
+            : request.state.evidence.find((candidate) => {
+              try {
+                const evidence = JSON.parse(candidate.text);
+                return Array.isArray(evidence) && evidence[2]?.at(-1) === "Preserve operational records";
+              } catch {
+                return false;
+              }
+            })?.id ?? "none";
           return [key, { type: "choice", choice: selectedOption, confidence: 0.97 }];
         }
         return [key, { type: "choice", choice: "supports", confidence: 0.97 }];
