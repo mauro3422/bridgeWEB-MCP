@@ -5,11 +5,11 @@ import { fork, type ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
 import { createMcpHandler, isLegacyRequest } from "@modelcontextprotocol/server";
 import { toNodeHandler, toWebRequest } from "@modelcontextprotocol/node";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createBridgeServer, createModernBridgeServer } from "./bridge-server.js";
 import { getBridgeHttpConfig, SERVER_NAME, SERVER_VERSION } from "./config.js";
 import { renderDashboardHtml } from "./dashboard.js";
@@ -102,9 +102,9 @@ const modernMcpHandler = createMcpHandler(
 );
 const modernNodeHandler = toNodeHandler(modernMcpHandler);
 
-type BridgeHttpTransport = StreamableHTTPServerTransport & {
-  sessionId?: string;
+type BridgeHttpTransport = WebStandardStreamableHTTPServerTransport & {
   bridgeActiveRequests: number;
+  bridgeNodeHandler: ReturnType<typeof toNodeHandler>;
 };
 type SessionRecord = {
   transport: BridgeHttpTransport;
@@ -123,6 +123,26 @@ function getPositiveIntEnv(name: string, fallback: number): number {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function withSseHeaderFlush(res: ServerResponse): ServerResponse {
+  return new Proxy(res, {
+    get(target, property) {
+      if (property === "writeHead") {
+        return (statusCode: number, headers?: OutgoingHttpHeaders) => {
+          const result = target.writeHead(statusCode, headers);
+          const contentType = headers?.["content-type"] ?? target.getHeader("content-type");
+          if (typeof contentType === "string" && contentType.toLowerCase().includes("text/event-stream")) {
+            target.flushHeaders();
+          }
+          return result;
+        };
+      }
+
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }
 
 const eventLoopProbeTimer = setInterval(() => {
@@ -580,7 +600,7 @@ async function createTransport(requestId: string): Promise<BridgeHttpTransport> 
     const mcpServer = createBridgeServer();
     let transport: BridgeHttpTransport;
 
-    transport = new StreamableHTTPServerTransport({
+    transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (sessionId: string) => {
         const now = Date.now();
@@ -595,6 +615,9 @@ async function createTransport(requestId: string): Promise<BridgeHttpTransport> 
       },
     }) as BridgeHttpTransport;
     transport.bridgeActiveRequests = 0;
+    transport.bridgeNodeHandler = toNodeHandler({
+      fetch: (request, options) => transport.handleRequest(request, options),
+    });
 
     transport.onclose = () => {
       const sessionId = transport.sessionId;
@@ -685,7 +708,7 @@ async function handleMcpRequest(
     if (activeRecord) activeRecord.activeRequests = transport.bridgeActiveRequests;
   }
   try {
-    await transport.handleRequest(req, res, parsedBody);
+    await transport.bridgeNodeHandler(req, withSseHeaderFlush(res), parsedBody);
   } catch (error) {
     log("error", "MCP request failed", {
       requestId,

@@ -12,15 +12,27 @@ import {
   retrieveMssrSemanticCandidates,
 } from "@mauroprime/mssr";
 
+const bridgePackage = JSON.parse(await fs.readFile(new URL("../package.json", import.meta.url), "utf8"));
+const packageLock = JSON.parse(await fs.readFile(new URL("../package-lock.json", import.meta.url), "utf8"));
+const mssrSpecifier = bridgePackage.dependencies?.["@mauroprime/mssr"];
+const mssrMatch = typeof mssrSpecifier === "string"
+  ? mssrSpecifier.match(/^file:(vendor\/mauroprime-mssr-(\d+\.\d+\.\d+)\.tgz)$/)
+  : null;
+assert.ok(mssrMatch, "Bridge must pin MSSR to a versioned local release-gate artifact");
+const [, vendorRelativePath, expectedVersion] = mssrMatch;
 const installedPackage = JSON.parse(
   await fs.readFile(new URL("../node_modules/@mauroprime/mssr/package.json", import.meta.url), "utf8"),
 );
-assert.equal(installedPackage.version, "0.2.100", "Bridge must consume the exact MSSR 0.2.100 package");
-const vendorTarball = await fs.readFile(new URL("../vendor/mauroprime-mssr-0.2.100.tgz", import.meta.url));
+assert.equal(installedPackage.version, expectedVersion, `Bridge must consume its pinned MSSR ${expectedVersion} package`);
+const vendorTarball = await fs.readFile(new URL(`../${vendorRelativePath}`, import.meta.url));
+const lockedMssr = packageLock.packages?.["node_modules/@mauroprime/mssr"];
+assert.equal(lockedMssr?.version, expectedVersion, "package-lock.json must pin the same MSSR version as package.json");
+assert.equal(lockedMssr?.resolved, mssrSpecifier, "package-lock.json must point to the exact MSSR tarball selected by package.json");
 assert.equal(
-  createHash("sha256").update(vendorTarball).digest("hex"),
-  "849b067d5f1578b3c32c73fc4e2bafcedaa8a5e01231ac1108fa92313a103d32",
-  "Bridge must vendor the exact MSSR 0.2.100 release-gate artifact",);
+  lockedMssr?.integrity,
+  `sha512-${createHash("sha512").update(vendorTarball).digest("base64")}`,
+  `Bridge must vendor the exact locked MSSR ${expectedVersion} artifact`,
+);
 
 const roadmapEvaluation = evaluateMssrSemanticConsistency({
   boundary: "ordinary",
@@ -162,4 +174,4 @@ assert.equal(semanticFallback.value, null);
 assert.equal(semanticFallback.reviewRequired, true);
 assert.equal(semanticFallback.autoApplyAllowed, false);
 
-console.log("Bridge MSSR 0.2.100 R4 and semantic-shadow host-consumption tests passed.");
+console.log(`Bridge MSSR ${expectedVersion} R4 and semantic-shadow host-consumption tests passed.`);

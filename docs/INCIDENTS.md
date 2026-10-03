@@ -19,6 +19,26 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-10-03 — Streamable HTTP responses had invalid chunk framing
+
+**Estado:** Corregido y cubierto en el candidato Bridge 0.6.147; no publicado ni adoptado por el runtime live.
+
+**Capa/owner:** Adaptación HTTP del transporte MCP de Bridge (`src/http.ts`). El transporte conserva la gestión de sesiones del SDK; `@modelcontextprotocol/node` escribe la respuesta HTTP de Node.
+
+**Síntoma observable:** `POST /mcp` con protocolo `2025-06-18` devolvía `Transfer-Encoding: chunked`, pero el cuerpo SSE empezaba por `event: message` sin tamaño de chunk. Clientes HTTP interpretaban `Invalid character in chunk size` y la inicialización no terminaba.
+
+**Reproducción/evidencia:** captura TCP cruda y regresión reproducible en `scripts/test-mcp-streamable-http-framing.mjs`. La regresión exige que initialize tenga framing chunked válido y chunk terminal, que el GET SSE entregue headers de inmediato y permanezca abierto, y que reciba `notifications/tools/list_changed`. El problema se reprodujo antes en Bridge 0.6.146/0.6.147 y en un servidor mínimo SDK 1.30.0 + Hono node-server 2.0.11 bajo Node 24.19.0.
+
+**Causa demostrada:** la ruta de respuesta del adaptador Node basado en Hono no preservaba framing HTTP válido para las respuestas SSE del transporte MCP. No se atribuye el defecto a un cambio del contenido MCP ni se afirma un defecto general del SDK.
+
+**Corrección:** Bridge usa `WebStandardStreamableHTTPServerTransport` con `@modelcontextprotocol/node` `toNodeHandler` para escribir directamente la respuesta Node. Un wrapper limitado a `text/event-stream` fuerza el envío inmediato de headers, manteniendo el stream abierto y el lifecycle de sesiones. No se agrega framing manual ni cambia el contrato de herramientas.
+
+**Regresión/evidencia:** pasan `npm run check`, `npm run test:mcp-dual-era` (incluye la prueba TCP) y `npm run test:regressions`. Esta última también reveló una aserción de adopción fijada en MSSR 0.2.100; ahora valida dinámicamente la versión, tarball e integridad exactos del lockfile. Se acortó el resumen del Librarian en `PROJECT_CONTEXT` para que Project Context Health pase. `npm run verify:all` no se ejecutó: requiere un endpoint activo en puerto 3001.
+
+**Seguimiento:** revisar y publicar el branch candidato; cualquier adopción live necesita su propio gate controlado. Live permanece Bridge 0.6.144.
+
+---
+
 ## 2026-10-01 — An unknown explicit MSSR trace ID inherited the active task identity
 
 **Estado:** Corregido en la rama candidata Bridge 0.6.144; el runtime live no fue reiniciado ni adoptó este cambio.
