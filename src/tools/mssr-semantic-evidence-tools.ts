@@ -9,6 +9,8 @@ import {
   MSSR_PROJECT_CONTROL_FILES,
   MSSR_PROJECT_HOME_DIR,
   MSSR_LIBRARIAN_JEV_SELECTION_LIMITS,
+  MSSR_LIBRARIAN_RETRIEVAL_LIMITS,
+  PROJECT_CONTEXT_LIBRARIAN_LIMITS,
   buildMssrSemanticSynthesisProposal,
   fetchMssrLibrarianEvidence,
   mssrEvidenceAtomSchema,
@@ -18,6 +20,7 @@ import {
   mssrSemanticEvidenceRelationReviewInputSchema,
   mssrSemanticSynthesisSourceEvidenceSchema,
   projectContextManifestSchema,
+  projectMssrProjectContextLibrarianMetadata,
   reviewMssrSemanticEvidenceRelations,
   searchMssrLibrarianEvidence,
   selectMssrLibrarianEvidenceWithJev,
@@ -40,6 +43,7 @@ const MAX_MARKDOWN_FILE_BYTES = 2_000_000;
 const MAX_TOTAL_MARKDOWN_BYTES = 4_000_000;
 const MAX_SOURCE_FILES = 32;
 const MAX_PROJECT_CONTEXT_MANIFEST_BYTES = 1_000_000;
+const MAX_PROJECT_CONTEXT_AUXILIARY_MANIFEST_BYTES = 1_000_000;
 const MAX_CREDENTIAL_OUTPUT_BYTES = 16_384;
 const MAX_CREDENTIAL_READ_MS = 10_000;
 const DEFAULT_CREDENTIAL_TARGET = "TypeSafe:MSSR:JevLab";
@@ -239,6 +243,195 @@ async function documentsWithProjectContextMetadata(project: ResolvedProject, sou
   return { documents: bound.documents, bindingsByAtomId: bound.bindingsByAtomId, metadataIndex: { ...bound.index, status } };
 }
 
+type ProjectContextLibrarianSidecarStatus = "applied" | "sidecar-missing" | "no-projectable-declarations" | "manifest-changed" | "limits-exceeded";
+type CanonicalJsonSnapshot = { found: true; value: unknown; revision: string; canonicalPath: string; canonicalHomePath: string } | { found: false; value: null; revision: null; canonicalPath: string; canonicalHomePath: string };
+
+function errorCode(error: unknown): string | undefined {
+  return error && typeof error === "object" && "code" in error && typeof (error as { code?: unknown }).code === "string"
+    ? (error as { code: string }).code
+    : undefined;
+}
+
+async function readCanonicalProjectJson(project: ResolvedProject, fileName: string, maxBytes: number, optional: boolean): Promise<CanonicalJsonSnapshot> {
+  const homeInput = path.join(project.root, MSSR_PROJECT_HOME_DIR);
+  const home = await fs.realpath(homeInput).catch((error: unknown) => {
+    if (optional && errorCode(error) === "ENOENT") return null;
+    throw new Error(`Canonical .mssr/${fileName} home is unavailable.`);
+  });
+  if (!home) return { found: false, value: null, revision: null, canonicalPath: path.join(homeInput, fileName), canonicalHomePath: homeInput };
+  if (!isWithin(project.root, home)) throw new Error(`Canonical .mssr/${fileName} home resolves outside the selected project root.`);
+
+  const expectedPath = path.join(homeInput, fileName);
+  const canonicalExpectedPath = path.join(home, fileName);
+  const canonicalPath = await fs.realpath(expectedPath).catch((error: unknown) => {
+    if (optional && errorCode(error) === "ENOENT") return null;
+    if (errorCode(error) === "ENOENT") throw new Error(`Required canonical .mssr/${fileName} is missing.`);
+    throw new Error(`Canonical .mssr/${fileName} could not be resolved safely.`);
+  });
+  if (!canonicalPath) return { found: false, value: null, revision: null, canonicalPath: canonicalExpectedPath, canonicalHomePath: home };
+  if (!isWithin(home, canonicalPath) || !isWithin(project.root, canonicalPath)) {
+    throw new Error(`Canonical .mssr/${fileName} resolves outside the project-control directory.`);
+  }
+
+  const before = await fs.stat(canonicalPath).catch(() => null);
+  if (!before?.isFile()) throw new Error(`Canonical .mssr/${fileName} must be a regular file.`);
+  if (before.size > maxBytes) throw new Error(`Canonical .mssr/${fileName} exceeds ${maxBytes} bytes.`);
+  const bytes = await fs.readFile(canonicalPath);
+  try {
+    const after = await fs.stat(canonicalPath);
+    if (bytes.byteLength !== before.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs) {
+      throw new Error(`Canonical .mssr/${fileName} changed while it was being read; retry against a stable revision.`);
+    }
+    const revision = sha256(bytes);
+    let text: string;
+    try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+    catch { throw new Error(`Canonical .mssr/${fileName} is not valid UTF-8 JSON.`); }
+    let value: unknown;
+    try { value = JSON.parse(text); }
+    catch { throw new Error(`Canonical .mssr/${fileName} is invalid JSON.`); }
+    return { found: true, value, revision, canonicalPath, canonicalHomePath: home };
+  } finally {
+    bytes.fill(0);
+  }
+}
+
+function emptyProjectContextLibrarianSidecarIndex(project: ResolvedProject, status: ProjectContextLibrarianSidecarStatus, revisions: {
+  librarianManifestRevision: string | null;
+  segmentsManifestRevision: string | null;
+  referencesManifestRevision: string | null;
+}) {
+  return {
+    mode: "project-context-librarian-sidecar" as const,
+    status,
+    projectContextManifestRevision: project.projectContextManifestRevision,
+    ...revisions,
+    declared: 0,
+    projected: 0,
+    omitted: 0,
+    items: [] as Array<unknown>,
+    selectorsAreProjectDeclared: true as const,
+    sourceOwnerIsCallerAsserted: true as const,
+    advisoryOnly: true as const,
+    truthAuthority: false as const,
+    canonicalRewriteAllowed: false as const,
+  };
+}
+
+async function sidecarSnapshotsStillMatch(project: ResolvedProject, initial: {
+  librarian: CanonicalJsonSnapshot;
+  segments: CanonicalJsonSnapshot;
+  references: CanonicalJsonSnapshot;
+}): Promise<boolean> {
+  if (!(await projectContextManifestStillMatches(project))) return false;
+  try {
+    const [librarian, segments, references] = await Promise.all([
+      readCanonicalProjectJson(project, MSSR_PROJECT_CONTROL_FILES.projectContextLibrarianManifest, PROJECT_CONTEXT_LIBRARIAN_LIMITS.sidecarBytes, true),
+      readCanonicalProjectJson(project, MSSR_PROJECT_CONTROL_FILES.projectContextSegmentsManifest, MAX_PROJECT_CONTEXT_AUXILIARY_MANIFEST_BYTES, true),
+      readCanonicalProjectJson(project, MSSR_PROJECT_CONTROL_FILES.projectContextReferencesManifest, MAX_PROJECT_CONTEXT_AUXILIARY_MANIFEST_BYTES, true),
+    ]);
+    return [librarian, segments, references].every((current, index) => {
+      const before = [initial.librarian, initial.segments, initial.references][index];
+      return current.found === before.found
+        && current.revision === before.revision
+        && current.canonicalPath === before.canonicalPath
+        && current.canonicalHomePath === before.canonicalHomePath;
+    });
+  } catch {
+    return false;
+  }
+}
+
+async function documentsWithProjectContextLibrarianSidecar(project: ResolvedProject, sourceRefs: readonly string[]) {
+  const batch = await readProjectMarkdownBatch(project, sourceRefs);
+  const [librarian, segments, references] = await Promise.all([
+    readCanonicalProjectJson(project, MSSR_PROJECT_CONTROL_FILES.projectContextLibrarianManifest, PROJECT_CONTEXT_LIBRARIAN_LIMITS.sidecarBytes, true),
+    readCanonicalProjectJson(project, MSSR_PROJECT_CONTROL_FILES.projectContextSegmentsManifest, MAX_PROJECT_CONTEXT_AUXILIARY_MANIFEST_BYTES, true),
+    readCanonicalProjectJson(project, MSSR_PROJECT_CONTROL_FILES.projectContextReferencesManifest, MAX_PROJECT_CONTEXT_AUXILIARY_MANIFEST_BYTES, true),
+  ]);
+  const revisions = {
+    librarianManifestRevision: librarian.revision,
+    segmentsManifestRevision: segments.revision,
+    referencesManifestRevision: references.revision,
+  };
+  if (!librarian.found) {
+    const stable = await sidecarSnapshotsStillMatch(project, { librarian, segments, references });
+    return {
+      documents: batch.documents,
+      bindingsByAtomId: new Map<string, { entryId: string; sourceRef: string; headingPath: string[]; rangeId: string }>(),
+      metadataIndex: emptyProjectContextLibrarianSidecarIndex(project, stable ? "sidecar-missing" : "manifest-changed", revisions),
+    };
+  }
+
+  const projection = projectMssrProjectContextLibrarianMetadata({
+    projectContextManifest: project.projectContextManifest,
+    librarianManifest: librarian.value,
+    segmentsManifest: segments.found ? segments.value : null,
+    referencesManifest: references.found ? references.value : null,
+    sourceFiles: batch.documents.map((document) => ({ path: document.sourceRef, markdown: document.markdown })),
+    owner: project.owner,
+  });
+  const recordsPerSource = new Map<string, number>();
+  for (const record of projection.records) recordsPerSource.set(record.sourceRef, (recordsPerSource.get(record.sourceRef) ?? 0) + 1);
+  const atomsPerSource = new Map<string, number>();
+  for (const atom of projection.evidenceAtoms) atomsPerSource.set(atom.source.ref, (atomsPerSource.get(atom.source.ref) ?? 0) + 1);
+  const overLimit = projection.records.length > MSSR_LIBRARIAN_RETRIEVAL_LIMITS.maxTotalRecords
+    || projection.evidenceAtoms.length > MSSR_LIBRARIAN_RETRIEVAL_LIMITS.maxTotalEvidenceAtoms
+    || [...recordsPerSource.values()].some((count) => count > MSSR_LIBRARIAN_RETRIEVAL_LIMITS.maxRecordsPerDocument)
+    || [...atomsPerSource.values()].some((count) => count > MSSR_LIBRARIAN_RETRIEVAL_LIMITS.maxEvidenceAtomsPerDocument);
+  const stable = await sidecarSnapshotsStillMatch(project, { librarian, segments, references });
+  const emptyBindings = new Map<string, { entryId: string; sourceRef: string; headingPath: string[]; rangeId: string }>();
+  if (!stable) {
+    return {
+      documents: batch.documents,
+      bindingsByAtomId: emptyBindings,
+      metadataIndex: { ...emptyProjectContextLibrarianSidecarIndex(project, "manifest-changed", revisions), declared: projection.declared, omitted: projection.declared },
+    };
+  }
+  if (overLimit) {
+    return {
+      documents: batch.documents,
+      bindingsByAtomId: emptyBindings,
+      metadataIndex: { ...emptyProjectContextLibrarianSidecarIndex(project, "limits-exceeded", revisions), declared: projection.declared, omitted: projection.declared },
+    };
+  }
+
+  const documents = batch.documents.map((document) => ({ ...document, records: [] as typeof projection.records, evidenceAtoms: [] as typeof projection.evidenceAtoms }));
+  const outputByRef = new Map(documents.map((document, index) => [document.sourceRef, index] as const));
+  for (const record of projection.records) {
+    const index = outputByRef.get(record.sourceRef);
+    if (index !== undefined) documents[index].records.push(record);
+  }
+  for (const atom of projection.evidenceAtoms) {
+    const index = outputByRef.get(atom.source.ref);
+    if (index !== undefined) documents[index].evidenceAtoms.push(atom);
+  }
+  const bindingsByAtomId = new Map<string, { entryId: string; sourceRef: string; headingPath: string[]; rangeId: string }>();
+  for (const item of projection.items) {
+    if (item.status !== "projected" || !item.evidenceAtomId || !item.sourceRef || !item.rangeId) continue;
+    bindingsByAtomId.set(item.evidenceAtomId, { entryId: item.entryId, sourceRef: item.sourceRef, headingPath: item.headingPath, rangeId: item.rangeId });
+  }
+  const status: ProjectContextLibrarianSidecarStatus = projection.projected > 0 ? "applied" : "no-projectable-declarations";
+  return {
+    documents,
+    bindingsByAtomId,
+    metadataIndex: {
+      mode: "project-context-librarian-sidecar" as const,
+      status,
+      projectContextManifestRevision: project.projectContextManifestRevision,
+      ...revisions,
+      declared: projection.declared,
+      projected: projection.projected,
+      omitted: projection.omitted,
+      items: projection.items,
+      selectorsAreProjectDeclared: projection.selectorsAreProjectDeclared,
+      sourceOwnerIsCallerAsserted: projection.sourceOwnerIsCallerAsserted,
+      advisoryOnly: projection.advisoryOnly,
+      truthAuthority: projection.truthAuthority,
+      canonicalRewriteAllowed: projection.canonicalRewriteAllowed,
+    },
+  };
+}
+
 async function revalidateHandle(project: ResolvedProject, handleInput: unknown) {
   const handle = mssrLibrarianEvidenceHandleSchema.parse(handleInput);
   if (handle.owner !== project.owner) throw new Error("Evidence handle belongs to a different canonical project root.");
@@ -275,6 +468,8 @@ export type MssrJevBridgeProviderOptions = {
   executeSystemOne?: TypeSafeSystemOne;
   model?: string;
 };
+
+export const MSSR_PROJECT_CONTEXT_LIBRARIAN_SIDECAR_METADATA_MODE = "project-context-librarian-sidecar" as const;
 
 function safeJevError(error: unknown): Error {
   const status = error && typeof error === "object" && "status" in error ? (error as { status?: unknown }).status : undefined;
@@ -405,7 +600,7 @@ const searchInputSchema = z.object({
   projectRoot: projectRootSchema,
   sourceRefs: z.array(sourceRefSchema).min(1).max(MAX_SOURCE_FILES),
   query: querySchema,
-  metadataMode: z.enum(["off", MSSR_PROJECT_CONTEXT_LIBRARIAN_METADATA_MODE]).default("off"),
+  metadataMode: z.enum(["off", MSSR_PROJECT_CONTEXT_LIBRARIAN_METADATA_MODE, MSSR_PROJECT_CONTEXT_LIBRARIAN_SIDECAR_METADATA_MODE]).default("off"),
 }).strict();
 
 const jevSelectionInputSchema = z.object({
@@ -453,14 +648,14 @@ function createMssrSemanticEvidenceToolModule(options: MssrSemanticEvidenceToolM
     tools: [
       {
         name: "mssr_librarian_search",
-        description: "Search explicitly selected UTF-8 Markdown files in a Git project with canonical .mssr/project-context.json. Bridge reads only those paths; data/, logs/, .mssr/runtime/, .git and non-Markdown files are excluded. Optional metadataMode=project-context-single-section uses only owner-declared selectors from one unique, explicitly named heading in the canonical project-context manifest; it does not crawl or infer tags from prose. Returns advisory revision-bound candidate handles.",
+        description: "Search explicitly selected UTF-8 Markdown files in a Git project with canonical .mssr/project-context.json. Bridge reads only those paths; data/, logs/, .mssr/runtime/, .git and non-Markdown files are excluded. Metadata is opt-in: project-context-single-section uses the legacy exact single-heading selectors; project-context-librarian-sidecar uses only owner-declared exact headings from .mssr/project-context-librarian.json, checked against the canonical context, segment and reference manifests and current Markdown fingerprints. The sidecar mode does not crawl, inherit module-wide tags, or infer selectors from prose; absent declarations or stale inputs leave lexical-only results with an explicit status. Returns advisory revision-bound candidate handles.",
         inputSchema: {
           type: "object",
           properties: {
             projectRoot: { type: "string", minLength: 1, maxLength: 4096 },
             sourceRefs: { type: "array", items: { type: "string", minLength: 1, maxLength: 1000 }, minItems: 1, maxItems: MAX_SOURCE_FILES, description: "Explicit project-relative .md paths. This tool does not crawl directories." },
             query: { type: "object", properties: { query: { type: "string", minLength: 1, maxLength: 500 }, maxResults: { type: "integer", minimum: 1, maximum: 100, default: 20 }, maxSnippetChars: { type: "integer", minimum: 40, maximum: 240, default: 160 }, metadata: { type: "object", maxProperties: 64, additionalProperties: { oneOf: [{ type: "string", maxLength: 240 }, { type: "number" }, { type: "boolean" }] }, description: "Optional typed metadata filters; project-context selector filters apply only when metadataMode opts in." } }, required: ["query"], additionalProperties: false },
-            metadataMode: { type: "string", enum: ["off", MSSR_PROJECT_CONTEXT_LIBRARIAN_METADATA_MODE], default: "off", description: "Opt in to exact single-heading project-context selectors. Default off preserves lexical-only behavior." },
+            metadataMode: { type: "string", enum: ["off", MSSR_PROJECT_CONTEXT_LIBRARIAN_METADATA_MODE, MSSR_PROJECT_CONTEXT_LIBRARIAN_SIDECAR_METADATA_MODE], default: "off", description: "Opt in to project-context metadata. Use project-context-single-section for the legacy selector path or project-context-librarian-sidecar for exact declared librarian headings and fingerprint validation. Default off preserves lexical-only behavior." },
           },
           required: ["projectRoot", "sourceRefs", "query"],
           additionalProperties: false,
@@ -473,7 +668,7 @@ function createMssrSemanticEvidenceToolModule(options: MssrSemanticEvidenceToolM
       },
       {
         name: "mssr_librarian_jev_select",
-        description: `Make one live TypeSafe Jev Choice call over explicitly selected project Markdown files. By default it offers heading sections; callers may instead pass up to ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles} exact candidateHandles returned by mssr_librarian_search, so Jev can choose query-matched blocks and deeper evidence. To use project-context selectors, first call mssr_librarian_search with metadataMode=project-context-single-section, then pass the returned exact handles here; this keeps metadata retrieval and Jev selection as separately inspectable steps. Bridge reads only sourceRefs and MSSR revalidates each handle against the current owner, source, revision, range, fingerprint, and privacy class before the provider call. The result is advisory; call mssr_librarian_fetch before using source text. This external request may incur account usage. It does not crawl, establish truth, generate prose, or write files. At most ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxHeadingCandidates} heading sections or ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles} exact handles plus none are offered; oversized sets are rejected without truncation.`,
+        description: `Make one live TypeSafe Jev Choice call over explicitly selected project Markdown files. By default it offers heading sections; callers may instead pass up to ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles} exact candidateHandles returned by mssr_librarian_search, so Jev can choose query-matched blocks and deeper evidence. To use declared project-context selectors, first call mssr_librarian_search with metadataMode=project-context-single-section or project-context-librarian-sidecar, then pass the returned exact handles here; metadata retrieval and Jev selection remain separate inspectable steps. Bridge reads only sourceRefs and MSSR revalidates each handle against the current owner, source, revision, range, fingerprint, and privacy class before the provider call. The result is advisory; call mssr_librarian_fetch before using source text. This external request may incur account usage. It does not crawl, establish truth, generate prose, or write files. At most ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxHeadingCandidates} heading sections or ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles} exact handles plus none are offered; oversized sets are rejected without truncation.`,
         inputSchema: {
           type: "object",
           properties: {
@@ -547,19 +742,29 @@ function createMssrSemanticEvidenceToolModule(options: MssrSemanticEvidenceToolM
         const project = await resolveManagedProject(args.projectRoot);
         const prepared = args.metadataMode === "off"
           ? await readProjectMarkdownBatch(project, args.sourceRefs)
-          : await documentsWithProjectContextMetadata(project, args.sourceRefs);
+          : args.metadataMode === MSSR_PROJECT_CONTEXT_LIBRARIAN_METADATA_MODE
+            ? await documentsWithProjectContextMetadata(project, args.sourceRefs)
+            : await documentsWithProjectContextLibrarianSidecar(project, args.sourceRefs);
         const documents = prepared.documents;
         const query = mssrLibrarianRetrievalQuerySchema.parse(args.query);
         const result = searchMssrLibrarianEvidence({ documents, query });
-        const results = "bindingsByAtomId" in prepared
+        const results = args.metadataMode === MSSR_PROJECT_CONTEXT_LIBRARIAN_METADATA_MODE
           ? result.results.map((item) => {
             const bindings = [...new Map((item.metadataProjectionMatches ?? []).flatMap((match) => {
-              const binding = prepared.bindingsByAtomId.get(match.atomId);
+              const binding = (prepared as Awaited<ReturnType<typeof documentsWithProjectContextMetadata>>).bindingsByAtomId.get(match.atomId);
               return binding ? [[`${binding.moduleId}:${binding.selectorField}:${binding.selectorValue}`, binding] as const] : [];
             })).values()];
             return bindings.length > 0 ? { ...item, projectContextMetadataBindings: bindings } : item;
           })
-          : result.results;
+          : args.metadataMode === MSSR_PROJECT_CONTEXT_LIBRARIAN_SIDECAR_METADATA_MODE
+            ? result.results.map((item) => {
+              const bindings = [...new Map((item.metadataProjectionMatches ?? []).flatMap((match) => {
+                const binding = (prepared as Awaited<ReturnType<typeof documentsWithProjectContextLibrarianSidecar>>).bindingsByAtomId.get(match.atomId);
+                return binding ? [[`${binding.entryId}:${binding.sourceRef}:${binding.rangeId}`, binding] as const] : [];
+              })).values()];
+              return bindings.length > 0 ? { ...item, projectContextLibrarianBindings: bindings } : item;
+            })
+            : result.results;
         return {
           projectOwner: project.owner,
           sourceCount: args.sourceRefs.length,

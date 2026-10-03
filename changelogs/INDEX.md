@@ -4,6 +4,7 @@ Versioned release notes are the canonical change-history surface for MSSR debugg
 
 ## Current releases
 
+- [0.6.147](0.6.147.md) - Adopt MSSR 0.2.101 and add an opt-in canonical project-context Librarian sidecar mode with exact heading fingerprints and fail-closed bounded manifest reads.
 - [0.6.146](0.6.146.md) - Add opt-in, exact-section project-context metadata to Librarian search and compose its revision-bound handles explicitly with Jev selection.
 - [0.6.145](0.6.145.md) - Adopt MSSR 0.2.100's exact-fetchable Jev candidate contract and query-dense excerpt selection; document the EvidenceAtom ingress boundary without adding duplicate MCP tools.
 - [0.6.144](0.6.144.md) - Adopt MSSR 0.2.96, complete Jev exact-range selection/fetch, and prevent unknown explicit trace IDs from inheriting another task's identity.

@@ -22,17 +22,22 @@ const child = spawn(process.execPath, ["dist/http.js"], {
     BRIDGE_MCP_PROJECT_SITUATION_PATH: path.join(tempRoot, "project-situation.json"),
     BRIDGE_MCP_PROJECT_SITUATION_ROOT: process.cwd(),
   },
-  stdio: ["ignore", "ignore", "pipe"],
+  stdio: ["ignore", "pipe", "pipe"],
   windowsHide: true,
 });
 
+let stdout = "";
 let stderr = "";
+child.stdout.on("data", (chunk) => {
+  stdout += chunk.toString();
+});
 child.stderr.on("data", (chunk) => {
   stderr += chunk.toString();
 });
 
 async function waitReady() {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (child.exitCode !== null) break;
     try {
       const response = await fetch(`${baseUrl}/readyz`);
       if (response.ok) return;
@@ -41,7 +46,7 @@ async function waitReady() {
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error(`Dual-era test server did not become ready.\n${stderr}`);
+  throw new Error(`Dual-era test server did not become ready.\nstdout:\n${stdout}\nstderr:\n${stderr}`);
 }
 
 const envelope = {
@@ -271,6 +276,10 @@ try {
   const list = await listResponse.json();
   assert.ok(list.result.tools.length >= 100);
   assert.ok(list.result.tools.some((tool) => tool.name === "skill_bootstrap"));
+
+  const librarianSearchTools = list.result.tools.filter((tool) => tool.name === "mssr_librarian_search");
+  assert.equal(librarianSearchTools.length, 1, "HTTP tools/list must expose one existing Librarian search tool, not a duplicate sidecar tool.");
+  assert.deepEqual(librarianSearchTools[0].inputSchema?.properties?.metadataMode?.enum, ["off", "project-context-single-section", "project-context-librarian-sidecar"]);
 
   const imageImportTool = list.result.tools.find((tool) => tool.name === "image_asset_import_files");
   assert.ok(imageImportTool, "HTTP tools/list must publish image_asset_import_files.");

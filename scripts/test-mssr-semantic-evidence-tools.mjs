@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   buildMssrEvidenceAtom,
+  buildMssrMarkdownDocumentSurface,
   mssrJevDecisionRequestSchema,
 } from "@mauroprime/mssr";
 import { createToolRegistry } from "../dist/tool-registry.js";
@@ -82,6 +83,25 @@ try {
   const directoryLinkType = process.platform === "win32" ? "junction" : "dir";
   await fs.symlink(path.join(root, "data"), path.join(root, "docs", "data-alias"), directoryLinkType);
   await fs.symlink(path.join(root, ".mssr", "runtime"), path.join(root, "docs", "runtime-alias"), directoryLinkType);
+
+  const projectSurface = buildMssrMarkdownDocumentSurface({ sourceRef: "policy.md", markdown: policyMarkdown });
+  const preserveHeading = projectSurface.headings.find((heading) => heading.title === "Preserve operational records");
+  assert.ok(preserveHeading, "fixture heading should be present for the exact sidecar binding");
+  const sidecarEntry = {
+    entryId: "policy-preserve-records",
+    sourcePath: "policy.md",
+    headingPath: preserveHeading.headingPath,
+    expectedFingerprint: preserveHeading.fingerprint,
+    selectors: {
+      domains: ["godot"],
+      actions: ["review"],
+      artifacts: ["repository"],
+      needs: ["version-control"],
+      signals: ["tool-chain-needed"],
+    },
+  };
+  const sidecarPath = path.join(root, ".mssr", "project-context-librarian.json");
+  await fs.writeFile(sidecarPath, JSON.stringify({ schemaVersion: 1, entries: [sidecarEntry] }), "utf8");
 
   const providerCalls = [];
   const decisionProvider = {
@@ -193,6 +213,159 @@ try {
     metadataMode: "project-context-single-section",
   });
   assert.equal(rejectedMultiSectionTag.results.length, 0, "selectors from multi-section modules are not spread across headings");
+
+  const sidecarSearch = await registry.call("mssr_librarian_search", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    query: { query: "godot", maxResults: 10 },
+    metadataMode: "project-context-librarian-sidecar",
+  });
+  assert.equal(sidecarSearch.metadataIndex.mode, "project-context-librarian-sidecar");
+  assert.equal(sidecarSearch.metadataIndex.status, "applied");
+  assert.equal(sidecarSearch.metadataIndex.declared, 1);
+  assert.equal(sidecarSearch.metadataIndex.projected, 1);
+  assert.equal(sidecarSearch.metadataIndex.omitted, 0);
+  assert.equal(sidecarSearch.metadataIndex.projectContextManifestRevision.length, 64);
+  assert.equal(sidecarSearch.metadataIndex.librarianManifestRevision.length, 64);
+  assert.equal(sidecarSearch.metadataIndex.segmentsManifestRevision, null, "an absent optional segments manifest is observed and passed as null");
+  assert.equal(sidecarSearch.metadataIndex.referencesManifestRevision, null, "an absent optional references manifest is observed and passed as null");
+  assert.equal(sidecarSearch.metadataIndex.advisoryOnly, true);
+  assert.equal(sidecarSearch.metadataIndex.truthAuthority, false);
+  assert.equal(sidecarSearch.metadataIndex.canonicalRewriteAllowed, false);
+  assert.equal(sidecarSearch.results.length, 1);
+  assert.equal(sidecarSearch.results[0].title, "Preserve operational records");
+  assert.ok(sidecarSearch.results[0].metadataProjectionMatches.some((match) => match.producer === "project-context-librarian"
+    && match.provenanceIsCallerAsserted === true
+    && match.matches.some((entry) => entry.field === "domain" && entry.value === "godot")));
+  assert.ok(sidecarSearch.results[0].projectContextLibrarianBindings.some((binding) => binding.entryId === "policy-preserve-records"
+    && binding.sourceRef === "policy.md" && binding.headingPath.at(-1) === "Preserve operational records"));
+  assert.equal(sidecarSearch.results[0].handle.rangeKind, "section");
+  assert.match((await registry.call("mssr_librarian_fetch", { projectRoot: root, handle: sidecarSearch.results[0].handle })).text, /Keep benchmark results/);
+
+  const secondModule = {
+    id: "policy-other-file",
+    kind: "memory",
+    description: "A selector that is deliberately bound to an unselected source.",
+    source: { path: "other-policy.md", sections: ["## Unrelated source"] },
+    domains: ["browser"],
+  };
+  const projectContextPath = path.join(root, ".mssr", "project-context.json");
+  const originalProjectContext = JSON.parse(await fs.readFile(projectContextPath, "utf8"));
+  const otherSurface = buildMssrMarkdownDocumentSurface({ sourceRef: "other-policy.md", markdown: await fs.readFile(path.join(root, "other-policy.md"), "utf8") });
+  const otherHeading = otherSurface.headings.find((heading) => heading.title === "Unrelated source");
+  assert.ok(otherHeading);
+  await fs.writeFile(projectContextPath, JSON.stringify({ ...originalProjectContext, modules: [...originalProjectContext.modules, secondModule] }), "utf8");
+  await fs.writeFile(sidecarPath, JSON.stringify({ schemaVersion: 1, entries: [sidecarEntry, {
+    ...sidecarEntry,
+    entryId: secondModule.id,
+    sourcePath: "other-policy.md",
+    headingPath: otherHeading.headingPath,
+    expectedFingerprint: otherHeading.fingerprint,
+    selectors: { domains: ["browser"], actions: [], artifacts: [], needs: [], signals: [] },
+  }] }), "utf8");
+  const unselectedSource = await registry.call("mssr_librarian_search", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    query: { query: "browser", maxResults: 10 },
+    metadataMode: "project-context-librarian-sidecar",
+  });
+  assert.equal(unselectedSource.results.length, 0, "sidecar entries cannot tag Markdown files outside explicit sourceRefs");
+  assert.equal(unselectedSource.metadataIndex.omitted, 1);
+  assert.equal(unselectedSource.metadataIndex.items.find((item) => item.entryId === secondModule.id)?.issue, "source-not-provided");
+  await fs.writeFile(projectContextPath, JSON.stringify(originalProjectContext), "utf8");
+  await fs.writeFile(sidecarPath, JSON.stringify({ schemaVersion: 1, entries: [sidecarEntry] }), "utf8");
+
+  const staleSidecarEntry = { ...sidecarEntry, expectedFingerprint: "0".repeat(64) };
+  await fs.writeFile(sidecarPath, JSON.stringify({ schemaVersion: 1, entries: [staleSidecarEntry] }), "utf8");
+  const staleSidecar = await registry.call("mssr_librarian_search", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    query: { query: "godot", maxResults: 10 },
+    metadataMode: "project-context-librarian-sidecar",
+  });
+  assert.equal(staleSidecar.metadataIndex.status, "no-projectable-declarations");
+  assert.equal(staleSidecar.metadataIndex.omitted, 1);
+  assert.equal(staleSidecar.metadataIndex.items[0].issue, "stale-fingerprint");
+  assert.equal(staleSidecar.results.length, 0, "stale declarations are discarded instead of widening retrieval");
+  await fs.writeFile(sidecarPath, JSON.stringify({ schemaVersion: 1, entries: [sidecarEntry] }), "utf8");
+
+  const sidecarTemporarilyMissing = `${sidecarPath}.missing-test`;
+  await fs.rename(sidecarPath, sidecarTemporarilyMissing);
+  try {
+    const missingSidecar = await registry.call("mssr_librarian_search", {
+      projectRoot: root,
+      sourceRefs: ["policy.md"],
+      query: { query: "godot", maxResults: 10 },
+      metadataMode: "project-context-librarian-sidecar",
+    });
+    assert.equal(missingSidecar.metadataIndex.status, "sidecar-missing");
+    assert.equal(missingSidecar.results.length, 0, "missing declarations preserve lexical-only search");
+  } finally {
+    await fs.rename(sidecarTemporarilyMissing, sidecarPath);
+  }
+
+  const sidecarBackupPath = `${sidecarPath}.safe-backup`;
+  const externalSidecarPath = `${sidecarPath}.outside-project`;
+  await fs.rename(sidecarPath, sidecarBackupPath);
+  await fs.writeFile(externalSidecarPath, JSON.stringify({ schemaVersion: 1, entries: [sidecarEntry] }), "utf8");
+  let sidecarSymlinkCreated = false;
+  try {
+    await fs.symlink(externalSidecarPath, sidecarPath, "file");
+    sidecarSymlinkCreated = true;
+  } catch (error) {
+    assert.ok(["EPERM", "EACCES", "ENOTSUP", "EINVAL"].includes(error?.code), `unexpected symlink setup failure: ${error?.code}`);
+  }
+  try {
+    if (sidecarSymlinkCreated) {
+      await assert.rejects(registry.call("mssr_librarian_search", {
+        projectRoot: root,
+        sourceRefs: ["policy.md"],
+        query: { query: "godot", maxResults: 10 },
+        metadataMode: "project-context-librarian-sidecar",
+      }), /outside the project-control directory/, "the sidecar cannot redirect reads outside the canonical .mssr home");
+    }
+  } finally {
+    if (sidecarSymlinkCreated) await fs.rm(sidecarPath, { force: true });
+    await fs.rename(sidecarBackupPath, sidecarPath);
+    await fs.rm(externalSidecarPath, { force: true });
+  }
+
+  await fs.writeFile(sidecarPath, Buffer.alloc(2_000_001, 0x20));
+  await assert.rejects(registry.call("mssr_librarian_search", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    query: { query: "godot", maxResults: 10 },
+    metadataMode: "project-context-librarian-sidecar",
+  }), /exceeds 2000000 bytes/, "oversized sidecars are rejected before JSON parsing");
+  await fs.writeFile(sidecarPath, JSON.stringify({ schemaVersion: 1, entries: [sidecarEntry] }), "utf8");
+
+  const segmentsPath = path.join(root, ".mssr", "project-context-segments.json");
+  await fs.writeFile(segmentsPath, JSON.stringify({ schemaVersion: 1, modules: [{
+    moduleId: "policy-preserve-records",
+    segments: [
+      { id: "baseline", sections: ["## Preserve operational records"], baseline: true },
+      { id: "retention", sections: ["## Review retention windows"], terms: ["retention"] },
+    ],
+  }] }), "utf8");
+  const indirectSidecar = await registry.call("mssr_librarian_search", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    query: { query: "godot", maxResults: 10 },
+    metadataMode: "project-context-librarian-sidecar",
+  });
+  assert.equal(indirectSidecar.metadataIndex.status, "no-projectable-declarations");
+  assert.equal(indirectSidecar.metadataIndex.items[0].issue, "indirect-source", "segmented modules are excluded from overlapping sidecar projection");
+  await fs.rm(segmentsPath, { force: true });
+
+  const referencesPath = path.join(root, ".mssr", "project-context-refs.json");
+  await fs.writeFile(referencesPath, "{not-json", "utf8");
+  await assert.rejects(registry.call("mssr_librarian_search", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    query: { query: "godot", maxResults: 10 },
+    metadataMode: "project-context-librarian-sidecar",
+  }), /invalid JSON/, "invalid optional project-control JSON fails closed instead of silently dropping policy");
+  await fs.rm(referencesPath, { force: true });
 
   const blockSelection = await registry.call("mssr_librarian_jev_select", {
     projectRoot: root,
@@ -405,6 +578,8 @@ try {
   const selectorSchema = defaultRegistry.tools.find((tool) => tool.name === "mssr_librarian_jev_select");
   assert.equal(selectorSchema.inputSchema.properties.candidateHandles.maxItems, 100);
   assert.equal("metadataMode" in selectorSchema.inputSchema.properties, false, "metadata retrieval is an explicit prior search step");
+  const searchSchema = defaultRegistry.tools.find((tool) => tool.name === "mssr_librarian_search");
+  assert.deepEqual(searchSchema.inputSchema.properties.metadataMode.enum, ["off", "project-context-single-section", "project-context-librarian-sidecar"]);
   assert.equal(selectorSchema.annotations.readOnlyHint, false);
   assert.equal(selectorSchema.annotations.destructiveHint, false);
   assert.equal(selectorSchema.metadata.mssrLifecycle.effect, "external-side-effect");
