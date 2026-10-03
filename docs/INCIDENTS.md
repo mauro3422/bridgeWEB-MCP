@@ -1905,3 +1905,19 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Regresión / verificación:** Pasan `npm run check`, `npm run test:mssr-semantic-evidence`, `npm run test:skill-routing` y `npm run docs:tools:check`. `npm run test:mcp-dual-era` y `npm run test:regressions` fallan en el initialize Streamable HTTP descrito arriba. El worktree base con readiness extendida confirma que el fallo precede a 0.6.147. `npm run verify:all` no se ejecutó porque incluye checks contra el endpoint activo en 127.0.0.1:3001, no disponible desde este contexto.
 
 **Seguimiento:** Obtener un repro mínimo ejecutable y bisectar el writer/adaptador sin cambiar el framing del protocolo; conservar byte capture de request/response y probar cualquier ajuste primero contra el servidor mínimo y ambos commits. Mantener 0.6.147 como candidata sin adoptar hasta que dual-era y regresiones HTTP pasen. Revisar el lanzador real antes de configurar `--use-system-ca` para el servicio; nunca desactivar TLS ni cambiar el almacén del sistema.
+
+## 2026-10-03 — Dual-era HTTP framing recovered; watchdog dry-run wrote a false acknowledgement
+
+**Estado:** Handshake recuperado en el Bridge principal 0.6.144; watchdog dry-run corregido y probado en el candidato 0.6.149. La causa de la salida del proceso Bridge original sigue sin resolver; el candidato no está desplegado como servidor.
+
+**Capa / owner:** Transporte HTTP Streamable MCP y script `start-bridge-http-watchdog.ps1`.
+
+**Síntoma observable:** El initialize MCP legacy falló durante la recuperación y el cliente túnel repitió intentos. La última ejecución `-DryRun -Once` registró el ack `auto-restart-http-process-exited` aunque el Bridge todavía no estaba disponible. En ese momento los puertos 3001/8081 estaban libres, por lo que el dry-run no inició ni detuvo procesos productivos. El ack falso quedó identificado como `dry-run-no-op`; su JSON original y SHA-256 están preservados bajo `D:\Dev\bridge-mcp\.bridge\recovery\2026-10-03-dry-run-false-restart-ack.json` y se enlazan desde el ledger principal.
+
+**Causa y límites:** La prueba de framing reprodujo que el adapter HTTP anterior no entregaba el body SSE/chunk esperado en el initialize legacy. En el checkout principal, cambiar a `WebStandardStreamableHTTPServerTransport` a través de `toNodeHandler` hace pasar la regresión raw y los flujos moderno `2026-07-28` y legacy `2025-06-18`. Por separado, el watchdog ejecutaba la rama normal de recuperación incluso en `-DryRun`; también podía consumir un pedido pendiente y evaluar el reemplazo de un listener no-ready antes del retorno dry-run. Esto explica el acuse falso; no demuestra por qué terminó el proceso original.
+
+**Corrección:** En el candidato 0.6.149, el dry-run ya no reemplaza listeners, consume pedidos, inicia una recuperación ni escribe ack. La prueba `test:http-watchdog-dry-run` usa un root y puerto temporales; confirma que un listener externo y el archivo de pedido sobreviven y que no aparece un ack. La corrección de framing está en el árbol sucio del checkout principal y no se publica desde este cambio.
+
+**Verificación del sistema:** Bridge principal en `D:\Dev\bridge-mcp`, versión 0.6.144, PID 79292, boot `78f66316-43eb-45a9-a3f0-3c4af7356c66`, 185 tools; HTTP 3001 y túnel 8081 responden ready. `npm run check`, build, framing raw y test dual-era pasaron en el árbol principal; las pruebas de telemetría usaron temporales.
+
+**Seguimiento:** El acceso de inicio usa el helper de este worktree, pero siempre pasa `ProjectRoot=D:\Dev\bridge-mcp`; el proceso, CWD y datos continúan siendo del Bridge principal. El watchdog que ya estaba ejecutándose se lanzó antes del cambio y cargó el script viejo; la corrección aplica al próximo lanzamiento del helper. Migrar el helper a una ruta versionada del checkout principal y verificar un próximo inicio controlado sin confundirlo con un segundo Bridge.

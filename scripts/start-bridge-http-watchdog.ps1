@@ -1,5 +1,6 @@
 param(
   [string]$ProjectRoot = ".",
+  [string]$BridgeCodeRoot = "",
   [string]$Profile = "bridge-local-http",
   [string]$TunnelClient = ".\tools\tunnel-client\tunnel-client.exe",
   [string]$TunnelProfileDir = "",
@@ -257,6 +258,10 @@ function Start-BridgeHttp {
 
   $existingPid = Get-ListenPid -Port $BridgePort
   if ($existingPid) {
+    if ($DryRun) {
+      Write-BridgeLog "Dry run: would replace non-ready Bridge HTTP listener pid=$existingPid port=$BridgePort"
+      return $null
+    }
     Write-BridgeLog "Bridge HTTP port $BridgePort is occupied but not ready; replacing pid=$existingPid" "warn"
     Stop-PortOwner -Port $BridgePort -Name "bridge HTTP" -ExpectedCommandPattern $bridgeCommandPattern
   }
@@ -268,7 +273,7 @@ function Start-BridgeHttp {
 
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = "node"
-  $psi.Arguments = ".\dist\http.js"
+  $psi.Arguments = '"' + $bridgeHttpScript + '"'
   $psi.WorkingDirectory = $ProjectRoot
   $psi.UseShellExecute = $false
   $psi.RedirectStandardOutput = $false
@@ -316,6 +321,10 @@ function Start-TunnelClient {
 
   $existingPid = Get-ListenPid -Port $tunnelPort
   if ($existingPid) {
+    if ($DryRun) {
+      Write-BridgeLog "Dry run: would replace non-ready tunnel listener pid=$existingPid port=$tunnelPort"
+      return $null
+    }
     Write-BridgeLog "Tunnel admin port $tunnelPort is occupied but not ready; replacing pid=$existingPid" "warn"
     Stop-PortOwner -Port $tunnelPort -Name "tunnel-client" -ExpectedCommandPattern $tunnelCommandPattern
   }
@@ -464,12 +473,28 @@ function Read-RestartRequest {
     $request = [pscustomobject]@{ id = [guid]::NewGuid().ToString(); parseError = $_.Exception.Message }
   }
 
-  Remove-Item -LiteralPath $requestPath -Force -ErrorAction SilentlyContinue
+  if (-not $DryRun) {
+    Remove-Item -LiteralPath $requestPath -Force -ErrorAction SilentlyContinue
+  }
   return $request
 }
 
-Set-Location $ProjectRoot
+Set-Location -LiteralPath $ProjectRoot
 $ProjectRoot = (Get-Location).Path
+if ([string]::IsNullOrWhiteSpace($BridgeCodeRoot)) {
+  $BridgeCodeRoot = $ProjectRoot
+}
+elseif (-not [System.IO.Path]::IsPathRooted($BridgeCodeRoot)) {
+  $BridgeCodeRoot = Join-Path $ProjectRoot $BridgeCodeRoot
+}
+$BridgeCodeRoot = (Resolve-Path -LiteralPath $BridgeCodeRoot).Path
+$bridgeHttpScript = Join-Path $BridgeCodeRoot "dist\http.js"
+if (-not (Test-Path -LiteralPath $bridgeHttpScript)) {
+  throw "Bridge HTTP entrypoint not found: $bridgeHttpScript"
+}
+if (-not (Test-Path -LiteralPath (Join-Path $BridgeCodeRoot "package.json"))) {
+  throw "Bridge code package.json not found under BridgeCodeRoot: $BridgeCodeRoot"
+}
 if (-not [System.IO.Path]::IsPathRooted($TunnelClient)) {
   $TunnelClient = Join-Path $ProjectRoot $TunnelClient
 }
@@ -492,13 +517,15 @@ if (-not $NoTunnel -and -not (Test-Path -LiteralPath (Join-Path $TunnelProfileDi
   throw "Tunnel profile '$Profile' was not found in profile directory: $TunnelProfileDir"
 }
 $bridgeBaseUrl = "http://$BridgeHost`:$BridgePort"
-$expectedServerVersion = [string](Get-Content -LiteralPath (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json).version
+$expectedServerVersion = [string](Get-Content -LiteralPath (Join-Path $BridgeCodeRoot "package.json") -Raw | ConvertFrom-Json).version
 $bridgeCommandPattern = '(?i)(?:^|\s)"?(?:[^"\r\n]*[\\/])?node(?:\.exe)?"?\s+.*?(?:dist[\\/]http\.js|src[\\/]http\.ts)(?:\s|$)'
 $escapedProfile = [regex]::Escape($Profile)
 $profileTokenPattern = '(?:"' + $escapedProfile + '"|''' + $escapedProfile + '''|' + $escapedProfile + ')'
 $tunnelCommandPattern = '(?i)tunnel-client(?:\.exe)?.*\brun\b.*--profile\s+' + $profileTokenPattern + '(?:\s|$)'
 
 Write-BridgeLog "ProjectRoot=$ProjectRoot"
+Write-BridgeLog "BridgeCodeRoot=$BridgeCodeRoot"
+Write-BridgeLog "Bridge HTTP entrypoint=$bridgeHttpScript expectedVersion=$expectedServerVersion"
 Write-BridgeLog "Bridge HTTP=$bridgeBaseUrl$McpPath"
 Write-BridgeLog "Tunnel profile=$Profile profileDir=$TunnelProfileDir admin=$TunnelBaseUrl"
 Write-BridgeLog "Session limits: max=$MaxSessions soft=$SoftSessionLimit idleMs=$SessionIdleMs reclaimIdleMs=$CapacityReclaimIdleMs anonymousTtlMs=$AnonymousTransportTtlMs cleanupMs=$CleanupIntervalMs maxBodyBytes=$MaxBodyBytes"
@@ -516,9 +543,16 @@ try {
   $watchdogMutex = Enter-BridgeWatchdogSingleton
 
   if ($Build -and -not $DryRun) {
-    Write-BridgeLog "Running npm run build before startup"
-    npm run build
-    if ($LASTEXITCODE -ne 0) { throw "npm run build failed with exit code $LASTEXITCODE" }
+    Write-BridgeLog "Running npm run build under BridgeCodeRoot=$BridgeCodeRoot"
+    Push-Location -LiteralPath $BridgeCodeRoot
+    try {
+      npm run build
+      $buildExitCode = $LASTEXITCODE
+    }
+    finally {
+      Pop-Location
+    }
+    if ($buildExitCode -ne 0) { throw "npm run build failed with exit code $buildExitCode" }
   }
 
   $bridgeProcess = Start-BridgeHttp
@@ -556,6 +590,22 @@ try {
     }
 
     $request = Read-RestartRequest
+
+    if ($DryRun) {
+      if ($request) {
+        Write-BridgeLog "Dry run: would honor restart request id=$($request.id) mode=$(if ($request.mode) { $request.mode } else { 'http' })"
+      }
+      elseif (-not $bridgeReady) {
+        Write-BridgeLog "Dry run: would evaluate Bridge recovery; readinessFailures=$bridgeReadinessFailures processAlive=$bridgeProcessAlive"
+      }
+      elseif (-not $tunnelReady) {
+        Write-BridgeLog "Dry run: would evaluate tunnel recovery; readinessFailures=$tunnelReadinessFailures processAlive=$tunnelProcessAlive"
+      }
+
+      if ($Once) { break }
+      Start-Sleep -Seconds $CheckIntervalSeconds
+      continue
+    }
 
     if ($request) {
       $mode = if ($request.mode) { [string]$request.mode } else { "http" }
