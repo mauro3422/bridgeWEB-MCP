@@ -40,6 +40,12 @@ if (-not (Test-Path -LiteralPath $processDiagnosticsPath)) {
 }
 . $processDiagnosticsPath
 
+$lifecycleModulePath = Join-Path $PSScriptRoot "bridge-watchdog-lifecycle.ps1"
+if (-not (Test-Path -LiteralPath $lifecycleModulePath)) {
+  throw "Bridge watchdog lifecycle helper not found: $lifecycleModulePath"
+}
+. $lifecycleModulePath
+
 function Write-BridgeLog {
   param([string]$Message, [string]$Level = "info")
   $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -193,30 +199,54 @@ function Enter-BridgeWatchdogSingleton {
 }
 
 function Stop-ProcessState {
-  param([object]$State, [string]$Name, [switch]$ForceExternal)
+  param(
+    [object]$State,
+    [string]$Name,
+    [switch]$ForceExternal,
+    [string]$Trigger = "watchdog-stop",
+    [string]$RecoveryAction = "stop",
+    [string]$RecoveryId = ""
+  )
   if ($null -eq $State) { return }
   if ($null -eq $State.Process) { return }
 
   $proc = $State.Process
-  if ($proc.HasExited) { return }
+  try {
+    $proc.Refresh()
+    if ($proc.HasExited) { return }
+  }
+  catch { return }
 
   if (-not $State.Managed -and -not $ForceExternal) {
     Write-BridgeLog "Leaving externally-started $Name pid=$($proc.Id) running"
     return
   }
 
+  $stopRequestedAtUtc = (Get-Date).ToUniversalTime().ToString("o")
+  $component = if ($Name -match "(?i)tunnel") { "tunnel-client" } else { "bridge-http" }
+  $terminationConfirmed = $false
   Write-BridgeLog "Stopping $Name pid=$($proc.Id) managed=$($State.Managed)"
   try {
-    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+    Stop-Process -Id $proc.Id -Force -ErrorAction Stop
     $proc.WaitForExit(5000) | Out-Null
+    $proc.Refresh()
+    $terminationConfirmed = [bool]$proc.HasExited
   }
   catch {
     Write-BridgeLog "Failed to stop $Name pid=$($proc.Id): $($_.Exception.Message)" "warn"
   }
+  Write-BridgeWatchdogLifecycleEvent -Component $component -EventType "process-stop" -Process $proc -Port ([int]$State.Port) -Trigger $Trigger -RecoveryAction $RecoveryAction -RecoveryId $RecoveryId -StopRequestedAtUtc $stopRequestedAtUtc -TerminationConfirmed $terminationConfirmed
 }
 
 function Stop-PortOwner {
-  param([int]$Port, [string]$Name, [string]$ExpectedCommandPattern)
+  param(
+    [int]$Port,
+    [string]$Name,
+    [string]$ExpectedCommandPattern,
+    [string]$Trigger = "verified-listener-replacement",
+    [string]$RecoveryAction = "replace-listener",
+    [string]$RecoveryId = ""
+  )
   $pidFromPort = Get-ListenPid -Port $Port
   if (-not $pidFromPort) { return }
 
@@ -225,18 +255,34 @@ function Stop-PortOwner {
     throw "Refusing to stop unknown $Name listener pid=$pidFromPort port=$Port command=$commandLine"
   }
 
+  $process = Get-Process -Id $pidFromPort -ErrorAction SilentlyContinue
+  $stopRequestedAtUtc = (Get-Date).ToUniversalTime().ToString("o")
+  $component = if ($Name -match "(?i)tunnel") { "tunnel-client" } else { "bridge-http" }
+  $terminationConfirmed = $false
   Write-BridgeLog "Stopping verified $Name listener pid=$pidFromPort port=$Port"
   try {
     Stop-Process -Id $pidFromPort -Force -ErrorAction Stop
+    if ($process) {
+      $process.WaitForExit(5000) | Out-Null
+      $process.Refresh()
+      $terminationConfirmed = [bool]$process.HasExited
+    }
     Start-Sleep -Milliseconds 500
   }
   catch {
     Write-BridgeLog "Failed to stop $Name listener pid=$pidFromPort port=${Port}: $($_.Exception.Message)" "warn"
     throw
   }
+  Write-BridgeWatchdogLifecycleEvent -Component $component -EventType "process-stop" -Process $process -Port $Port -Trigger $Trigger -RecoveryAction $RecoveryAction -RecoveryId $RecoveryId -StopRequestedAtUtc $stopRequestedAtUtc -TerminationConfirmed $terminationConfirmed
 }
 
 function Start-BridgeHttp {
+  param(
+    [string]$Trigger = "watchdog-start",
+    [string]$RecoveryAction = "start-http",
+    [string]$RecoveryId = ""
+  )
+
   $readyUrl = "http://$BridgeHost`:$BridgePort/readyz"
   if (Test-HttpText -Url $readyUrl -Expected "ready") {
     $status = Get-BridgeStatus -BaseUrl "http://$BridgeHost`:$BridgePort"
@@ -251,6 +297,7 @@ function Start-BridgeHttp {
         throw "Bridge endpoint identity matched, but process identity did not: pid=$($state.Process.Id) command=$commandLine"
       }
       Write-BridgeLog "Bridge HTTP already ready on port $BridgePort pid=$($state.Process.Id); adopting verified process"
+      Write-BridgeWatchdogLifecycleEvent -Component "bridge-http" -EventType "process-adopted" -Process $state.Process -Port $BridgePort -Trigger $Trigger -RecoveryAction $RecoveryAction -RecoveryId $RecoveryId
       return $state
     }
     throw "Bridge HTTP reports ready on port $BridgePort, but its owner pid is unavailable."
@@ -298,10 +345,18 @@ function Start-BridgeHttp {
 
   $process = [System.Diagnostics.Process]::Start($psi)
   Write-BridgeLog "Started bridge HTTP pid=$($process.Id)"
-  return [pscustomobject]@{ Process = $process; Managed = $true; Name = "bridge HTTP"; Port = $BridgePort }
+  $state = [pscustomobject]@{ Process = $process; Managed = $true; Name = "bridge HTTP"; Port = $BridgePort }
+  Write-BridgeWatchdogLifecycleEvent -Component "bridge-http" -EventType "process-started" -Process $process -Port $BridgePort -Trigger $Trigger -RecoveryAction $RecoveryAction -RecoveryId $RecoveryId
+  return $state
 }
 
 function Start-TunnelClient {
+  param(
+    [string]$Trigger = "watchdog-start",
+    [string]$RecoveryAction = "start-tunnel",
+    [string]$RecoveryId = ""
+  )
+
   if ($NoTunnel) { return $null }
 
   $tunnelUri = [Uri]$TunnelBaseUrl
@@ -314,6 +369,7 @@ function Start-TunnelClient {
         throw "Tunnel admin endpoint is ready, but process identity did not match: pid=$($state.Process.Id) command=$commandLine"
       }
       Write-BridgeLog "Tunnel already ready on port $tunnelPort pid=$($state.Process.Id); adopting verified process"
+      Write-BridgeWatchdogLifecycleEvent -Component "tunnel-client" -EventType "process-adopted" -Process $state.Process -Port $tunnelPort -Trigger $Trigger -RecoveryAction $RecoveryAction -RecoveryId $RecoveryId
       return $state
     }
     throw "Tunnel reports ready on port $tunnelPort, but its owner pid is unavailable."
@@ -353,7 +409,9 @@ function Start-TunnelClient {
 
   $process = [System.Diagnostics.Process]::Start($psi)
   Write-BridgeLog "Started tunnel-client profile=$Profile pid=$($process.Id)"
-  return [pscustomobject]@{ Process = $process; Managed = $true; Name = "tunnel-client"; Port = $tunnelPort }
+  $state = [pscustomobject]@{ Process = $process; Managed = $true; Name = "tunnel-client"; Port = $tunnelPort }
+  Write-BridgeWatchdogLifecycleEvent -Component "tunnel-client" -EventType "process-started" -Process $process -Port $tunnelPort -Trigger $Trigger -RecoveryAction $RecoveryAction -RecoveryId $RecoveryId
+  return $state
 }
 
 function Write-RestartAck {
@@ -404,6 +462,8 @@ function Get-BridgeRecoveryEvidence {
     [bool]$ProcessAlive,
     [int]$ProcessId = 0,
     [object]$ProcessExitCode = $null,
+    [object]$ProcessState = $null,
+    [string]$RecoveryReason = "unknown",
     [int]$ReadinessFailureAgeSeconds = 0,
     [int]$AliveGraceSeconds = 0
   )
@@ -456,6 +516,8 @@ function Get-BridgeRecoveryEvidence {
     aliveReadinessGraceSeconds = $AliveGraceSeconds
     processAlive = $ProcessAlive
     processExitCode = $ProcessExitCode
+    recoveryReason = $RecoveryReason
+    processLifecycle = Get-BridgeWatchdogProcessSnapshot -Process $(if ($ProcessState) { $ProcessState.Process } else { $null }) -Trigger $RecoveryReason -ReadinessFailures $ReadinessFailures
     processDiagnostics = $processDiagnostics
     status = $statusSnapshot
     statusError = $statusError
@@ -518,7 +580,7 @@ if (-not $NoTunnel -and -not (Test-Path -LiteralPath (Join-Path $TunnelProfileDi
 }
 $bridgeBaseUrl = "http://$BridgeHost`:$BridgePort"
 $expectedServerVersion = [string](Get-Content -LiteralPath (Join-Path $BridgeCodeRoot "package.json") -Raw | ConvertFrom-Json).version
-$bridgeCommandPattern = '(?i)(?:^|\s)"?(?:[^"\r\n]*[\\/])?node(?:\.exe)?"?\s+.*?(?:dist[\\/]http\.js|src[\\/]http\.ts)(?:\s|$)'
+$bridgeCommandPattern = '(?i)(?:^|[\\/])node(?:\.exe)?["'']?\s+.*?(?:dist[\\/]http\.js|src[\\/]http\.ts)["'']?(?:\s|$)'
 $escapedProfile = [regex]::Escape($Profile)
 $profileTokenPattern = '(?:"' + $escapedProfile + '"|''' + $escapedProfile + '''|' + $escapedProfile + ')'
 $tunnelCommandPattern = '(?i)tunnel-client(?:\.exe)?.*\brun\b.*--profile\s+' + $profileTokenPattern + '(?:\s|$)'
@@ -609,21 +671,22 @@ try {
 
     if ($request) {
       $mode = if ($request.mode) { [string]$request.mode } else { "http" }
+      $restartRecoveryId = [guid]::NewGuid().ToString("N")
       Write-BridgeLog "Restart requested id=$($request.id) mode=$mode reason=$($request.reason)"
 
       if ($mode -eq "http" -or $mode -eq "full") {
-        Stop-ProcessState -State $bridgeProcess -Name "bridge HTTP" -ForceExternal
-        Stop-PortOwner -Port $BridgePort -Name "bridge HTTP" -ExpectedCommandPattern $bridgeCommandPattern
+        Stop-ProcessState -State $bridgeProcess -Name "bridge HTTP" -ForceExternal -Trigger "explicit-restart" -RecoveryAction "restart-http" -RecoveryId $restartRecoveryId
+        Stop-PortOwner -Port $BridgePort -Name "bridge HTTP" -ExpectedCommandPattern $bridgeCommandPattern -Trigger "explicit-restart" -RecoveryAction "restart-http" -RecoveryId $restartRecoveryId
         Start-Sleep -Seconds $RestartDelaySeconds
-        $bridgeProcess = Start-BridgeHttp
+        $bridgeProcess = Start-BridgeHttp -Trigger "explicit-restart" -RecoveryAction "restart-http" -RecoveryId $restartRecoveryId
       }
 
       if (($mode -eq "tunnel" -or $mode -eq "full") -and -not $NoTunnel) {
         $tunnelPort = ([Uri]$TunnelBaseUrl).Port
-        Stop-ProcessState -State $tunnelProcess -Name "tunnel-client" -ForceExternal
-        Stop-PortOwner -Port $tunnelPort -Name "tunnel-client" -ExpectedCommandPattern $tunnelCommandPattern
+        Stop-ProcessState -State $tunnelProcess -Name "tunnel-client" -ForceExternal -Trigger "explicit-restart" -RecoveryAction "restart-tunnel" -RecoveryId $restartRecoveryId
+        Stop-PortOwner -Port $tunnelPort -Name "tunnel-client" -ExpectedCommandPattern $tunnelCommandPattern -Trigger "explicit-restart" -RecoveryAction "restart-tunnel" -RecoveryId $restartRecoveryId
         Start-Sleep -Seconds $RestartDelaySeconds
-        $tunnelProcess = Start-TunnelClient
+        $tunnelProcess = Start-TunnelClient -Trigger "explicit-restart" -RecoveryAction "restart-tunnel" -RecoveryId $restartRecoveryId
       }
 
       $bridgeReadinessFailures = 0
@@ -640,6 +703,8 @@ try {
         $bridgeReadinessFailureAgeSeconds -ge $AliveReadinessGraceSeconds
       if (-not $bridgeProcessAlive -or $bridgeReadinessSustained) {
         $bridgeRecoveryReason = if (-not $bridgeProcessAlive) { "process-exited" } else { "readiness-sustained" }
+        $bridgeRecoveryId = [guid]::NewGuid().ToString("N")
+        $bridgePreviousProcessState = $bridgeProcess
         $bridgeProcessId = if ($bridgeProcess -and $bridgeProcess.Process) { [int]$bridgeProcess.Process.Id } else { 0 }
         $bridgeProcessExitCode = $null
         if (-not $bridgeProcessAlive -and $bridgeProcess -and $bridgeProcess.Process) {
@@ -649,12 +714,17 @@ try {
           }
           catch {}
         }
-        $bridgeRecoveryEvidence = Get-BridgeRecoveryEvidence -ReadinessFailures $bridgeReadinessFailures -ProcessAlive $bridgeProcessAlive -ProcessId $bridgeProcessId -ProcessExitCode $bridgeProcessExitCode -ReadinessFailureAgeSeconds $bridgeReadinessFailureAgeSeconds -AliveGraceSeconds $AliveReadinessGraceSeconds
+        $bridgeRecoveryFailureCount = $bridgeReadinessFailures
+        $bridgePreviousProcess = if ($bridgePreviousProcessState -and $bridgePreviousProcessState.Process) { $bridgePreviousProcessState.Process } else { $null }
+        Write-BridgeWatchdogLifecycleEvent -Component "bridge-http" -EventType "process-exit-observed" -Process $bridgePreviousProcess -Port $BridgePort -Trigger $bridgeRecoveryReason -RecoveryAction "restart-http" -RecoveryId $bridgeRecoveryId -ReadinessFailures $bridgeRecoveryFailureCount
+        $bridgeRecoveryEvidence = Get-BridgeRecoveryEvidence -ReadinessFailures $bridgeRecoveryFailureCount -ProcessAlive $bridgeProcessAlive -ProcessId $bridgeProcessId -ProcessExitCode $bridgeProcessExitCode -ProcessState $bridgePreviousProcessState -RecoveryReason $bridgeRecoveryReason -ReadinessFailureAgeSeconds $bridgeReadinessFailureAgeSeconds -AliveGraceSeconds $AliveReadinessGraceSeconds
         Write-BridgeLog "Bridge HTTP recovery triggered reason=$bridgeRecoveryReason readinessFailures=$bridgeReadinessFailures threshold=$ConsecutiveFailureThreshold ageSeconds=$bridgeReadinessFailureAgeSeconds graceSeconds=$AliveReadinessGraceSeconds" "warn"
-        Stop-ProcessState -State $bridgeProcess -Name "bridge HTTP" -ForceExternal
-        Stop-PortOwner -Port $BridgePort -Name "bridge HTTP" -ExpectedCommandPattern $bridgeCommandPattern
+        Stop-ProcessState -State $bridgePreviousProcessState -Name "bridge HTTP" -ForceExternal -Trigger $bridgeRecoveryReason -RecoveryAction "restart-http" -RecoveryId $bridgeRecoveryId
+        Stop-PortOwner -Port $BridgePort -Name "bridge HTTP" -ExpectedCommandPattern $bridgeCommandPattern -Trigger $bridgeRecoveryReason -RecoveryAction "restart-http" -RecoveryId $bridgeRecoveryId
         Start-Sleep -Seconds $RestartDelaySeconds
-        $bridgeProcess = Start-BridgeHttp
+        $bridgeReplacementState = Start-BridgeHttp -Trigger $bridgeRecoveryReason -RecoveryAction "restart-http" -RecoveryId $bridgeRecoveryId
+        Write-BridgeWatchdogLifecycleEvent -Component "bridge-http" -EventType "process-recovery" -Process $bridgePreviousProcess -ReplacementProcess $(if ($bridgeReplacementState) { $bridgeReplacementState.Process } else { $null }) -Port $BridgePort -Trigger $bridgeRecoveryReason -RecoveryAction "restart-http" -RecoveryId $bridgeRecoveryId -ReadinessFailures $bridgeRecoveryFailureCount
+        $bridgeProcess = $bridgeReplacementState
         $bridgeReadinessFailures = 0
         $bridgeReadinessFailureStartedAt = $null
         Write-RestartAck -Request $null -Action "auto-restart-http-$bridgeRecoveryReason" -Evidence $bridgeRecoveryEvidence
@@ -666,14 +736,31 @@ try {
     elseif (-not $tunnelReady) {
       if (-not $tunnelProcessAlive -or $tunnelReadinessFailures -ge $ConsecutiveFailureThreshold) {
         $tunnelRecoveryReason = if (-not $tunnelProcessAlive) { "process-exited" } else { "readiness-threshold" }
+        $tunnelRecoveryId = [guid]::NewGuid().ToString("N")
+        $tunnelRecoveryFailureCount = $tunnelReadinessFailures
+        $tunnelPreviousProcessState = $tunnelProcess
+        $tunnelPreviousProcess = if ($tunnelPreviousProcessState -and $tunnelPreviousProcessState.Process) { $tunnelPreviousProcessState.Process } else { $null }
+        $tunnelProcessEvidenceBeforeRecovery = Get-BridgeWatchdogProcessSnapshot -Process $tunnelPreviousProcess -Trigger $tunnelRecoveryReason -ReadinessFailures $tunnelRecoveryFailureCount
+        Write-BridgeWatchdogLifecycleEvent -Component "tunnel-client" -EventType "process-exit-observed" -Process $tunnelPreviousProcess -Port ([Uri]$TunnelBaseUrl).Port -Trigger $tunnelRecoveryReason -RecoveryAction "restart-tunnel" -RecoveryId $tunnelRecoveryId -ReadinessFailures $tunnelRecoveryFailureCount
         Write-BridgeLog "Tunnel recovery triggered reason=$tunnelRecoveryReason readinessFailures=$tunnelReadinessFailures threshold=$ConsecutiveFailureThreshold" "warn"
         $tunnelPort = ([Uri]$TunnelBaseUrl).Port
-        Stop-ProcessState -State $tunnelProcess -Name "tunnel-client" -ForceExternal
-        Stop-PortOwner -Port $tunnelPort -Name "tunnel-client" -ExpectedCommandPattern $tunnelCommandPattern
+        Stop-ProcessState -State $tunnelPreviousProcessState -Name "tunnel-client" -ForceExternal -Trigger $tunnelRecoveryReason -RecoveryAction "restart-tunnel" -RecoveryId $tunnelRecoveryId
+        Stop-PortOwner -Port $tunnelPort -Name "tunnel-client" -ExpectedCommandPattern $tunnelCommandPattern -Trigger $tunnelRecoveryReason -RecoveryAction "restart-tunnel" -RecoveryId $tunnelRecoveryId
         Start-Sleep -Seconds $RestartDelaySeconds
-        $tunnelProcess = Start-TunnelClient
+        $tunnelReplacementState = Start-TunnelClient -Trigger $tunnelRecoveryReason -RecoveryAction "restart-tunnel" -RecoveryId $tunnelRecoveryId
+        $tunnelReplacementProcess = if ($tunnelReplacementState) { $tunnelReplacementState.Process } else { $null }
+        Write-BridgeWatchdogLifecycleEvent -Component "tunnel-client" -EventType "process-recovery" -Process $tunnelPreviousProcess -ReplacementProcess $tunnelReplacementProcess -Port $tunnelPort -Trigger $tunnelRecoveryReason -RecoveryAction "restart-tunnel" -RecoveryId $tunnelRecoveryId -ReadinessFailures $tunnelRecoveryFailureCount
+        $tunnelRecoveryEvidence = [ordered]@{
+          recoveryReason = $tunnelRecoveryReason
+          recoveryAction = "restart-tunnel"
+          readinessFailures = $tunnelRecoveryFailureCount
+          processBeforeRecovery = $tunnelProcessEvidenceBeforeRecovery
+          processAfterRecovery = Get-BridgeWatchdogProcessSnapshot -Process $tunnelPreviousProcess -Trigger $tunnelRecoveryReason -ReadinessFailures $tunnelRecoveryFailureCount
+          replacementProcess = Get-BridgeWatchdogProcessSnapshot -Process $tunnelReplacementProcess -Trigger "replacement"
+        }
+        $tunnelProcess = $tunnelReplacementState
         $tunnelReadinessFailures = 0
-        Write-RestartAck -Request $null -Action "auto-restart-tunnel-$tunnelRecoveryReason"
+        Write-RestartAck -Request $null -Action "auto-restart-tunnel-$tunnelRecoveryReason" -Evidence $tunnelRecoveryEvidence
       }
       else {
         Write-BridgeLog "Tunnel readiness probe failed ($tunnelReadinessFailures/$ConsecutiveFailureThreshold) while process is alive; deferring restart" "warn"
@@ -686,8 +773,9 @@ try {
 }
 finally {
   if ($Once -or $DryRun) {
-    Stop-ProcessState -State $tunnelProcess -Name "tunnel-client"
-    Stop-ProcessState -State $bridgeProcess -Name "bridge HTTP"
+    $cleanupTrigger = if ($DryRun) { "dry-run-cleanup" } else { "one-shot-cleanup" }
+    Stop-ProcessState -State $tunnelProcess -Name "tunnel-client" -Trigger $cleanupTrigger -RecoveryAction "stop"
+    Stop-ProcessState -State $bridgeProcess -Name "bridge HTTP" -Trigger $cleanupTrigger -RecoveryAction "stop"
   }
 
   if ($watchdogMutex) {

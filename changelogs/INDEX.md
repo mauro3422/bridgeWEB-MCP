@@ -4,6 +4,8 @@ Versioned release notes are the canonical change-history surface for MSSR debugg
 
 ## Current releases
 
+- [0.6.151](0.6.151.md) - Persist bounded, secret-safe watchdog process lifecycle and recovery evidence for Bridge HTTP and the tunnel.
+
 - [0.6.150](0.6.150.md) - Correct the documented lineage of the HTTP Streamable framing recovery.
 - [0.6.149](0.6.149.md) - Keep watchdog dry runs side-effect-free and separate runtime/data roots from watchdog code.
 - [0.6.148](0.6.148.md) - Scope binary MCP resources safely, bind image previews to exact source bytes, and abstain on stale Project Health inventory.

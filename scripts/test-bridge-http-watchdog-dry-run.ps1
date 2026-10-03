@@ -36,6 +36,7 @@ http.createServer((_req, res) => {
 
   $requestPath = Join-Path $testRoot ".bridge-restart-request"
   $ackPath = Join-Path $testRoot ".bridge-restart-ack"
+  $lifecyclePath = Join-Path $testRoot "logs\bridge-watchdog-lifecycle.jsonl"
   $requestJson = '{"id":"dry-run-preserve-request","mode":"http","reason":"watchdog regression fixture"}'
   Set-Content -LiteralPath $requestPath -Value $requestJson -Encoding UTF8
 
@@ -66,8 +67,9 @@ http.createServer((_req, res) => {
   if (-not (Test-Path -LiteralPath $requestPath)) { throw "Dry run consumed the restart request" }
   if ((Get-Content -LiteralPath $requestPath -Raw).Trim() -ne $requestJson) { throw "Dry run changed the restart request" }
   if (Test-Path -LiteralPath $ackPath) { throw "Dry run wrote a restart acknowledgement" }
+  if (Test-Path -LiteralPath $lifecyclePath) { throw "Dry run wrote watchdog lifecycle telemetry" }
 
-  Write-Output (@{ ok = $true; bridgePort = $testPort; externalProcessPreserved = $true; restartRequestPreserved = $true; restartAckWritten = $false } | ConvertTo-Json -Compress)
+  Write-Output (@{ ok = $true; bridgePort = $testPort; externalProcessPreserved = $true; restartRequestPreserved = $true; restartAckWritten = $false; lifecycleTelemetryWritten = $false } | ConvertTo-Json -Compress)
 }
 finally {
   if ($probeProcess) {
