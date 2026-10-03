@@ -1,7 +1,7 @@
 # Bridge project state
 
 ## Current release
-Bridge 0.6.149 is an isolated candidate on `codex/bridge-dirty-cohort-reconciliation-20261003`, based on the published candidate 0.6.148. It packages watchdog code-root separation and side-effect-free `-DryRun`, a regression test, the repository invariant in `AGENTS.md`, architecture and operations-memory updates, and the incident follow-up. It is not deployed as the HTTP server.
+Bridge 0.6.150 is an isolated follow-up candidate on `codex/bridge-dirty-cohort-reconciliation-20261003`, based on the published candidate 0.6.149. It corrects the incident record to show that the HTTP framing fix was already versioned in ancestor commit `7b6fcd3` (0.6.147); it adds no runtime code. The 0.6.149 watchdog code-root separation and side-effect-free `-DryRun` fix remain in its ancestry and are not deployed as the HTTP server.
 
 The primary runtime remains `D:\Dev\bridge-mcp` version 0.6.144, PID 79292, boot `78f66316-43eb-45a9-a3f0-3c4af7356c66`, port 3001; tunnel PID 77116 is ready on 8081. The Startup entry invokes this worktree's watchdog helper with `ProjectRoot=D:\Dev\bridge-mcp`; `BridgeCodeRoot` defaults to that primary root, so server code, working directory and operational data still resolve to the primary checkout. The current watchdog process was launched before the 0.6.149 helper edit; the safety fix applies on its next launch. No service process restart or deployment is implied by this release candidate.
 
