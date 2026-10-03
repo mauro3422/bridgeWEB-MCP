@@ -4,8 +4,10 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import {
   CallToolRequestSchema,
+  ErrorCode,
   ListResourcesRequestSchema,
   ListToolsRequestSchema,
+  McpError,
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { SERVER_NAME, SERVER_VERSION } from "./config.js";
@@ -18,7 +20,7 @@ import {
   type BridgeNoticeInput,
 } from "./notices.js";
 import { createDefaultToolRegistry } from "./tool-registry.js";
-import { listLocalFileResources, readLocalFileResource } from "./local-resource-registry.js";
+import { createLocalFileResourceRegistry } from "./local-resource-registry.js";
 import {
   evaluatePreparedBridgeArchitectureImpact,
   prepareBridgeArchitectureImpactHostAdoption,
@@ -601,16 +603,27 @@ type BridgeServerSurface = {
   setRequestHandler: (...args: any[]) => void;
   getClientVersion: () => { name?: string; version?: string } | undefined;
   oninitialized?: () => void;
+  onclose?: () => void;
   sendToolListChanged: () => Promise<void>;
 };
 
 function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
-  const modularToolRegistry = createDefaultToolRegistry();
+  const localResources = modern ? null : createLocalFileResourceRegistry();
+  const modularToolRegistry = createDefaultToolRegistry({
+    localResources,
+    resourceLinksEnabled: !modern,
+  });
   const routingCompliance = createMssrRoutingComplianceNoticeTracker();
   const pendingContextProjects = new Set<string>();
   const pendingContextRoots = new Set<string>();
   let localTaskKey: string | undefined;
   let localWorkflowKey: string | undefined;
+
+  const previousOnClose = server.onclose;
+  server.onclose = () => {
+    localResources?.clear();
+    previousOnClose?.();
+  };
 
   server.oninitialized = () => {
     void server.sendToolListChanged().catch((error) => {
@@ -649,7 +662,7 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
   });
 
   const listResources = async () => ({
-    resources: listLocalFileResources().map((resource) => ({
+    resources: (localResources?.list() ?? []).map((resource) => ({
       uri: resource.uri,
       name: resource.name,
       description: resource.description,
@@ -662,9 +675,10 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
       },
     })),
   });
-  const readResource = async (request: { params: { uri: string } }) => ({
-    contents: [await readLocalFileResource(request.params.uri)],
-  });
+  const readResource = async (request: { params: { uri: string } }) => {
+    if (!localResources) throw new McpError(ErrorCode.InvalidParams, "Deferred MCP resource reads require a stateful session; modern stateless MCP returns embedded resources instead.");
+    return { contents: [await localResources.read(request.params.uri)] };
+  };
 
   if (modern) {
     server.setRequestHandler("resources/list", listResources);

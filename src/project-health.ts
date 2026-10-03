@@ -3,7 +3,7 @@ import path from "node:path";
 import { auditMssrProjectContextHealth, discoverMssrWorkspaceRepositories } from "@mauroprime/mssr";
 import { collectBridgeDocumentFreshness } from "./document-freshness-host.js";
 
-const DEFAULT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+export const PROJECT_HEALTH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_CHECK_MS = 60 * 60 * 1000;
 const DEFAULT_RETENTION = 90;
 const DEFAULT_MAX_DEPTH = 4;
@@ -291,7 +291,7 @@ export async function captureProjectHealthIfDue(options: {
 } = {}) {
   const now = options.now ?? new Date();
   const filePath = options.filePath ?? defaultFilePath();
-  const intervalMs = options.intervalMs ?? DEFAULT_INTERVAL_MS;
+  const intervalMs = options.intervalMs ?? PROJECT_HEALTH_INTERVAL_MS;
   const retention = Math.max(2, Math.floor(options.retention ?? DEFAULT_RETENTION));
   const store = await readStore(filePath);
   const latest = store.snapshots.at(-1);

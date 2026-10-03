@@ -1,5 +1,5 @@
 import path from "node:path";
-import { getProjectHealthReport } from "./project-health.js";
+import { getProjectHealthReport, PROJECT_HEALTH_INTERVAL_MS } from "./project-health.js";
 
 export type ProjectReferenceCandidate = {
   name: string;
@@ -31,7 +31,7 @@ export type ProjectReferenceResolution = {
   selected: ProjectReferenceCandidate | null;
   candidates: ProjectReferenceCandidate[];
   selection: {
-    strategy: "exact" | "ranked-deterministic" | "insufficient-margin" | "no-match" | "no-snapshot";
+    strategy: "exact" | "ranked-deterministic" | "insufficient-margin" | "no-match" | "no-snapshot" | "stale-snapshot";
     confidence: "high" | "medium" | "low" | "none";
     margin: number | null;
     deterministic: true;
@@ -93,6 +93,7 @@ export function resolveProjectReferenceFromHealth(
   report: ProjectHealthReport,
   reference: string,
   maxCandidates = 8,
+  now = new Date(),
 ): ProjectReferenceResolution {
   const normalizedReference = normalizeReference(reference);
   const workspaceRoot = report.workspaceRoot || report.latest?.workspaceRoot || null;
@@ -118,6 +119,25 @@ export function resolveProjectReferenceFromHealth(
         toolName: null,
         arguments: null,
         instruction: "Project Health has no usable workspace snapshot. Refresh the existing Project Health projection before resolving a project reference.",
+      },
+    };
+  }
+
+  const observedAtMs = observedAt ? Date.parse(observedAt) : Number.NaN;
+  if (!Number.isFinite(observedAtMs) || now.getTime() - observedAtMs >= PROJECT_HEALTH_INTERVAL_MS) {
+    return {
+      schemaVersion: 1,
+      reference,
+      normalizedReference,
+      status: "unavailable",
+      source,
+      selected: null,
+      candidates: [],
+      selection: { strategy: "stale-snapshot", confidence: "none", margin: null, deterministic: true, semanticSelectorRecommended: false },
+      nextAction: {
+        toolName: null,
+        arguments: null,
+        instruction: "The stored Project Health inventory is missing a valid observation time or is at least 24 hours old. Wait for the Project Health scheduler to refresh it; this read-only resolver will not scan the workspace or guess a project root.",
       },
     };
   }

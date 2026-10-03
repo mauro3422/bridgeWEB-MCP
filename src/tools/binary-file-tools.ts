@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import type { BridgeToolModule } from "./types.js";
-import { registerLocalFileResource, LOCAL_RESOURCE_MAX_BYTES } from "../local-resource-registry.js";
+import { LOCAL_RESOURCE_MAX_BYTES, type LocalFileResourceRegistry } from "../local-resource-registry.js";
 import { resolveToolPath } from "./shared/path.js";
 
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
@@ -225,7 +225,16 @@ async function fileInfo(inputPath: string) {
     modifiedAt: stat.mtime.toISOString(),
   };
 }
-async function attachBinaryFile(inputPath: string, mode: "embedded" | "link" | "both", expectedSha256?: string) {
+async function attachBinaryFile(
+  inputPath: string,
+  mode: "embedded" | "link" | "both",
+  expectedSha256: string | undefined,
+  localResources: LocalFileResourceRegistry | null,
+  resourceLinksEnabled: boolean,
+) {
+  if (mode === "link" && !resourceLinksEnabled) {
+    throw new Error("mode=link requires a stateful MCP session. Use mode=embedded, or mode=both to receive the stateless-compatible embedded fallback.");
+  }
   const info = await fileInfo(inputPath);
   if (info.bytes > LOCAL_RESOURCE_MAX_BYTES) {
     throw new Error(`Binary MCP attachment exceeds ${LOCAL_RESOURCE_MAX_BYTES} bytes; use binary_file_read_chunk for larger files`);
@@ -237,16 +246,23 @@ async function attachBinaryFile(inputPath: string, mode: "embedded" | "link" | "
     throw new Error(`SHA-256 mismatch: expected ${expectedSha256.toLowerCase()}, actual ${actualSha256}`);
   }
 
-  const resource = registerLocalFileResource({
-    path: info.path,
-    mimeType: info.mime,
-    size: info.bytes,
-    sha256: actualSha256,
-    modifiedAt: info.modifiedAt,
-    description: `Read-only MauroPrime local file: ${path.basename(info.path)}`,
-  });
+  const includeLink = resourceLinksEnabled && (mode === "link" || mode === "both");
+  const includeEmbedded = !resourceLinksEnabled || mode === "embedded" || mode === "both";
+  const resource = includeLink
+    ? localResources?.register({
+      path: info.path,
+      mimeType: info.mime,
+      size: info.bytes,
+      sha256: actualSha256,
+      modifiedAt: info.modifiedAt,
+      description: `Read-only MauroPrime local file: ${path.basename(info.path)}`,
+    })
+    : null;
+  if (includeLink && !resource) throw new Error("Persistent MCP resource links are not configured for this session");
+  const inlineUri = `mauroprime://inline-local-file/${crypto.randomUUID()}`;
+  const effectiveMode = includeLink ? mode : "embedded";
   const content: Array<Record<string, unknown>> = [];
-  if (mode === "link" || mode === "both") {
+  if (includeLink && resource) {
     content.push({
       type: "resource_link",
       uri: resource.uri,
@@ -257,11 +273,11 @@ async function attachBinaryFile(inputPath: string, mode: "embedded" | "link" | "
       annotations: { audience: ["user", "assistant"], priority: 0.9, lastModified: resource.modifiedAt },
     });
   }
-  if (mode === "embedded" || mode === "both") {
+  if (includeEmbedded) {
     content.push({
       type: "resource",
-      resource: { uri: resource.uri, mimeType: resource.mimeType, blob: bytes.toString("base64") },
-      annotations: { audience: ["user", "assistant"], priority: 0.9, lastModified: resource.modifiedAt },
+      resource: { uri: resource?.uri ?? inlineUri, mimeType: info.mime, blob: bytes.toString("base64") },
+      annotations: { audience: ["user", "assistant"], priority: 0.9, lastModified: info.modifiedAt },
     });
   }
 
@@ -272,19 +288,29 @@ async function attachBinaryFile(inputPath: string, mode: "embedded" | "link" | "
     mime: info.mime,
     modifiedAt: info.modifiedAt,
     transport: "mcp-resource-content",
-    mode,
-    resource: {
+    mode: effectiveMode,
+    ...(effectiveMode !== mode ? { requestedMode: mode, linkUnavailable: "stateless-modern-mcp" } : {}),
+    resource: resource ? {
       uri: resource.uri,
       name: resource.name,
       expiresAt: resource.expiresAt,
       readableVia: "resources/read",
+    } : {
+      uri: inlineUri,
+      name: path.basename(info.path),
+      expiresAt: null,
+      embeddedOnly: true,
     },
     encodedPayloadExposedInText: false,
     __bridgeContent: content,
   };
 }
 
-export const binaryFileToolModule: BridgeToolModule = {
+export function createBinaryFileToolModule(
+  localResources: LocalFileResourceRegistry | null,
+  resourceLinksEnabled: boolean,
+): BridgeToolModule {
+  return {
   name: "binary-files",
   tools: [
     {
@@ -299,7 +325,7 @@ export const binaryFileToolModule: BridgeToolModule = {
     },
     {
       name: "binary_file_attach",
-      description: "Attach one allowed local file as MCP resource content without printing its encoded payload in the text result. mode=embedded sends one verified blob content block, mode=link returns a resource_link resolved by resources/read, and mode=both provides both paths. Use for bounded PC-to-MCP evidence; keep binary_file_read_chunk as the large-file fallback.",
+      description: "Attach one allowed local file as MCP resource content without printing its encoded payload in the text result. In stateful MCP sessions, mode=embedded sends one verified blob content block, mode=link returns a session-scoped resource_link resolved by resources/read, and mode=both provides both. Stateless modern MCP supports embedded content; mode=both falls back to embedded and mode=link is rejected. Use binary_file_read_chunk for larger files.",
       inputSchema: {
         type: "object",
         properties: {
@@ -415,7 +441,7 @@ export const binaryFileToolModule: BridgeToolModule = {
         mode: z.enum(["embedded", "link", "both"]).default("both"),
         expectedSha256: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
       }).parse(raw);
-      return await attachBinaryFile(parsed.path, parsed.mode, parsed.expectedSha256);
+      return await attachBinaryFile(parsed.path, parsed.mode, parsed.expectedSha256, localResources, resourceLinksEnabled);
     },
     binary_file_read_chunk: async (raw) => {
       const parsed = z.object({
@@ -534,4 +560,5 @@ export const binaryFileToolModule: BridgeToolModule = {
       return { uploadId: parsed.uploadId, aborted: existed, targetUntouched: true };
     },
   },
-};
+  };
+}

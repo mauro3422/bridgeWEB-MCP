@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { RUNTIME_BOOT_ID } from "./runtime-identity.js";
-import { binaryFileToolModule } from "./tools/binary-file-tools.js";
+import { createBinaryFileToolModule } from "./tools/binary-file-tools.js";
+import { createLocalFileResourceRegistry, type LocalFileResourceRegistry } from "./local-resource-registry.js";
 import { blenderToolModule } from "./tools/blender-tools.js";
 import { bridgeOpsToolModule } from "./tools/bridge-ops.js";
 import { bridgeWorkflowToolModule } from "./tools/bridge-workflow.js";
@@ -610,7 +611,7 @@ const defaultToolModules: readonly BridgeToolModule[] = [
   robloxStudioToolModule,
   robloxAssetToolModule,
   robloxPhotoCaptureToolModule,
-  binaryFileToolModule,
+  createBinaryFileToolModule(null, false),
   imageToolModule,
   mediaReviewToolModule,
   processToolModule,
@@ -662,6 +663,14 @@ export function getDefaultToolAudit(args: RegisteredToolAuditArgs) {
   return buildRegisteredToolAudit(getDefaultToolCatalog(), args);
 }
 
-export function createDefaultToolRegistry(): BridgeToolRegistry {
-  return createToolRegistry(defaultToolModules);
+export function createDefaultToolRegistry(options: {
+  localResources?: LocalFileResourceRegistry | null;
+  resourceLinksEnabled?: boolean;
+} = {}): BridgeToolRegistry {
+  const localResources = options.localResources === undefined ? createLocalFileResourceRegistry() : options.localResources;
+  const binaryModule = createBinaryFileToolModule(
+    localResources,
+    options.resourceLinksEnabled ?? localResources !== null,
+  );
+  return createToolRegistry(defaultToolModules.map((module) => module.name === "binary-files" ? binaryModule : module));
 }

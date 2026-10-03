@@ -50,7 +50,7 @@ function project(name, relativeRoot = name) {
 
 try {
   await fs.mkdir(workspaceRoot, { recursive: true });
-  const observedAt = "2026-09-28T01:45:00.000Z";
+  const observedAt = new Date().toISOString();
   const projects = [
     project("kode"),
     project("kode-editor-kernel"),
@@ -77,6 +77,8 @@ try {
   }, null, 2)}\n`, "utf8");
 
   const { createDefaultToolRegistry } = await import("../dist/tool-registry.js");
+  const { getProjectHealthReport, PROJECT_HEALTH_INTERVAL_MS } = await import("../dist/project-health.js");
+  const { resolveProjectReferenceFromHealth } = await import("../dist/project-reference.js");
   const registry = createDefaultToolRegistry();
   const tool = registry.tools.find((item) => item.name === "project_reference_resolve");
   assert.ok(tool, "project_reference_resolve must be registered");
@@ -116,6 +118,19 @@ try {
   assert.equal(missing.status, "not-found");
   assert.equal(missing.selected, null);
   assert.equal(missing.candidates.length, 0);
+
+  const report = await getProjectHealthReport(storePath);
+  const justFresh = resolveProjectReferenceFromHealth(report, "Kode", 8, new Date(Date.parse(observedAt) + PROJECT_HEALTH_INTERVAL_MS - 1));
+  assert.equal(justFresh.status, "resolved", "The resolver must accept inventory just under the Project Health daily freshness boundary.");
+  const exactlyStale = resolveProjectReferenceFromHealth(report, "Kode", 8, new Date(Date.parse(observedAt) + PROJECT_HEALTH_INTERVAL_MS));
+  assert.equal(exactlyStale.status, "unavailable", "The resolver must abstain at the same 24-hour boundary used by Project Health capture.");
+  assert.equal(exactlyStale.selected, null);
+  assert.equal(exactlyStale.selection.strategy, "stale-snapshot");
+  assert.equal(exactlyStale.nextAction.toolName, null, "A stale read-only resolver must not invent an unavailable refresh tool.");
+
+  const invalidTimestampReport = { ...report, latest: { ...report.latest, observedAt: "not-a-date" } };
+  const invalidTimestamp = resolveProjectReferenceFromHealth(invalidTimestampReport, "Kode", 8, new Date());
+  assert.equal(invalidTimestamp.status, "unavailable", "Invalid inventory timestamps must fail closed.");
 
   console.log("project reference resolver regression passed");
 } finally {

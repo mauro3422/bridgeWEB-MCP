@@ -5,6 +5,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-v060-regression-'));
 process.env.BRIDGE_MCP_CACHE_DIR = path.join(sandbox, 'cache-store');
 process.env.BRIDGE_MCP_SNAPSHOT_DIR = path.join(sandbox, 'snapshot-store');
@@ -849,6 +858,31 @@ try {
   if (chatPreview.preview.sha256 !== chatPreviewSha256 || chatPreview.preview.bytes !== chatPreviewBytes.length || chatPreview.preview.mime !== 'image/jpeg') throw new Error('chat preview metadata/hash verification failed');
   if (chatPreview.preview.bytes > 16 * 1024 || chatPreview.transfer.nextTool !== 'binary_file_read_chunk' || chatPreview.transfer.recommendedChunkBytes !== 12 * 1024) throw new Error('chat preview transfer budget contract failed');
   if (!Array.isArray(chatPreview.__bridgeImages) || chatPreview.__bridgeImages.length !== 1 || Buffer.from(chatPreview.__bridgeImages[0].data,'base64').compare(chatPreviewBytes) !== 0) throw new Error('chat preview MCP image attachment did not match the transport preview');
+  const previewBeforeRetry = Buffer.from(chatPreviewBytes);
+  let previewOverwriteRejected = false;
+  try {
+    await call('image_chat_preview_prepare', {inputPath:savedSinglePath,outputPath:chatPreviewPath,maxBytes:16 * 1024});
+  } catch (error) {
+    previewOverwriteRejected = String(error).includes('output already exists');
+  }
+  if (!previewOverwriteRejected || fs.readFileSync(chatPreviewPath).compare(previewBeforeRetry) !== 0) throw new Error('chat preview preparation overwrote an existing output');
+  const pixelBombBytes = Buffer.from(savedSingleBytes);
+  pixelBombBytes.writeUInt32BE(7000, 16);
+  pixelBombBytes.writeUInt32BE(7000, 20);
+  pixelBombBytes.writeUInt32BE(crc32(pixelBombBytes.subarray(12, 29)), 29);
+  const pixelBombPath = path.join(root,'images','pixel-bomb.png');
+  const pixelBombOutput = path.join(root,'images','pixel-bomb-preview.jpg');
+  fs.writeFileSync(pixelBombPath, pixelBombBytes);
+  let pixelBombRejected = false;
+  let pixelBombError = '';
+  try {
+    await call('image_chat_preview_prepare', {inputPath:pixelBombPath,outputPath:pixelBombOutput,maxBytes:16 * 1024});
+  } catch (error) {
+    pixelBombError = String(error);
+    pixelBombRejected = /40,000,000|40000000|pixel processing limit|DecompressionBomb/i.test(pixelBombError);
+  }
+  if (!pixelBombRejected || fs.existsSync(pixelBombOutput)) throw new Error(`chat preview preparation did not reject an oversized pixel source before output; rejected=${pixelBombRejected}, outputExists=${fs.existsSync(pixelBombOutput)}, error=${pixelBombError}`);
+  if (fs.readdirSync(path.join(root,'images')).some((name) => name.startsWith('.chat-preview-'))) throw new Error('chat preview source snapshot/config temporary files were not cleaned up');
   let imageHashRejected = false;
   try {
     await call('image_file_attach', {items:[{path:savedSinglePath,expectedSha256:'0'.repeat(64)}]});

@@ -5,9 +5,15 @@ import hashlib
 import io
 import json
 import os
+import warnings
+import uuid
 from pathlib import Path
 
 from PIL import Image
+
+MAX_SOURCE_PIXELS = 40_000_000
+Image.MAX_IMAGE_PIXELS = MAX_SOURCE_PIXELS
+warnings.simplefilter("error", Image.DecompressionBombWarning)
 
 
 def _sha256(data: bytes) -> str:
@@ -60,8 +66,16 @@ def prepare(config: dict) -> dict:
     start_quality = int(config.get("jpegQuality", 90))
     min_quality = int(config.get("minJpegQuality", 58))
     background = _parse_background(str(config.get("background", "101217")))
+    max_source_pixels = int(config.get("maxSourcePixels", MAX_SOURCE_PIXELS))
+    source_bytes = input_path.read_bytes()
+    source_sha256 = _sha256(source_bytes)
+    expected_source_sha256 = str(config.get("expectedSourceSha256", "")).lower()
+    if len(expected_source_sha256) != 64 or source_sha256 != expected_source_sha256:
+        raise ValueError("source snapshot SHA-256 does not match the inspected source bytes")
 
-    with Image.open(input_path) as source:
+    with Image.open(io.BytesIO(source_bytes)) as source:
+        if source.width * source.height > max_source_pixels:
+            raise ValueError(f"source exceeds the {max_source_pixels}-pixel processing limit")
         source.load()
         source_width, source_height = source.size
         image = _flatten_to_rgb(source, background)
@@ -88,10 +102,17 @@ def prepare(config: dict) -> dict:
         )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = output_path.with_name(f".{output_path.name}.{os.getpid()}.tmp")
+    if output_path.exists() or output_path.is_symlink():
+        raise FileExistsError(f"chat preview output already exists: {output_path}")
+    temp_path = output_path.with_name(f".{output_path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     try:
-        temp_path.write_bytes(encoded)
-        os.replace(temp_path, output_path)
+        with temp_path.open("xb") as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+        # Hard-link creation is atomic and fails if another writer created the target.
+        # Both paths are in the output directory so the operation stays on one volume.
+        os.link(temp_path, output_path)
     finally:
         if temp_path.exists():
             temp_path.unlink(missing_ok=True)
@@ -99,6 +120,7 @@ def prepare(config: dict) -> dict:
     return {
         "inputPath": str(input_path),
         "outputPath": str(output_path),
+        "sourceSha256": source_sha256,
         "sourceWidth": source_width,
         "sourceHeight": source_height,
         "width": image.width,

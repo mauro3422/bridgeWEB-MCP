@@ -12,6 +12,7 @@ const MAX_ATTACH_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_ATTACH_TOTAL_BYTES = 24 * 1024 * 1024;
 const MAX_CHAT_PREVIEW_SOURCE_BYTES = 32 * 1024 * 1024;
 const MAX_CHAT_PREVIEW_BYTES = 512 * 1024;
+const MAX_CHAT_PREVIEW_SOURCE_PIXELS = 40_000_000;
 
 const assetTargetSchema = z.object({
   outputPath: z.string().min(1),
@@ -257,21 +258,31 @@ async function prepareChatPreview(args: {
   const sourceSha256 = sha256(sourceBytes);
 
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  try {
+    await fs.lstat(outputPath);
+    throw new Error(`Chat preview output already exists; choose a new path: ${outputPath}`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
   const scriptPath = path.resolve(process.cwd(), "integrations", "images", "prepare_chat_preview.py");
   await ensureImageFile(scriptPath, "Chat preview preparation script");
   const configPath = path.join(path.dirname(outputPath), `.chat-preview-${crypto.randomUUID()}.json`);
-  await fs.writeFile(configPath, JSON.stringify({
-    inputPath,
-    outputPath,
-    maxWidth: args.maxWidth,
-    maxHeight: args.maxHeight,
-    maxBytes: args.maxBytes,
-    jpegQuality: args.jpegQuality,
-    minJpegQuality: args.minJpegQuality,
-    background: args.background,
-  }, null, 2), "utf8");
+  const sourceSnapshotPath = path.join(path.dirname(outputPath), `.chat-preview-source-${crypto.randomUUID()}.bin`);
 
   try {
+    await fs.writeFile(sourceSnapshotPath, sourceBytes, { flag: "wx", mode: 0o600 });
+    await fs.writeFile(configPath, JSON.stringify({
+      inputPath: sourceSnapshotPath,
+      outputPath,
+      expectedSourceSha256: sourceSha256,
+      maxSourcePixels: MAX_CHAT_PREVIEW_SOURCE_PIXELS,
+      maxWidth: args.maxWidth,
+      maxHeight: args.maxHeight,
+      maxBytes: args.maxBytes,
+      jpegQuality: args.jpegQuality,
+      minJpegQuality: args.minJpegQuality,
+      background: args.background,
+    }, null, 2), { encoding: "utf8", flag: "wx", mode: 0o600 });
     const pythonExecutable = process.env.BRIDGE_PYTHON_EXE || "python";
     const processResult = await runProcess(pythonExecutable, [scriptPath, "--config", configPath], process.cwd(), args.timeoutMs);
     if (processResult.code !== 0 || processResult.timedOut) {
@@ -280,6 +291,7 @@ async function prepareChatPreview(args: {
     const marker = String(processResult.stdout ?? "").split(/\r?\n/).find((line) => line.startsWith("CHAT_PREVIEW_PREPARED="));
     if (!marker) throw new Error("Chat preview preparation did not return its completion marker");
     const prepared = JSON.parse(marker.slice("CHAT_PREVIEW_PREPARED=".length));
+    if (prepared.sourceSha256 !== sourceSha256) throw new Error("Prepared chat preview source hash does not match the inspected source bytes");
     const previewBytes = await fs.readFile(outputPath);
     if (previewBytes.length > args.maxBytes || previewBytes.length > MAX_CHAT_PREVIEW_BYTES) {
       throw new Error(`Prepared chat preview exceeds byte budget: ${previewBytes.length}`);
@@ -319,7 +331,10 @@ async function prepareChatPreview(args: {
       __bridgeImages: [{ type: "image", mimeType: previewMetadata.mime, data: previewBytes.toString("base64") }],
     };
   } finally {
-    await fs.rm(configPath, { force: true }).catch(() => undefined);
+    await Promise.all([
+      fs.rm(configPath, { force: true }).catch(() => undefined),
+      fs.rm(sourceSnapshotPath, { force: true }).catch(() => undefined),
+    ]);
   }
 }
 
@@ -824,12 +839,12 @@ export const imageToolModule: BridgeToolModule = {
     },
     {
       name: "image_chat_preview_prepare",
-      description: "Prepare a bounded high-resolution JPEG copy of an existing local PNG/JPEG/WebP specifically for user-visible ChatGPT evidence. The source is never modified. The preview is attached for model inspection and its path/hash/size plus a bounded binary_file_read_chunk handoff are returned so a host with a visible Python/file sandbox can reconstruct and render the same bytes for the user without fragile one-shot Base64 copying.",
+      description: "Prepare a bounded high-resolution JPEG copy of an existing local PNG/JPEG/WebP specifically for user-visible ChatGPT evidence. The source is snapshotted and hash-checked before conversion, images above 40 million pixels are rejected, and an existing output path is never overwritten. The preview is attached for model inspection and its path/hash/size plus a bounded binary_file_read_chunk handoff are returned so a host with a visible Python/file sandbox can reconstruct and render the same bytes for the user without fragile one-shot Base64 copying.",
       inputSchema: {
         type: "object",
         properties: {
           inputPath: { type: "string", description: "Allowed local source PNG/JPEG/WebP path. The original is read-only." },
-          outputPath: { type: "string", description: "Allowed .jpg/.jpeg path for the transport preview; normally a generated .bridge preview path." },
+          outputPath: { type: "string", description: "New allowed .jpg/.jpeg path for the transport preview; existing files and symlinks are rejected." },
           maxWidth: { type: "integer", minimum: 256, maximum: 4096, default: 1600 },
           maxHeight: { type: "integer", minimum: 256, maximum: 4096, default: 1600 },
           maxBytes: { type: "integer", minimum: 16384, maximum: MAX_CHAT_PREVIEW_BYTES, default: 180000, description: "Target upper byte budget. Lower values reduce the number of cross-sandbox transfer chunks." },

@@ -132,6 +132,12 @@ async function legacyRequest(sessionId, id, method, params = {}) {
   });
 }
 
+async function readMcpResponse(response) {
+  const text = await response.text();
+  const dataLine = text.split(/\r?\n/).find((line) => line.startsWith("data: "));
+  return JSON.parse(dataLine ? dataLine.slice("data: ".length) : text);
+}
+
 async function closeLegacySession(sessionId) {
   return fetch(`${baseUrl}/mcp`, {
     method: "DELETE",
@@ -291,7 +297,8 @@ try {
   assert.deepEqual(actionFallbackTool._meta?.["openai/fileParams"], ["files"]);
   assert.ok(actionFallbackTool.inputSchema?.properties?.files, "bridge_tool_action must preserve top-level authorized file passthrough when dedicated schemas are omitted by a host catalog.");
 
-  const fixtureBinaryPath = path.join(process.cwd(), "package.json");
+  const fixtureBinaryPath = path.join(tempRoot, "package-fixture.json");
+  fs.copyFileSync(path.join(process.cwd(), "package.json"), fixtureBinaryPath);
   const fixtureBinaryBytes = fs.readFileSync(fixtureBinaryPath);
   const binaryAttachResponse = await modernRequest(3, "tools/call", {
     name: "binary_file_attach",
@@ -302,13 +309,24 @@ try {
   const binaryAttachBody = JSON.parse(binaryAttachText);
   const binaryResourceLink = binaryAttachBody.result.content.find((part) => part.type === "resource_link");
   const binaryEmbeddedResource = binaryAttachBody.result.content.find((part) => part.type === "resource");
-  assert.ok(binaryResourceLink?.uri?.startsWith("mauroprime://local-file/"), "binary_file_attach must return an opaque MCP resource_link URI.");
+  const binaryAttachSummary = JSON.parse(binaryAttachBody.result.content.find((part) => part.type === "text")?.text || "{}");
+  assert.equal(binaryResourceLink, undefined, "Modern stateless MCP must not publish a deferred resource link backed by shared process state.");
   assert.equal(Buffer.from(binaryEmbeddedResource?.resource?.blob || "", "base64").compare(fixtureBinaryBytes), 0, "Embedded MCP resource must preserve the exact local file bytes.");
-  const resourceReadResponse = await modernRequest(4, "resources/read", { uri: binaryResourceLink.uri });
-  const resourceReadText = await resourceReadResponse.text();
-  assert.equal(resourceReadResponse.status, 200, resourceReadText);
-  const resourceReadBody = JSON.parse(resourceReadText);
-  assert.equal(Buffer.from(resourceReadBody.result.contents[0].blob, "base64").compare(fixtureBinaryBytes), 0, "resources/read must return the same verified bytes as the embedded resource.");
+  assert.equal(binaryAttachSummary.mode, "embedded", "Modern mode=both must explicitly fall back to the self-contained embedded resource.");
+  assert.equal(binaryAttachSummary.requestedMode, "both");
+  const modernResourcesList = await modernRequest(4, "resources/list");
+  assert.deepEqual((await modernResourcesList.json()).result.resources, [], "Modern stateless MCP must not enumerate resources created by unrelated requests.");
+  const modernInlineRead = await modernRequest(5, "resources/read", { uri: binaryEmbeddedResource.resource.uri });
+  const modernInlineReadBody = await modernInlineRead.json();
+  assert.equal(modernInlineReadBody.error?.code, -32602, "An embedded modern attachment must fail as an unavailable resource, not an internal server error.");
+  assert.match(modernInlineReadBody.error?.message || "", /stateful session/i);
+  const modernLinkOnly = await modernRequest(6, "tools/call", {
+    name: "binary_file_attach",
+    arguments: { path: fixtureBinaryPath, mode: "link" },
+  });
+  const modernLinkOnlyBody = await modernLinkOnly.json();
+  const modernLinkOnlySummary = JSON.parse(modernLinkOnlyBody.result.content[0]?.text || "{}");
+  assert.match(modernLinkOnlySummary.error || "", /stateful MCP session/i, "Modern stateless MCP must reject deferred resource-only attachments.");
 
   const mismatchResponse = await fetch(`${baseUrl}/mcp`, {
     method: "POST",
@@ -319,7 +337,7 @@ try {
     },
     body: JSON.stringify({
       jsonrpc: "2.0",
-      id: 5,
+      id: 7,
       method: "tools/list",
       params: { _meta: envelope },
     }),
@@ -330,10 +348,37 @@ try {
   await sleep(25);
   const reusedResponse = await legacyRequest(reusableSession, 11, "tools/list");
   assert.equal(reusedResponse.status, 200, "A low-pressure legacy session must remain reusable beyond the reclaim grace window");
-  const legacyResourcesList = await legacyRequest(reusableSession, 12, "resources/list");
+  const legacyAttachResponse = await legacyRequest(reusableSession, 12, "tools/call", {
+    name: "binary_file_attach",
+    arguments: { path: fixtureBinaryPath, mode: "both" },
+  });
+  assert.equal(legacyAttachResponse.status, 200);
+  const legacyAttachBody = await readMcpResponse(legacyAttachResponse);
+  const legacyResourceLink = legacyAttachBody.result.content.find((part) => part.type === "resource_link");
+  assert.ok(legacyResourceLink?.uri?.startsWith("mauroprime://local-file/"), "Stateful legacy sessions must receive session-scoped resource links.");
+  const legacyResourcesList = await legacyRequest(reusableSession, 13, "resources/list");
   assert.equal(legacyResourcesList.status, 200, "Legacy resources/list must expose registered binary resources.");
-  const legacyResourceRead = await legacyRequest(reusableSession, 13, "resources/read", { uri: binaryResourceLink.uri });
+  const legacyListBody = await readMcpResponse(legacyResourcesList);
+  assert.equal(legacyListBody.result.resources.length, 1);
+  assert.equal(legacyListBody.result.resources[0].uri, legacyResourceLink.uri);
+  const legacyResourceRead = await legacyRequest(reusableSession, 14, "resources/read", { uri: legacyResourceLink.uri });
   assert.equal(legacyResourceRead.status, 200, "Legacy resources/read must resolve a binary_file_attach resource URI.");
+  assert.equal(Buffer.from((await readMcpResponse(legacyResourceRead)).result.contents[0].blob, "base64").compare(fixtureBinaryBytes), 0);
+
+  const isolatedLegacySession = await openLegacySession(15, "bridge-legacy-isolation-test");
+  const isolatedListResponse = await legacyRequest(isolatedLegacySession, 16, "resources/list");
+  const isolatedListBody = await readMcpResponse(isolatedListResponse);
+  assert.deepEqual(isolatedListBody.result.resources, [], "A separate stateful MCP session must not list another session's local file resource.");
+  const isolatedReadResponse = await legacyRequest(isolatedLegacySession, 17, "resources/read", { uri: legacyResourceLink.uri });
+  const isolatedReadBody = await readMcpResponse(isolatedReadResponse);
+  assert.equal(isolatedReadBody.error?.code, -32602, "A cross-session URI must be rejected as an unavailable resource.");
+  assert.match(isolatedReadBody.error?.message || "", /unknown, expired, or belongs to another MCP session/i, "A separate stateful MCP session must not read another session's local file resource.");
+  fs.unlinkSync(fixtureBinaryPath);
+  const missingSourceResponse = await legacyRequest(reusableSession, 18, "resources/read", { uri: legacyResourceLink.uri });
+  const missingSourceBody = await readMcpResponse(missingSourceResponse);
+  assert.equal(missingSourceBody.error?.code, -32602, "A resource whose source was deleted must fail as unavailable, not as an internal server error.");
+  assert.match(missingSourceBody.error?.message || "", /no longer available/i);
+  await closeLegacySession(isolatedLegacySession);
   const reusableClose = await closeLegacySession(reusableSession);
   assert.ok([200, 202, 204].includes(reusableClose.status));
 
@@ -361,7 +406,7 @@ try {
   assert.equal(status.transport, "streamable-http-dual-era");
   assert.match(statusResponse.headers.get("keep-alive") || "", /timeout=120/, "Bridge should advertise the long keep-alive window used by the tunnel client");
   assert.equal(status.protocols.modern.revision, "2026-07-28");
-  assert.equal(status.protocols.modern.requests, 5);
+  assert.equal(status.protocols.modern.requests, 7);
   assert.equal(status.limits.softSessionLimit, 4);
   assert.equal(status.limits.httpKeepAliveTimeoutMs, 120000);
   assert.equal(status.limits.httpKeepAliveTimeoutBufferMs, 5000);

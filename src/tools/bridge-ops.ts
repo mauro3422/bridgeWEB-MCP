@@ -211,7 +211,7 @@ export async function tunnelHealth(baseUrl = DEFAULT_TUNNEL_ADMIN_BASE_URL) {
 async function getRuntimeToolCatalog() {
   try {
     const { createDefaultToolRegistry } = await import("../tool-registry.js");
-    const registry = createDefaultToolRegistry();
+    const registry = createDefaultToolRegistry({ localResources: null, resourceLinksEnabled: false });
     const names = registry.tools.map((tool) => tool.name);
     const payload = registry.tools.map((tool) => ({
       name: tool.name,
