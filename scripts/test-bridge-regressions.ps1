@@ -554,7 +554,7 @@ Invoke-Check "HTTP body and session limits reject excess work" {
       jsonrpc = "2.0"
       id = 1
       method = "initialize"
-      params = @{ protocolVersion = "2024-11-05"; capabilities = @{}; clientInfo = @{ name = "regression"; version = "0.1.0" } }
+      params = @{ protocolVersion = "2025-06-18"; capabilities = @{}; clientInfo = @{ name = "regression"; version = "0.1.0" } }
     } | ConvertTo-Json -Depth 10 -Compress
     $first = Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/mcp" -Method Post -Headers $headers -ContentType "application/json" -Body $initialize
     if ([int]$first.StatusCode -ne 200) { throw "first initialize failed with $($first.StatusCode)" }
@@ -591,7 +591,7 @@ Invoke-Check "HTTP body and session limits reject excess work" {
     }
     if ($bodyStatus -ne 413) { throw "expected oversized body 413, got $bodyStatus" }
 
-    $closed = Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/mcp" -Method Delete -Headers @{ Accept = "application/json, text/event-stream"; "Mcp-Session-Id" = $reclaimedSessionId }
+    $closed = Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/mcp" -Method Delete -Headers @{ Accept = "application/json, text/event-stream"; "Mcp-Session-Id" = $reclaimedSessionId; "Mcp-Protocol-Version" = "2025-06-18" }
     if (@(200, 202, 204) -notcontains [int]$closed.StatusCode) { throw "session DELETE failed with $($closed.StatusCode)" }
     $statusAfterDelete = Invoke-RestMethod -Uri "$baseUrl/status" -TimeoutSec 2
     if ([int]$statusAfterDelete.sessions -ne 0) { throw "session DELETE did not release capacity" }
