@@ -61,6 +61,22 @@ function Read-LifecycleEvents {
   return @($raw -split "\r?\n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_ | ConvertFrom-Json })
 }
 
+function Assert-BridgeProcessIdentityPattern {
+  $patternLine = Get-Content -LiteralPath $watchdogPath | Where-Object { $_ -match '^\$bridgeCommandPattern\s*=' } | Select-Object -First 1
+  if (-not $patternLine) { throw "Bridge process identity pattern was not found in the watchdog" }
+  $pattern = $patternLine.Substring($patternLine.IndexOf("= '") + 3).TrimEnd("'").Replace("''", "'")
+  $fixtures = @(
+    @{ label = "bare node command with quoted entrypoint"; commandLine = '"node" "D:\Dev\bridge-mcp\dist\http.js"'; expected = $true },
+    @{ label = "Node executable under Program Files"; commandLine = '"C:\Program Files\nodejs\node.exe" "D:\Dev\bridge-mcp\dist\http.js"'; expected = $true },
+    @{ label = "Node source entrypoint"; commandLine = 'node D:\Dev\bridge-mcp\src\http.ts'; expected = $true },
+    @{ label = "unrelated Python process"; commandLine = '"C:\Python\python.exe" "D:\Dev\bridge-mcp\dist\http.js"'; expected = $false }
+  )
+  foreach ($fixture in $fixtures) {
+    $actual = [regex]::IsMatch($fixture.commandLine, $pattern)
+    if ($actual -ne $fixture.expected) { throw "Bridge process identity regression failed for $($fixture.label)" }
+  }
+}
+
 function Assert-RecoveryRecord {
   param(
     [object]$Record,
@@ -85,6 +101,7 @@ function Assert-RecoveryRecord {
 }
 
 try {
+  Assert-BridgeProcessIdentityPattern
   New-TestRoot -Root $bridgeExitRoot -Version "0.0.0-watchdog-bridge-exit-test"
   $bridgeExitPort = Get-FreeLoopbackPort
   Set-Content -LiteralPath (Join-Path $bridgeExitRoot "dist\http.js") -Value 'setTimeout(() => process.exit(23), 25);' -Encoding UTF8
@@ -145,7 +162,13 @@ http.createServer((req, res) => {
 }).listen(port, "127.0.0.1");
 '@ -Encoding UTF8
 
-  $bridgeFixtureProcess = Start-Process -FilePath $nodePath -ArgumentList ('"{0}" {1}' -f $bridgeFixturePath, $tunnelBridgePort) -WorkingDirectory $tunnelExitRoot -PassThru -WindowStyle Hidden
+  $bridgeFixtureStart = [System.Diagnostics.ProcessStartInfo]::new()
+  $bridgeFixtureStart.FileName = "node"
+  $bridgeFixtureStart.Arguments = ('"{0}" {1}' -f $bridgeFixturePath, $tunnelBridgePort)
+  $bridgeFixtureStart.WorkingDirectory = $tunnelExitRoot
+  $bridgeFixtureStart.UseShellExecute = $false
+  $bridgeFixtureStart.CreateNoWindow = $true
+  $bridgeFixtureProcess = [System.Diagnostics.Process]::Start($bridgeFixtureStart)
   Wait-ForListener -Port $tunnelBridgePort -Process $bridgeFixtureProcess
 
   $tunnelArgs = @(
