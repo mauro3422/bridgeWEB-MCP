@@ -50,7 +50,8 @@ child.stderr.on("data", (chunk) => { stderr += String(chunk); });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function waitReady() {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  const deadline = performance.now() + 30_000;
+  while (performance.now() < deadline) {
     try {
       const response = await fetch(`${base}/readyz`, { signal: AbortSignal.timeout(500) });
       if (response.ok && await response.text() === "ready") return;
@@ -58,7 +59,10 @@ async function waitReady() {
     if (child.exitCode !== null) break;
     await sleep(50);
   }
-  assert.fail(`isolated Bridge did not become ready: ${stderr}`);
+  const childState = child.exitCode === null
+    ? `still running (pid ${child.pid})`
+    : `exited with code ${child.exitCode} and signal ${child.signalCode ?? "none"}`;
+  assert.fail(`isolated Bridge did not become ready; child ${childState}: ${stderr}`);
 }
 
 async function json(pathname) {
@@ -307,5 +311,5 @@ try {
     child.kill();
     await new Promise((resolve) => child.once("exit", resolve));
   }
-  await fs.rm(temp, { recursive: true, force: true });
+  await fs.rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 }
