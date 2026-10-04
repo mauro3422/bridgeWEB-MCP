@@ -3,7 +3,9 @@
 ## Current release
 Bridge 0.6.153 is active from `codex/bridge-dirty-cohort-reconciliation-20261003`. The live HTTP process is PID 25952, boot `ad26f0d1-9b72-45c3-aefb-4a13a1e3956b`, ready on port 3001; it serves code from `D:\Dev\bridge-mcp-cohort-reconciliation` and keeps runtime/data under `D:\Dev\bridge-mcp`. Tunnel PID 2588 remains ready on 8081; the live catalog has 185 tools and no restart is pending.
 
-`0.6.154` is an isolated Jev/TLS candidate on `codex/jev-safe-provider-errors-20261004`; its focused, health, full-regression, and tool-doc gates pass. See the [incident evidence](../docs/INCIDENTS.md#2026-10-04--jev-requests-failed-tls-validation-under-the-managed-node-process). Live remains `0.6.153`; independent review and controlled adoption are pending.
+`0.6.154` is the reviewed and published Jev/TLS candidate on `codex/jev-safe-provider-errors-20261004`, commit `ef345b1316c411c51c9ce5c426898d62acaf0b57`; its focused, health, full-regression, and tool-doc gates pass. The Windows Startup `.cmd` now points to this candidate, and the prior file is preserved at `C:\Users\mauro\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\BridgeMCP-Watchdog.cmd.before-jev-0.6.154-20261004T020724Z.bak` (SHA-256 `703DAD3F342310D50C9FB8272F384CA1E1BB3CF94530067EC6B196BC0CD819FD`).
+
+Live remains `0.6.153`: the controlled process handoff was blocked by host policy before execution, so no Bridge or tunnel process was stopped. The current HTTP PID 25952 and tunnel PID 2588 remain healthy; the startup entry will activate `.154` on the next fresh Windows logon. Recheck readiness, tool catalog, tunnel continuity, and `bridge_verify_all` after that handoff. See the [incident evidence](../docs/INCIDENTS.md#2026-10-04--jev-requests-failed-tls-validation-under-the-managed-node-process).
 
 `bridge_verify_all` job `bridge_verify_1791073232248_1` passed with exit 0, no timeout (315.2 s), and 185 tools. HTTP/MCP lifecycle, smoke, build/regressions, routing/liveness, watchdog, documentation, and metrics checks passed; see [0.6.153 release evidence](../changelogs/0.6.153.md). The 0.6.152 smoke-token and stale-doc findings are resolved.
 
