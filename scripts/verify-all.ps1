@@ -1,5 +1,6 @@
 param(
   [string]$ProjectRoot = "",
+  [string]$RuntimeDataRoot = "",
   [string]$ExpectedServerVersion = "",
   [switch]$StrictGit
 )
@@ -10,6 +11,14 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
   $ProjectRoot = Split-Path -Parent $PSScriptRoot
 }
 $ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
+
+if ([string]::IsNullOrWhiteSpace($RuntimeDataRoot)) {
+  $RuntimeDataRoot = [string]$env:BRIDGE_MCP_PROJECT_ROOT
+}
+if ([string]::IsNullOrWhiteSpace($RuntimeDataRoot)) {
+  $RuntimeDataRoot = $ProjectRoot
+}
+$RuntimeDataRoot = (Resolve-Path -LiteralPath $RuntimeDataRoot).Path
 
 if ([string]::IsNullOrWhiteSpace($ExpectedServerVersion)) {
   $packagePath = Join-Path $ProjectRoot "package.json"
@@ -60,7 +69,7 @@ $steps = @()
 $steps += Invoke-VerifyStep "doctor" { powershell -NoProfile -File .\scripts\bridge-doctor.ps1 -ExpectedServerVersion $ExpectedServerVersion }
 $steps += Invoke-VerifyStep "check" { npm run check }
 $steps += Invoke-VerifyStep "build" { npm run build }
-$steps += Invoke-VerifyStep "smoke:http" { powershell -NoProfile -File .\scripts\test-bridge-http.ps1 }
+$steps += Invoke-VerifyStep "smoke:http" { powershell -NoProfile -File .\scripts\test-bridge-http.ps1 -RuntimeDataRoot $RuntimeDataRoot }
 $steps += Invoke-VerifyStep "test:mcp-dual-era" { npm run test:mcp-dual-era }
 $steps += Invoke-VerifyStep "test:regressions" { cmd.exe /d /s /c "npm run test:regressions 2>&1" }
 $steps += Invoke-VerifyStep "test:routing-latency" { npm run test:routing-latency }
@@ -90,6 +99,7 @@ $ok = $failedRequired.Count -eq 0
 $result = [pscustomobject]@{
   ok = $ok
   projectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
+  runtimeDataRoot = $RuntimeDataRoot
   expectedServerVersion = $ExpectedServerVersion
   strictGit = [bool]$StrictGit
   steps = $steps

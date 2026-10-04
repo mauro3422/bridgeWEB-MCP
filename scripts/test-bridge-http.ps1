@@ -1,9 +1,18 @@
 param(
   [string]$BaseUrl = "http://127.0.0.1:3001",
-  [string]$McpPath = "/mcp"
+  [string]$McpPath = "/mcp",
+  [string]$RuntimeDataRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($RuntimeDataRoot)) {
+  $RuntimeDataRoot = [string]$env:BRIDGE_MCP_PROJECT_ROOT
+}
+if ([string]::IsNullOrWhiteSpace($RuntimeDataRoot)) {
+  $RuntimeDataRoot = (Get-Location).Path
+}
+$RuntimeDataRoot = (Resolve-Path -LiteralPath $RuntimeDataRoot).Path
 
 function Wait-BridgeReady {
   param([int]$TimeoutSeconds = 45)
@@ -105,7 +114,7 @@ Invoke-Check "MSSR dashboard" {
 }
 
 Invoke-Check "authenticated external MSSR telemetry" {
-  $tokenPath = Join-Path (Get-Location) "data\mssr-ingest.token"
+  $tokenPath = Join-Path $RuntimeDataRoot "data\mssr-ingest.token"
   if (-not (Test-Path -LiteralPath $tokenPath)) { throw "MSSR ingest token was not created at $tokenPath" }
   $eventId = "__test_opencode_" + [Guid]::NewGuid().ToString("N")
   $traceId = "__test_opencode_trace_" + [Guid]::NewGuid().ToString("N")

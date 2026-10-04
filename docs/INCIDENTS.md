@@ -1953,3 +1953,15 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Regresión:** Se agregaron fixtures donde el package de ProjectRoot declara 0.6.144/0.2.96 y BridgeCodeRoot declara 0.6.151/0.2.101, además de una prueba Project Situation con roots distintos. Deben producir una evaluación `ok` sin mismatches cuando runtime coincide con BridgeCodeRoot.
 
 **Verificación inicial:** El primer Bridge 0.6.151 quedó listo y el túnel existente PID 2588 permaneció intacto. La transición inicial produjo el mismatch descrito, por lo que 0.6.151 no se declara como adopción final hasta activar y verificar la corrección 0.6.152.
+
+## 2026-10-04 — Full verification used the code checkout for a data-backed HTTP smoke
+
+**Estado:** Resuelto y verificado en Bridge 0.6.153. Bridge 0.6.152 permanecía saludable; su `bridge_verify_all` devolvió 2 gates requeridos fallidos, corregidos en esta versión.
+
+**Síntoma:** smoke:http consultó /api/mssr/events y recibió HTTP 401. docs:tools:check también encontró TOOLS.md desactualizado.
+
+**Causa:** bridge_verify_all ejecuta la verificación desde BridgeCodeRoot; el smoke buscaba data/mssr-ingest.token bajo el cwd, aunque el runtime conserva ese token bajo ProjectRoot. El segundo hallazgo era documentación generada que no se había regenerado para el catálogo actual de 185 herramientas.
+
+**Corrección:** El watchdog comparte ProjectRoot como BRIDGE_MCP_PROJECT_ROOT. verify-all.ps1 y test-bridge-http.ps1 resuelven el token desde ese root (con fallback al cwd en checkouts de raíz única); TOOLS.md se regenera con npm run docs:tools. No se copiaron secretos entre raíces.
+
+**Verificación:** Bridge 0.6.153 live; `bridge_verify_all` job `bridge_verify_1791073232248_1` terminó con `ok=true`, `failedRequired=0`, exit 0, sin timeout. Pasaron HTTP smoke autenticado bajo la raíz de datos, check/build, doble era/framing MCP, regresiones completas, routing latency, WAL, liveness, skill routing, `docs:tools:check`, watchdog/restart, métricas y tools-list. Proceso HTTP PID 25952 / boot `ad26f0d1-9b72-45c3-aefb-4a13a1e3956b`; túnel `bridge-local-http` PID 2588 preservado.
