@@ -121,7 +121,8 @@ try {
                 return false;
               }
             })?.id ?? "none";
-          return [key, { type: "choice", choice: selectedOption, confidence: 0.97 }];
+          const probabilities = Object.fromEntries(Object.keys(question.options).map((option) => [option, option === selectedOption ? 0.97 : 0.03 / (Object.keys(question.options).length - 1)]));
+          return [key, { type: "choice", choice: selectedOption, confidence: 0.97, probabilities }];
         }
         return [key, { type: "choice", choice: "supports", confidence: 0.97 }];
       }));
@@ -212,6 +213,9 @@ try {
   assert.equal(jevSelection.selected.title, "Preserve operational records");
   assert.equal(jevSelection.verification, "unverified");
   assert.equal(jevSelection.confidenceCalibration, "uncalibrated-provider-score");
+  assert.equal(jevSelection.choiceCalls.length, 1);
+  assert.deepEqual(Object.keys(jevSelection.choiceCalls[0].probabilities).sort(), jevSelection.choiceCalls[0].offeredOptionIds.slice().sort(), "tool output preserves the complete exact offered Choice distribution");
+  assert.equal(jevSelection.choiceCalls[0].probabilities[jevSelection.choiceCalls[0].selectedOptionId], 0.97);
   assert.equal(jevSelection.exactFetchRequired, true);
   assert.equal(jevSelection.truthAuthority, false);
   assert.equal(jevSelection.autoApplyAllowed, false);
@@ -643,7 +647,7 @@ try {
       sdkRequest = { url: String(input), authorization: new Headers(init?.headers).get("authorization") };
       return Response.json({
         model: "test-model",
-        answers: { q: { type: "noul", noul: 0.1 } },
+        answers: { q: { type: "choice", choice: "yes", confidence: 0.8, probabilities: { yes: 0.8, no: 0.2 } } },
         usage: { input_tokens: 1, output_tokens: 1 },
       });
     };
@@ -651,7 +655,8 @@ try {
       readCredentialBytes: async () => sdkCredentialBytes,
       model: "test-model",
     });
-    await sdkProvider.executeSystemOne({ state: {}, questions: { q: { kind: "noul", prompt: "test" } } });
+    const sdkResponse = await sdkProvider.executeSystemOne({ state: {}, questions: { q: { kind: "choice", prompt: "test", options: { yes: "yes", no: "no" } } } });
+    assert.deepEqual(sdkResponse.answers.q, { type: "choice", choice: "yes", confidence: 0.8, probabilities: { yes: 0.8, no: 0.2 } }, "TypeSafe Choice distribution must survive the SDK adapter unchanged");
   } finally {
     globalThis.fetch = originalFetch;
     if (previousTypesafeBaseUrl === undefined) delete process.env.TYPESAFE_BASE_URL;

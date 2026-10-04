@@ -1,5 +1,9 @@
 # Bridge project state
 
+## Choice-distribution preservation candidate — 0.6.156 / MSSR 0.2.104 (2026-10-04)
+
+The isolated candidate branch `codex/jev-mssr-0.2.103-adoption-20261004` advances from Bridge 0.6.155 / MSSR 0.2.103 to 0.6.156 / MSSR 0.2.104. The exact imported tarball is 1,104,067 bytes, SHA-256 `714e9d0997e4bc92c2981e1aeb3e5b8a98beef91efc04f82e92d001748a7e4ca`. The TypeSafe adapter preserves complete Choice probability maps, and MSSR returns each call's offered option IDs and provider map in `choiceCalls`; absent maps stay null. This enables future calibration analysis but provides no calibration or threshold by itself. The final MSSR release gate, focused semantic-evidence tests, Bridge check/build, docs check, skill-routing audit, project-health regression, full regressions, and project-change consistency passed against these exact bytes. Live Bridge remains 0.6.153; no restart or activation occurred.
+
 ## Candidate recovery — 0.6.155 / MSSR 0.2.103 (2026-10-04)
 
 An isolated branch `codex/jev-mssr-0.2.103-adoption-20261004` restores `mssr_librarian_evidence_pack`, a tool previously introduced in Bridge 0.6.148 but absent from the later 0.6.154 lineage. It consumes the exact MSSR 0.2.103 release artifact (SHA-256 `8191881b18a0e4a84b87b59750e6587d60be77e94893b55a52c740fb9e7c0fd5`). Focused semantic-evidence tests, full regressions, 186-tool registry, generated docs, skill-routing audit, and type checks pass. The canonical ownership summary now describes its bounded citation-pack role. Project-change consistency returns `publishReady=true`; existing Project Health WATCH findings (state size, 28 modules, and budget pressure) remain informational. Live Bridge stays 0.6.153; no restart or activation occurred. Candidate snapshot `20261004073257_f24b636c-dc1` preserves the pre-change state.

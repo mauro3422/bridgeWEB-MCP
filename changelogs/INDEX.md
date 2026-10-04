@@ -4,6 +4,7 @@ Versioned release notes are the canonical change-history surface for MSSR debugg
 
 ## Current releases
 
+- [0.6.156](0.6.156.md) - Preserve the TypeSafe Jev Choice probability map through the Bridge adapter and Librarian result; adopt MSSR 0.2.104.
 - [0.6.155](0.6.155.md) - Restore the previously shipped exact-citation Librarian evidence pack on the current Jev/TLS lineage and adopt MSSR 0.2.103.
 - [0.6.154](0.6.154.md) - Use Windows system trust roots for the managed Jev provider child and report sanitized provider failure classes.
 - [0.6.153](0.6.153.md) - Keep data-backed verification on ProjectRoot and refresh tool docs.
