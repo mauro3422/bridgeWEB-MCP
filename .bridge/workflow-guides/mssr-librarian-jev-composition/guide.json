@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "name": "mssr-librarian-jev-composition",
+  "title": "MSSR Librarian and Jev Evidence Composition",
+  "description": "Use the existing MSSR Librarian tools to retrieve, select and verify exact project evidence, review contradictions, and compose citation-grounded host paragraphs. Jev makes bounded text decisions; the host owns retrieval scope, writing, verification and any approved persistence.",
+  "activation": {
+    "keywords": [
+      "MSSR",
+      "Librarian",
+      "Bibliotecario",
+      "Jev",
+      "evidencia",
+      "citas",
+      "contradicciones",
+      "síntesis",
+      "composición"
+    ],
+    "phrases": [
+      "usa el Bibliotecario MSSR con Jev para buscar evidencia revisar contradicciones y armar una respuesta con citas exactas",
+      "usa el Bibliotecario MSSR para revisar estos documentos",
+      "busca evidencia con Jev y arma una respuesta citada",
+      "revisa contradicciones entre átomos MSSR",
+      "use the MSSR Librarian and Jev to assemble cited evidence",
+      "compose a source-grounded answer from project documents",
+      "every time I ask you to research project documents use the MSSR Librarian and Jev workflow"
+    ],
+    "negativeKeywords": [
+      "grep a secas",
+      "buscar una cadena en un solo archivo",
+      "explicar una tool sin consultar documentos"
+    ],
+    "examples": [
+      "Usa el Bibliotecario MSSR con Jev para buscar evidencia, revisar contradicciones y armar una respuesta con citas exactas.",
+      "Investiga en el MSSR qué decidió Jev sobre la unión de evidencia y entrega conclusiones con citas exactas.",
+      "Use the MSSR Librarian and Jev to assemble cited evidence."
+    ]
+  },
+  "entrypoint": "GUIDE.md",
+  "phases": {
+    "scope-and-query": "phases/scope-and-query.md",
+    "retrieve-and-select": "phases/retrieve-and-select.md",
+    "verify-and-pack-evidence": "phases/verify-and-pack-evidence.md",
+    "review-relations-and-conflicts": "phases/review-relations-and-conflicts.md",
+    "compose-and-verify": "phases/compose-and-verify.md",
+    "resume-and-record": "phases/resume-and-record.md"
+  },
+  "recommendedTools": [
+    "mssr_librarian_search",
+    "mssr_librarian_jev_select",
+    "mssr_librarian_fetch",
+    "mssr_librarian_evidence_pack",
+    "mssr_semantic_evidence_relation_review",
+    "mssr_semantic_evidence_synthesis_preview"
+  ],
+  "scopeNotes": "Project guide; overrides a global guide with the same name while this projectRoot is supplied."
+}
