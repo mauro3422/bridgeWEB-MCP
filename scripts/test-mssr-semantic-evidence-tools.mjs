@@ -143,6 +143,47 @@ try {
   assert.equal(exact.advisoryOnly, true);
   assert.match(exact.text, /Keep benchmark results/);
 
+  const retentionSearch = await registry.call("mssr_librarian_search", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    query: { query: "retention windows", maxResults: 10 },
+  });
+  const retentionHandle = retentionSearch.results[0]?.handle;
+  assert.ok(retentionHandle, "search should return a second exact range for evidence packing");
+  const providerCallsBeforePack = providerCalls.length;
+  const evidencePack = await registry.call("mssr_librarian_evidence_pack", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    handles: [preserveHandle, retentionHandle],
+  });
+  assert.equal(providerCalls.length, providerCallsBeforePack, "evidence packing must not call Jev");
+  assert.equal(evidencePack.kind, "mssr-librarian-evidence-pack");
+  assert.equal(evidencePack.assembly, "verbatim-source-ranges");
+  assert.equal(evidencePack.paragraphs.length, 2);
+  assert.match(evidencePack.paragraphs[0].exactText, /Keep benchmark results/);
+  assert.match(evidencePack.paragraphs[1].exactText, /Classify cache and runtime snapshots/);
+  assert.equal(evidencePack.paragraphs[0].citation.handleId, preserveHandle.id);
+  assert.equal(evidencePack.paragraphs[1].citation.fingerprint, retentionHandle.fingerprint);
+  assert.equal(evidencePack.advisoryOnly, true);
+  assert.equal(evidencePack.truthAuthority, false);
+  assert.equal(evidencePack.canonicalRewriteAllowed, false);
+  assert.equal(evidencePack.ownerAndPrivacyAreCallerAsserted, true);
+  await assert.rejects(registry.call("mssr_librarian_evidence_pack", {
+    projectRoot: root,
+    sourceRefs: ["policy.md", "other-policy.md"],
+    handles: [preserveHandle],
+  }), /exactly match the unique sources referenced by handles/);
+  await assert.rejects(registry.call("mssr_librarian_evidence_pack", {
+    projectRoot: root,
+    sourceRefs: ["other-policy.md"],
+    handles: [preserveHandle],
+  }), /explicitly supplied normalized sourceRefs/);
+  await assert.rejects(registry.call("mssr_librarian_evidence_pack", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    handles: [preserveHandle, preserveHandle],
+  }), /handles must be unique/);
+
   const jevSelection = await registry.call("mssr_librarian_jev_select", {
     projectRoot: root,
     sourceRefs: ["policy.md"],
@@ -574,12 +615,18 @@ try {
   const defaultRegistry = (await import("../dist/tool-registry.js")).createDefaultToolRegistry();
   assert.ok(defaultRegistry.has("mssr_librarian_search"));
   assert.ok(defaultRegistry.has("mssr_librarian_jev_select"));
+  assert.ok(defaultRegistry.has("mssr_librarian_evidence_pack"));
   assert.ok(defaultRegistry.has("mssr_semantic_evidence_relation_review"));
   const selectorSchema = defaultRegistry.tools.find((tool) => tool.name === "mssr_librarian_jev_select");
   assert.equal(selectorSchema.inputSchema.properties.candidateHandles.maxItems, 100);
   assert.equal("metadataMode" in selectorSchema.inputSchema.properties, false, "metadata retrieval is an explicit prior search step");
   const searchSchema = defaultRegistry.tools.find((tool) => tool.name === "mssr_librarian_search");
   assert.deepEqual(searchSchema.inputSchema.properties.metadataMode.enum, ["off", "project-context-single-section", "project-context-librarian-sidecar"]);
+  const evidencePackSchema = defaultRegistry.tools.find((tool) => tool.name === "mssr_librarian_evidence_pack");
+  assert.equal(evidencePackSchema.inputSchema.properties.handles.maxItems, 16);
+  assert.ok(defaultRegistry.riskSummary.readOnly.includes("mssr_librarian_evidence_pack"));
+  assert.equal(evidencePackSchema.annotations.readOnlyHint, true);
+  assert.equal(evidencePackSchema.annotations.destructiveHint, false);
   assert.equal(selectorSchema.annotations.readOnlyHint, false);
   assert.equal(selectorSchema.annotations.destructiveHint, false);
   assert.equal(selectorSchema.metadata.mssrLifecycle.effect, "external-side-effect");

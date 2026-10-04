@@ -9,9 +9,11 @@ import {
   MSSR_PROJECT_CONTROL_FILES,
   MSSR_PROJECT_HOME_DIR,
   MSSR_LIBRARIAN_JEV_SELECTION_LIMITS,
+  MSSR_LIBRARIAN_EVIDENCE_PACK_LIMITS,
   MSSR_LIBRARIAN_RETRIEVAL_LIMITS,
   PROJECT_CONTEXT_LIBRARIAN_LIMITS,
   buildMssrSemanticSynthesisProposal,
+  buildMssrLibrarianEvidencePack,
   fetchMssrLibrarianEvidence,
   mssrEvidenceAtomSchema,
   mssrJevDecisionRequestSchema,
@@ -613,6 +615,12 @@ const jevSelectionInputSchema = z.object({
 
 const fetchInputSchema = z.object({ projectRoot: projectRootSchema, handle: mssrLibrarianEvidenceHandleSchema }).strict();
 
+const evidencePackInputSchema = z.object({
+  projectRoot: projectRootSchema,
+  sourceRefs: z.array(sourceRefSchema).min(1).max(MSSR_LIBRARIAN_EVIDENCE_PACK_LIMITS.maxDocuments),
+  handles: z.array(mssrLibrarianEvidenceHandleSchema).min(1).max(MSSR_LIBRARIAN_EVIDENCE_PACK_LIMITS.maxHandles),
+}).strict();
+
 const relationInputSchema = z.object({
   projectRoot: projectRootSchema,
   input: mssrSemanticEvidenceRelationReviewInputSchema,
@@ -665,6 +673,20 @@ function createMssrSemanticEvidenceToolModule(options: MssrSemanticEvidenceToolM
         name: "mssr_librarian_fetch",
         description: "Re-read and validate one exact Librarian handle against the current file revision under the selected managed project root. Only project-metadata Markdown is accepted; no caller-provided source text is trusted.",
         inputSchema: { type: "object", properties: { projectRoot: { type: "string", minLength: 1, maxLength: 4096 }, handle: exactHandleObjectSchema }, required: ["projectRoot", "handle"], additionalProperties: false },
+      },
+      {
+        name: "mssr_librarian_evidence_pack",
+        description: `Re-read up to ${MSSR_LIBRARIAN_EVIDENCE_PACK_LIMITS.maxHandles} exact Librarian handles from explicitly selected project Markdown sources, then package each unchanged range as a separate citation-bearing paragraph. Use after mssr_librarian_search and, optionally, mssr_librarian_jev_select. Bridge authorizes and rereads only the supplied canonical sourceRefs; MSSR revalidates each handle's current revision, range, and fingerprint. This operation is read-only: it does not call Jev, generate or compact prose, crawl, establish truth, or rewrite canonical files. Owner/privacy provenance remains caller-asserted.`,
+        inputSchema: {
+          type: "object",
+          properties: {
+            projectRoot: { type: "string", minLength: 1, maxLength: 4096 },
+            sourceRefs: { type: "array", items: { type: "string", minLength: 1, maxLength: 1000 }, minItems: 1, maxItems: MSSR_LIBRARIAN_EVIDENCE_PACK_LIMITS.maxDocuments, description: "Explicit project-relative Markdown sources for the supplied handles. Every source must be referenced by at least one handle; no directory crawl is performed." },
+            handles: { type: "array", items: exactHandleObjectSchema, minItems: 1, maxItems: MSSR_LIBRARIAN_EVIDENCE_PACK_LIMITS.maxHandles, description: "Exact revision-bound handles returned by mssr_librarian_search or selected by mssr_librarian_jev_select. Each handle is revalidated against current source bytes." },
+          },
+          required: ["projectRoot", "sourceRefs", "handles"],
+          additionalProperties: false,
+        },
       },
       {
         name: "mssr_librarian_jev_select",
@@ -790,6 +812,28 @@ function createMssrSemanticEvidenceToolModule(options: MssrSemanticEvidenceToolM
         const project = await resolveManagedProject(args.projectRoot);
         const evidence = await revalidateHandle(project, args.handle);
         return { projectOwner: project.owner, ...evidence };
+      },
+      mssr_librarian_evidence_pack: async (raw) => {
+        const args = evidencePackInputSchema.parse(raw);
+        const project = await resolveManagedProject(args.projectRoot);
+        const sourceRefs = args.sourceRefs.map(normalizeProjectSourceRef);
+        if (new Set(sourceRefs).size !== sourceRefs.length) throw new Error("Librarian sourceRefs must be unique.");
+        const handles = args.handles.map((handle) => mssrLibrarianEvidenceHandleSchema.parse(handle));
+        if (new Set(handles.map((handle) => handle.id)).size !== handles.length) throw new Error("Librarian evidence-pack handles must be unique.");
+        for (const handle of handles) {
+          if (handle.owner !== project.owner) throw new Error("Evidence handle belongs to a different canonical project root.");
+          if (handle.privacyClass !== "project-metadata") throw new Error("Bridge Librarian currently accepts only project-metadata sources.");
+          if (normalizeProjectSourceRef(handle.sourceRef) !== handle.sourceRef || !sourceRefs.includes(handle.sourceRef)) {
+            throw new Error("Every evidence handle must reference one of the explicitly supplied normalized sourceRefs.");
+          }
+        }
+        const referencedSourceRefs = [...new Set(handles.map((handle) => handle.sourceRef))];
+        if (referencedSourceRefs.length !== sourceRefs.length || sourceRefs.some((sourceRef) => !referencedSourceRefs.includes(sourceRef))) {
+          throw new Error("Evidence-pack sourceRefs must exactly match the unique sources referenced by handles.");
+        }
+        const { documents } = await readProjectMarkdownBatch(project, sourceRefs);
+        const pack = buildMssrLibrarianEvidencePack({ documents, handles });
+        return { projectOwner: project.owner, sourceCount: sourceRefs.length, ...pack };
       },
       mssr_semantic_evidence_relation_review: async (raw) => {
         const args = relationInputSchema.parse(raw);

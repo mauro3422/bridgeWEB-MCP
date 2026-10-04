@@ -41,7 +41,7 @@ import type { BridgeMssrLifecycleMetadata, BridgeToolMetadata, BridgeToolModule,
 
 const readOnlyToolNames = new Set([
   "system_info", "list_dir", "read_text_file", "list_files_smart", "read_file_lines", "read_many_files", "search_files", "storage_growth_scan",
-  "mssr_librarian_search", "mssr_librarian_fetch", "mssr_semantic_evidence_synthesis_preview",
+  "mssr_librarian_search", "mssr_librarian_fetch", "mssr_librarian_evidence_pack", "mssr_semantic_evidence_synthesis_preview",
   "terminal_read", "terminal_list", "work_peek", "work_show",
   "git_status", "git_diff", "git_log", "git_show_commit", "git_compare_branches",
   "tunnel_health", "bridge_health", "bridge_connector_catalog_compare", "bridge_self_check", "bridge_restart_status",
@@ -102,7 +102,7 @@ const mssrControlPlaneToolNames = new Set([
 ]);
 
 const mssrSubstantialReadToolNames = new Set([
-  "mssr_librarian_search", "mssr_librarian_fetch", "mssr_librarian_jev_select", "mssr_semantic_evidence_synthesis_preview",
+  "mssr_librarian_search", "mssr_librarian_fetch", "mssr_librarian_evidence_pack", "mssr_librarian_jev_select", "mssr_semantic_evidence_synthesis_preview",
   "analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code",
   "python_validate", "python_symbols", "python_impact_analysis", "python_import_graph", "python_call_graph", "python_dead_code", "python_test_plan", "pytest_testmon",
   "project_context_audit", "project_context_health", "project_context_modularization_plan", "project_change_consistency", "bridge_verify_status",
