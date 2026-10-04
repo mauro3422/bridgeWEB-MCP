@@ -12207,7 +12207,7 @@ Metadata: role=dedicated · family=mssr-semantic-evidence · lifecycle=stable
 
 #### `mssr_librarian_evidence_pack`
 
-Re-read up to 16 exact Librarian handles from explicitly selected project Markdown sources, then package each unchanged range as a separate citation-bearing paragraph. Use after mssr_librarian_search and, optionally, mssr_librarian_jev_select. Bridge authorizes and rereads only the supplied canonical sourceRefs; MSSR revalidates each handle's current revision, range, and fingerprint. This operation is read-only: it does not call Jev, generate or compact prose, crawl, establish truth, or rewrite canonical files. Owner/privacy provenance remains caller-asserted.
+Package up to 16 exact caller-supplied Librarian handles from explicitly selected project Markdown sources. Callers normally obtain handles from mssr_librarian_search and may first pass them through mssr_librarian_jev_select; this operation does not authenticate that history or prove Jev selected them. Bridge authorizes and rereads only the supplied canonical sourceRefs; MSSR revalidates each current owner, privacy class, revision, range, and fingerprint, then returns each unchanged range as a citation-bearing paragraph. Read-only: no Jev call, prose generation/compaction, crawl, truth authority, or canonical rewrite.
 
 Metadata: role=dedicated · family=mssr-semantic-evidence · lifecycle=stable
 
@@ -12240,7 +12240,7 @@ Metadata: role=dedicated · family=mssr-semantic-evidence · lifecycle=stable
       },
       "minItems": 1,
       "maxItems": 16,
-      "description": "Exact revision-bound handles returned by mssr_librarian_search or selected by mssr_librarian_jev_select. Each handle is revalidated against current source bytes."
+      "description": "Exact revision-bound handles supplied by the caller, normally from mssr_librarian_search and optionally selected with mssr_librarian_jev_select. Selection provenance is not authenticated; every handle is revalidated against current source bytes."
     }
   },
   "required": [
