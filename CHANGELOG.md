@@ -2,7 +2,7 @@
 
 The canonical Bridge release history now lives under [`changelogs/`](changelogs/INDEX.md).
 
-- Current source release: [0.6.148](changelogs/0.6.148.md) (isolated MCP resource/image safety and Project Health freshness candidate; published runtime remains 0.6.144 until controlled adoption)
+- Current source release: [0.6.152](changelogs/0.6.152.md) (BridgeCodeRoot-aware release consistency for a separately rooted HTTP runtime)
 - Version index: [changelogs/INDEX.md](changelogs/INDEX.md)
 - Historical monolithic archive: [changelogs/LEGACY.md](changelogs/LEGACY.md)
 

@@ -350,12 +350,13 @@ try {
   if (!verifyStatusTool || !registry.riskSummary.readOnly.includes('bridge_verify_status')) throw new Error('bridge_verify_status read-only registration failed');
   const watchdogSource = fs.readFileSync(path.join(process.cwd(), 'scripts', 'start-bridge-http-watchdog.ps1'), 'utf8');
   if (!watchdogSource.includes('[int]$ConsecutiveFailureThreshold = 3') || !watchdogSource.includes('$bridgeReadinessFailures -ge $ConsecutiveFailureThreshold') || !watchdogSource.includes('while process is alive; deferring restart') || !watchdogSource.includes('process-exited')) throw new Error('watchdog transient-readiness debounce regression');
+  if (!watchdogSource.includes('$psi.Environment["BRIDGE_MCP_CODE_ROOT"] = $BridgeCodeRoot') || !watchdogSource.includes('$psi.WorkingDirectory = $ProjectRoot')) throw new Error('watchdog must keep code-root identity separate from runtime/data working directory');
   const processDiagnosticsPath = path.join(process.cwd(), 'scripts', 'bridge-process-diagnostics.ps1');
   const processDiagnosticsSource = fs.readFileSync(processDiagnosticsPath, 'utf8');
   if (!watchdogSource.includes('. $processDiagnosticsPath') || !watchdogSource.includes('processDiagnostics = $processDiagnostics') || !watchdogSource.includes('processExitCode = $ProcessExitCode') || !watchdogSource.includes('Get-BridgeProcessDiagnostics -ProcessId $ProcessId -Port $BridgePort') || !watchdogSource.includes('-ProcessExitCode $bridgeProcessExitCode')) throw new Error('watchdog external process diagnostics wiring regression');
   if (/CommandLine|Win32_Process[^\n]*CommandLine/i.test(processDiagnosticsSource)) throw new Error('watchdog process diagnostics must not capture command lines');
   const evidenceIndex = watchdogSource.indexOf('$bridgeRecoveryEvidence = Get-BridgeRecoveryEvidence');
-  const stopIndex = watchdogSource.indexOf('Stop-ProcessState -State $bridgeProcess -Name "bridge HTTP" -ForceExternal', evidenceIndex);
+  const stopIndex = watchdogSource.indexOf('Stop-ProcessState -State $bridgePreviousProcessState -Name "bridge HTTP" -ForceExternal', evidenceIndex);
   if (evidenceIndex < 0 || stopIndex < 0 || evidenceIndex > stopIndex) throw new Error('watchdog must capture recovery evidence before stopping bridge HTTP');
   if (process.platform === 'win32') {
     const quotedDiagnosticsPath = processDiagnosticsPath.replaceAll("'", "''");

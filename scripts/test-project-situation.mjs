@@ -159,6 +159,32 @@ assert.ok(bridgeReleaseClaims.some((item) => item.key === "semantic.state-value:
 const bridgeReleaseSituation = evaluateMssrSituationModel({ boundary: "post-restart", observations: bridgeReleaseClaims });
 assert.equal(bridgeReleaseSituation.decision.level, "ok", JSON.stringify(bridgeReleaseSituation.decision));
 
+const splitDataRoot = await fs.mkdtemp(path.join(os.tmpdir(), "bridge-project-situation-data-root-"));
+const splitCodeRoot = path.resolve(process.cwd());
+const originalWorkingDirectory = process.cwd();
+const previousCodeRoot = process.env.BRIDGE_MCP_CODE_ROOT;
+try {
+  process.chdir(splitDataRoot);
+  process.env.BRIDGE_MCP_CODE_ROOT = splitCodeRoot;
+  const splitRootSnapshot = await collectProjectSituationSnapshot({
+    workspaceRoot: splitDataRoot,
+    now,
+    dependencies: {
+      discover: async () => [splitDataRoot],
+      loadInbox: async () => createEmptyMssrContextInboxState(),
+      collectRepository: async () => ({ observations: [] }),
+    },
+  });
+  assert.equal(splitRootSnapshot.projects.length, 1);
+  assert.equal(splitRootSnapshot.projects[0].level, "ok", JSON.stringify(splitRootSnapshot.projects[0]));
+  assert.equal(splitRootSnapshot.projects[0].mismatchCount, 0, "Bridge self-release claims must use BridgeCodeRoot while the project item remains rooted at ProjectRoot");
+} finally {
+  process.chdir(originalWorkingDirectory);
+  if (previousCodeRoot === undefined) delete process.env.BRIDGE_MCP_CODE_ROOT;
+  else process.env.BRIDGE_MCP_CODE_ROOT = previousCodeRoot;
+  await fs.rm(splitDataRoot, { recursive: true, force: true });
+}
+
 const opened = buildProjectSituationNoticeInputs(stale, null);
 assert.equal(opened.length, 1);
 assert.equal(opened[0].code, "mssr-project-situation-review");

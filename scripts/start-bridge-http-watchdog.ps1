@@ -328,6 +328,7 @@ function Start-BridgeHttp {
   $psi.Environment["BRIDGE_MCP_HTTP_HOST"] = $BridgeHost
   $psi.Environment["BRIDGE_MCP_HTTP_PORT"] = [string]$BridgePort
   $psi.Environment["BRIDGE_MCP_HTTP_PATH"] = $McpPath
+  $psi.Environment["BRIDGE_MCP_CODE_ROOT"] = $BridgeCodeRoot
   $psi.Environment["BRIDGE_MCP_HTTP_SESSION_IDLE_MS"] = [string]$SessionIdleMs
   $psi.Environment["BRIDGE_MCP_HTTP_SOFT_SESSION_LIMIT"] = [string]$SoftSessionLimit
   $psi.Environment["BRIDGE_MCP_HTTP_CAPACITY_RECLAIM_IDLE_MS"] = [string]$CapacityReclaimIdleMs

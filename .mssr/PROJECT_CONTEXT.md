@@ -3,7 +3,7 @@
 ## Architecture
 `bridge-mcp` is the MauroPrime host/adapter runtime. It exposes local tools, project context, provider adapters, observability, watchdog/restart flow, and ChatGPT Web integration. The Bridge HTTP/MCP adapter is specifically the ChatGPT Web access path; Codex does not use that transport and is handled through MSSR/local host adapters instead. Portable MSSR owns deterministic routing, learning schemas, project-context selection primitives, and cross-host contracts; Bridge consumes `@mauroprime/mssr` and owns filesystem/runtime integration.
 
-For HTTP supervision, optional `BridgeCodeRoot` selects the package metadata and `dist/http.js` entry point. `ProjectRoot` remains the process working directory and owns relative runtime resources such as the default tunnel binary and restart request/ack files. When omitted, `BridgeCodeRoot` defaults to `ProjectRoot`. This separates helper code from the supervised runtime/data root without creating a second Bridge server.
+HTTP supervision separates `BridgeCodeRoot` (package, `dist/http.js`, and self-release audits) from `ProjectRoot` (working directory and relative runtime/data). When omitted, `BridgeCodeRoot` defaults to `ProjectRoot`; see the indexed watchdog invariant.
 
 ## Canonical ownership
 
@@ -16,7 +16,7 @@ For HTTP supervision, optional `BridgeCodeRoot` selects the package metadata and
 - Versioned release history lives under `changelogs/`; the root `CHANGELOG.md` is a compatibility entry point.
 - Packaged MSSR owns routing, lifecycle, context-selection and semantic policies; Bridge owns host integration, observation, persistence, transport and delivery. Detailed contracts stay in indexed `.mssr/knowledge/` modules and are loaded only when relevant.
 - Binary MCP resource links are scoped to stateful server sessions. The unauthenticated modern endpoint is stateless, so it returns immediate embedded attachments and rejects deferred link-only reads; see [MCP binary and image transport](../docs/MCP_BINARY_AND_IMAGE_TRANSPORT.md).
-- Dashboard analytics and the Context Director/Human Cockpit are read-only projections over canonical owners. Analytics stay isolated from the HTTP/MCP event loop; derived caches/snapshots are acceleration only, and volatile capability lists remain live-discovered rather than copied into durable instructions or memory. Human UX v2 owns the default intent-oriented read-only shell (`Inicio / Trabajo / Salud / Explorar` + global Inspector). `Trabajo` keeps current resumable work separate from retained historical observation: current Project Map may use explicit owner classification, 24 h/7 d history is only `observed`, and 30 d retained history is only `historical`; filters reuse the same bounded snapshot and never become health/lifecycle authority.
+- Dashboard/Human Cockpit are read-only projections over canonical owners. Keep analytics off the HTTP/MCP loop, caches/snapshots acceleration-only, and capabilities live-discovered. The v2 shell is `Inicio / Trabajo / Salud / Explorar` + Inspector. Current work stays distinct from `observed` (24 h/7 d) and `historical` (30 d); neither drives health/lifecycle. See indexed Human Cockpit and resume-inventory modules.
 - MSSR owns Librarian/Jev semantics; Bridge enforces authorized canonical `.mssr/` reads and exact-revision fetches. Metadata and Jev results stay opt-in, advisory and non-persistent; Bridge never crawls or mutates project truth.
 ## Project knowledge governance
 

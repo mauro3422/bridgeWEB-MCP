@@ -50,6 +50,26 @@ try {
   await fs.rm(healthyRoot, { recursive: true, force: true });
 }
 
+const projectDataRoot = await fixture({ packageVersion: "0.6.144", sourceVersion: "0.6.144", distVersion: "0.6.144", declaredMssr: "0.2.96", installedMssr: "0.2.96" });
+const bridgeCodeRoot = await fixture({ packageVersion: "0.6.151", sourceVersion: "0.6.151", distVersion: "0.6.151", declaredMssr: "0.2.101", installedMssr: "0.2.101" });
+const originalWorkingDirectory = process.cwd();
+const previousCodeRoot = process.env.BRIDGE_MCP_CODE_ROOT;
+try {
+  process.chdir(projectDataRoot);
+  process.env.BRIDGE_MCP_CODE_ROOT = bridgeCodeRoot;
+  const splitRoot = await observeBridgeReleaseConsistency({ runtimeVersion: "0.6.151", boundary: "post-restart" });
+  assert.equal(splitRoot.root, bridgeCodeRoot, "release observations must read the explicitly configured Bridge code root");
+  assert.equal(splitRoot.projection.level, "ok", JSON.stringify(splitRoot.projection));
+  assert.equal(splitRoot.observations.find((item) => item.key === "bridge.release-version" && item.authority === "canonical")?.value, "0.6.151");
+  assert.equal(splitRoot.observations.find((item) => item.key === "bridge.mssr-package-version" && item.authority === "canonical")?.value, "0.2.101");
+} finally {
+  process.chdir(originalWorkingDirectory);
+  if (previousCodeRoot === undefined) delete process.env.BRIDGE_MCP_CODE_ROOT;
+  else process.env.BRIDGE_MCP_CODE_ROOT = previousCodeRoot;
+  await fs.rm(projectDataRoot, { recursive: true, force: true });
+  await fs.rm(bridgeCodeRoot, { recursive: true, force: true });
+}
+
 const staleRuntimeRoot = await fixture({ distVersion: "0.6.102" });
 try {
   const stale = await observeBridgeReleaseConsistency({ root: staleRuntimeRoot, runtimeVersion: "0.6.102", boundary: "post-restart" });

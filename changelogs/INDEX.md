@@ -4,6 +4,7 @@ Versioned release notes are the canonical change-history surface for MSSR debugg
 
 ## Current releases
 
+- [0.6.152](0.6.152.md) - Keep BridgeCodeRoot release authority separate from ProjectRoot runtime/data ownership.
 - [0.6.151](0.6.151.md) - Persist bounded, secret-safe watchdog process lifecycle and recovery evidence for Bridge HTTP and the tunnel.
 
 - [0.6.150](0.6.150.md) - Correct the documented lineage of the HTTP Streamable framing recovery.

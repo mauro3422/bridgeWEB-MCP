@@ -217,9 +217,10 @@ export async function collectProjectSituationSnapshot(options: {
   const collectRepository = options.dependencies?.collectRepository
     ?? (async (projectRoot: string) => collectRepositoryContextMessages({ projectRoot, maxObservations: 32 }));
   const bridgeRoot = path.resolve(process.cwd());
+  const bridgeCodeRoot = path.resolve(process.env.BRIDGE_MCP_CODE_ROOT?.trim() || bridgeRoot);
   const collectSemanticClaims = options.dependencies?.collectSemanticClaims
     ?? (async (projectRoot: string) => path.resolve(projectRoot) === bridgeRoot
-      ? collectBridgeReleaseSemanticSituationObservations(projectRoot)
+      ? collectBridgeReleaseSemanticSituationObservations(bridgeCodeRoot)
       : []);
   const repos = await discover(workspaceRoot, maxDepth);
   const projects: ProjectSituationItem[] = [];

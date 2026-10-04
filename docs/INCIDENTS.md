@@ -1937,3 +1937,19 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Corrección verificada y activada:** Bridge 0.6.151 agrega eventos JSONL de lifecycle con campos allowlisted y sin command lines/argumentos/salida; preserva observación, exit code conocido, uptime, stop/confirmación, recovery id y PID sustituto. `-DryRun` no escribe estos eventos. La primera prueba reveló que el patrón no reconocía Node bajo `C:\Program Files\nodejs`; el preflight real encontró además que el Bridge actual aparece como `"node" "D:\Dev\bridge-mcp\dist\http.js"`. El patrón y la regresión cubren ambas formas, `.js`/`.ts` y el rechazo de Python. El lifecycle test reproduce el comando bare `node`; la prueba dry-run y lifecycle, `npm run check` y `npm run build` pasan. Un `-DryRun -Once` adoptó Bridge PID 23140 y túnel PID 2588 sin cambiar procesos ni escribir ACK/eventos. Después se recargó únicamente el supervisor: los dos eventos reales `process-adopted` confirman las mismas identidades y la continuidad de ambos servicios.
 
 **Límite y seguimiento:** El `.cmd` de Startup todavía abrirá una consola visible en futuros logons; el supervisor actual PID 14888 se lanzó oculto para esta recarga controlada. La instrumentación puede explicar salidas/restarts futuros, pero no recuperar retrospectivamente la causa del cierre anterior. No atribuir el cierre del proceso de anoche hasta que exista evidencia histórica más directa.
+
+**Revalidación 2026-10-03:** La copia activa de `BridgeMCP-Watchdog.cmd` fue leída y su SHA-256 es `703DAD3F342310D50C9FB8272F384CA1E1BB3CF94530067EC6B196BC0CD819FD`; incluye `-WindowStyle Hidden` y apunta al helper candidato con `ProjectRoot=D:\Dev\bridge-mcp` y `BridgeCodeRoot=D:\Dev\bridge-mcp-cohort-reconciliation`. La nota anterior sobre una consola visible quedó supersedida. El `.bak` inventariado apunta al helper legacy ausente y no hay evidencia de que se haya ejecutado.
+
+## 2026-10-03 — Release consistency used ProjectRoot instead of BridgeCodeRoot
+
+**Estado:** Causa confirmada y corregida en Bridge 0.6.152. El runtime/datos permanecen en `D:\Dev\bridge-mcp`; el servidor HTTP de prueba corría desde el worktree candidato `D:\Dev\bridge-mcp-cohort-reconciliation`.
+
+**Síntoma:** Después de adoptar HTTP 0.6.151, `/readyz` estaba listo y `/status` identificaba 0.6.151, pero el observador C2c abrió una alerta `replica-mismatch` / `runtime-state-mismatch`: esperaba 0.6.144 del `package.json` de ProjectRoot y observaba 0.6.151 en el runtime.
+
+**Causa:** El watchdog ya elegía paquete y entrypoint con `BridgeCodeRoot` y mantenía `WorkingDirectory=ProjectRoot`, pero no transfería la raíz de código al proceso HTTP. El observador de release y las claims propias de Project Situation usaban `process.cwd()` para package, source, generated e installed; por eso confundían el propietario de datos con el binario activo.
+
+**Corrección:** El watchdog pasa la raíz resuelta como `BRIDGE_MCP_CODE_ROOT`. Release consistency toma esa raíz para sus archivos de versión, y Project Situation aplica esas claims al proyecto Bridge identificado por ProjectRoot mientras las carga desde BridgeCodeRoot. El cwd, persistencia, logs, descubrimiento de proyectos, túnel y restart files permanecen en ProjectRoot.
+
+**Regresión:** Se agregaron fixtures donde el package de ProjectRoot declara 0.6.144/0.2.96 y BridgeCodeRoot declara 0.6.151/0.2.101, además de una prueba Project Situation con roots distintos. Deben producir una evaluación `ok` sin mismatches cuando runtime coincide con BridgeCodeRoot.
+
+**Verificación inicial:** El primer Bridge 0.6.151 quedó listo y el túnel existente PID 2588 permaneció intacto. La transición inicial produjo el mismatch descrito, por lo que 0.6.151 no se declara como adopción final hasta activar y verificar la corrección 0.6.152.

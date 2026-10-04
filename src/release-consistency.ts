@@ -33,6 +33,11 @@ function bounded(value: unknown, max = 160): string | null {
   return typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null;
 }
 
+function resolveBridgeCodeRoot(root?: string): string {
+  const configuredRoot = process.env.BRIDGE_MCP_CODE_ROOT?.trim();
+  return path.resolve(root ?? configuredRoot ?? process.cwd());
+}
+
 async function readText(filePath: string): Promise<{ state: "observed"; text: string } | { state: "unavailable" }> {
   try {
     return { state: "observed", text: await fs.readFile(filePath, "utf8") };
@@ -95,10 +100,10 @@ function unavailable(
 }
 
 export async function collectBridgeReleaseConsistencyObservations(
-  root = process.cwd(),
+  root = resolveBridgeCodeRoot(),
   runtimeVersion = SERVER_VERSION,
 ): Promise<MssrConsistencyObservation[]> {
-  const resolvedRoot = path.resolve(root);
+  const resolvedRoot = resolveBridgeCodeRoot(root);
   const packagePath = path.join(resolvedRoot, "package.json");
   const sourceConfigPath = path.join(resolvedRoot, "src", "config.ts");
   const distConfigPath = path.join(resolvedRoot, "dist", "config.js");
@@ -150,7 +155,7 @@ function semanticClaimSourceForObservation(observation: MssrConsistencyObservati
 }
 
 export async function collectBridgeReleaseSemanticSituationObservations(
-  root = process.cwd(),
+  root = resolveBridgeCodeRoot(),
   runtimeVersion = SERVER_VERSION,
 ): Promise<MssrSituationObservation[]> {
   const observations = await collectBridgeReleaseConsistencyObservations(root, runtimeVersion);
@@ -173,7 +178,7 @@ export async function observeBridgeReleaseConsistency(options: {
   boundary?: MssrConsistencyBoundary;
   now?: Date;
 } = {}): Promise<BridgeReleaseConsistencySnapshot> {
-  const root = path.resolve(options.root ?? process.cwd());
+  const root = resolveBridgeCodeRoot(options.root);
   const boundary = options.boundary ?? "ordinary";
   const observations = await collectBridgeReleaseConsistencyObservations(root, options.runtimeVersion ?? SERVER_VERSION);
   const projection = evaluateMssrConsistencyDecisionSupport({ boundary, observations });
@@ -201,7 +206,7 @@ export function startReleaseConsistencyScheduler(options: {
   const tracker = createMssrConsistencyNoticeTracker();
   let running = false;
   let firstSuccessfulObservation = true;
-  const root = path.resolve(options.root ?? process.cwd());
+  const root = resolveBridgeCodeRoot(options.root);
 
   const observe = options.observe ?? ((boundary: MssrConsistencyBoundary) => observeBridgeReleaseConsistency({
     root,
