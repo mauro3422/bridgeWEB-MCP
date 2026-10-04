@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { APIConnectionError, APIError, APIUserAbortError, APITimeoutError, TypeSafeError } from "@typesafe-ai/sdk";
 import {
   buildMssrEvidenceAtom,
   buildMssrMarkdownDocumentSurface,
@@ -542,6 +543,33 @@ try {
   await provider.executeSystemOne({ state: {}, questions: { q: { kind: "noul", prompt: "test" } } });
   assert.equal(suppliedApiKey, "test-only-credential");
   assert.ok(credentialBytes.every((byte) => byte === 0), "credential bytes must be cleared after the call");
+
+  const providerErrorSecret = "synthetic-secret-error-body-must-not-escape";
+  const safeErrorCases = [
+    { error: new APITimeoutError(30_000, { cause: new Error(providerErrorSecret) }), message: "Jev provider request timed out; no decision was produced." },
+    { error: new APIConnectionError(providerErrorSecret), message: "Jev provider connection or response delivery failed; no decision was produced." },
+    { error: new APIUserAbortError(providerErrorSecret), message: "Jev provider request was cancelled; no decision was produced." },
+    { error: new APIError(401, { error: providerErrorSecret }, new Headers(), providerErrorSecret), message: "Jev provider request failed (HTTP 401); response content was suppressed." },
+    { error: new TypeSafeError(providerErrorSecret), message: "Jev SDK rejected its request configuration; raw details were suppressed." },
+    { error: new Error(providerErrorSecret), message: "Jev provider request failed without a classified response; raw details were suppressed." },
+  ];
+  for (const [index, testCase] of safeErrorCases.entries()) {
+    const failedCredentialBytes = Buffer.from(`test-only-failure-credential-${index}`, "utf16le");
+    const failedProvider = createMssrJevBridgeDecisionProvider({
+      readCredentialBytes: async () => failedCredentialBytes,
+      executeSystemOne: async () => { throw testCase.error; },
+    });
+    await assert.rejects(
+      failedProvider.executeSystemOne({ state: {}, questions: { q: { kind: "noul", prompt: "test" } } }),
+      (error) => {
+        assert.equal(error.message, testCase.message);
+        assert.equal(error.message.includes(providerErrorSecret), false);
+        assert.equal(error.cause, undefined);
+        return true;
+      },
+    );
+    assert.ok(failedCredentialBytes.every((byte) => byte === 0), "provider failure must clear credential bytes");
+  }
 
   const previousTypesafeBaseUrl = process.env.TYPESAFE_BASE_URL;
   const originalFetch = globalThis.fetch;

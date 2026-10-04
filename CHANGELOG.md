@@ -2,7 +2,7 @@
 
 The canonical Bridge release history now lives under [`changelogs/`](changelogs/INDEX.md).
 
-- Current source release: [0.6.153](changelogs/0.6.153.md) (keep data-backed verification on ProjectRoot and refresh tool docs)
+- Current source release: [0.6.154](changelogs/0.6.154.md) (use system trust roots for managed Jev provider calls and sanitize provider errors)
 - Version index: [changelogs/INDEX.md](changelogs/INDEX.md)
 - Historical monolithic archive: [changelogs/LEGACY.md](changelogs/LEGACY.md)
 

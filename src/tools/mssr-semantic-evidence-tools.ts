@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { TextDecoder } from "node:util";
-import { TypeSafeClient, choice, noul, type Questions } from "@typesafe-ai/sdk";
+import { APIConnectionError, APIUserAbortError, APITimeoutError, TypeSafeClient, TypeSafeError, choice, noul, type Questions } from "@typesafe-ai/sdk";
 import {
   MSSR_PROJECT_CONTROL_FILES,
   MSSR_PROJECT_HOME_DIR,
@@ -472,11 +472,23 @@ export type MssrJevBridgeProviderOptions = {
 export const MSSR_PROJECT_CONTEXT_LIBRARIAN_SIDECAR_METADATA_MODE = "project-context-librarian-sidecar" as const;
 
 function safeJevError(error: unknown): Error {
+  if (error instanceof APITimeoutError) {
+    return new Error("Jev provider request timed out; no decision was produced.");
+  }
+  if (error instanceof APIConnectionError) {
+    return new Error("Jev provider connection or response delivery failed; no decision was produced.");
+  }
+  if (error instanceof APIUserAbortError) {
+    return new Error("Jev provider request was cancelled; no decision was produced.");
+  }
   const status = error && typeof error === "object" && "status" in error ? (error as { status?: unknown }).status : undefined;
   if (typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599) {
     return new Error(`Jev provider request failed (HTTP ${status}); response content was suppressed.`);
   }
-  return new Error("Jev provider request failed; check provider availability and Windows Credential Manager configuration.");
+  if (error instanceof TypeSafeError) {
+    return new Error("Jev SDK rejected its request configuration; raw details were suppressed.");
+  }
+  return new Error("Jev provider request failed without a classified response; raw details were suppressed.");
 }
 
 async function readWindowsCredentialBytes(): Promise<Buffer | null> {

@@ -9,6 +9,7 @@ $bridgeExitRoot = Join-Path $tempBase ("bridge-watchdog-bridge-exit-" + [guid]::
 $tunnelExitRoot = Join-Path $tempBase ("bridge-watchdog-tunnel-exit-" + [guid]::NewGuid().ToString("N"))
 $bridgeExitProcess = $null
 $tunnelFixtureProcess = $null
+$previousCaMarker = [Environment]::GetEnvironmentVariable("BRIDGE_WATCHDOG_TEST_CA_MARKER", "Process")
 
 foreach ($root in @($bridgeExitRoot, $tunnelExitRoot)) {
   $resolvedRoot = [System.IO.Path]::GetFullPath($root)
@@ -104,7 +105,12 @@ try {
   Assert-BridgeProcessIdentityPattern
   New-TestRoot -Root $bridgeExitRoot -Version "0.0.0-watchdog-bridge-exit-test"
   $bridgeExitPort = Get-FreeLoopbackPort
-  Set-Content -LiteralPath (Join-Path $bridgeExitRoot "dist\http.js") -Value 'setTimeout(() => process.exit(23), 25);' -Encoding UTF8
+  $caMarker = Join-Path $bridgeExitRoot "node-system-ca-mode.txt"
+  Set-Content -LiteralPath (Join-Path $bridgeExitRoot "dist\http.js") -Value @'
+const fs = require("node:fs");
+fs.writeFileSync(process.env.BRIDGE_WATCHDOG_TEST_CA_MARKER, process.env.NODE_USE_SYSTEM_CA || "unset");
+setTimeout(() => process.exit(23), 25);
+'@ -Encoding UTF8
 
   $bridgeArgs = @(
     "-ProjectRoot", $bridgeExitRoot,
@@ -121,8 +127,11 @@ try {
     "-CheckIntervalSeconds", "1",
     "-NoTunnel", "-Once", "-AllowDuplicate"
   )
+  [Environment]::SetEnvironmentVariable("BRIDGE_WATCHDOG_TEST_CA_MARKER", $caMarker, "Process")
   & $powershellPath -NoProfile -ExecutionPolicy Bypass -File $watchdogPath @bridgeArgs
   if ($LASTEXITCODE -ne 0) { throw "Bridge exit scenario watchdog failed with code $LASTEXITCODE" }
+  if (-not (Test-Path -LiteralPath $caMarker)) { throw "Watchdog bridge fixture did not write the CA-mode readback" }
+  if ((Get-Content -LiteralPath $caMarker -Raw).Trim() -ne "1") { throw "Watchdog did not enable the Node system CA store for its HTTP child" }
 
   $bridgeEvents = Read-LifecycleEvents -Root $bridgeExitRoot
   $bridgeRecovery = $bridgeEvents | Where-Object { $_.component -eq "bridge-http" -and $_.eventType -eq "process-recovery" } | Select-Object -First 1
@@ -208,6 +217,7 @@ http.createServer((req, res) => {
   } | ConvertTo-Json -Compress)
 }
 finally {
+  [Environment]::SetEnvironmentVariable("BRIDGE_WATCHDOG_TEST_CA_MARKER", $previousCaMarker, "Process")
   foreach ($process in @($bridgeFixtureProcess)) {
     if ($process) {
       try {

@@ -337,6 +337,9 @@ function Start-BridgeHttp {
   $psi.Environment["BRIDGE_MCP_HTTP_CLEANUP_INTERVAL_MS"] = [string]$CleanupIntervalMs
   $psi.Environment["BRIDGE_MCP_HTTP_MAX_SESSIONS"] = [string]$MaxSessions
   $psi.Environment["BRIDGE_MCP_HTTP_MAX_BODY_BYTES"] = [string]$MaxBodyBytes
+  # Match the Windows system trust store used by the browser and PowerShell.
+  # This adds system roots while retaining normal TLS certificate validation.
+  $psi.Environment["NODE_USE_SYSTEM_CA"] = "1"
   # The watchdog can outlive changes made to the user's environment block.
   # Refresh optional secrets from the user-scoped environment before spawning
   # the HTTP child, without persisting or logging their values.
