@@ -1,5 +1,9 @@
 # Bridge project state
 
+## Candidate recovery — 0.6.155 / MSSR 0.2.103 (2026-10-04)
+
+An isolated branch `codex/jev-mssr-0.2.103-adoption-20261004` restores `mssr_librarian_evidence_pack`, a tool previously introduced in Bridge 0.6.148 but absent from the later 0.6.154 lineage. It consumes the exact MSSR 0.2.103 release artifact (SHA-256 `8191881b18a0e4a84b87b59750e6587d60be77e94893b55a52c740fb9e7c0fd5`). Focused semantic-evidence tests, full regressions, 186-tool registry, generated docs, skill-routing audit, and type checks pass. The canonical ownership summary now describes its bounded citation-pack role. Project-change consistency returns `publishReady=true`; existing Project Health WATCH findings (state size, 28 modules, and budget pressure) remain informational. Live Bridge stays 0.6.153; no restart or activation occurred. Candidate snapshot `20261004073257_f24b636c-dc1` preserves the pre-change state.
+
 ## Current release
 Bridge 0.6.153 is active from `codex/bridge-dirty-cohort-reconciliation-20261003`. The live HTTP process is PID 25952, boot `ad26f0d1-9b72-45c3-aefb-4a13a1e3956b`, ready on port 3001; it serves code from `D:\Dev\bridge-mcp-cohort-reconciliation` and keeps runtime/data under `D:\Dev\bridge-mcp`. Tunnel PID 2588 remains ready on 8081; the live catalog has 185 tools and no restart is pending.
 
