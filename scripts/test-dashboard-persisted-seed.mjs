@@ -57,6 +57,7 @@ const child = spawn(process.execPath, [path.join(root, "dist", "http.js")], {
     BRIDGE_MCP_PROJECT_SITUATION_PATH: path.join(metricsDir, "project-situation.json"),
     BRIDGE_MCP_DASHBOARD_SNAPSHOT_STATE: cachePath,
     BRIDGE_MCP_DASHBOARD_WORKER_TIMEOUT_MS: "1",
+    BRIDGE_MCP_TEST_OBSERVABILITY_STORAGE_INIT_DELAY_MS: "5000",
   },
 });
 let stderr = "";

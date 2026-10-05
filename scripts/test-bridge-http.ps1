@@ -1,7 +1,8 @@
 param(
   [string]$BaseUrl = "http://127.0.0.1:3001",
   [string]$McpPath = "/mcp",
-  [string]$RuntimeDataRoot = ""
+  [string]$RuntimeDataRoot = "",
+  [string]$ExpectedServerVersion = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -81,6 +82,9 @@ Invoke-Check "readyz" {
 Invoke-Check "status" {
   $status = Invoke-RestMethod "$BaseUrl/status"
   if ($status.server.name -ne "bridge-mcp") { throw "Unexpected server name: $($status.server.name)" }
+  if (-not [string]::IsNullOrWhiteSpace($ExpectedServerVersion) -and [string]$status.server.version -ne $ExpectedServerVersion) {
+    throw "HTTP smoke target version mismatch: expected $ExpectedServerVersion, got $($status.server.version); refusing to send test telemetry."
+  }
   if ($status.transport -ne "streamable-http-dual-era") { throw "Unexpected transport: $($status.transport)" }
   if ($status.protocols.legacy.sessionful -ne $true) { throw "Legacy MCP route must remain sessionful" }
   if ($status.protocols.modern.revision -ne "2026-07-28") { throw "Unexpected modern MCP revision: $($status.protocols.modern.revision)" }

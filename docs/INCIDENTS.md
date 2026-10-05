@@ -19,6 +19,26 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-10-05 — Cold HTTP dashboard worker opened observability SQLite before schema creation
+
+**Estado:** Corregido y cubierto en la candidata Bridge 0.6.158; activación en el runtime HTTP principal pendiente del handoff controlado.
+
+**Capa/owner:** Inicialización de las bases compartidas de métricas y MSSR (`src/metrics.ts`, `src/mssr-observatory.ts`, `src/http.ts`) y el worker de solo lectura del dashboard.
+
+**Síntoma observable:** En un runtime nuevo y aislado, el primer `GET /api/dashboard/snapshot` fallaba con HTTP 500 (`no such table: mssr_events`; tras crear esa tabla por separado, `no such table: tool_calls`). Las rutas `/api/metrics/status` y `/api/mssr/summary` ocultaban la carrera porque inicializaban sus propios esquemas antes de que el dashboard se consultara.
+
+**Reproducción/evidencia:** `scripts/test-observability-http-liveness.mjs` ahora consulta el snapshot antes de cualquier otra ruta. Falló antes de la corrección y pasa con una base vacía después de inicializar ambas tablas en el host. La misma prueba drena 64 escrituras, completa un checkpoint WAL y atiende seis llamadas MCP sintéticas concurrentes sin stalls del event loop.
+
+**Causa demostrada:** El worker del dashboard se inicia en modo read-only y no puede crear tablas ausentes. La primera corrección movió el DDL al host antes de `listen`, pero la revisión de arquitectura detectó que eso hacía depender readiness/primer paint del coste SQLite y violaba `.mssr/PROJECT_CONTEXT.md`.
+
+**Corrección:** Un hijo de bootstrap efímero crea ambos esquemas después de que HTTP empieza a escuchar; el event loop principal no espera DDL. El worker del dashboard y todas las rutas HTTP respaldadas por SQLite esperan el mismo resultado; MCP tampoco despacha mientras el esquema no esté listo. El host conserva liveness y puede servir el snapshot persistido durante el bootstrap. Un lock SQLite reconocido recibe un solo reintento tras 200 ms. Si la inicialización falla de forma persistente, health sigue vivo, pero readiness/status y las rutas DB/MCP fallan cerrados con 503; el snapshot last-good continúa disponible. Al apagar HTTP, el bootstrap pendiente también se detiene.
+
+**Regresión/verificación:** la regresión de liveness retarda cinco segundos el bootstrap, solicita primero dashboard y luego varias rutas HTTP/MCP concurrentes, exige liveness/readiness rápida y comprueba que las rutas DB esperan el esquema sin causar stalls. La prueba de persisted seed valida primer paint stale inmediato. `test-observability-bootstrap-retry.mjs` induce un lock real sobre SQLite temporal, confirma exactamente un reintento y una consulta posterior 200; `test-observability-bootstrap-failure.mjs` confirma readiness/MCP/metrics 503 y snapshot stale tras fallo persistente. `npm run verify:all` pasó con `failedRequired=0` usando Bridge 0.6.158 aislado en 3018 y runtime externo v6; recibo y SHA del transcript están en el changelog `.158`. El HTTP productivo `.155` y el túnel `8081` permanecieron intactos.
+
+**Seguimiento:** completar el cambio controlado de código del runtime principal a `.158`, verificar que conserva `ProjectRoot=D:\Dev\bridge-mcp` y confirmar readiness/MCP/túnel antes de cerrar la adopción.
+
+---
+
 ## 2026-10-03 — Streamable HTTP responses had invalid chunk framing
 
 **Estado:** Corregido y cubierto en el candidato Bridge 0.6.147; no publicado ni adoptado por el runtime live.

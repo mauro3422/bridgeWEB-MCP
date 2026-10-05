@@ -1,6 +1,6 @@
 # MSSR Librarian and Jev in Bridge
 
-Bridge integrates the Librarian and semantic-evidence workflow through six MCP tools backed by the versioned `@mauroprime/mssr` package. This 0.6.156 candidate adopts the locally verified MSSR 0.2.104 artifact (SHA-256 `714e9d0997e4bc92c2981e1aeb3e5b8a98beef91efc04f82e92d001748a7e4ca`). MSSR owns deterministic retrieval, revision-bound handles, EvidenceAtom validation, Jev selection/relation contracts, reversible synthesis previews, exact-heading projection, and exact-citation evidence-pack construction. Bridge owns project-root authorization, bounded canonical manifest and Markdown reads, source/manifest freshness checks, provider transport, and Windows Credential Manager access. The live runtime has not adopted this candidate.
+Bridge integrates the Librarian and semantic-evidence workflow through six MCP tools backed by the versioned `@mauroprime/mssr` package. The isolated 0.6.158 candidate adopts the locally release-gated MSSR 0.2.105 artifact (SHA-256 `96aba5308ed126da12da6d9602c90429d174905a0a7422133a2630043576ec3b`). MSSR owns deterministic retrieval, revision-bound handles, EvidenceAtom validation, Jev selection/relation contracts, reversible synthesis previews, exact-heading projection, exact-citation evidence-pack construction, and fetchable-range tie ordering. Bridge owns project-root authorization, bounded canonical manifest and Markdown reads, source/manifest freshness checks, provider transport, and Windows Credential Manager access. The live runtime remains on 0.6.155 until the isolated candidate passes its gates and is deliberately adopted.
 
 For a capability-by-capability inventory of 100 current, partial, and proposed decision cases, see [MSSR_JEV_USE_CASE_CATALOG.md](MSSR_JEV_USE_CASE_CATALOG.md). The catalog is an evaluation roadmap, not an implementation claim.
 
@@ -67,7 +67,7 @@ The isolated 0.6.155 candidate upgrades to the exact release-gated MSSR 0.2.103 
 
 ### Isolated Bridge 0.6.156 Choice-distribution preservation (2026-10-04)
 
-Bridge 0.6.156 imports the exact release-gated MSSR 0.2.104 tarball (SHA-256 `714e9d0997e4bc92c2981e1aeb3e5b8a98beef91efc04f82e92d001748a7e4ca`). Its TypeSafe adapter now carries the provider's Choice `probabilities` map unchanged into MSSR's strict response validation. The Librarian result exposes the offered option IDs and returned map for each call, or an explicit null when a map is absent. Regression fixtures exercise both the SDK adapter and the full selection tool without making a live provider call. This preserves calibration evidence; it does not calibrate confidence or define a threshold. Verification and project consistency gates are recorded in the 0.6.156 changelog. Live Bridge remains 0.6.153; this isolated candidate is not activated.
+Bridge 0.6.156 imports the exact release-gated MSSR 0.2.104 tarball (SHA-256 `714e9d0997e4bc92c2981e1aeb3e5b8a98beef91efc04f82e92d001748a7e4ca`). Its TypeSafe adapter carried the provider's Choice `probabilities` map unchanged into MSSR's strict response validation, but the 0.6.156 Librarian handler did not return the per-call Choice details to MCP callers. Bridge 0.6.158 closes that result-shape gap: `choiceCalls` now exposes each bounded call's offered option IDs, selected ID, raw confidence, and original map, or explicit `null` when absent. Regression fixtures exercise the full selection tool without making a live provider call. This preserves calibration evidence; it does not calibrate confidence or define a threshold. Verification and project consistency gates are recorded in the 0.6.156 and 0.6.158 changelogs. The live Bridge remains 0.6.155 until candidate gates and controlled adoption are complete.
 
 ## Decision-only models and external evidence
 
@@ -87,7 +87,7 @@ Use deterministic cache/storage tools and explicit owner, activity, freshness, a
 
 ## Source and package ownership
 
-Portable semantic behavior is versioned in `D:\Dev\mssr`. This Bridge candidate consumes the exact local MSSR 0.2.104 release-gate tarball in `vendor/` (SHA-256 `714e9d0997e4bc92c2981e1aeb3e5b8a98beef91efc04f82e92d001748a7e4ca`); source tarball and vendored bytes must match before runtime adoption. `TOOLS.md` is generated from `src/tool-registry.ts` and the module schemas. The live Bridge remains 0.6.153; 0.6.156 is an isolated, unadopted candidate.
+Portable semantic behavior is versioned in `D:\Dev\mssr`. This Bridge candidate consumes the exact local MSSR 0.2.105 release-gate tarball in `vendor/` (SHA-256 `96aba5308ed126da12da6d9602c90429d174905a0a7422133a2630043576ec3b`); source tarball and vendored bytes must match before runtime adoption. `TOOLS.md` is generated from `src/tool-registry.ts` and the module schemas. The live Bridge remains 0.6.155 pending candidate verification and controlled adoption.
 
 ## Host adapter prototype boundary
 

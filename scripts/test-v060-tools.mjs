@@ -355,6 +355,15 @@ try {
   const verifyAllSource = fs.readFileSync(path.join(process.cwd(), 'scripts', 'verify-all.ps1'), 'utf8');
   const httpSmokeSource = fs.readFileSync(path.join(process.cwd(), 'scripts', 'test-bridge-http.ps1'), 'utf8');
   if (!verifyAllSource.includes('$RuntimeDataRoot = [string]$env:BRIDGE_MCP_PROJECT_ROOT') || !verifyAllSource.includes('-RuntimeDataRoot $RuntimeDataRoot') || !httpSmokeSource.includes('$RuntimeDataRoot = [string]$env:BRIDGE_MCP_PROJECT_ROOT') || !httpSmokeSource.includes('Join-Path $RuntimeDataRoot') || !httpSmokeSource.includes('mssr-ingest.token')) throw new Error('verify-all HTTP smoke must resolve runtime tokens from ProjectRoot when code and data roots differ');
+  const bridgeBaseUrlDefaultIndex = verifyAllSource.indexOf('[string]$BridgeBaseUrl = ""');
+  const bridgeBaseUrlEnvIndex = verifyAllSource.indexOf('$BridgeBaseUrl = [string]$env:BRIDGE_VERIFY_BASE_URL');
+  const bridgeUriParseIndex = verifyAllSource.indexOf('$bridgeUri = [Uri]$BridgeBaseUrl');
+  if (bridgeBaseUrlDefaultIndex < 0 || bridgeBaseUrlEnvIndex < 0 || bridgeUriParseIndex < 0 || bridgeBaseUrlEnvIndex > bridgeUriParseIndex) throw new Error('verify-all must resolve the isolated BRIDGE_VERIFY_BASE_URL before parsing or deriving MCP target URLs');
+  const expectedVersionGuardIndex = httpSmokeSource.indexOf('HTTP smoke target version mismatch: expected');
+  const firstHttpPostIndex = httpSmokeSource.indexOf('-Method Post');
+  if (expectedVersionGuardIndex < 0 || firstHttpPostIndex < 0 || expectedVersionGuardIndex > firstHttpPostIndex || !verifyAllSource.includes('-ExpectedServerVersion $ExpectedServerVersion')) throw new Error('HTTP smoke must reject the wrong Bridge version before any POST and verify-all must pass the expected version');
+  const verifyMcpCallSource = fs.readFileSync(path.join(process.cwd(), 'scripts', 'verify-mcp-call.mjs'), 'utf8');
+  if (!verifyMcpCallSource.includes('BRIDGE_MCP_VERIFY_BASE') || !verifyAllSource.includes('$env:BRIDGE_MCP_VERIFY_BASE = $mcpBaseUrl')) throw new Error('verify-all read-only MCP checks must use the same isolated Bridge base URL');
   const processDiagnosticsPath = path.join(process.cwd(), 'scripts', 'bridge-process-diagnostics.ps1');
   const processDiagnosticsSource = fs.readFileSync(processDiagnosticsPath, 'utf8');
   if (!watchdogSource.includes('. $processDiagnosticsPath') || !watchdogSource.includes('processDiagnostics = $processDiagnostics') || !watchdogSource.includes('processExitCode = $ProcessExitCode') || !watchdogSource.includes('Get-BridgeProcessDiagnostics -ProcessId $ProcessId -Port $BridgePort') || !watchdogSource.includes('-ProcessExitCode $bridgeProcessExitCode')) throw new Error('watchdog external process diagnostics wiring regression');

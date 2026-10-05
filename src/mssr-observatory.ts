@@ -611,6 +611,14 @@ function getDb(): DatabaseSync | null {
   return db;
 }
 
+/**
+ * Create the observatory schema in the writable host process before any
+ * read-only dashboard worker can open the same database on a cold start.
+ */
+export function initializeMssrObservatoryStorage(): void {
+  getDb();
+}
+
 function redactText(value: string, maxChars = 400): string {
   return value
     .replace(/sk-[A-Za-z0-9_-]{12,}/g, "sk-REDACTED")

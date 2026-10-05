@@ -60,6 +60,7 @@ const HTTP_HEADERS_TIMEOUT_MS = Math.max(
 
 let ready = false;
 let closing = false;
+let observabilityStorageState: "not-started" | "initializing" | "ready" | "failed" | "stopped" = "not-started";
 let transportsCreating = 0;
 let legacyProtocolRequests = 0;
 let modernProtocolRequests = 0;
@@ -78,6 +79,8 @@ let lastHttpClientErrorAt: string | null = null;
 let capacityAdmissionTail: Promise<void> = Promise.resolve();
 let dashboardSnapshotCache: { expiresAtMs: number; buildMs: number; value: Record<string, unknown> } | null = null;
 let dashboardSnapshotInFlight: Promise<Record<string, unknown>> | null = null;
+let dashboardStorageInitialization: Promise<void> | null = null;
+let dashboardStorageBootstrapProcess: ChildProcess | null = null;
 let dashboardWorkerProcess: ChildProcess | null = null;
 let dashboardWorkerSequence = 0;
 const dashboardWorkerRequests = new Map<string, {
@@ -258,8 +261,9 @@ function getStatus() {
     host: config.host,
     port: config.port,
     allowRemote: config.allowRemote,
-    ready,
+    ready: isHttpReady(),
     closing,
+    observabilityStorage: { state: observabilityStorageState },
     sessions: sessions.size,
     activeSessions,
     idleSessions: sessions.size - activeSessions,
@@ -348,6 +352,81 @@ function stopDashboardWorker(error?: Error) {
   if (!child.killed) child.kill();
 }
 
+function isHttpReady(): boolean {
+  return ready && !closing && observabilityStorageState !== "failed";
+}
+
+function startDashboardStorageInitialization(): Promise<void> {
+  const workerPath = fileURLToPath(new URL("./observability-storage-bootstrap.js", import.meta.url));
+  const env = { ...process.env };
+  delete env.BRIDGE_MCP_METRICS_READONLY;
+
+  return new Promise((resolve, reject) => {
+    const child = fork(workerPath, [], {
+      stdio: ["ignore", "ignore", "ignore", "ipc"],
+      execArgv: process.execArgv.filter((arg) => arg !== "--input-type=module" && !arg.startsWith("--input-type=")),
+      env,
+    });
+    dashboardStorageBootstrapProcess = child;
+    let resultOk = false;
+    let resultError: string | undefined;
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (!child.killed) child.kill();
+      finish(new Error("observability storage bootstrap exceeded 30000ms"));
+    }, 30_000);
+    timeout.unref();
+
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (error) reject(error);
+      else resolve();
+    };
+
+    child.on("message", (message: unknown) => {
+      if (!message || typeof message !== "object") return;
+      const payload = message as Record<string, unknown>;
+      if (payload.type !== "observability-storage-initialized") return;
+      resultOk = payload.ok === true;
+      resultError = typeof payload.error === "string" ? payload.error.slice(0, 1_000) : undefined;
+    });
+    child.once("error", (error) => finish(error));
+    child.once("exit", (code, signal) => {
+      if (dashboardStorageBootstrapProcess === child) dashboardStorageBootstrapProcess = null;
+      if (code === 0 && resultOk) {
+        finish();
+        return;
+      }
+      const detail = resultError ? `: ${resultError}` : "";
+      finish(new Error(`observability storage bootstrap exited (code ${code ?? "null"}, signal ${signal ?? "none"})${detail}`));
+    });
+  });
+}
+
+async function initializeObservabilityStorage(): Promise<void> {
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      await startDashboardStorageInitialization();
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempt >= 2 || !/(?:sqlite_busy|database is (?:busy|locked)|database table is locked)/i.test(message) || closing) {
+        throw error;
+      }
+      log("warn", "observability storage bootstrap hit transient SQLite contention; retrying once", { attempt });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
+}
+
+function stopDashboardStorageBootstrap() {
+  const child = dashboardStorageBootstrapProcess;
+  dashboardStorageBootstrapProcess = null;
+  if (child && !child.killed) child.kill();
+}
+
 function ensureDashboardWorkerProcess(): ChildProcess {
   if (dashboardWorkerProcess && dashboardWorkerProcess.connected && dashboardWorkerProcess.exitCode === null && !dashboardWorkerProcess.killed) {
     return dashboardWorkerProcess;
@@ -385,6 +464,27 @@ function ensureDashboardWorkerProcess(): ChildProcess {
 }
 
 function getDashboardWorkerSnapshot(): Promise<Record<string, unknown>> {
+  if (!dashboardStorageInitialization) {
+    return Promise.reject(new Error("observability storage bootstrap has not started"));
+  }
+  return dashboardStorageInitialization.then(() => requestDashboardWorkerSnapshot());
+}
+
+async function awaitObservabilityStorageInitialization(): Promise<void> {
+  if (!dashboardStorageInitialization) {
+    throw Object.assign(new Error("Observability storage is not initialized; request was not dispatched."), { statusCode: 503 });
+  }
+  try {
+    await dashboardStorageInitialization;
+  } catch {
+    throw Object.assign(new Error("Observability storage is unavailable; request was not dispatched."), { statusCode: 503 });
+  }
+  if (observabilityStorageState !== "ready") {
+    throw Object.assign(new Error("Observability storage is unavailable; request was not dispatched."), { statusCode: 503 });
+  }
+}
+
+function requestDashboardWorkerSnapshot(): Promise<Record<string, unknown>> {
   const child = ensureDashboardWorkerProcess();
   const requestId = `${RUNTIME_BOOT_ID}:${++dashboardWorkerSequence}`;
   return new Promise((resolve, reject) => {
@@ -749,6 +849,8 @@ async function handleMcpRequest(
 }
 
 async function handleDualEraMcpRequest(req: IncomingMessage, res: ServerResponse, requestId: string) {
+  await awaitObservabilityStorageInitialization();
+
   let parsedBody: unknown;
   if (req.method === "POST") {
     try {
@@ -831,12 +933,12 @@ async function main() {
       }
 
       if (req.method === "GET" && url.pathname === "/readyz") {
-        sendText(res, ready && !closing ? 200 : 503, ready && !closing ? "ready" : "not ready");
+        sendText(res, isHttpReady() ? 200 : 503, isHttpReady() ? "ready" : "not ready");
         return;
       }
 
       if (req.method === "GET" && url.pathname === "/status") {
-        sendJson(res, ready && !closing ? 200 : 503, getStatus());
+        sendJson(res, isHttpReady() ? 200 : 503, getStatus());
         return;
       }
 
@@ -851,6 +953,7 @@ async function main() {
       }
 
       if (req.method === "GET" && url.pathname === "/api/mssr/summary") {
+        await awaitObservabilityStorageInitialization();
         sendJson(res, 200, queryMssrObservatory({
           kind: "summary",
           days: getDays(url, 30, 365),
@@ -886,6 +989,7 @@ async function main() {
           return;
         }
         const payload = await readJsonBody(req, 64 * 1024);
+        await awaitObservabilityStorageInitialization();
         sendJson(res, 202, ingestMssrTelemetry(payload));
         return;
       }
@@ -910,6 +1014,7 @@ async function main() {
         if (!TOOL_AUDIT_VIEWS.includes(rawView as ToolAuditView)) {
           throw Object.assign(new Error(`view must be one of: ${TOOL_AUDIT_VIEWS.join(", ")}.`), { statusCode: 400 });
         }
+        await awaitObservabilityStorageInitialization();
         const toolName = url.searchParams.get("toolName")?.trim() || undefined;
         sendJson(res, 200, getDefaultToolAudit({
           view: rawView as ToolAuditView,
@@ -922,31 +1027,37 @@ async function main() {
       }
 
       if (req.method === "GET" && url.pathname === "/api/metrics/status") {
+        await awaitObservabilityStorageInitialization();
         sendJson(res, 200, getMetricsStatus());
         return;
       }
 
       if (req.method === "GET" && url.pathname === "/api/metrics/overview") {
+        await awaitObservabilityStorageInitialization();
         sendJson(res, 200, getMetricsOverview(url.searchParams.get("scope") === "all" ? "all" : "active"));
         return;
       }
 
       if (req.method === "GET" && url.pathname === "/api/metrics/summary") {
+        await awaitObservabilityStorageInitialization();
         sendJson(res, 200, getMetricsSummary(getLimit(url, 50, 200), url.searchParams.get("scope") === "all" ? "all" : "active"));
         return;
       }
 
       if (req.method === "GET" && url.pathname === "/api/metrics/recent") {
+        await awaitObservabilityStorageInitialization();
         sendJson(res, 200, getRecentMetrics(getLimit(url, 25, 200), url.searchParams.get("scope") === "all" ? "all" : "active"));
         return;
       }
 
       if (req.method === "GET" && url.pathname === "/api/metrics/errors") {
+        await awaitObservabilityStorageInitialization();
         sendJson(res, 200, getMetricsErrors(getLimit(url, 25, 200), url.searchParams.get("scope") === "all" ? "all" : "active"));
         return;
       }
 
       if (req.method === "GET" && url.pathname === "/api/metrics/timeline") {
+        await awaitObservabilityStorageInitialization();
         sendJson(res, 200, getMetricsTimeline(getLimit(url, 500, 2000), url.searchParams.get("scope") === "all" ? "all" : "active"));
         return;
       }
@@ -1009,6 +1120,8 @@ async function main() {
     if (closing) return;
     closing = true;
     ready = false;
+    observabilityStorageState = "stopped";
+    stopDashboardStorageBootstrap();
     stopDashboardWorker(new Error("bridge shutdown"));
     clearInterval(cleanupTimer);
     clearInterval(eventLoopProbeTimer);
@@ -1084,6 +1197,18 @@ async function main() {
         httpKeepAliveTimeoutBufferMs: HTTP_KEEP_ALIVE_TIMEOUT_BUFFER_MS,
         httpHeadersTimeoutMs: HTTP_HEADERS_TIMEOUT_MS,
       },
+    });
+    observabilityStorageState = "initializing";
+    dashboardStorageInitialization = initializeObservabilityStorage();
+    void dashboardStorageInitialization.then(() => {
+      if (closing) return;
+      observabilityStorageState = "ready";
+    }).catch((error) => {
+      if (closing) return;
+      observabilityStorageState = "failed";
+      log("error", "observability storage initialization failed; database-backed routes are unavailable", {
+        error: error instanceof Error ? error.message : String(error),
+      });
     });
     void refreshDashboardSnapshot().catch((error) => {
       log("warn", "dashboard warmup failed", { error: error instanceof Error ? error.message : String(error) });

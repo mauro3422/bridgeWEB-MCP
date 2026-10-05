@@ -4,7 +4,7 @@ if (!toolName) {
   process.exit(2);
 }
 
-const base = "http://127.0.0.1:3001/mcp";
+const base = process.env.BRIDGE_MCP_VERIFY_BASE || "http://127.0.0.1:3001/mcp";
 const args = JSON.parse(rawArgs);
 const commonHeaders = {
   "Content-Type": "application/json",

@@ -120,7 +120,7 @@ try {
               } catch {
                 return false;
               }
-            })?.id ?? "none";
+            })?.id ?? (request.state.stage === "local-shortlist" ? Object.keys(question.options)[0] : "none");
           const probabilities = Object.fromEntries(Object.keys(question.options).map((option) => [option, option === selectedOption ? 0.97 : 0.03 / (Object.keys(question.options).length - 1)]));
           return [key, { type: "choice", choice: selectedOption, confidence: 0.97, probabilities }];
         }
@@ -216,6 +216,7 @@ try {
   assert.equal(jevSelection.choiceCalls.length, 1);
   assert.deepEqual(Object.keys(jevSelection.choiceCalls[0].probabilities).sort(), jevSelection.choiceCalls[0].offeredOptionIds.slice().sort(), "tool output preserves the complete exact offered Choice distribution");
   assert.equal(jevSelection.choiceCalls[0].probabilities[jevSelection.choiceCalls[0].selectedOptionId], 0.97);
+  assert.equal(jevSelection.choiceCalls[0].confidence, 0.97);
   assert.equal(jevSelection.exactFetchRequired, true);
   assert.equal(jevSelection.truthAuthority, false);
   assert.equal(jevSelection.autoApplyAllowed, false);
@@ -224,6 +225,42 @@ try {
   assert.ok(Object.keys(selectionRequest.questions.selection.options).includes("none"));
   assert.ok(Object.values(selectionRequest.questions.selection.options).every((option) => option.length <= 1200));
   assert.equal(JSON.stringify(selectionRequest).includes("TAIL-ONLY-MUST-NOT-BE-SENT"), false, "Jev selection must receive only the bounded excerpt, not the whole source section");
+  const maplessRegistry = createToolRegistry([createMssrSemanticEvidenceToolModule({ decisionProvider: {
+    async executeSystemOne(request) {
+      const answers = Object.fromEntries(Object.entries(request.questions).map(([key, question]) => {
+        if (question.kind === "noul") return [key, { type: "noul", noul: 0.97 }];
+        const selectedOption = Object.entries(question.options).find(([, option]) => option.includes("Keep benchmark results"))?.[0] ?? "none";
+        return [key, { type: "choice", choice: selectedOption, confidence: 0.97 }];
+      }));
+      return { provider: "mapless-test-provider", model: "mapless-test-model", answers, usage: { input_tokens: 12, output_tokens: 3 } };
+    },
+  } } )]);
+  const maplessSelection = await maplessRegistry.call("mssr_librarian_jev_select", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    query: "Where should benchmark records and provenance be kept?",
+  });
+  assert.equal(maplessSelection.choiceCalls.length, 1);
+  assert.equal(maplessSelection.choiceCalls[0].probabilities, null, "a missing provider distribution remains explicitly absent");
+  const manyHeadings = ["# Hierarchical choice fixture", ""];
+  for (let index = 1; index <= 260; index += 1) {
+    const title = index === 260 ? "Preserve operational records" : `Section ${String(index).padStart(3, "0")}`;
+    manyHeadings.push(`## ${title}`, "", `Candidate ${index} contains bounded evidence for hierarchical option preservation. ${index === 260 ? "UNIQUE_HIERARCHICAL_TARGET" : ""}`, "");
+  }
+  await fs.writeFile(path.join(root, "hierarchical-choice.md"), manyHeadings.join("\n"), "utf8");
+  const providerCallsBeforeHierarchy = providerCalls.length;
+  const hierarchicalSelection = await registry.call("mssr_librarian_jev_select", {
+    projectRoot: root,
+    sourceRefs: ["hierarchical-choice.md"],
+    query: "Find the target evidence in the hierarchical catalog.",
+  });
+  assert.equal(hierarchicalSelection.status, "selected");
+  assert.equal(hierarchicalSelection.selectionMode, "hierarchical");
+  assert.equal(hierarchicalSelection.providerCalls, 3);
+  assert.equal(providerCalls.length - providerCallsBeforeHierarchy, hierarchicalSelection.providerCalls);
+  assert.equal(hierarchicalSelection.choiceCalls.length, hierarchicalSelection.providerCalls, "the MCP result preserves every shard and final Choice call");
+  assert.ok(hierarchicalSelection.choiceCalls.every((call) => call.probabilities && Object.keys(call.probabilities).sort().join("\0") === call.offeredOptionIds.slice().sort().join("\0")), "each hierarchical call preserves the exact complete option distribution");
+  assert.equal(hierarchicalSelection.selected.title, "Preserve operational records");
   const jevExact = await registry.call("mssr_librarian_fetch", { projectRoot: root, handle: jevSelection.selected.handle });
   assert.equal(jevExact.handle.fingerprint, jevSelection.selected.handle.fingerprint);
   assert.match(jevExact.text, /Keep benchmark results/);
@@ -440,6 +477,7 @@ try {
   assert.deepEqual(blockSelection.selected.handle, preserveHandle, "Jev selection must preserve the exact Librarian search handle");
   assert.equal(blockSelection.candidateCount, 1);
   assert.equal(JSON.stringify(providerCalls.at(-1)).includes("TAIL-ONLY-MUST-NOT-BE-SENT"), false);
+  const providerCallsBeforeInvalidHandle = providerCalls.length;
   await assert.rejects(
     registry.call("mssr_librarian_jev_select", {
       projectRoot: root,
@@ -449,7 +487,7 @@ try {
     }),
     /explicitly supplied document owned by the same caller/,
   );
-  assert.equal(providerCalls.length, 2, "a handle outside the selected sourceRefs must be rejected before calling Jev");
+  assert.equal(providerCalls.length, providerCallsBeforeInvalidHandle, "a handle outside the selected sourceRefs must be rejected before calling Jev");
 
   const jevFromMetadataSearch = await registry.call("mssr_librarian_jev_select", {
     projectRoot: root,
@@ -558,8 +596,9 @@ try {
     traceId: "bridge-test-je v-01".replace(" ", ""),
   };
   mssrJevDecisionRequestSchema.parse({ state: { test: true }, questions: { q: { kind: "noul", prompt: "test" } } });
+  const providerCallsBeforeRelationReview = providerCalls.length;
   const reviewed = await registry.call("mssr_semantic_evidence_relation_review", { projectRoot: root, input: reviewInput });
-  assert.equal(providerCalls.length, 5, "two exact selections, one metadata-driven selection, one abstention, and one relation review each call the provider");
+  assert.equal(providerCalls.length, providerCallsBeforeRelationReview + 1, "one relation review adds exactly one provider call after the selection workflow");
   assert.match(JSON.stringify(providerCalls.at(-1).state), /Keep benchmark results/);
   assert.doesNotMatch(JSON.stringify(providerCalls.at(-1).state), /caller supplied text must be ignored/);
   assert.equal(reviewed.policy.judgmentsVerified, false);
@@ -585,13 +624,14 @@ try {
     sourceRefs: ["policy.md"],
     handles: [preserveHandle],
   }), /stale/);
+  const providerCallsBeforeStaleSelection = providerCalls.length;
   await assert.rejects(registry.call("mssr_librarian_jev_select", {
     projectRoot: root,
     sourceRefs: ["policy.md"],
     query: "select a stale search result",
     candidateHandles: [preserveHandle],
   }), /stale/);
-  assert.equal(providerCalls.length, 5, "a stale search handle must be rejected before calling Jev");
+  assert.equal(providerCalls.length, providerCallsBeforeStaleSelection, "a stale search handle must be rejected before calling Jev");
 
   const credentialBytes = Buffer.from("test-only-credential", "utf16le");
   let suppliedApiKey;

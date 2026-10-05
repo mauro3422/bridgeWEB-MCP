@@ -102,6 +102,14 @@ type ResolvedProject = {
   projectContextManifestRevision: string;
 };
 
+type JevChoiceCallEvidence = {
+  questionKey: string;
+  offeredOptionIds: string[];
+  selectedOptionId: string;
+  confidence: number;
+  probabilities: Record<string, number> | null;
+};
+
 function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
@@ -707,7 +715,7 @@ function createMssrSemanticEvidenceToolModule(options: MssrSemanticEvidenceToolM
       },
       {
         name: "mssr_librarian_jev_select",
-        description: `Make one live TypeSafe Jev Choice call over explicitly selected project Markdown files. By default it offers heading sections; callers may instead pass up to ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles} exact candidateHandles returned by mssr_librarian_search, so Jev can choose query-matched blocks and deeper evidence. To use declared project-context selectors, first call mssr_librarian_search with metadataMode=project-context-single-section or project-context-librarian-sidecar, then pass the returned exact handles here; metadata retrieval and Jev selection remain separate inspectable steps. Bridge reads only sourceRefs and MSSR revalidates each handle against the current owner, source, revision, range, fingerprint, and privacy class before the provider call. The result is advisory; call mssr_librarian_fetch before using source text. This external request may incur account usage. It does not crawl, establish truth, generate prose, or write files. At most ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxHeadingCandidates} heading sections or ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles} exact handles plus none are offered; oversized sets are rejected without truncation.`,
+        description: `Make one live TypeSafe Jev Choice call over explicitly selected project Markdown files. By default it offers heading sections; callers may instead pass up to ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles} exact candidateHandles returned by mssr_librarian_search, so Jev can choose query-matched blocks and deeper evidence. To use declared project-context selectors, first call mssr_librarian_search with metadataMode=project-context-single-section or project-context-librarian-sidecar, then pass the returned exact handles here; metadata retrieval and Jev selection remain separate inspectable steps. Bridge reads only sourceRefs and MSSR revalidates each handle against the current owner, source, revision, range, fingerprint, and privacy class before the provider call. The result is advisory; call mssr_librarian_fetch before using source text. Each Choice call preserves its offered option IDs, selected ID, raw confidence, and original probability map when supplied; absent maps are null, never inferred. This external request may incur account usage. It does not crawl, establish truth, generate prose, or write files. At most ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxHeadingCandidates} heading sections or ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles} exact handles plus none are offered; oversized sets are rejected without truncation.`,
         inputSchema: {
           type: "object",
           properties: {
@@ -816,13 +824,32 @@ function createMssrSemanticEvidenceToolModule(options: MssrSemanticEvidenceToolM
         const args = jevSelectionInputSchema.parse(raw);
         const project = await resolveManagedProject(args.projectRoot);
         const prepared = await readProjectMarkdownBatch(project, args.sourceRefs);
+        const choiceCalls: JevChoiceCallEvidence[] = [];
+        const evidenceProvider: MssrJevDecisionProvider = {
+          async executeSystemOne(request) {
+            const response = await decisionProvider.executeSystemOne(request);
+            for (const [questionKey, question] of Object.entries(request.questions)) {
+              if (question.kind !== "choice") continue;
+              const answer = response.answers[questionKey];
+              if (!answer || answer.type !== "choice") continue;
+              choiceCalls.push({
+                questionKey,
+                offeredOptionIds: Object.keys(question.options),
+                selectedOptionId: answer.choice,
+                confidence: answer.confidence,
+                probabilities: answer.probabilities ? { ...answer.probabilities } : null,
+              });
+            }
+            return response;
+          },
+        };
         const result = await selectMssrLibrarianEvidenceWithJev({
           documents: prepared.documents,
           query: args.query,
           ...(args.candidateHandles ? { candidateHandles: args.candidateHandles } : {}),
           ...(args.model ? { model: args.model } : {}),
-        }, decisionProvider);
-        return { projectOwner: project.owner, sourceCount: args.sourceRefs.length, ...result };
+        }, evidenceProvider);
+        return { projectOwner: project.owner, sourceCount: args.sourceRefs.length, ...result, choiceCalls };
       },
       mssr_librarian_fetch: async (raw) => {
         const args = fetchInputSchema.parse(raw);

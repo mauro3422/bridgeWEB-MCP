@@ -4,6 +4,7 @@ Versioned release notes are the canonical change-history surface for MSSR debugg
 
 ## Current releases
 
+- [0.6.158](0.6.158.md) - Adopt MSSR 0.2.105 Librarian ordering and Jev Choice evidence; gate and verify HTTP observability bootstrap/recovery.
 - [0.6.157](0.6.157.md) - Stabilize the Windows HTTP liveness regression's startup diagnostics and temporary SQLite cleanup.
 - [0.6.156](0.6.156.md) - Preserve Jev Choice probabilities and document the host-owned Bibliotecario composition workflow; adopt MSSR 0.2.104.
 - [0.6.155](0.6.155.md) - Restore the previously shipped exact-citation Librarian evidence pack on the current Jev/TLS lineage and adopt MSSR 0.2.103.

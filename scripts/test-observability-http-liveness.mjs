@@ -22,6 +22,7 @@ const port = await new Promise((resolve, reject) => {
   });
 });
 const base = `http://127.0.0.1:${port}`;
+const serverSpawnedAt = performance.now();
 const child = spawn(process.execPath, [path.join(root, "dist", "http.js")], {
   cwd: root,
   stdio: ["ignore", "ignore", "pipe"],
@@ -42,6 +43,7 @@ const child = spawn(process.execPath, [path.join(root, "dist", "http.js")], {
     BRIDGE_MCP_PROJECT_SITUATION_ROOT: root,
     BRIDGE_MCP_METRICS_WAL_CHECKPOINT_DELAY_MS: "200",
     BRIDGE_MCP_METRICS_WAL_CHECKPOINT_BUSY_MS: "25",
+    BRIDGE_MCP_TEST_OBSERVABILITY_STORAGE_INIT_DELAY_MS: "5000",
   },
 });
 let stderr = "";
@@ -65,10 +67,11 @@ async function waitReady() {
   assert.fail(`isolated Bridge did not become ready; child ${childState}: ${stderr}`);
 }
 
-async function json(pathname) {
-  const response = await fetch(`${base}${pathname}`, { signal: AbortSignal.timeout(1_000) });
-  assert.equal(response.ok, true, `${pathname} returned ${response.status}`);
-  return response.json();
+async function json(pathname, timeoutMs = 1_000) {
+  const response = await fetch(`${base}${pathname}`, { signal: AbortSignal.timeout(timeoutMs) });
+  const body = await response.text();
+  assert.equal(response.ok, true, `${pathname} returned ${response.status}: ${body.slice(0, 1_000)}`);
+  return JSON.parse(body);
 }
 
 const modernMeta = {
@@ -169,12 +172,73 @@ function routeEnvelope(traceId, index) {
 let lockDb;
 try {
   await waitReady();
-  const baseline = await json("/status");
-  assert.equal(typeof baseline.runtimeBootId, "string");
-  await json("/api/metrics/status");
-  await json("/api/mssr/summary?scope=all");
+  const readyStartupMs = performance.now() - serverSpawnedAt;
+  assert.ok(readyStartupMs < 3_000, `HTTP readiness waited for delayed observability initialization: ${readyStartupMs.toFixed(2)} ms`);
   const token = (await fs.readFile(tokenPath, "utf8")).trim();
   assert.ok(token.length > 0, "MSSR ingest token missing");
+
+  // Health, readiness, status, and the dashboard shell stay responsive while
+  // schema initialization is deliberately delayed. Every main-process SQLite
+  // reader/writer must wait for the same bootstrap promise; exercise them
+  // concurrently before the cold dashboard can finish initialization.
+  const livenessProbePromise = probeReady(2_000);
+  const livenessStartedAt = performance.now();
+  const immediateResponses = await Promise.all([
+    fetch(`${base}/healthz`, { signal: AbortSignal.timeout(1_000) }),
+    fetch(`${base}/status`, { signal: AbortSignal.timeout(1_000) }),
+    fetch(`${base}/dashboard`, { signal: AbortSignal.timeout(1_000) }),
+  ]);
+  const immediateLivenessMs = performance.now() - livenessStartedAt;
+  for (const response of immediateResponses) {
+    assert.equal(response.status, 200, `unblocked liveness route returned ${response.status}`);
+    await response.arrayBuffer();
+  }
+  assert.ok(immediateLivenessMs < 1_000, `health/status/dashboard shell waited for storage bootstrap: ${immediateLivenessMs.toFixed(2)} ms`);
+
+  const bootstrapTraceId = `mssr-bootstrap-gate-${Date.now()}`;
+  const coldStorageRequests = [
+    { name: "metrics status", run: () => json("/api/metrics/status", 15_000) },
+    { name: "metrics overview", run: () => json("/api/metrics/overview", 15_000) },
+    { name: "metrics summary", run: () => json("/api/metrics/summary", 15_000) },
+    { name: "metrics recent", run: () => json("/api/metrics/recent", 15_000) },
+    { name: "metrics errors", run: () => json("/api/metrics/errors", 15_000) },
+    { name: "metrics timeline", run: () => json("/api/metrics/timeline", 15_000) },
+    { name: "MSSR summary", run: () => json("/api/mssr/summary?scope=all", 15_000) },
+    { name: "tool audit", run: () => json("/api/tools/audit", 15_000) },
+    {
+      name: "authenticated telemetry ingest",
+      run: async () => {
+        const response = await fetch(`${base}/api/mssr/events`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify(routeEnvelope(bootstrapTraceId, 0)),
+          signal: AbortSignal.timeout(15_000),
+        });
+        const body = await response.text();
+        assert.equal(response.status, 202, `bootstrap telemetry ingest returned ${response.status}: ${body.slice(0, 800)}`);
+        return JSON.parse(body);
+      },
+    },
+    { name: "MCP metrics tool", run: () => modernToolCall(1, "bridge_metrics_status", {}) },
+    { name: "cold dashboard snapshot", run: () => json("/api/dashboard/snapshot", 15_000) },
+  ].map(async ({ name, run }) => {
+    const startedAt = performance.now();
+    const value = await run();
+    return { name, elapsedMs: performance.now() - startedAt, value };
+  });
+  const coldStorageResults = await Promise.all(coldStorageRequests);
+  const livenessProbe = await livenessProbePromise;
+  assert.deepEqual(livenessProbe.failures, [], `readyz failed while storage requests waited: ${JSON.stringify(livenessProbe.failures)}`);
+  assert.ok(livenessProbe.samples.length >= 20, `expected repeated bootstrap readyz samples, got ${livenessProbe.samples.length}`);
+  for (const result of coldStorageResults) {
+    assert.ok(result.elapsedMs >= 1_000, `${result.name} bypassed the delayed SQLite bootstrap (${result.elapsedMs.toFixed(2)} ms)`);
+  }
+  const coldDashboard = coldStorageResults.find(({ name }) => name === "cold dashboard snapshot").value;
+  const coldDashboardMs = coldStorageResults.find(({ name }) => name === "cold dashboard snapshot").elapsedMs;
+  assert.ok(coldDashboard.mssr && typeof coldDashboard.mssr === "object", "cold dashboard snapshot omitted MSSR summary");
+  const baseline = await json("/status");
+  assert.equal(typeof baseline.runtimeBootId, "string");
+  assert.equal(baseline.observabilityStorage?.state, "ready", "observability storage was not ready after bootstrap-gated requests completed");
 
   lockDb = new DatabaseSync(sqlitePath);
   lockDb.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 1000;");
@@ -301,6 +365,10 @@ try {
     runtimeBootId: after.runtimeBootId,
     persistenceCompleted: persistenceStatus.persistence.completed,
     walCheckpoints: persistenceStatus.walMaintenance.checkpointCount,
+    readyStartupMs: Math.round(readyStartupMs * 100) / 100,
+    immediateLivenessMs: Math.round(immediateLivenessMs * 100) / 100,
+    bootstrapGateWaitMs: Math.round(Math.max(...coldStorageResults.map(({ elapsedMs }) => elapsedMs)) * 100) / 100,
+    coldDashboardMs: Math.round(coldDashboardMs * 100) / 100,
   });
 } finally {
   if (lockDb) {

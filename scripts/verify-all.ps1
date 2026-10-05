@@ -2,16 +2,23 @@ param(
   [string]$ProjectRoot = "",
   [string]$RuntimeDataRoot = "",
   [string]$ExpectedServerVersion = "",
+  [string]$BridgeBaseUrl = "",
   [switch]$StrictGit
 )
 
 $ErrorActionPreference = "Stop"
 
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+  $ProjectRoot = [string]$env:BRIDGE_VERIFY_PROJECT_ROOT
+}
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
   $ProjectRoot = Split-Path -Parent $PSScriptRoot
 }
 $ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
 
+if ([string]::IsNullOrWhiteSpace($RuntimeDataRoot)) {
+  $RuntimeDataRoot = [string]$env:BRIDGE_VERIFY_RUNTIME_ROOT
+}
 if ([string]::IsNullOrWhiteSpace($RuntimeDataRoot)) {
   $RuntimeDataRoot = [string]$env:BRIDGE_MCP_PROJECT_ROOT
 }
@@ -19,12 +26,27 @@ if ([string]::IsNullOrWhiteSpace($RuntimeDataRoot)) {
   $RuntimeDataRoot = $ProjectRoot
 }
 $RuntimeDataRoot = (Resolve-Path -LiteralPath $RuntimeDataRoot).Path
+if ([string]::IsNullOrWhiteSpace($BridgeBaseUrl)) {
+  $BridgeBaseUrl = [string]$env:BRIDGE_VERIFY_BASE_URL
+}
+if ([string]::IsNullOrWhiteSpace($BridgeBaseUrl)) {
+  $BridgeBaseUrl = "http://127.0.0.1:3001"
+}
+$bridgeUri = [Uri]$BridgeBaseUrl
+if ($bridgeUri.Scheme -notin @("http", "https") -or -not $bridgeUri.IsAbsoluteUri) {
+  throw "BridgeBaseUrl must be an absolute HTTP(S) URL: $BridgeBaseUrl"
+}
+$bridgeAuthority = $bridgeUri.GetLeftPart([UriPartial]::Authority)
+$mcpBaseUrl = "$bridgeAuthority/mcp"
+$env:BRIDGE_MCP_VERIFY_BASE = $mcpBaseUrl
 
+if ([string]::IsNullOrWhiteSpace($ExpectedServerVersion)) {
+  $ExpectedServerVersion = [string]$env:BRIDGE_VERIFY_SERVER_VERSION
+}
 if ([string]::IsNullOrWhiteSpace($ExpectedServerVersion)) {
   $packagePath = Join-Path $ProjectRoot "package.json"
   $ExpectedServerVersion = [string]((Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json).version)
 }
-
 function Convert-ToTailText {
   param([string]$Text, [int]$MaxChars = 4000)
   if ($null -eq $Text) { return "" }
@@ -66,10 +88,10 @@ function Invoke-VerifyStep {
 Set-Location -LiteralPath $ProjectRoot
 
 $steps = @()
-$steps += Invoke-VerifyStep "doctor" { powershell -NoProfile -File .\scripts\bridge-doctor.ps1 -ExpectedServerVersion $ExpectedServerVersion }
+$steps += Invoke-VerifyStep "doctor" { powershell -NoProfile -File .\scripts\bridge-doctor.ps1 -ProjectRoot $ProjectRoot -BridgeHost $bridgeUri.Host -BridgePort $bridgeUri.Port -ExpectedServerVersion $ExpectedServerVersion }
 $steps += Invoke-VerifyStep "check" { npm run check }
 $steps += Invoke-VerifyStep "build" { npm run build }
-$steps += Invoke-VerifyStep "smoke:http" { powershell -NoProfile -File .\scripts\test-bridge-http.ps1 -RuntimeDataRoot $RuntimeDataRoot }
+$steps += Invoke-VerifyStep "smoke:http" { powershell -NoProfile -File .\scripts\test-bridge-http.ps1 -BaseUrl $bridgeAuthority -RuntimeDataRoot $RuntimeDataRoot -ExpectedServerVersion $ExpectedServerVersion }
 $steps += Invoke-VerifyStep "test:mcp-dual-era" { npm run test:mcp-dual-era }
 $steps += Invoke-VerifyStep "test:regressions" { cmd.exe /d /s /c "npm run test:regressions 2>&1" }
 $steps += Invoke-VerifyStep "test:routing-latency" { npm run test:routing-latency }
@@ -100,6 +122,7 @@ $result = [pscustomobject]@{
   ok = $ok
   projectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
   runtimeDataRoot = $RuntimeDataRoot
+  bridgeBaseUrl = $bridgeAuthority
   expectedServerVersion = $ExpectedServerVersion
   strictGit = [bool]$StrictGit
   steps = $steps

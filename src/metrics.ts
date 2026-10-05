@@ -375,6 +375,14 @@ function getDb(): DatabaseSync | null {
   return db;
 }
 
+/**
+ * Create the writable metrics schema before the read-only dashboard worker
+ * opens the shared observability database on a cold start.
+ */
+export function initializeMetricsStorage(): void {
+  getDb();
+}
+
 function redactText(value: string, maxChars = 500): string {
   return value
     .replace(/sk-[A-Za-z0-9_-]{12,}/g, "sk-REDACTED")
