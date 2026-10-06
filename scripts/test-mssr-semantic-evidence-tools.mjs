@@ -218,6 +218,11 @@ try {
   assert.equal(jevSelection.choiceCalls[0].probabilities[jevSelection.choiceCalls[0].selectedOptionId], 0.97);
   assert.equal(jevSelection.choiceCalls[0].confidence, 0.97);
   assert.equal(jevSelection.exactFetchRequired, true);
+  assert.ok(jevSelection.rangeOverlapDiagnostics, "Bridge must pass through MSSR range-overlap diagnostics");
+  assert.ok(Number.isInteger(jevSelection.rangeOverlapDiagnostics.sameSourceRevisionPairs));
+  assert.ok(Number.isInteger(jevSelection.rangeOverlapDiagnostics.overlappingPairCount));
+  assert.ok(Array.isArray(jevSelection.rangeOverlapDiagnostics.pairs));
+  assert.equal(jevSelection.rangeOverlapDiagnostics.mutationApplied, false, "range diagnostics must stay read-only");
   assert.equal(jevSelection.truthAuthority, false);
   assert.equal(jevSelection.autoApplyAllowed, false);
   const selectionRequest = providerCalls.at(-1);
@@ -259,6 +264,7 @@ try {
   assert.equal(hierarchicalSelection.providerCalls, 3);
   assert.equal(providerCalls.length - providerCallsBeforeHierarchy, hierarchicalSelection.providerCalls);
   assert.equal(hierarchicalSelection.choiceCalls.length, hierarchicalSelection.providerCalls, "the MCP result preserves every shard and final Choice call");
+  assert.ok(hierarchicalSelection.rangeOverlapDiagnostics, "hierarchical results retain range-overlap diagnostics");
   assert.ok(hierarchicalSelection.choiceCalls.every((call) => call.probabilities && Object.keys(call.probabilities).sort().join("\0") === call.offeredOptionIds.slice().sort().join("\0")), "each hierarchical call preserves the exact complete option distribution");
   assert.equal(hierarchicalSelection.selected.title, "Preserve operational records");
   const jevExact = await registry.call("mssr_librarian_fetch", { projectRoot: root, handle: jevSelection.selected.handle });

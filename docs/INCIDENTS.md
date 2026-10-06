@@ -1997,3 +1997,17 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Corrección y regresión:** El candidato aislado establece `NODE_USE_SYSTEM_CA=1` solo en el proceso hijo HTTP de Windows; no escribe variables de usuario/máquina ni desactiva la validación de certificados. El adapter clasifica timeout SDK, conexión, cancelación, HTTP, configuración SDK y errores no clasificados con mensajes fijos seguros. No expone mensajes crudos, bodies, causas anidadas ni credenciales y limpia los buffers de credenciales. Se añadieron pruebas del proveedor inyectado para esas clases y una fixture de lifecycle que lee la variable del proceso hijo.
 
 **Verificación/seguimiento:** Tras versionar, `npm run check`, `npm run test:mssr-semantic-evidence`, `scripts/test-bridge-http-watchdog-lifecycle.ps1`, `npm run test:project-health`, la suite completa `npm run test:regressions` (exit 0) y `npm run docs:tools:check` pasaron. Esta última gate requirió regenerar el `TOOLS.md` obsoleto para el catálogo actual de 185 herramientas. Luna revisó la corrección y la rama quedó publicada en `ef345b1316c411c51c9ce5c426898d62acaf0b57`. El Startup `.cmd` apunta a `D:\Dev\bridge-mcp-jev-diagnostics`; el respaldo conserva los mismos bytes y SHA-256 `703DAD3F342310D50C9FB8272F384CA1E1BB3CF94530067EC6B196BC0CD819FD`. El handoff live sigue pendiente: la política del host rechazó la acción de detener los PIDs verificados antes de ejecutarla, sin tocar procesos; HTTP PID 25952 sigue en `.153`, túnel PID 2588 sigue `ready` y la telemetría no registra fallos 502/no-status. Próximo gate: activar mediante una vía permitida o el siguiente logon de Windows y volver a verificar el runtime.
+
+## 2026-10-06 — Aislado timeout transitorio en la prueba de framing Streamable HTTP
+
+**Estado:** No reproducido en las repeticiones aisladas ni en la verificación completa posterior; causa no determinada.
+
+**Capa / owner:** Harness `test-mcp-streamable-http-framing.mjs`, incluido por `test:mcp-dual-era` y `verify:all`.
+
+**Síntoma y evidencia:** La primera `npm run verify:all` del candidato Bridge 0.6.159 registró `test:mcp-dual-era` fallido en `scripts/test-mcp-streamable-http-framing.mjs:62`. El resumen del verificador no conservó el error interno del proceso hijo. Después, `npm run test:mcp-streamable-http` pasó por separado (`initializeStatus=200`, una parte chunked, evento SSE válido); `npm run test:mcp-dual-era` pasó con 186 herramientas, siete solicitudes modernas, 41 legacy y framing válido; una segunda verificación completa también pasó con `failedRequired=0`. Evidencia completa: `D:\MSSR-benchmark-artifacts\bridge-0.6.159-verify-20261006-v1\verify-all-transcript-rerun.txt` y `verify-all-receipt.json`.
+
+**Causa:** No resuelta. La evidencia posterior descarta una falla persistente del framing en esta corrida, pero no explica el timeout inicial; no se atribuye a carga, puerto ni transporte sin reproducción.
+
+**Corrección / regresión:** No hubo cambio de código por este evento. Se repitió primero el test de framing aislado y luego `verify:all` completo; ambos pasaron. La verificación final es 14/14 gates requeridos, 0 fallidos.
+
+**Seguimiento:** Si reaparece, capturar la salida/stack original del proceso hijo y correlacionar su puerto aleatorio y duración antes de cambiar timeouts o transporte.

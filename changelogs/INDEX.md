@@ -3,6 +3,7 @@
 Versioned release notes are the canonical change-history surface for MSSR debugging, maintenance, and persistence checks.
 
 ## Current releases
+- [0.6.159](0.6.159.md) - Adopt exact MSSR 0.2.108 bytes and expose read-only Jev range-overlap diagnostics.
 
 - [0.6.158](0.6.158.md) - Adopt MSSR 0.2.105 Librarian ordering and Jev Choice evidence; gate and verify HTTP observability bootstrap/recovery.
 - [0.6.157](0.6.157.md) - Stabilize the Windows HTTP liveness regression's startup diagnostics and temporary SQLite cleanup.
