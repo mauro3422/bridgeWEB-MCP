@@ -19,6 +19,24 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-10-08 — Controlled restart request used BridgeCodeRoot instead of ProjectRoot
+
+**Estado:** Resuelto durante la activación de Bridge 0.6.162; no hubo interrupción del servicio por el primer pedido.
+
+**Capa/owner:** Solicitud de restart MCP y watchdog HTTP (`bridge_request_restart`, `scripts/start-bridge-http-watchdog.ps1`).
+
+**Síntoma observable:** El pedido `5c263914-4cea-4960-a152-a6897df34ef5` se escribió en `D:\Dev\bridge-mcp-candidate-0.6.160-mssr-0.2.109\.bridge-restart-request`; el watchdog seguía vigilando `D:\Dev\bridge-mcp\.bridge-restart-request`, por lo que no podía consumirlo.
+
+**Causa demostrada:** El watchdog resuelve `RestartRequestFile` y `RestartAckFile` contra `ProjectRoot`; pasar `BridgeCodeRoot` como `cwd` a la herramienta cambió el destino del archivo.
+
+**Corrección:** Se preservó el JSON del primer pedido fuera del checkout, se retiró sólo ese archivo no consumido y se repitió `bridge_request_restart` sin `cwd`. El pedido `75f10456-7612-4e4e-9404-d20aaf8bbbe3` fue reconocido por el watchdog; Bridge 0.6.162 quedó ready en PID 39780 y el túnel conservó PID 23336.
+
+**Regresión/verificación:** Readback de `/status`, `/readyz`, `bridge_health`, acuse del watchdog y catálogo live de 187 tools. No se modificó el runtime/data root ni se reinició el túnel.
+
+**Seguimiento:** En topologías separadas, omitir `cwd` para que la herramienta use el `ProjectRoot` del proceso; confirmar `requestPath` en la respuesta antes de esperar un restart.
+
+---
+
 ## 2026-10-05 — Cold HTTP dashboard worker opened observability SQLite before schema creation
 
 **Estado:** Corregido y cubierto en la candidata Bridge 0.6.158; activación en el runtime HTTP principal pendiente del handoff controlado.
