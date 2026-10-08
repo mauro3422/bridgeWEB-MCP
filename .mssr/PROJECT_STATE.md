@@ -1,4 +1,7 @@
 # Bridge project state
+## Current MSSR adoption candidate — 0.6.161 / MSSR 0.2.110
+
+The 0.6.160/0.2.109 isolated candidate failed `test:regressions`: MSSR 0.2.109 omitted `rangeOverlapDiagnostics`, which was present in 0.2.108 and expected by Bridge. The defect was in canonical MSSR source `D:\Dev\mssr\src\librarian-jev-selection.ts`; the existing Bridge handler already passes through the MSSR result. MSSR 0.2.110 restores bounded read-only overlap diagnostics and adds nested/disjoint tests. Exact package: 1,115,994 bytes, SHA-256 `44f5c57a8eacc53fe3f9012cd113fa27775a382b855cde344c7b3ed4279b25ea`. The exact tarball is installed in candidate 0.6.161, and `verify:all` passed with `failedRequired=0`. Active Bridge remains 0.6.159 / MSSR 0.2.108; candidate runtime stays isolated on loopback port 3018 with external runtime data. No production restart has occurred.
 
 ## Previous MSSR Librarian/Jev and liveness candidate — 0.6.158 / MSSR 0.2.105 (superseded 2026-10-06)
 
@@ -12,7 +15,11 @@ Benchmark run v16 remains a separate prepared seed for Bridge 0.6.156 / MSSR 0.2
 
 ## Current release
 
-Bridge 0.6.159 / MSSR 0.2.108 is active in the live HTTP Bridge. Watchdog request `f9dcea75-a962-4b0a-b10e-00415a377d39` adopted PID 29180 / boot `837b6744-b79a-4b56-987d-329a9020a0ae`; code root is this branch, data root remains `D:\Dev\bridge-mcp`, and local/tunnel readiness pass with 186 tools. The live Librarian/Jev smoke passed metadata search, Spanish-to-English selection, exact fetch, and cited evidence-pack checks; the reported confidence is uncalibrated. Full receipt, usage, and cutover details are in `changelogs/0.6.159.md`. The primary checkout remains untouched; no main merge or npm publication occurred.
+Bridge 0.6.159 / MSSR 0.2.108 remains active in the live HTTP Bridge. Watchdog request `f9dcea75-a962-4b0a-b10e-00415a377d39` adopted PID 29180 / boot `837b6744-b79a-4b56-987d-329a9020a0ae`; code root is the production checkout and data root is `D:\Dev\bridge-mcp`. The live Librarian/Jev smoke and 186-tool readback are historical evidence recorded in `changelogs/0.6.159.md`.
+
+## Candidate verification — 2026-10-08
+
+Isolated branch `codex/bridge-mssr-0.2.105-0.6.158-20261005` is being advanced to Bridge 0.6.160 with the exact locally release-gated MSSR 0.2.109 artifact (1,113,978 bytes; SHA-256 `90ea5401a0dad5d2b4edaa264837d9cc36fbab76bae2ea7747e5c4df993baff8`). The prior candidate verifier contacted tunnel health/readiness on port 8081 even when using an isolated Bridge port. The candidate adds an explicit, visible `-SkipTunnelChecks` path for isolated validation; it does not start a watchdog or tunnel. Full isolated verification and installed-byte parity remain pending. Production stays on 0.6.159 / 0.2.108 until candidate evidence is complete; the primary checkout and active process have not been modified.
 ## Liveness and observability
 Durable MSSR events and Bridge tool metrics use the shared single-writer observability worker instead of synchronous JSONL/SQLite request-path writes. A bounded in-memory overlay preserves immediate read-your-writes semantics for active trace/recent/routing projections while durable persistence catches up. WAL maintenance is separate from receipt durability: passive checkpoints run outside the HTTP/MCP event loop after a true quiet-period debounce.
 

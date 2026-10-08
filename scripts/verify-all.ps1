@@ -3,6 +3,7 @@ param(
   [string]$RuntimeDataRoot = "",
   [string]$ExpectedServerVersion = "",
   [string]$BridgeBaseUrl = "",
+  [switch]$SkipTunnelChecks,
   [switch]$StrictGit
 )
 
@@ -88,7 +89,9 @@ function Invoke-VerifyStep {
 Set-Location -LiteralPath $ProjectRoot
 
 $steps = @()
-$steps += Invoke-VerifyStep "doctor" { powershell -NoProfile -File .\scripts\bridge-doctor.ps1 -ProjectRoot $ProjectRoot -BridgeHost $bridgeUri.Host -BridgePort $bridgeUri.Port -ExpectedServerVersion $ExpectedServerVersion }
+$doctorArgs = @("-ProjectRoot", $ProjectRoot, "-BridgeHost", $bridgeUri.Host, "-BridgePort", $bridgeUri.Port, "-ExpectedServerVersion", $ExpectedServerVersion)
+if ($SkipTunnelChecks) { $doctorArgs += "-SkipTunnelChecks" }
+$steps += Invoke-VerifyStep "doctor" { powershell -NoProfile -File .\scripts\bridge-doctor.ps1 @doctorArgs }
 $steps += Invoke-VerifyStep "check" { npm run check }
 $steps += Invoke-VerifyStep "build" { npm run build }
 $steps += Invoke-VerifyStep "smoke:http" { powershell -NoProfile -File .\scripts\test-bridge-http.ps1 -BaseUrl $bridgeAuthority -RuntimeDataRoot $RuntimeDataRoot -ExpectedServerVersion $ExpectedServerVersion }
