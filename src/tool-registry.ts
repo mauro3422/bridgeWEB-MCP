@@ -15,6 +15,7 @@ import { gitToolModule } from "./tools/git-tools.js";
 import { gitPublicationToolModule } from "./tools/git-publication-tools.js";
 import { godotToolModule } from "./tools/godot-tools.js";
 import { imageToolModule } from "./tools/image-tools.js";
+import { assetFileToolModule } from "./tools/asset-file-tools.js";
 import { mediaReviewToolModule } from "./tools/media-review-tools.js";
 import { metricsToolModule } from "./tools/metrics-tools.js";
 import { mssrObservatoryToolModule } from "./tools/mssr-observatory-tools.js";
@@ -69,7 +70,7 @@ const destructiveToolNames = new Set([
   "roblox_asset_upload",
   "image_asset_save", "image_asset_import_files", "image_chat_preview_prepare", "image_character_views_prepare", "image_reference_pack_prepare",
   "media_review_ingest",
-  "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_finish", "binary_upload_abort",
+  "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_finish", "binary_upload_abort", "asset_import_files",
   "blender_open", "blender_viewport_screenshot", "blender_focus_review", "blender_review_bundle", "blender_animation_review", "blender_ik_keyframe", "blender_execute_code", "blender_batch_script", "blender_install_reference_pack", "blender_setup_character_references",
   "godot_mcp_action", "godot_scene_create", "godot_screen_capture_save",
   "remote_node_exec", "remote_node_upload_file",
@@ -111,7 +112,7 @@ const mssrSubstantialReadToolNames = new Set([
 
 const mssrVerifyToolNames = new Set(["python_validate", "pytest_testmon", "bridge_verify_status", "bridge_verify_all"]);
 const mssrPublishToolNames = new Set(["git_push_current_branch", "git_multi_repo_publish", "roblox_asset_upload"]);
-const mssrPersistToolNames = new Set(["git_commit_all", "roblox_place_save", "binary_upload_finish"]);
+const mssrPersistToolNames = new Set(["git_commit_all", "roblox_place_save", "binary_upload_finish", "asset_import_files"]);
 const mssrExternalSideEffectToolNames = new Set([
   "remote_node_exec", "remote_node_upload_file", "roblox_mcp_action", "godot_mcp_action", "godot_scene_open",
   "whiteboard_add_text", "whiteboard_add_svg", "whiteboard_add_diagram", "whiteboard_insert_image",
@@ -612,6 +613,7 @@ const defaultToolModules: readonly BridgeToolModule[] = [
   robloxAssetToolModule,
   robloxPhotoCaptureToolModule,
   createBinaryFileToolModule(null, false),
+  assetFileToolModule,
   imageToolModule,
   mediaReviewToolModule,
   processToolModule,

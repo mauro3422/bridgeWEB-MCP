@@ -3,6 +3,7 @@
 Versioned release notes are the canonical change-history surface for MSSR debugging, maintenance, and persistence checks.
 
 ## Current releases
+- [0.6.162](0.6.162.md) - Add secure general-purpose ChatGPT file-parameter import to the active Bridge source line.
 - [0.6.161](0.6.161.md) - adopt corrected MSSR 0.2.110 after restoring read-only overlap diagnostics.
 - [0.6.160](0.6.160.md) - Rejected isolated candidate: MSSR package omitted expected overlap diagnostics; tunnel-free verification is carried forward in 0.6.161.
 - [0.6.159](0.6.159.md) - Adopt exact MSSR 0.2.108 bytes and expose read-only Jev range-overlap diagnostics.

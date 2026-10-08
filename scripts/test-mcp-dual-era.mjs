@@ -291,6 +291,10 @@ try {
   assert.ok(imageImportTool, "HTTP tools/list must publish image_asset_import_files.");
   assert.deepEqual(imageImportTool._meta?.["openai/fileParams"], ["files"]);
   assert.ok(imageImportTool.inputSchema?.properties?.files, "image_asset_import_files must expose its authorized file parameter in HTTP tools/list.");
+  const assetImportTool = list.result.tools.find((tool) => tool.name === "asset_import_files");
+  assert.ok(assetImportTool, "HTTP tools/list must publish the general-purpose asset_import_files tool.");
+  assert.deepEqual(assetImportTool._meta?.["openai/fileParams"], ["files"]);
+  assert.ok(assetImportTool.inputSchema?.properties?.files, "asset_import_files must expose its authorized file parameter in HTTP tools/list.");
 
   const actionFallbackTool = list.result.tools.find((tool) => tool.name === "bridge_tool_action");
   assert.ok(actionFallbackTool, "HTTP tools/list must publish bridge_tool_action.");
