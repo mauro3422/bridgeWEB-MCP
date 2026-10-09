@@ -661,3 +661,18 @@ Las tools acotadas ya migradas ahi: viewport screenshot, review bundle,
 reference packs/sheets, focus review (con guards), character references
 (store/status/setup). `execute_code` / `batch_script` no se migran por diseno.
 Ver `D:\Dev\mcpBlender\docs\HANDOFF-bridge-blender-migration.md`.
+
+
+## Storage Auditor local
+
+El diagnóstico de crecimiento de disco reutiliza `storage_growth_scan` como una sola fuente de verdad. El scanner persiste baselines por root, mantiene un watcher recursivo mientras hay cobertura continua y, en pasadas posteriores, vuelve a leer sólo rutas notificadas como cambiadas; ante restart, overflow o pérdida de cobertura reconcilia el árbol completo antes de confiar en el snapshot.
+
+La UI local no agrega un segundo scanner ni realiza limpieza automática:
+
+```powershell
+.\storage-auditor.cmd
+# o sin abrir navegador automáticamente:
+npm run storage:app
+```
+
+La interfaz expone scopes separados para `D:\Dev` y `D:\`, espacio libre, estrategia/coverage, crecimiento desde el baseline anterior, categorías y hotspots clasificados como `safe-regenerable`, `review`, `preserve` o `project-data`. La clasificación es advisory: incluso un hotspot regenerable debe comprobar ownership/actividad antes de una limpieza. ChatGPT usa el mismo motor mediante `storage_growth_scan`, por lo que la vista humana y la auditoría por Bridge comparten snapshot, categorías y política. En roots grandes, `status` es la ruta rápida de entrada; una reconciliación completa puede tardar varios minutos y queda reservada para crear baseline o recuperar cobertura perdida del watcher.

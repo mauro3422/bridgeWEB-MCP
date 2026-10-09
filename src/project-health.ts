@@ -3,16 +3,27 @@ import path from "node:path";
 import { auditMssrProjectContextHealth, discoverMssrWorkspaceRepositories } from "@mauroprime/mssr";
 import { collectBridgeDocumentFreshness } from "./document-freshness-host.js";
 
-const DEFAULT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+export const PROJECT_HEALTH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_CHECK_MS = 60 * 60 * 1000;
 const DEFAULT_RETENTION = 90;
 const DEFAULT_MAX_DEPTH = 4;
 
 export type ProjectHealthLevel = "ok" | "watch" | "review";
+export type ProjectWorkspaceStatusState = "finished" | "abandoned-or-replaced";
+export type ProjectWorkspaceStatus = {
+  status: "absent" | "valid" | "invalid";
+  state: ProjectWorkspaceStatusState | null;
+  reason: string | null;
+  updatedAt: string | null;
+  replacedBy: string | null;
+  source: ".mssr/PROJECT_STATE.md#Workspace status";
+  error: string | null;
+};
 export type ProjectHealthItem = {
   name: string;
   relativeRoot: string;
   level: ProjectHealthLevel;
+  workspaceStatus: ProjectWorkspaceStatus;
   manifestStatus: string;
   coreEntries: number;
   modules: number;
@@ -24,6 +35,15 @@ export type ProjectHealthItem = {
   freshnessFindingCount: number;
   freshnessFindingCodes: string[];
   freshnessReviewDocuments: string[];
+  referenceAuditAvailable: boolean;
+  referenceScannedMarkdown: number;
+  referenceCandidateCount: number;
+  referenceHighPriorityCount: number;
+  referenceMediumPriorityCount: number;
+  referenceLowPriorityCount: number;
+  referenceConnectedCount: number;
+  referenceAuditTruncated: boolean;
+  referenceHighCandidates: string[];
 };
 export type ProjectHealthSnapshot = {
   observedAt: string;
@@ -50,6 +70,91 @@ function defaultWorkspaceRoot(): string {
       || process.env.MSSR_WORKSPACE_ROOT
       || path.dirname(process.cwd()),
   );
+}
+
+const WORKSPACE_STATUS_SOURCE = ".mssr/PROJECT_STATE.md#Workspace status" as const;
+const WORKSPACE_TERMINAL_STATES = new Set<ProjectWorkspaceStatusState>(["finished", "abandoned-or-replaced"]);
+
+function boundedStatusValue(value: string | undefined, maxLength: number): string | null {
+  const normalized = (value ?? "").trim().replace(/\s+/g, " ");
+  return normalized ? normalized.slice(0, maxLength) : null;
+}
+
+async function readProjectWorkspaceStatus(projectRoot: string): Promise<ProjectWorkspaceStatus> {
+  const statePath = path.join(projectRoot, ".mssr", "PROJECT_STATE.md");
+  let text: string;
+  try {
+    text = await fs.readFile(statePath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { status: "absent", state: null, reason: null, updatedAt: null, replacedBy: null, source: WORKSPACE_STATUS_SOURCE, error: null };
+    }
+    return { status: "invalid", state: null, reason: null, updatedAt: null, replacedBy: null, source: WORKSPACE_STATUS_SOURCE, error: "workspace status authority could not be read" };
+  }
+
+  const lines = text.split(/\r?\n/);
+  const headingIndex = lines.findIndex((line) => line.trim().toLowerCase() === "## workspace status");
+  if (headingIndex < 0) {
+    return { status: "absent", state: null, reason: null, updatedAt: null, replacedBy: null, source: WORKSPACE_STATUS_SOURCE, error: null };
+  }
+
+  const fields = new Map<string, string>();
+  for (let index = headingIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (/^##\s+/.test(line.trim())) break;
+    const match = line.match(/^\s*([A-Za-z][A-Za-z -]*):\s*(.*?)\s*$/);
+    if (!match) continue;
+    fields.set(match[1].trim().toLowerCase().replace(/\s+/g, "-"), match[2]);
+  }
+
+  const rawState = boundedStatusValue(fields.get("state"), 80)?.toLowerCase() ?? null;
+  if (!rawState || !WORKSPACE_TERMINAL_STATES.has(rawState as ProjectWorkspaceStatusState)) {
+    return {
+      status: "invalid",
+      state: null,
+      reason: boundedStatusValue(fields.get("reason"), 240),
+      updatedAt: null,
+      replacedBy: boundedStatusValue(fields.get("replaced-by"), 160),
+      source: WORKSPACE_STATUS_SOURCE,
+      error: "State must be finished or abandoned-or-replaced",
+    };
+  }
+
+  const rawUpdatedAt = boundedStatusValue(fields.get("updated-at") ?? fields.get("updated"), 80);
+  if (!rawUpdatedAt) {
+    return {
+      status: "invalid",
+      state: rawState as ProjectWorkspaceStatusState,
+      reason: boundedStatusValue(fields.get("reason"), 240),
+      updatedAt: null,
+      replacedBy: boundedStatusValue(fields.get("replaced-by"), 160),
+      source: WORKSPACE_STATUS_SOURCE,
+      error: "Updated-At is required so terminal state can be ordered against later work",
+    };
+  }
+  const parsed = Date.parse(rawUpdatedAt);
+  if (!Number.isFinite(parsed)) {
+    return {
+      status: "invalid",
+      state: rawState as ProjectWorkspaceStatusState,
+      reason: boundedStatusValue(fields.get("reason"), 240),
+      updatedAt: null,
+      replacedBy: boundedStatusValue(fields.get("replaced-by"), 160),
+      source: WORKSPACE_STATUS_SOURCE,
+      error: "Updated-At must be an ISO/date-like timestamp",
+    };
+  }
+  const updatedAt = new Date(parsed).toISOString();
+
+  return {
+    status: "valid",
+    state: rawState as ProjectWorkspaceStatusState,
+    reason: boundedStatusValue(fields.get("reason"), 240),
+    updatedAt,
+    replacedBy: boundedStatusValue(fields.get("replaced-by"), 160),
+    source: WORKSPACE_STATUS_SOURCE,
+    error: null,
+  };
 }
 
 async function readStore(filePath = defaultFilePath()): Promise<ProjectHealthStore> {
@@ -89,9 +194,10 @@ export async function collectProjectHealthSnapshot(options: {
 
   const rank = { review: 2, watch: 1, ok: 0 } as const;
   for (const projectRoot of repos) {
-    const [health, freshness] = await Promise.all([
+    const [health, freshness, workspaceStatus] = await Promise.all([
       auditMssrProjectContextHealth(projectRoot),
       collectBridgeDocumentFreshness(projectRoot),
+      readProjectWorkspaceStatus(projectRoot),
     ]);
     const relativeRoot = path.relative(workspaceRoot, projectRoot).replace(/\\/g, "/") || ".";
     const freshnessLevel: ProjectHealthLevel = freshness.manifestStatus === "invalid"
@@ -115,23 +221,46 @@ export async function collectProjectHealthSnapshot(options: {
       target: item.target,
       recommendation: item.recommendation,
     }));
-    const findings = [...structuralFindings, ...freshnessFindings].slice(0, 24);
-    const level = rank[freshnessLevel] > rank[health.level] ? freshnessLevel : health.level;
+    const workspaceStatusFindings = workspaceStatus.status === "invalid"
+      ? [{
+          code: "workspace-status-invalid",
+          target: WORKSPACE_STATUS_SOURCE,
+          recommendation: `Corrige ## Workspace status antes de usarlo como evidencia explícita de estado terminal: ${workspaceStatus.error ?? "contrato inválido"}.`,
+        }]
+      : [];
+    const referenceAudit = health.referenceAudit ?? null;
+    const allFindings = [...structuralFindings, ...freshnessFindings, ...workspaceStatusFindings];
+    const findings = allFindings.slice(0, 24);
+    const baseLevel = rank[freshnessLevel] > rank[health.level] ? freshnessLevel : health.level;
+    const level: ProjectHealthLevel = workspaceStatus.status === "invalid" ? "review" : baseLevel;
     projects.push({
       name: path.basename(projectRoot),
       relativeRoot,
       level,
+      workspaceStatus,
       manifestStatus: health.manifestStatus,
       coreEntries: health.coreCount,
       modules: health.moduleCount,
-      findingCount: structuralFindings.length + freshnessFindings.length,
-      findingCodes: [...new Set([...structuralFindings, ...freshnessFindings].map((item) => item.code))].sort(),
+      findingCount: allFindings.length,
+      findingCodes: [...new Set(allFindings.map((item) => item.code))].sort(),
       findings,
       freshnessManifestStatus: freshness.manifestStatus,
       freshnessLevel,
       freshnessFindingCount: freshnessFindings.length,
       freshnessFindingCodes: [...new Set(freshnessFindings.map((item) => item.code))].sort(),
       freshnessReviewDocuments: freshness.evaluation?.reviewDocuments ?? [],
+      referenceAuditAvailable: Boolean(referenceAudit),
+      referenceScannedMarkdown: referenceAudit?.scannedMarkdown ?? 0,
+      referenceCandidateCount: referenceAudit?.candidateCount ?? 0,
+      referenceHighPriorityCount: referenceAudit?.highPriorityCount ?? 0,
+      referenceMediumPriorityCount: referenceAudit?.mediumPriorityCount ?? 0,
+      referenceLowPriorityCount: referenceAudit?.lowPriorityCount ?? 0,
+      referenceConnectedCount: referenceAudit?.connectedCount ?? 0,
+      referenceAuditTruncated: referenceAudit?.truncated ?? false,
+      referenceHighCandidates: (referenceAudit?.candidates ?? [])
+        .filter((candidate) => candidate.reviewPriority === "high")
+        .slice(0, 8)
+        .map((candidate) => candidate.path),
     });
   }
 
@@ -162,7 +291,7 @@ export async function captureProjectHealthIfDue(options: {
 } = {}) {
   const now = options.now ?? new Date();
   const filePath = options.filePath ?? defaultFilePath();
-  const intervalMs = options.intervalMs ?? DEFAULT_INTERVAL_MS;
+  const intervalMs = options.intervalMs ?? PROJECT_HEALTH_INTERVAL_MS;
   const retention = Math.max(2, Math.floor(options.retention ?? DEFAULT_RETENTION));
   const store = await readStore(filePath);
   const latest = store.snapshots.at(-1);

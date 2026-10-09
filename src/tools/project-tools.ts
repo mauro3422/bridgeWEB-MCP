@@ -5,6 +5,7 @@ import type { BridgeToolModule } from "./types.js";
 import { pathPolicyStatus, resolveToolPath } from "./shared/path.js";
 import { runProcess } from "./shared/process.js";
 import { writeTextAndVerify } from "./shared/text-files.js";
+import { resolveWorkspaceProjectReference } from "../project-reference.js";
 
 const PROFILE_FILE = ".bridge-project.json";
 
@@ -134,11 +135,13 @@ export const projectToolModule: BridgeToolModule = {
   tools: [
     { name: "path_policy_status", description: "Show active writable/cwd roots, read-only roots, denied paths, denied sensitive filenames, and path-policy guidance.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
     { name: "project_profile", description: "Detect a project's languages, frameworks, package manager, scripts, commands, important files, Git state, and saved Bridge profile.", inputSchema: { type: "object", properties: { projectRoot: { type: "string" } }, additionalProperties: false } },
+    { name: "project_reference_resolve", description: "Resolve a natural project reference against a Project Health inventory observed within the last 24 hours. Returns a bounded deterministic owner candidate or an ambiguity set plus the exact project_context_load handoff; it abstains for missing or stale inventory and never changes MSSR routing or scans the workspace itself.", inputSchema: { type: "object", properties: { reference: { type: "string", minLength: 1, maxLength: 200 }, maxCandidates: { type: "integer", minimum: 1, maximum: 16, default: 8 } }, required: ["reference"], additionalProperties: false } },
     { name: "project_profile_save", description: "Save a .bridge-project.json profile containing detected project commands plus explicit overrides.", inputSchema: { type: "object", properties: { projectRoot: { type: "string" }, overrides: { type: "object", additionalProperties: true, default: {} } }, additionalProperties: false } },
   ],
   handlers: {
     path_policy_status: () => pathPolicyStatus(),
     project_profile: async (args) => projectProfile(z.object({ projectRoot: z.string().optional() }).parse(args).projectRoot),
+    project_reference_resolve: async (args) => { const p = z.object({ reference: z.string().min(1).max(200), maxCandidates: z.number().int().min(1).max(16).default(8) }).parse(args); return resolveWorkspaceProjectReference(p.reference, p.maxCandidates); },
     project_profile_save: async (args) => { const p = z.object({ projectRoot: z.string().optional(), overrides: z.record(z.unknown()).default({}) }).parse(args); return saveProjectProfile(p.projectRoot, p.overrides); },
   },
 };

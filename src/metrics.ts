@@ -87,7 +87,7 @@ type DatabaseSync = {
   close: () => void;
 };
 type SqliteModule = {
-  DatabaseSync: new (filename: string) => DatabaseSync;
+  DatabaseSync: new (filename: string, options?: { readOnly?: boolean }) => DatabaseSync;
 };
 
 export type BridgeMetricStart = {
@@ -268,14 +268,22 @@ function getDb(): DatabaseSync | null {
   if (!metricsEnabled) return null;
   if (db !== undefined) return db;
 
-  ensureDirs();
+  const readOnly = process.env.BRIDGE_MCP_METRICS_READONLY === "1";
+  if (!readOnly) ensureDirs();
   const sqlite = loadSqlite();
   if (!sqlite) {
     db = null;
     return null;
   }
 
-  db = new sqlite.DatabaseSync(sqlitePath);
+  db = readOnly
+    ? new sqlite.DatabaseSync(sqlitePath, { readOnly: true })
+    : new sqlite.DatabaseSync(sqlitePath);
+  if (readOnly) {
+    db.exec("PRAGMA busy_timeout = 100; PRAGMA query_only = ON;");
+    return db;
+  }
+
   db.exec(`
     PRAGMA busy_timeout = 100;
     PRAGMA journal_mode = WAL;
@@ -365,6 +373,14 @@ function getDb(): DatabaseSync | null {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   return db;
+}
+
+/**
+ * Create the writable metrics schema before the read-only dashboard worker
+ * opens the shared observability database on a cold start.
+ */
+export function initializeMetricsStorage(): void {
+  getDb();
 }
 
 function redactText(value: string, maxChars = 500): string {
@@ -674,13 +690,14 @@ export function classifyToolAuditError(value: string | null | undefined): string
   if (!error) return "unknown";
   const explicit = error.match(/^\[([a-z0-9-]+)\]/)?.[1];
   if (explicit && [
-    "expected-integrity-mismatch", "stale-file-state", "invalid-image-payload", "source-file-unavailable",
+    "expected-integrity-mismatch", "stale-file-state", "invalid-image-payload", "invalid-encoded-payload", "script-runtime-error", "source-file-unavailable",
     "safety-guard", "missing-upstream", "no-remote-configured", "target-not-found", "patch-conflict",
   ].includes(explicit)) return explicit;
-  if (/invalid image payload|unsupported image signature|invalid base64|data url.*image/.test(error)) return "invalid-image-payload";
+  if (/invalid image payload|unsupported image signature|data url.*image|image payload.*base64/.test(error)) return "invalid-image-payload";
+  if (/invalid base64|base64(?:url)? payload|hex payload|encoded payload|non-canonical|invalid base64 length/.test(error)) return "invalid-encoded-payload";
   if (/authorized source.*unavailable|source file unavailable|temporary authorized file.*missing/.test(error)) return "source-file-unavailable";
   if (/sha-?256.*mismatch|hash mismatch|integrity mismatch|head=.*tracking=.*remote=/.test(error)) return "expected-integrity-mismatch";
-  if (/head changed|stale file|already exited|worktree changed|excluded paths are already staged/.test(error)) return "stale-file-state";
+  if (/head changed|stale file|worktree changed|excluded paths are already staged/.test(error)) return "stale-file-state";
   if (/remote .*not configured|no remote configured|required git remote/.test(error)) return "no-remote-configured";
   if (/missing upstream|no upstream|has no upstream branch/.test(error)) return "missing-upstream";
   if (/invalid_type|unrecognized_keys|too_big|too_small|zod|required|expected .* received|number must be (less|greater) than or equal|must be a (json object|non-empty string)|invalid .* expected/.test(error)) return "schema-validation";
@@ -688,7 +705,7 @@ export function classifyToolAuditError(value: string | null | undefined): string
   if (/process-result:timeout|timed? out|timeout|etimedout/.test(error)) return "timeout";
   if (/process-result:failed:code=/.test(error)) return "process-exit";
   if (/expected \d+ replacement|expected replacement|patch conflict|context mismatch/.test(error)) return "patch-conflict";
-  if (/unknown modular tool|unknown (terminal|workspace|upload|snapshot|studio) (session|id|target)|not found|enoent|target .*missing|does not exist/.test(error)) return "target-not-found";
+  if (/unknown modular tool|unknown (terminal|workspace|upload|snapshot|studio) (session|id|target)|(?:terminal|session).*already exited|not found|enoent|target .*missing|does not exist/.test(error)) return "target-not-found";
   if (/econnrefused|provider unavailable|connection closed|disconnected|tools\/list returned zero|no last-known tool cache/.test(error)) return "provider-unavailable";
   if (/refusing|not allowed|outside allowed|denied path|escaped|requires exact|truncated snapshot rollback/.test(error)) return "safety-guard";
   if (/internal|sqlite|assertion|unexpected/.test(error)) return "runtime-internal";

@@ -1,16 +1,53 @@
 param(
-  [string]$ProjectRoot = "D:\Dev\bridge-mcp",
+  [string]$ProjectRoot = "",
+  [string]$RuntimeDataRoot = "",
   [string]$ExpectedServerVersion = "",
+  [string]$BridgeBaseUrl = "",
+  [switch]$SkipTunnelChecks,
   [switch]$StrictGit
 )
 
 $ErrorActionPreference = "Stop"
 
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+  $ProjectRoot = [string]$env:BRIDGE_VERIFY_PROJECT_ROOT
+}
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+  $ProjectRoot = Split-Path -Parent $PSScriptRoot
+}
+$ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
+
+if ([string]::IsNullOrWhiteSpace($RuntimeDataRoot)) {
+  $RuntimeDataRoot = [string]$env:BRIDGE_VERIFY_RUNTIME_ROOT
+}
+if ([string]::IsNullOrWhiteSpace($RuntimeDataRoot)) {
+  $RuntimeDataRoot = [string]$env:BRIDGE_MCP_PROJECT_ROOT
+}
+if ([string]::IsNullOrWhiteSpace($RuntimeDataRoot)) {
+  $RuntimeDataRoot = $ProjectRoot
+}
+$RuntimeDataRoot = (Resolve-Path -LiteralPath $RuntimeDataRoot).Path
+if ([string]::IsNullOrWhiteSpace($BridgeBaseUrl)) {
+  $BridgeBaseUrl = [string]$env:BRIDGE_VERIFY_BASE_URL
+}
+if ([string]::IsNullOrWhiteSpace($BridgeBaseUrl)) {
+  $BridgeBaseUrl = "http://127.0.0.1:3001"
+}
+$bridgeUri = [Uri]$BridgeBaseUrl
+if ($bridgeUri.Scheme -notin @("http", "https") -or -not $bridgeUri.IsAbsoluteUri) {
+  throw "BridgeBaseUrl must be an absolute HTTP(S) URL: $BridgeBaseUrl"
+}
+$bridgeAuthority = $bridgeUri.GetLeftPart([UriPartial]::Authority)
+$mcpBaseUrl = "$bridgeAuthority/mcp"
+$env:BRIDGE_MCP_VERIFY_BASE = $mcpBaseUrl
+
+if ([string]::IsNullOrWhiteSpace($ExpectedServerVersion)) {
+  $ExpectedServerVersion = [string]$env:BRIDGE_VERIFY_SERVER_VERSION
+}
 if ([string]::IsNullOrWhiteSpace($ExpectedServerVersion)) {
   $packagePath = Join-Path $ProjectRoot "package.json"
   $ExpectedServerVersion = [string]((Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json).version)
 }
-
 function Convert-ToTailText {
   param([string]$Text, [int]$MaxChars = 4000)
   if ($null -eq $Text) { return "" }
@@ -52,10 +89,12 @@ function Invoke-VerifyStep {
 Set-Location -LiteralPath $ProjectRoot
 
 $steps = @()
-$steps += Invoke-VerifyStep "doctor" { powershell -NoProfile -File .\scripts\bridge-doctor.ps1 -ExpectedServerVersion $ExpectedServerVersion }
+$doctorArgs = @("-ProjectRoot", $ProjectRoot, "-BridgeHost", $bridgeUri.Host, "-BridgePort", $bridgeUri.Port, "-ExpectedServerVersion", $ExpectedServerVersion)
+if ($SkipTunnelChecks) { $doctorArgs += "-SkipTunnelChecks" }
+$steps += Invoke-VerifyStep "doctor" { powershell -NoProfile -File .\scripts\bridge-doctor.ps1 @doctorArgs }
 $steps += Invoke-VerifyStep "check" { npm run check }
 $steps += Invoke-VerifyStep "build" { npm run build }
-$steps += Invoke-VerifyStep "smoke:http" { powershell -NoProfile -File .\scripts\test-bridge-http.ps1 }
+$steps += Invoke-VerifyStep "smoke:http" { powershell -NoProfile -File .\scripts\test-bridge-http.ps1 -BaseUrl $bridgeAuthority -RuntimeDataRoot $RuntimeDataRoot -ExpectedServerVersion $ExpectedServerVersion }
 $steps += Invoke-VerifyStep "test:mcp-dual-era" { npm run test:mcp-dual-era }
 $steps += Invoke-VerifyStep "test:regressions" { cmd.exe /d /s /c "npm run test:regressions 2>&1" }
 $steps += Invoke-VerifyStep "test:routing-latency" { npm run test:routing-latency }
@@ -70,7 +109,7 @@ $steps += Invoke-VerifyStep "metrics status" {
   node .\scripts\verify-mcp-call.mjs bridge_metrics_status "{}" sqliteAvailable jsonlPath
 }
 $steps += Invoke-VerifyStep "tools:list sanity" {
-  node .\scripts\verify-mcp-tools-list.mjs system_info run_command git_status bridge_self_check bridge_metrics_status bridge_verify_all read_file_lines edit_lines impact_analysis dependency_graph import_graph call_graph find_dead_code python_validate python_symbols python_impact_analysis python_import_graph python_dead_code python_test_plan pytest_testmon project_context_load workflow_guide_recommend workflow_guide_load workflow_guide_create skill_catalog skill_route_audit skill_route_plan skill_bootstrap binary_file_info binary_file_read_chunk binary_file_write binary_upload_begin binary_upload_append binary_upload_status binary_upload_finish binary_upload_abort image_asset_save image_character_views_prepare blender_status blender_open blender_scene_info blender_viewport_screenshot blender_execute_code blender_batch_script blender_store_reference_image blender_setup_character_references blender_character_loop_status
+  node .\scripts\verify-mcp-tools-list.mjs system_info run_command git_status bridge_self_check bridge_metrics_status bridge_verify_all read_file_lines edit_lines impact_analysis dependency_graph import_graph call_graph find_dead_code python_validate python_symbols python_impact_analysis python_import_graph python_dead_code python_test_plan pytest_testmon project_context_load workflow_guide_recommend workflow_guide_load workflow_guide_create skill_catalog skill_route_audit skill_route_plan skill_bootstrap mssr_librarian_search mssr_librarian_evidence_pack binary_file_info binary_file_read_chunk binary_file_write binary_upload_begin binary_upload_append binary_upload_status binary_upload_finish binary_upload_abort image_asset_import_files asset_import_files image_asset_save image_character_views_prepare blender_status blender_open blender_scene_info blender_viewport_screenshot blender_execute_code blender_batch_script blender_setup_character_references blender_character_loop_status
 }
 $steps += Invoke-VerifyStep "git status" {
   git status --short --branch
@@ -85,6 +124,8 @@ $ok = $failedRequired.Count -eq 0
 $result = [pscustomobject]@{
   ok = $ok
   projectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
+  runtimeDataRoot = $RuntimeDataRoot
+  bridgeBaseUrl = $bridgeAuthority
   expectedServerVersion = $ExpectedServerVersion
   strictGit = [bool]$StrictGit
   steps = $steps

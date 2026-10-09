@@ -57,7 +57,10 @@
     "resume": "GUIDE.md"
   },
   "recommendedTools": [
-    "image_asset_save",
+    "image_asset_import_files",
+    "bridge_tool_schema",
+    "bridge_tool_action",
+    "bridge_connector_catalog_compare",
     "image_character_views_prepare",
     "image_reference_pack_prepare",
     "blender_validate_reference_pack",

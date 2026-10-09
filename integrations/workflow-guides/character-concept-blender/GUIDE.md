@@ -166,7 +166,7 @@ Record concrete notes. Use `pending` when not reviewed and `fail` when the direc
 
 ## Phase 6 — Save sources
 
-Call `image_asset_save` with stable roles, prompts, source provider and useful metadata. Keep source masters separate from normalized derivatives.
+Use `image_asset_import_files` for ChatGPT-generated/edited source images so the authorized file bytes go directly to disk without agent-side Base64 conversion. If the dedicated importer is missing from the current connector catalog, inspect its runtime schema and delegate it through `bridge_tool_action`, passing the authorized images in the wrapper's top-level `files` parameter and normal target metadata inside `arguments`. If this session's `bridge_tool_action` schema also lacks top-level `files`, the connector catalog is stale: preserve the already-generated images, refresh/reopen the connector or continue in a new chat, and resume from those same images. Do **not** regenerate them merely to obtain another transport shape. Preserve stable roles, prompts, source provider and useful metadata, and keep source masters separate from normalized derivatives. `image_asset_save` is only a compatibility fallback when direct file-parameter transport is genuinely unavailable and real image bytes are already available natively.
 
 Recommended layout:
 
@@ -237,7 +237,7 @@ Regenerate or repair only failed views. Do not install a failed or pending pack.
 
 ## Phase 9 — Install in Blender
 
-Call `blender_install_reference_pack` with `layout: axis_aligned`.
+Install through the canonical axis-aligned contract. Prefer `blender_install_reference_pack` with `layout: axis_aligned` when a prepared/validated pack manifest exists. When deliberately using the standalone `blender-mcp` and the reference image paths are already persisted, its path-backed `reference_setup` primitive implements the same placement contract; it is not a second reference workflow.
 
 Expected construction layout:
 

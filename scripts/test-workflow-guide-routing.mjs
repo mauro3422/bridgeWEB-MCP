@@ -86,6 +86,48 @@ for (const name of ['roblox-save-backup-recovery', 'roblox-placement-system-auth
   assert.equal(coverageDiagnostic.existingSkillCoverage.matches.some((item) => item.name === name), false, `${name} must remain diagnostic evidence, not existing coverage`);
 }
 
+const genericBridgeRecoveryTask = 'Verificar las mejoras de calidad de las tools del Bridge y el recovery de procesos síncronos.';
+const genericBridgeRecovery = await registry.call('workflow_guide_recommend', { task: genericBridgeRecoveryTask, maxResults: 5 });
+assert.equal(
+  genericBridgeRecovery.existingSkillCoverage.matches.some((item) => item.name === 'roblox-save-backup-recovery'),
+  false,
+  'generic Bridge recovery work must not claim Roblox save/backup ownership without Roblox context',
+);
+
+const genericBridgeWrapperTask = 'Use bridge_tool_query to inspect project_change_consistency after a Bridge restart.';
+const genericBridgeWrapper = await registry.call('workflow_guide_recommend', { task: genericBridgeWrapperTask, maxResults: 5 });
+assert.equal(
+  genericBridgeWrapper.matches.some((item) => item.name === 'tablet-whiteboard-context'),
+  false,
+  'generic Bridge wrapper/runtime work must not activate the TabletWhiteboard guide',
+);
+
+
+const proportionalityAudit = await registry.call('workflow_guide_recommend', {
+  task:'Optimizar la proporcionalidad del contexto MSSR y reducir rituales de routing en el control plane.',
+  maxResults:5,
+});
+assert.equal(
+  proportionalityAudit.matches.some((item) => item.name === 'roblox-visual-benchmark'),
+  false,
+  'substring prop inside proporcionalidad must not activate the Roblox visual benchmark guide',
+);
+
+const boundedHandoff = await registry.call('workflow_guide_recommend', {
+  task:'Finaliza este handoff MSSR y confirma Git status; no reconstruyas un inventario de proyectos.',
+  maxResults:5,
+});
+assert.notEqual(boundedHandoff.recommendation.guide, 'cross-project-context-inventory', 'generic MSSR + Git wording must not force the cross-project inventory guide without a strong activation match');
+assert.notEqual(boundedHandoff.recommendation.action, 'load_existing', 'weak generic single-keyword accumulation must remain advisory, not an automatic guide load');
+const auxiliaryDirtyConstraint = await registry.call('workflow_guide_recommend', {
+  task:'Audita la adopción MSSR 0.2.78 y preserva el dirty tree actual mientras comparas dos paquetes; no reconstruyas el inventario cross-project.',
+  maxResults:5,
+});
+const auxiliaryInventoryMatch = auxiliaryDirtyConstraint.matches.find((item) => item.name === 'cross-project-context-inventory');
+assert.equal(auxiliaryInventoryMatch?.strongMatch ?? false, false, 'a short auxiliary keyword such as dirty tree must not become a strong guide intent by itself');
+assert.notEqual(auxiliaryDirtyConstraint.recommendation.guide, 'cross-project-context-inventory', 'preserving a dirty tree during another audit must not force the inventory workflow');
+assert.notEqual(auxiliaryDirtyConstraint.recommendation.action, 'load_existing', 'auxiliary dirty-tree wording must stay metadata-only unless a stronger inventory signal exists');
+
 const positiveCoverageCases = [
   ['In Roblox Studio, implement a placement system with a ghost preview, rotation and snapping.', 'roblox-placement-system-authoring'],
   ['Save and back up my Roblox Studio place so I can recover it after risky edits.', 'roblox-save-backup-recovery'],

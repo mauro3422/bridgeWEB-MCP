@@ -3,7 +3,31 @@
 Versioned release notes are the canonical change-history surface for MSSR debugging, maintenance, and persistence checks.
 
 ## Current releases
+- [0.6.162](0.6.162.md) - Add secure general-purpose ChatGPT file-parameter import to the active Bridge source line.
+- [0.6.161](0.6.161.md) - adopt corrected MSSR 0.2.110 after restoring read-only overlap diagnostics.
+- [0.6.160](0.6.160.md) - Rejected isolated candidate: MSSR package omitted expected overlap diagnostics; tunnel-free verification is carried forward in 0.6.161.
+- [0.6.159](0.6.159.md) - Adopt exact MSSR 0.2.108 bytes and expose read-only Jev range-overlap diagnostics.
 
+- [0.6.158](0.6.158.md) - Adopt MSSR 0.2.105 Librarian ordering and Jev Choice evidence; gate and verify HTTP observability bootstrap/recovery.
+- [0.6.157](0.6.157.md) - Stabilize the Windows HTTP liveness regression's startup diagnostics and temporary SQLite cleanup.
+- [0.6.156](0.6.156.md) - Preserve Jev Choice probabilities and document the host-owned Bibliotecario composition workflow; adopt MSSR 0.2.104.
+- [0.6.155](0.6.155.md) - Restore the previously shipped exact-citation Librarian evidence pack on the current Jev/TLS lineage and adopt MSSR 0.2.103.
+- [0.6.154](0.6.154.md) - Use Windows system trust roots for the managed Jev provider child and report sanitized provider failure classes.
+- [0.6.153](0.6.153.md) - Keep data-backed verification on ProjectRoot and refresh tool docs.
+- [0.6.152](0.6.152.md) - Keep BridgeCodeRoot release authority separate from ProjectRoot runtime/data ownership.
+- [0.6.151](0.6.151.md) - Persist bounded, secret-safe watchdog process lifecycle and recovery evidence for Bridge HTTP and the tunnel.
+
+- [0.6.150](0.6.150.md) - Correct the documented lineage of the HTTP Streamable framing recovery.
+- [0.6.149](0.6.149.md) - Keep watchdog dry runs side-effect-free and separate runtime/data roots from watchdog code.
+- [0.6.148](0.6.148.md) - Scope binary MCP resources safely, bind image previews to exact source bytes, and abstain on stale Project Health inventory.
+- [0.6.147](0.6.147.md) - Adopt MSSR 0.2.101 and add an opt-in canonical project-context Librarian sidecar mode with exact heading fingerprints and fail-closed bounded manifest reads.
+- [0.6.146](0.6.146.md) - Add opt-in, exact-section project-context metadata to Librarian search and compose its revision-bound handles explicitly with Jev selection.
+- [0.6.145](0.6.145.md) - Adopt MSSR 0.2.100's exact-fetchable Jev candidate contract and query-dense excerpt selection; document the EvidenceAtom ingress boundary without adding duplicate MCP tools.
+- [0.6.144](0.6.144.md) - Adopt MSSR 0.2.96, complete Jev exact-range selection/fetch, and prevent unknown explicit trace IDs from inheriting another task's identity.
+- [0.6.143](0.6.143.md) - Adopt MSSR 0.2.95 and add explicit bounded Jev selection with exact-fetch verification through the Bridge Librarian.
+
+- [0.6.142](0.6.142.md) - Adopt MSSR 0.2.93 Librarian/Jev tools through bounded host-owned source reads, exact revalidation, protected credentials, and immutable synthesis previews.
+- [0.6.141](0.6.141.md) - Add persistent incremental filesystem-growth diagnostics with safe watcher fallback, growth attribution, and focused storage regression coverage.
 - [0.6.140](0.6.140.md) - Adopt MSSR 0.2.72 and prove Bridge host consumption of the portable R4 evaluator/retrieval/message/shadow contracts while keeping longitudinal QA as an evidence-accumulation gate.
 - [0.6.139](0.6.139.md) - Adopt MSSR 0.2.71 and prepare controlled Bridge host adoption of the portable R4 semantic-consistency slice without claiming unwired host semantic producers.
 - [0.6.138](0.6.138.md) - Fix paged MSSR continuation lifecycle synchronization so `skill_context_next` satisfies exact-trace required-skill obligations in Bridge RAM before R2 preflight, without weakening owner isolation.

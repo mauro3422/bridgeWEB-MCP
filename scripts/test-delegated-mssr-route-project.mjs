@@ -12,6 +12,7 @@ const skillRoot = path.join(codexHome, "skills");
 const metricsDir = path.join(sandbox, "metrics");
 const logDir = path.join(sandbox, "logs");
 const projectRoot = path.join(sandbox, "delegated-route-project");
+const otherProjectRoot = path.join(sandbox, "delegated-route-project-other");
 
 process.env.CODEX_HOME = codexHome;
 process.env.BRIDGE_MCP_METRICS_DIR = metricsDir;
@@ -44,6 +45,8 @@ fs.appendFileSync(
   "utf8",
 );
 fs.mkdirSync(projectRoot, { recursive: true });
+fs.mkdirSync(otherProjectRoot, { recursive: true });
+fs.writeFileSync(path.join(otherProjectRoot, "fixture.txt"), "delegated-route-other-fixture\n", "utf8");
 fs.writeFileSync(path.join(projectRoot, "fixture.txt"), "delegated-route-fixture\n", "utf8");
 
 const [{ Client }, { InMemoryTransport }, { createBridgeServer }, metrics, observatory, traceContext, skillCatalog] = await Promise.all([
@@ -348,6 +351,51 @@ try {
     row.tool === "bridge_tool_query" && row.operation_subject === "search_files" && row.trace_id === concurrentTraceB.traceId);
   assert.equal(legacyDispatchMetric?.trace_id, concurrentTraceB.traceId);
 
+
+  traceContext.resetSharedMssrTraceRegistryForTests();
+  await call("project_context_load", {
+    projectRoot,
+    task: "Bind owner trace A to the first project before rotating the same host session.",
+  });
+  const ownerTraceA = await planDelegatedRoute("Explicit owner trace A before same-session project rotation.");
+  await call("project_context_load", {
+    projectRoot: otherProjectRoot,
+    task: "Rotate the same host session to project B without invalidating explicit trace A.",
+  });
+  const ownerTraceB = await planDelegatedRoute("Active owner trace B after same-session project rotation.");
+  assert.notEqual(ownerTraceA.traceId, ownerTraceB.traceId);
+
+  const resumedOwnerA = await call("bridge_tool_query", {
+    toolName: "search_files",
+    traceId: ownerTraceA.traceId,
+    arguments: {
+      path: projectRoot,
+      pattern: "delegated-route-fixture",
+      maxResults: 5,
+    },
+  });
+  assert.equal(
+    resumedOwnerA.bridgeNotices?.items?.some((notice) => notice.code === "mssr-trace-owner-mismatch") ?? false,
+    false,
+    "An explicit traceId must outrank stale same-session owner state when the current call points back to the trace's real project.",
+  );
+  const resumedOwnerMetric = metrics.getRecentMetrics(30, "active").recent.find((row) =>
+    row.tool === "bridge_tool_query" && row.operation_subject === "search_files" && row.trace_id === ownerTraceA.traceId);
+  assert.equal(resumedOwnerMetric?.project, "delegated-route-project");
+  assert.equal(resumedOwnerMetric?.trace_id, ownerTraceA.traceId);
+
+  await assert.rejects(
+    () => call("bridge_tool_query", {
+      toolName: "project_profile",
+      traceId: ownerTraceA.traceId,
+      arguments: {
+        projectRoot: otherProjectRoot,
+      },
+    }),
+    /owner|mssr-trace-owner-mismatch/i,
+    "Explicit trace authority must not weaken the cross-project owner guard.",
+  );
+  traceContext.resetSharedMssrTraceRegistryForTests();
 
   const missingCarryoverRoot = path.join(projectRoot, "missing-context-root");
   await assert.rejects(

@@ -5,7 +5,8 @@ param(
   [int]$BridgePort = 3001,
   [string]$TunnelBaseUrl = "http://127.0.0.1:8081",
   [string]$StartupFileName = "BridgeMCP-Watchdog.cmd",
-  [string]$ExpectedServerVersion = ""
+  [string]$ExpectedServerVersion = "",
+  [switch]$SkipTunnelChecks
 )
 
 $ErrorActionPreference = "Stop"
@@ -71,16 +72,21 @@ function Get-BridgeProcesses {
 Set-Location -LiteralPath $ProjectRoot
 $ProjectRoot = (Get-Location).Path
 $bridgeBaseUrl = "http://$BridgeHost`:$BridgePort"
-$tunnelUri = [Uri]$TunnelBaseUrl
-$tunnelPort = $tunnelUri.Port
+if ($SkipTunnelChecks) {
+  $tunnelPort = $null
+}
+else {
+  $tunnelUri = [Uri]$TunnelBaseUrl
+  $tunnelPort = $tunnelUri.Port
+}
 $warnings = New-Object System.Collections.Generic.List[string]
 
 Write-Section "Bridge doctor"
 Write-Host "ProjectRoot: $ProjectRoot"
 Write-Host "Profile:     $Profile"
 Write-Host "Bridge:      $bridgeBaseUrl/mcp"
-Write-Host "Tunnel:      $TunnelBaseUrl"
-Write-Host "Expected:    server=$ExpectedServerVersion profile=$Profile bridgePort=$BridgePort tunnelPort=$tunnelPort"
+Write-Host "Tunnel:      $(if ($SkipTunnelChecks) { 'checks skipped' } else { $TunnelBaseUrl })"
+Write-Host "Expected:    server=$ExpectedServerVersion profile=$Profile bridgePort=$BridgePort tunnelPort=$(if ($SkipTunnelChecks) { 'skipped' } else { $tunnelPort })"
 
 Write-Section "HTTP health"
 $bridgeStatus = Get-JsonStatus -Url "$bridgeBaseUrl/status"
@@ -102,22 +108,29 @@ $bridgeReady = Test-HttpText -Url "$bridgeBaseUrl/readyz" -Expected "ready"
 Write-Host "bridge /readyz: $(if ($bridgeReady.ok) { 'OK ready' } else { 'FAIL ' + $bridgeReady.error })"
 if (-not $bridgeReady.ok) { $warnings.Add("bridge readyz is not ready") | Out-Null }
 
-$tunnelHealth = Test-HttpText -Url "$TunnelBaseUrl/healthz" -Expected "live"
-Write-Host "tunnel /healthz: $(if ($tunnelHealth.ok) { 'OK live' } else { 'FAIL ' + $tunnelHealth.error })"
-if (-not $tunnelHealth.ok) {
-  Write-RecoveryHint "the active HTTP profile uses tunnel admin $TunnelBaseUrl; do not fall back to 8080 unless you intentionally changed profiles."
-  $warnings.Add("tunnel healthz is not live") | Out-Null
+if ($SkipTunnelChecks) {
+  Write-Host "tunnel healthz/readyz: SKIPPED (-SkipTunnelChecks)"
 }
+else {
+  $tunnelHealth = Test-HttpText -Url "$TunnelBaseUrl/healthz" -Expected "live"
+  Write-Host "tunnel /healthz: $(if ($tunnelHealth.ok) { 'OK live' } else { 'FAIL ' + $tunnelHealth.error })"
+  if (-not $tunnelHealth.ok) {
+    Write-RecoveryHint "the active HTTP profile uses tunnel admin $TunnelBaseUrl; do not fall back to 8080 unless you intentionally changed profiles."
+    $warnings.Add("tunnel healthz is not live") | Out-Null
+  }
 
-$tunnelReady = Test-HttpText -Url "$TunnelBaseUrl/readyz" -Expected "ready"
-Write-Host "tunnel /readyz: $(if ($tunnelReady.ok) { 'OK ready' } else { 'FAIL ' + $tunnelReady.error })"
-if (-not $tunnelReady.ok) {
-  Write-RecoveryHint "check tunnel-client, the Startup watchdog launcher, and the profile name before restarting manually."
-  $warnings.Add("tunnel readyz is not ready") | Out-Null
+  $tunnelReady = Test-HttpText -Url "$TunnelBaseUrl/readyz" -Expected "ready"
+  Write-Host "tunnel /readyz: $(if ($tunnelReady.ok) { 'OK ready' } else { 'FAIL ' + $tunnelReady.error })"
+  if (-not $tunnelReady.ok) {
+    Write-RecoveryHint "check tunnel-client, the Startup watchdog launcher, and the profile name before restarting manually."
+    $warnings.Add("tunnel readyz is not ready") | Out-Null
+  }
 }
 
 Write-Section "Listening ports"
-$interestingPorts = @($BridgePort, $tunnelPort, 3002, 3004, 8080, 8094) | Sort-Object -Unique
+$interestingPorts = @($BridgePort, 3002, 3004, 8080, 8094)
+if (-not $SkipTunnelChecks) { $interestingPorts += $tunnelPort }
+$interestingPorts = $interestingPorts | Sort-Object -Unique
 $portRows = foreach ($port in $interestingPorts) {
   $ownerPid = Get-ListenPid -Port $port
   if ($ownerPid) {

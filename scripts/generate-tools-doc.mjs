@@ -8,15 +8,16 @@ const OUT_PATH = "TOOLS.md";
 const registry = createDefaultToolRegistry();
 
 const groupRules = [
-  ["Core / navegacion", ["system_info", "list_dir", "read_text_file", "read_file_lines", "read_many_files", "list_files_smart", "search_files"]],
+  ["Core / navegacion", ["system_info", "list_dir", "read_text_file", "read_file_lines", "read_many_files", "list_files_smart", "search_files", "storage_growth_scan"]],
   ["Escritura segura", ["write_text_file", "apply_patch", "edit_lines"]],
-  ["Archivos binarios", ["binary_file_info", "binary_file_read_chunk", "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_status", "binary_upload_finish", "binary_upload_abort"]],
+  ["Archivos binarios", ["binary_file_info", "binary_file_attach", "binary_file_read_chunk", "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_status", "binary_upload_finish", "binary_upload_abort", "asset_import_files"]],
   ["Guias reutilizables", ["project_context_load", "workflow_guide_recommend", "workflow_guide_load", "workflow_guide_create"]],
-  ["Imagenes", ["image_file_attach", "image_asset_save", "image_character_views_prepare", "image_reference_pack_prepare"]],
+  ["Imagenes", ["image_file_attach", "image_chat_preview_prepare", "image_asset_import_files", "image_asset_save", "image_character_views_prepare", "image_reference_pack_prepare"]],
   ["Ejecucion / terminal", ["run_command", "terminal_start", "terminal_write", "terminal_read", "terminal_stop", "terminal_list"]],
-  ["Blender", ["blender_status", "blender_open", "blender_scene_info", "blender_viewport_screenshot", "blender_focus_review", "blender_review_bundle", "blender_execute_code", "blender_batch_script", "blender_store_reference_image", "blender_validate_reference_pack", "blender_install_reference_pack", "blender_setup_character_references", "blender_character_loop_status"]],
+  ["Blender", ["blender_status", "blender_open", "blender_scene_info", "blender_viewport_screenshot", "blender_focus_review", "blender_review_bundle", "blender_execute_code", "blender_batch_script", "blender_validate_reference_pack", "blender_install_reference_pack", "blender_setup_character_references", "blender_character_loop_status"]],
   ["Tablet Whiteboard", ["whiteboard_capture_pc_view", "whiteboard_latest_capture", "whiteboard_capture_list"]],
   ["Godot", ["godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list", "godot_mcp_query", "godot_mcp_action", "godot_scene_open", "godot_scene_create", "godot_screen_capture_save"]],
+  ["QuietDesk", ["quietdesk_status", "quietdesk_desktop_snapshot", "quietdesk_desktop_coverage", "quietdesk_desktop_candidates", "quietdesk_desktop_semantic_context", "quietdesk_desktop_capture", "quietdesk_runtime_telemetry", "quietdesk_execute_semantic"]],
   ["Git", ["git_status", "git_set_remote", "git_commit_all", "git_push_current_branch"]],
   ["Bridge ops", ["tunnel_health", "bridge_self_check", "bridge_verify_all", "bridge_request_restart", "bridge_restart_status"]],
   ["Metricas / visualizaciones", ["bridge_metrics_status", "bridge_metrics_summary", "bridge_metrics_recent", "bridge_tool_audit", "bridge_visualization_catalog", "bridge_visualize_metrics"]],

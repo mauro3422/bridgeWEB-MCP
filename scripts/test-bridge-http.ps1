@@ -1,9 +1,19 @@
 param(
   [string]$BaseUrl = "http://127.0.0.1:3001",
-  [string]$McpPath = "/mcp"
+  [string]$McpPath = "/mcp",
+  [string]$RuntimeDataRoot = "",
+  [string]$ExpectedServerVersion = ""
 )
 
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($RuntimeDataRoot)) {
+  $RuntimeDataRoot = [string]$env:BRIDGE_MCP_PROJECT_ROOT
+}
+if ([string]::IsNullOrWhiteSpace($RuntimeDataRoot)) {
+  $RuntimeDataRoot = (Get-Location).Path
+}
+$RuntimeDataRoot = (Resolve-Path -LiteralPath $RuntimeDataRoot).Path
 
 function Wait-BridgeReady {
   param([int]$TimeoutSeconds = 45)
@@ -72,6 +82,9 @@ Invoke-Check "readyz" {
 Invoke-Check "status" {
   $status = Invoke-RestMethod "$BaseUrl/status"
   if ($status.server.name -ne "bridge-mcp") { throw "Unexpected server name: $($status.server.name)" }
+  if (-not [string]::IsNullOrWhiteSpace($ExpectedServerVersion) -and [string]$status.server.version -ne $ExpectedServerVersion) {
+    throw "HTTP smoke target version mismatch: expected $ExpectedServerVersion, got $($status.server.version); refusing to send test telemetry."
+  }
   if ($status.transport -ne "streamable-http-dual-era") { throw "Unexpected transport: $($status.transport)" }
   if ($status.protocols.legacy.sessionful -ne $true) { throw "Legacy MCP route must remain sessionful" }
   if ($status.protocols.modern.revision -ne "2026-07-28") { throw "Unexpected modern MCP revision: $($status.protocols.modern.revision)" }
@@ -82,7 +95,7 @@ Invoke-Check "status" {
 
 Invoke-Check "MSSR dashboard" {
   $dashboard = Invoke-WebRequest -UseBasicParsing "$BaseUrl/dashboard"
-  if ($dashboard.Content -notmatch 'id="mssr-structured"' -or $dashboard.Content -notmatch 'id="mssr-continuity"' -or $dashboard.Content -notmatch 'id="mssr-skill-outcomes"' -or $dashboard.Content -notmatch 'id="mssr-selected-skills"' -or $dashboard.Content -notmatch 'id="mssr-loaded-skills"' -or $dashboard.Content -notmatch 'id="agent-profiles"' -or $dashboard.Content -notmatch 'id="mssr-agent-activation"' -or $dashboard.Content -notmatch 'id="mssr-agent-results"' -or $dashboard.Content -notmatch 'id="current-runtime-boot"' -or $dashboard.Content -notmatch 'Cobertura MSSR' -or $dashboard.Content -notmatch 'Conexiones MCP' -or $dashboard.Content -notmatch 'modelo no expuesto' -or $dashboard.Content -notmatch 'pendiente' -or $dashboard.Content -notmatch 'Herramientas MCP' -or $dashboard.Content -notmatch 'cargarla no demuestra') {
+  if ($dashboard.Content -notmatch 'id="mssr-structured"' -or $dashboard.Content -notmatch 'id="mssr-continuity"' -or $dashboard.Content -notmatch 'id="mssr-skill-outcomes"' -or $dashboard.Content -notmatch 'id="mssr-selected-skills"' -or $dashboard.Content -notmatch 'id="mssr-loaded-skills"' -or $dashboard.Content -notmatch 'id="agent-profiles"' -or $dashboard.Content -notmatch 'id="mssr-agent-activation"' -or $dashboard.Content -notmatch 'id="mssr-agent-results"' -or $dashboard.Content -notmatch 'id="current-runtime-boot"' -or $dashboard.Content -notmatch 'Cobertura MSSR' -or $dashboard.Content -notmatch 'Conexiones MCP' -or $dashboard.Content -notmatch 'modelo no expuesto' -or $dashboard.Content -notmatch 'pendiente' -or $dashboard.Content -notmatch 'Herramientas MCP' -or $dashboard.Content -notmatch 'Su uso correcto se demuestra') {
     throw "Dashboard does not expose MSSR and per-agent profile sections"
   }
   if (-not $dashboard.Content.Contains("replace(/\s+/g") -or $dashboard.Content.Contains("replace(/s+/g")) {
@@ -105,7 +118,7 @@ Invoke-Check "MSSR dashboard" {
 }
 
 Invoke-Check "authenticated external MSSR telemetry" {
-  $tokenPath = Join-Path (Get-Location) "data\mssr-ingest.token"
+  $tokenPath = Join-Path $RuntimeDataRoot "data\mssr-ingest.token"
   if (-not (Test-Path -LiteralPath $tokenPath)) { throw "MSSR ingest token was not created at $tokenPath" }
   $eventId = "__test_opencode_" + [Guid]::NewGuid().ToString("N")
   $traceId = "__test_opencode_trace_" + [Guid]::NewGuid().ToString("N")

@@ -1,17 +1,45 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 
 import {
+  MSSR_SEMANTIC_EXPERIENCE_MODE,
+  classifyMssrSemanticExperienceDeterministically,
+  createMssrSemanticExperienceObservation,
   evaluateMssrSemanticConsistency,
   evaluateMssrSemanticShadowEvidence,
   produceMssrSemanticContextMessages,
   retrieveMssrSemanticCandidates,
 } from "@mauroprime/mssr";
 
+const bridgePackage = JSON.parse(await fs.readFile(new URL("../package.json", import.meta.url), "utf8"));
+const packageLock = JSON.parse(await fs.readFile(new URL("../package-lock.json", import.meta.url), "utf8"));
+const mssrSpecifier = bridgePackage.dependencies?.["@mauroprime/mssr"];
+const mssrMatch = typeof mssrSpecifier === "string"
+  ? mssrSpecifier.match(/^file:(vendor\/mauroprime-mssr-(\d+\.\d+\.\d+)\.tgz)$/)
+  : null;
+assert.ok(mssrMatch, "Bridge must pin MSSR to a versioned local release-gate artifact");
+const [, vendorRelativePath, expectedVersion] = mssrMatch;
 const installedPackage = JSON.parse(
   await fs.readFile(new URL("../node_modules/@mauroprime/mssr/package.json", import.meta.url), "utf8"),
 );
-assert.equal(installedPackage.version, "0.2.72", "Bridge must consume the exact MSSR 0.2.72 package");
+assert.equal(installedPackage.version, expectedVersion, `Bridge must consume its pinned MSSR ${expectedVersion} package`);
+const vendorTarball = await fs.readFile(new URL(`../${vendorRelativePath}`, import.meta.url));
+assert.equal(expectedVersion, "0.2.110", "Bridge 0.6.161 must adopt the current verified MSSR release");
+assert.equal(vendorTarball.byteLength, 1_115_994, "Bridge must vendor the exact MSSR 0.2.110 release-gate size");
+assert.equal(
+  createHash("sha256").update(vendorTarball).digest("hex"),
+  "44f5c57a8eacc53fe3f9012cd113fa27775a382b855cde344c7b3ed4279b25ea",
+  "Bridge must vendor the byte-identical MSSR 0.2.110 release-gate artifact",
+);
+const lockedMssr = packageLock.packages?.["node_modules/@mauroprime/mssr"];
+assert.equal(lockedMssr?.version, expectedVersion, "package-lock.json must pin the same MSSR version as package.json");
+assert.equal(lockedMssr?.resolved, mssrSpecifier, "package-lock.json must point to the exact MSSR tarball selected by package.json");
+assert.equal(
+  lockedMssr?.integrity,
+  `sha512-${createHash("sha512").update(vendorTarball).digest("base64")}`,
+  `Bridge must vendor the exact locked MSSR ${expectedVersion} artifact`,
+);
 
 const roadmapEvaluation = evaluateMssrSemanticConsistency({
   boundary: "ordinary",
@@ -42,10 +70,32 @@ const messages = produceMssrSemanticContextMessages({
   evaluation: roadmapEvaluation,
   observedAt: "2026-09-19T20:00:00-03:00",
 });
+const repeatedMessages = produceMssrSemanticContextMessages({
+  evaluation: roadmapEvaluation,
+  observedAt: "2026-09-19T20:05:00-03:00",
+});
 assert.equal(messages.length, 1);
 assert.equal(messages[0].kind, "roadmap-contradiction");
 assert.equal(messages[0].advisoryActions.includes("inspect-reference"), true);
 assert.equal(messages[0].advisoryActions.includes("replan"), true);
+assert.equal(
+  messages[0].dedupeKey,
+  repeatedMessages[0].dedupeKey,
+  "Bridge must preserve stable semantic message identity across repeated observations",
+);
+
+const resolvedRoadmap = evaluateMssrSemanticConsistency({
+  boundary: "ordinary",
+  claims: roadmapEvaluation.activeClaims.map((claim) => ({ ...claim, value: "completed" })),
+});
+assert.equal(
+  produceMssrSemanticContextMessages({
+    evaluation: resolvedRoadmap,
+    observedAt: "2026-09-19T20:10:00-03:00",
+  }).length,
+  0,
+  "A resolved contradiction must become silent instead of leaving stale semantic noise",
+);
 
 const claims = [
   {
@@ -100,4 +150,35 @@ assert.equal(shadow.truthAuthority, false);
 assert.equal(shadow.directNoticeAuthority, false);
 assert.equal(shadow.canonicalRewriteAllowed, false);
 
-console.log("Bridge MSSR 0.2.72 R4 host-consumption adoption test passed.");
+const semanticExperience = createMssrSemanticExperienceObservation({
+  projectKey: "bridge-mcp",
+  decisionKind: "context-selection",
+  feature: {
+    subjectKind: "project-context",
+    candidateKinds: ["baseline", "reference"],
+    signals: ["host-adoption"],
+    flags: { installed: true },
+    buckets: { release: "0.2.89" },
+  },
+  proposal: {
+    value: "baseline",
+    confidence: 0.9,
+    provider: "bridge-host",
+    modelId: "adoption-smoke",
+  },
+});
+assert.equal(MSSR_SEMANTIC_EXPERIENCE_MODE, "verified-shadow-experience");
+assert.equal(semanticExperience.verification.status, "unknown");
+assert.equal(semanticExperience.authorityInfluence, false);
+assert.equal(semanticExperience.routingInfluence, false);
+assert.equal(semanticExperience.autoApplyAllowed, false);
+const semanticFallback = classifyMssrSemanticExperienceDeterministically({
+  decisionKind: "context-selection",
+  feature: semanticExperience.feature,
+});
+assert.equal(semanticFallback.basis, "abstain");
+assert.equal(semanticFallback.value, null);
+assert.equal(semanticFallback.reviewRequired, true);
+assert.equal(semanticFallback.autoApplyAllowed, false);
+
+console.log(`Bridge MSSR ${expectedVersion} R4 and semantic-shadow host-consumption tests passed.`);

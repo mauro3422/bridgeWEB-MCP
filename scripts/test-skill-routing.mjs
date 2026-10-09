@@ -118,6 +118,48 @@ for (const testCase of expandedCases) {
   });
 }
 
+const nearMatchIntent = {
+  summary: 'Evaluar workload Jev masivo con paralelismo y presupuesto, omitiendo adrede la señal de tool-chain para probar diagnóstico Bridge',
+  domains: ['coding', 'agent-orchestration'],
+  actions: ['design', 'optimize', 'analyze', 'test'],
+  artifacts: ['code', 'project'],
+  needs: ['performance', 'integrity-verification'],
+  signals: ['nominal'],
+  risk: 'read-only',
+  ambiguity: 'low',
+};
+const nearMatchRoute = await registry.call('skill_route_plan', {
+  task: 'Tengo 500 candidatos independientes y quiero que Jev los clasifique con cache, dedupe y paralelismo acotado.',
+  intent: nearMatchIntent,
+  caller: 'chatgpt-web',
+  stage: 'start',
+  maxSkills: 8,
+  responseMode: 'compact',
+});
+if (nearMatchRoute.loadOrder.includes('jev-decision-systems')) {
+  failures.push('bridge near-match regression: Jev must remain outside loadOrder while its required signal is missing');
+}
+const bridgeNearMatch = nearMatchRoute.nearMatches?.find((candidate) => candidate.name === 'jev-decision-systems');
+if (!bridgeNearMatch) {
+  failures.push('bridge near-match regression: compact route must preserve jev-decision-systems diagnostic');
+} else {
+  const signalGate = bridgeNearMatch.missingGates?.find((gate) => gate.dimension === 'signal');
+  if (!signalGate?.missingValues?.includes('tool-chain-needed')) {
+    failures.push('bridge near-match regression: compact diagnostic must expose missing tool-chain-needed signal');
+  }
+}
+const recoveredNearMatchRoute = await registry.call('skill_route_plan', {
+  task: 'Tengo 500 candidatos independientes y quiero que Jev los clasifique con cache, dedupe y paralelismo acotado.',
+  intent: { ...nearMatchIntent, signals: ['tool-chain-needed'] },
+  caller: 'chatgpt-web',
+  stage: 'start',
+  maxSkills: 8,
+  responseMode: 'compact',
+});
+if (!recoveredNearMatchRoute.loadOrder.includes('jev-decision-systems')) {
+  failures.push('bridge near-match regression: truthful corrected intent must route jev-decision-systems normally');
+}
+
 const audit = await registry.call('skill_route_audit', { sources: ['codex-local', 'codex-system'] });
 if (!audit.ok) failures.push(...audit.errors.map((error) => `audit error: ${error}`));
 if (audit.maintenanceRequired) failures.push(...audit.maintenanceReasons.map((reason) => `audit maintenance: ${reason}`));

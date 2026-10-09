@@ -19,6 +19,160 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-10-08 — Controlled restart request used BridgeCodeRoot instead of ProjectRoot
+
+**Estado:** Resuelto durante la activación de Bridge 0.6.162; no hubo interrupción del servicio por el primer pedido.
+
+**Capa/owner:** Solicitud de restart MCP y watchdog HTTP (`bridge_request_restart`, `scripts/start-bridge-http-watchdog.ps1`).
+
+**Síntoma observable:** El pedido `5c263914-4cea-4960-a152-a6897df34ef5` se escribió en `D:\Dev\bridge-mcp-candidate-0.6.160-mssr-0.2.109\.bridge-restart-request`; el watchdog seguía vigilando `D:\Dev\bridge-mcp\.bridge-restart-request`, por lo que no podía consumirlo.
+
+**Causa demostrada:** El watchdog resuelve `RestartRequestFile` y `RestartAckFile` contra `ProjectRoot`; pasar `BridgeCodeRoot` como `cwd` a la herramienta cambió el destino del archivo.
+
+**Corrección:** Se preservó el JSON del primer pedido fuera del checkout, se retiró sólo ese archivo no consumido y se repitió `bridge_request_restart` sin `cwd`. El pedido `75f10456-7612-4e4e-9404-d20aaf8bbbe3` fue reconocido por el watchdog; Bridge 0.6.162 quedó ready en PID 39780 y el túnel conservó PID 23336.
+
+**Regresión/verificación:** Readback de `/status`, `/readyz`, `bridge_health`, acuse del watchdog y catálogo live de 187 tools. No se modificó el runtime/data root ni se reinició el túnel.
+
+**Seguimiento:** En topologías separadas, omitir `cwd` para que la herramienta use el `ProjectRoot` del proceso; confirmar `requestPath` en la respuesta antes de esperar un restart.
+
+---
+
+## 2026-10-05 — Cold HTTP dashboard worker opened observability SQLite before schema creation
+
+**Estado:** Corregido y cubierto en la candidata Bridge 0.6.158; activación en el runtime HTTP principal pendiente del handoff controlado.
+
+**Capa/owner:** Inicialización de las bases compartidas de métricas y MSSR (`src/metrics.ts`, `src/mssr-observatory.ts`, `src/http.ts`) y el worker de solo lectura del dashboard.
+
+**Síntoma observable:** En un runtime nuevo y aislado, el primer `GET /api/dashboard/snapshot` fallaba con HTTP 500 (`no such table: mssr_events`; tras crear esa tabla por separado, `no such table: tool_calls`). Las rutas `/api/metrics/status` y `/api/mssr/summary` ocultaban la carrera porque inicializaban sus propios esquemas antes de que el dashboard se consultara.
+
+**Reproducción/evidencia:** `scripts/test-observability-http-liveness.mjs` ahora consulta el snapshot antes de cualquier otra ruta. Falló antes de la corrección y pasa con una base vacía después de inicializar ambas tablas en el host. La misma prueba drena 64 escrituras, completa un checkpoint WAL y atiende seis llamadas MCP sintéticas concurrentes sin stalls del event loop.
+
+**Causa demostrada:** El worker del dashboard se inicia en modo read-only y no puede crear tablas ausentes. La primera corrección movió el DDL al host antes de `listen`, pero la revisión de arquitectura detectó que eso hacía depender readiness/primer paint del coste SQLite y violaba `.mssr/PROJECT_CONTEXT.md`.
+
+**Corrección:** Un hijo de bootstrap efímero crea ambos esquemas después de que HTTP empieza a escuchar; el event loop principal no espera DDL. El worker del dashboard y todas las rutas HTTP respaldadas por SQLite esperan el mismo resultado; MCP tampoco despacha mientras el esquema no esté listo. El host conserva liveness y puede servir el snapshot persistido durante el bootstrap. Un lock SQLite reconocido recibe un solo reintento tras 200 ms. Si la inicialización falla de forma persistente, health sigue vivo, pero readiness/status y las rutas DB/MCP fallan cerrados con 503; el snapshot last-good continúa disponible. Al apagar HTTP, el bootstrap pendiente también se detiene.
+
+**Regresión/verificación:** la regresión de liveness retarda cinco segundos el bootstrap, solicita primero dashboard y luego varias rutas HTTP/MCP concurrentes, exige liveness/readiness rápida y comprueba que las rutas DB esperan el esquema sin causar stalls. La prueba de persisted seed valida primer paint stale inmediato. `test-observability-bootstrap-retry.mjs` induce un lock real sobre SQLite temporal, confirma exactamente un reintento y una consulta posterior 200; `test-observability-bootstrap-failure.mjs` confirma readiness/MCP/metrics 503 y snapshot stale tras fallo persistente. `npm run verify:all` pasó con `failedRequired=0` usando Bridge 0.6.158 aislado en 3018 y runtime externo v6; recibo y SHA del transcript están en el changelog `.158`. El HTTP productivo `.155` y el túnel `8081` permanecieron intactos.
+
+**Seguimiento:** completar el cambio controlado de código del runtime principal a `.158`, verificar que conserva `ProjectRoot=D:\Dev\bridge-mcp` y confirmar readiness/MCP/túnel antes de cerrar la adopción.
+
+---
+
+## 2026-10-03 — Streamable HTTP responses had invalid chunk framing
+
+**Estado:** Corregido y cubierto en el candidato Bridge 0.6.147; no publicado ni adoptado por el runtime live.
+
+**Capa/owner:** Adaptación HTTP del transporte MCP de Bridge (`src/http.ts`). El transporte conserva la gestión de sesiones del SDK; `@modelcontextprotocol/node` escribe la respuesta HTTP de Node.
+
+**Síntoma observable:** `POST /mcp` con protocolo `2025-06-18` devolvía `Transfer-Encoding: chunked`, pero el cuerpo SSE empezaba por `event: message` sin tamaño de chunk. Clientes HTTP interpretaban `Invalid character in chunk size` y la inicialización no terminaba.
+
+**Reproducción/evidencia:** captura TCP cruda y regresión reproducible en `scripts/test-mcp-streamable-http-framing.mjs`. La regresión exige que initialize tenga framing chunked válido y chunk terminal, que el GET SSE entregue headers de inmediato y permanezca abierto, y que reciba `notifications/tools/list_changed`. El problema se reprodujo antes en Bridge 0.6.146/0.6.147 y en un servidor mínimo SDK 1.30.0 + Hono node-server 2.0.11 bajo Node 24.19.0.
+
+**Causa demostrada:** la ruta de respuesta del adaptador Node basado en Hono no preservaba framing HTTP válido para las respuestas SSE del transporte MCP. No se atribuye el defecto a un cambio del contenido MCP ni se afirma un defecto general del SDK.
+
+**Corrección:** Bridge usa `WebStandardStreamableHTTPServerTransport` con `@modelcontextprotocol/node` `toNodeHandler` para escribir directamente la respuesta Node. Un wrapper limitado a `text/event-stream` fuerza el envío inmediato de headers, manteniendo el stream abierto y el lifecycle de sesiones. No se agrega framing manual ni cambia el contrato de herramientas.
+
+**Regresión/evidencia:** pasan `npm run check`, `npm run test:mcp-dual-era` (incluye la prueba TCP) y `npm run test:regressions`. Esta última también reveló una aserción de adopción fijada en MSSR 0.2.100; ahora valida dinámicamente la versión, tarball e integridad exactos del lockfile. Se acortó el resumen del Librarian en `PROJECT_CONTEXT` para que Project Context Health pase. `npm run verify:all` no se ejecutó: requiere un endpoint activo en puerto 3001.
+
+**Seguimiento:** revisar y publicar el branch candidato; cualquier adopción live necesita su propio gate controlado. Live permanece Bridge 0.6.144.
+
+---
+
+## 2026-10-01 — An unknown explicit MSSR trace ID inherited the active task identity
+
+**Estado:** Corregido en la rama candidata Bridge 0.6.144; el runtime live no fue reiniciado ni adoptó este cambio.
+
+**Capa/owner:** Bridge trace coordinator (`src/mssr-trace-context.ts`); portable MSSR continues to own task-identity compatibility.
+
+**Síntoma observable:** after loading project context while one trace remained active, `skill_bootstrap` with a new explicit `traceId` and a different `taskKey` returned `mssr-trace-task-identity-mismatch` naming the old trace.
+
+**Reproducción/evidencia:** the exact-ID lookup returned no state for the requested ID, but the route path then called `localState(false, !explicitTrace)`. With an explicit ID, owner-scope filtering was disabled and the coordinator's old `localTraceId` was used for task compatibility. The prior trace timer could also be cleared by that fallback. Luna's read-only source review independently confirmed this path. The regression now exercises a fresh explicit task, a same-task child with its parent ID, and preservation of mismatch rejection for an existing ID.
+
+**Causa demostrada:** Bridge treated the explicit ID as a lookup hint in the route path instead of as the authoritative identity selected by the caller.
+
+**Corrección:** route/task and lifecycle checks now use only the exact state found for an explicit ID; an unknown ID has no prior state. A local-trace mismatch can still be surfaced as diagnostic evidence for ordinary trace-aware calls, without borrowing that trace or clearing its timer.
+
+**Regresión/evidencia:** `npm run check`, `npm run build`, and `node scripts/test-mssr-trace-contract.mjs` pass on the candidate. The test asserts the requested fresh trace ID is returned, same-task parent lineage works, and an existing trace still rejects an incompatible task key.
+
+**Seguimiento:** run the complete candidate verification and review the pushed branch before any controlled runtime adoption.
+
+---
+
+## 2026-09-30 — HTTP smoke pinned to obsolete dashboard copy
+
+**Estado:** Corregido en `scripts/test-bridge-http.ps1`; el smoke HTTP completo pasó después de reiniciar y adoptar MSSR 0.2.89.
+
+**Capa/owner:** Bridge owns the HTTP dashboard smoke assertion and current dashboard markup.
+
+**Síntoma observable:** después de un reinicio sano, el smoke pasó readiness, health, readyz y status, pero falló al inspeccionar el dashboard aunque todos los IDs requeridos estaban presentes.
+
+**Reproducción/evidencia:** `powershell -NoProfile -File .\scripts\test-bridge-http.ps1` fallaba sólo en la aserción de copy del bloque MSSR. El dashboard servido contenía `Su uso correcto se demuestra...`, no el literal anterior `cargarla no demuestra`. El literal actualizado con acentos también falló bajo Windows PowerShell 5.1 al leer el script UTF-8 sin BOM; la subcadena ASCII estable pasó.
+
+**Causa demostrada:** el smoke fijaba una redacción anterior del dashboard y dependía de un literal acentuado que Windows PowerShell 5.1 interpretaba distinto al texto servido.
+
+**Corrección:** la comprobación conserva los IDs y etiquetas estructurales existentes y valida la frase ASCII `Su uso correcto se demuestra`, alineada con el copy actual.
+
+**Regresión/evidencia:** el smoke post-restart pasó el dashboard MSSR (`2357` rutas, `230` outcomes), telemetría autenticada/idempotente, tools portfolio (`180` registradas), métricas activas, y lifecycle MCP (`initialize/initialized/delete`, sesión liberada).
+
+**Seguimiento:** volver a ejecutar el smoke HTTP tras cambios futuros de copy; no se requiere cambiar dashboard UI por esta discrepancia.
+
+---
+
+## 2026-09-25 — `DatabaseSync(path, undefined)` rompió el arranque aislado en Node 24
+
+**Estado:** Corregido y verificado en Bridge 0.6.141; runtime live adoptado por restart controlado.
+
+**Capa/owner:** Bridge posee `src/metrics.ts`, `src/mssr-observatory.ts` y el proceso aislado que arma snapshots del dashboard. `node:sqlite` define el contrato de `DatabaseSync`.
+
+**Síntoma observable:** después de introducir el modo read-only del analytics child, el smoke aislado de HTTP/liveness dejaba de llegar a readiness o devolvía `500` en métricas. Un probe mínimo contra una base temporal reprodujo `ERR_INVALID_ARG_TYPE` al construir `DatabaseSync`.
+
+**Causa demostrada:** Node 24 no acepta pasar explícitamente `undefined` como segundo argumento. La rama normal había quedado como `new DatabaseSync(path, readOnly ? { readOnly: true } : undefined)`, por lo que el modo write fallaba aunque semánticamente pretendiera usar el constructor de un argumento.
+
+**Corrección:** ambos owners usan dos ramas explícitas: read-only construye con `{ readOnly: true }`; modo normal usa `new DatabaseSync(path)` sin segundo argumento. El dashboard child sigue siendo read-only y el runtime normal conserva su inicialización/escritura habitual.
+
+**Regresión/evidencia:** `logs/dashboard-final-gates-4.log` pasa TypeScript/build, HTTP liveness, seed persistido, worker reutilizable, Human Cockpit y `git diff --check`; liveness registró cero event-loop stalls. El restart live posterior quedó healthy y el primer snapshot real volvió en ~234 ms desde el last-good seed mientras el refresh frío seguía en background.
+
+**Seguimiento:** mantener el constructor de un argumento para el modo normal y conservar el smoke aislado; no usar `undefined` como placeholder de options al envolver APIs nativas que distinguen aridad.
+
+---
+
+## 2026-09-25 — `tools:list sanity` exigía una tool Blender eliminada deliberadamente
+
+**Estado:** Corregido en `scripts/verify-all.ps1`; gate integral final de Bridge 0.6.141 verificado con `ok=true`, `failedRequired=0` y exit `0`.
+
+**Capa/owner:** Bridge posee su release verifier y la lista mínima de tools que `tools:list sanity` exige. El catálogo runtime y los contratos/regresiones de imágenes/Blender determinan la exposición vigente; el verifier no debe revivir herramientas retiradas intencionalmente.
+
+**Síntoma observable:** el primer gate integral de 0.6.141 pasó doctor, check/build, smoke HTTP, dual-era, regresiones, routing latency, WAL, liveness, skill routing y docs, pero terminó `failedRequired=1` porque `tools:list sanity` reportó `missing tools: blender_store_reference_image` aunque el catálogo live/documentado tenía 175 tools coherentes.
+
+**Causa demostrada:** `scripts/verify-all.ps1` conservaba una expectativa legacy. El incidente vigente del 2026-09-23 documenta que `blender_store_reference_image` fue eliminado completamente para evitar un segundo camino Base64, mientras `image_asset_import_files` quedó como transporte primario y `test-v060-tools.mjs` exige explícitamente la ausencia de la tool eliminada.
+
+**Corrección:** la sanity list dejó de requerir `blender_store_reference_image` y ahora requiere `image_asset_import_files`; `image_asset_save` permanece sólo como fallback de compatibilidad. No se restauró ninguna tool Base64 ni se modificó el catálogo runtime para satisfacer el verifier.
+
+**Regresión/evidencia:** la comprobación focal `verify-mcp-tools-list` pasó con `image_asset_import_files`, `image_asset_save` y `blender_setup_character_references`. Después, la ejecución durable `data/bridge-0.6.141-final-verify.log` completó todos los gates con exit `0`, `ok=true`, `failedRequired=0`; `tools:list sanity` pasó con el contrato corregido.
+
+**Seguimiento:** cuando una tool se elimina deliberadamente, actualizar en la misma tanda las expectativas de sanity/release que la enumeran. La regresión de catálogo debe seguir distinguiendo transporte canónico y fallbacks, en vez de forzar compatibilidad con una superficie retirada.
+
+---
+
+## 2026-09-25 — Context Message receipt en 255 bloqueó `skill_route_plan` y `skill_bootstrap`
+
+**Estado:** Corregido en MSSR 0.2.75, adoptado y verificado en el runtime live de Bridge 0.6.141.
+
+**Capa/owner:** portable MSSR posee el schema y la transición del receipt de Context Messages; Bridge posee el host/control-plane que consume ese estado y expone route/bootstrap. La recuperación del inbox se realizó únicamente mediante la superficie host `mssr_context_ack`.
+
+**Síntoma observable:** el receipt durable de `incident:docs-incidents.md` quedó con `selectedCount=255`. Tanto `skill_route_plan` como `skill_bootstrap` fallaban antes de abrir una ruta con `Number must be less than or equal to 255` en `deliveries[0].selectedCount`. Como las mutaciones normales requieren lifecycle MSSR, el host quedaba en un deadlock de control plane: no podía abrir la traza necesaria para ejecutar la adopción correctiva.
+
+**Reproducción/evidencia:** `.mssr/runtime/context-inbox.json` mostraba el receipt exacto en 255. Cada nueva selección intentaba el siguiente conteo y 0.2.74 rechazaba el estado resultante. `mssr_context_ack` reconoció sólo `incident:docs-incidents.md`; inmediatamente después `skill_bootstrap` volvió a completar y permitió abrir la traza `mssr-20260925054833-988c28fd-699`, sin editar el inbox manualmente.
+
+**Causa demostrada:** MSSR 0.2.74 permitía persistir `selectedCount=255` pero su schema validaba el mismo campo con máximo 255 después de incrementar. La transición válida de uso `255 -> 256` convertía por lo tanto un receipt previamente aceptado en un estado rechazado por el propio loader.
+
+**Corrección:** MSSR 0.2.75 amplía el contrato portable para permitir el crecimiento del contador y saturarlo de forma segura en `Number.MAX_SAFE_INTEGER`. Bridge adopta el tarball exacto `mauroprime-mssr-0.2.75.tgz` (780,931 bytes; SHA-256 `3d7ea50a795b3eaf1ade3fe00be0f497c7891e46608e0d2efb6e7e1fafe1fec9`) y mantiene `mssr_context_ack` como recuperación explícita; no se añadió una segunda autoridad ni un fallback léxico.
+
+**Regresión:** `scripts/test-mssr-context-receipt-count.mjs` ejecuta contra `node_modules/@mauroprime/mssr`, exige `255 -> 256` y saturación segura en `Number.MAX_SAFE_INTEGER`. También pasa `scripts/test-mssr-semantic-r4-adoption.mjs`. Tras el restart controlado del Bridge, un `skill_bootstrap` real volvió a completar sin el error del receipt.
+
+**Seguimiento:** conservar la regresión en la cadena global de Bridge y la cobertura portable en MSSR. Si reaparece un bloqueo semejante, usar superficies control-plane explícitas para recuperación y verificar el receipt exacto; no editar `.mssr/runtime/context-inbox.json` a mano ni relajar R2 para saltar lifecycle.
+
+---
+
 ## 2026-09-19 — `skill_context_next` no actualizaba el lifecycle RAM usado por R2 preflight
 
 **Estado:** Corregido y cubierto por regresión en source/dist 0.6.138; adopción live pendiente al registrar esta entrada.
@@ -1703,3 +1857,175 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Conclusión actual:** existe evidencia de latencia/readiness anómala asociada al smoke, pero todavía no una causa raíz única. No se atribuye el problema a R1/R2 porque owner isolation, automatic lifecycle, dual-era, full regressions y liveness pasaron después de la recuperación.
 
 **Seguimiento:** instrumentar timing por subpaso de `test-bridge-http.ps1` y correlacionarlo con dashboard/telemetry/session lifecycle, event-loop lag y métricas del tunnel antes de cambiar thresholds del watchdog. Distinguir siempre un smoke lento de un runtime realmente no-responsive; no ocultar el síntoma aumentando timeouts sin evidencia.
+
+
+## 2026-09-23 — Generated-image persistence kept falling back to agent-side Base64
+
+**Estado:** Corregido y adoptado en el runtime live. Restart HTTP `93e3246b-ccfa-4398-8563-4d89c3e7bef8` quedó acknowledged el `2026-09-23T14:14:10.3297442Z`; health/tunnel están `live/ready` y el catálogo runtime es de 163 tools. La conversación Web actual conserva un catálogo host cacheado anterior: todavía muestra la tool eliminada y no expone `image_asset_import_files` directamente, por lo que requiere refrescar/reabrir el conector o iniciar un chat nuevo para recibir el catálogo actualizado.
+
+**Capa / owner:** `src/tools/image-tools.ts`, `src/tools/blender-tools.ts`, `src/tool-registry.ts`, instrucciones del Bridge y workflow guides de assets visuales.
+
+**Síntoma observable:** aunque `image_asset_import_files` ya aceptaba `openai/fileParams` y preservaba bytes originales, las instrucciones y workflows seguían recomendando `image_asset_save`, y Blender exponía además `blender_store_reference_image`, otro guardador Base64. En ChatGPT Web esto hacía reaparecer conversiones/decodificaciones lentas aun existiendo el transporte correcto por archivo autorizado.
+
+**Causa demostrada:** coexistían tres señales contradictorias: el camino directo por file parameter, una tool Base64 descrita como camino normal para imágenes generadas y una segunda tool Base64 específica de Blender. El catálogo de una conversación también puede quedar stale después de un restart, por lo que wrapper reachability no sustituye la exposición directa de `_meta["openai/fileParams"]`.
+
+**Corrección:** `image_asset_import_files` queda declarado como camino primario ChatGPT Web → PC y se coloca antes del fallback en el módulo de imágenes; `image_asset_save` conserva compatibilidad pero queda marcado con `role=fallback` y prohíbe convertir una referencia/imagen a Base64 sólo para invocarlo; `blender_store_reference_image` se eliminó completamente. Las instrucciones del servidor, Blender y los workflow guides ahora usan file parameters por defecto.
+
+**Regresión / evidencia:** `test-image-file-import.mjs` verifica bytes originales preservados; `test-image-persistence.mjs` conserva el fallback Base64 y rollback atómico; `test-v060-tools.mjs` exige 163 tools, `image_asset_import_files` como ruta primaria, `image_asset_save` con rol fallback y ausencia de `blender_store_reference_image`. Build y tests focales pasan.
+
+**Invariante:** una imagen generada/editada por ChatGPT que pueda viajar como archivo autorizado no debe convertirse, serializarse ni reconstruirse en Base64 por el agente. Base64 es únicamente un fallback de compatibilidad cuando el transporte directo por file parameter está realmente indisponible y los bytes ya existen en ese formato.
+
+
+## 2026-09-23 — Tool audit exposed contract, taxonomy, synchronous-work and routing friction
+
+**Estado:** Corregido, verificado y adoptado en el runtime live. El restart final HTTP `0134a14e-ab45-46a8-9e1e-1694a48a19a5` quedó acknowledged el `2026-09-23T17:54:30.4776293Z`; health/tunnel están `live/ready`, el catálogo runtime sigue en 163 tools y los smokes live confirman Blender fail-closed, shell observable, routing específico y árbol de procesos sin descendientes fantasma. Los restarts `aa5a0078-db51-4d60-93b9-049896ef80f2` y `60e44beb-414f-44df-8527-23d69c7b3712` fueron adopciones intermedias de esta misma auditoría.
+
+**Evidencia observable:** la auditoría de 30 días separó fallos reales de guards saludables. `work_once`/`run_command` concentraban timeouts y procesos fallidos por trabajo síncrono largo o incierto; `work_feed` recibía IDs de sesiones ya terminadas; errores Base64/hex genéricos podían clasificarse como `invalid-image-payload`; `blender_scene_info` acumulaba fallos de schema sobre `expectedBlendFile`; y la cobertura auxiliar de workflows podía elevar `roblox-save-backup-recovery` sólo por el término genérico `recovery`, aun sin intención Roblox.
+
+**Corrección:** se añadió la categoría estable `invalid-encoded-payload` y su firma de fricción; `binary_file_write` marca errores de encoding y desalienta conversiones artificiales de imágenes; `run_command`/`work_once` declaran explícitamente el límite de trabajo síncrono y un timeout real devuelve recovery hacia `work_begin`/`terminal_start`; sesiones terminadas pasan a `target-not-found` y `terminal_write`/`work_feed` exigen liveness; `blender_scene_info` exige `expectedBlendFile` no vacío y orienta a `blender_status`; el generador de `TOOLS.md` prioriza `image_asset_import_files` y ya no contiene la tool Blender retirada; y las skills narrow quedan por debajo del umbral de cobertura si falta su intención núcleo, incluyendo contexto Roblox/`.rbxl[x]` para `roblox-save-backup-recovery`.
+
+**Segunda pasada sobre fricción histórica:** los chats previos apuntaban además a cuatro clases de error que la métrica agregada no distinguía. El transporte `bridge_tool_query` y el orden `--python ... -- args` de Blender ya estaban sanos y no se tocaron. Sí se reprodujeron y corrigieron: (1) Blender puede finalizar con exit code `0` aunque Python emita traceback, por lo que `blender_batch_script` ahora falla con `script-runtime-error`; (2) `run_command`/`work_once` exponen el shell real y documentan que Windows usa normalmente `ComSpec/cmd.exe`, evitando asumir sintaxis PowerShell; (3) un uso inválido de `edit_lines` se clasifica como `schema-validation` en vez de simular staleness; (4) auditorías de routing que citan una guía/skill como falso positivo no convierten esa cita en intención de ownership. El wrapper tampoco recomienda leer schema ante un `script-runtime-error` o `timeout` sustantivo.
+
+**Observabilidad de procesos:** durante la auditoría, un árbol Windows llegó a atribuir un Godot antiguo con CPU acumulada a una ejecución nueva. La causa era seguir `ParentProcessId` sin identidad temporal, lo que permite unir procesos no relacionados tras reutilización de PID. El traversal ahora valida también `CreationDate` de padre e hijo. Un smoke live posterior mostró sólo el `cmd -> node -> node` esperado, sin procesos fantasma.
+
+**Rendimiento revisado:** un `skill_route_plan` post-restart registró ~3,35 s, con ~2,85 s en discovery; la repetición en caliente bajó a ~0,54 s total y ~3,6 ms de discovery. Se clasificó como cold-cache/transitorio y no se modificó el router por una muestra aislada. Sigue existiendo ruido no vinculante de guides con score bajo en algunas tareas, pero no cambia ownership ni la recomendación efectiva.
+
+**No-cambios deliberados:** no se relajó `apply_patch`: sus conflictos exactos son fail-safe y su tasa histórica de éxito sigue siendo alta. Tampoco se eliminaron tools sólo por no tener evidencia de uso, ni se alteraron contratos protegidos como `project_context_load`/`skill_bootstrap` sin causa reproducible. Los wrappers de fallback permanecen porque la falta o staleness de schemas directos del host no equivale a una falla del runtime Bridge.
+
+**Regresión / evidencia:** `npm run check`, `npm run build`, `test-workflow-guide-routing.mjs`, `test-system-hardening.mjs`, `docs:tools:check`, la suite aislada completa `npm run test:regressions` y `git diff --check` pasan sobre el source final. La suite mantiene 163 tools y verifica además el import directo de imágenes, lifecycle MSSR, Blender, Godot, Whiteboard, observabilidad/liveness y remote-node.
+
+**Invariante:** optimizar según evidencia causal, no según el contador bruto de errores. Un fallo de contrato/caller debe clasificarse como tal; trabajo largo o de duración incierta debe ser persistente e inspeccionable; y una capability especializada no puede ganar ownership por vocabulario genérico cuando falta su señal de dominio núcleo.
+
+## 2026-09-30 — Cross-project MSSR trace owner passed to the wrong repository
+
+**Estado:** Causa reproducida y recuperada; no queda defecto de código demostrado.
+
+**Capa / owner:** Correlación de trazas entre el proyecto Bridge (`D:\Dev\bridge-mcp`) y el proyecto MSSR (`D:\Dev\mssr`).
+
+**Síntoma observable:** `mssr_librarian_jev_select` rechazó una traza Bridge al operar sobre el root de MSSR. Una consulta posterior a `project_change_consistency` también rechazó la traza MSSR al operar sobre Bridge. Ambos errores fueron `mssr-trace-owner-mismatch` y ocurrieron antes de ejecutar el target; el intento rechazado no llamó Jev. Después se usaron trazas separadas por owner: selección Jev más exact-fetch pasó para documentos MSSR y `project_change_consistency(mode=persist)` pasó para Bridge.
+
+**Causa demostrada:** el caller pasó explícitamente un `traceId` cuyo owner de proyecto no coincidía con el `projectRoot` del tool. El rechazo protege el aislamiento de trazas y es el comportamiento correcto.
+
+**Corrección:** conservar una traza por proyecto y replanificar en el owner correcto cuando una tarea cruza repositorios. No compartir un `traceId` entre MSSR y Bridge ni omitir el mismatch con reintentos adivinados. No se modificó el router ni las reglas de ownership.
+
+**Regresión / evidencia:** Bridge `0.6.143` / MSSR `0.2.95`, boot `fef12ad4-e879-4c78-bfb2-54b3d4cdfcba`; runtime selector y exact-fetch pasaron; la puerta Bridge quedó `ok=true`, `publishReady=true`. El smoke Jev exitoso tuvo una sola llamada provider adicional; los intentos rechazados no se contaron como llamadas Jev.
+
+**Invariante:** el owner del proyecto, el `projectRoot` y la traza explícita deben coincidir. Un flujo multi-repositorio usa trazas separadas y evidencia enlazada, no una traza transferida entre owners.
+
+## 2026-09-30 — Outcome remained blocked until maintenance completed after the final close replan
+
+**Estado:** Recuperado; el guard lifecycle se comportó correctamente.
+
+**Capa / owner:** Secuencia de checkpoints MCP MSSR del caller, con persistencia en el ledger de Bridge.
+
+**Síntoma observable:** `mssr_trace_record(eventType=outcome)` devolvió `mssr-success-outcome-blocked-stale-close` después de una persistencia posterior a la replanificación de cierre. Una primera recuperación todavía carecía de un checkpoint `phase_completed` de maintenance posterior a la replanificación más reciente.
+
+**Causa demostrada:** la revisión de cierre queda obsoleta cuando llega trabajo o persistencia posterior. Para cerrar con éxito, el owner exige route/bootstrap en `stage=close`, checkpoint `phase_completed` de maintenance con la revisión vigente y luego un único outcome sin trabajo intermedio.
+
+**Corrección:** se replanificó tras la última escritura de `.mssr/PROJECT_STATE.md`, se cargó la fase, se registró maintenance y el outcome MSSR se aceptó (`muoxm739-fd51626d-5f2`, `muoxm73k-4a42261f-94d`). No se cambió el código del guard.
+
+**Regresión / evidencia:** el resultado aceptado cerró la traza de verificación real de documentos; la puerta Bridge `project_change_consistency` seguía en `ok=true`, `publishReady=true`. El error fue de orden del caller, no un fallo de runtime.
+
+**Invariante:** después de la última escritura, replanificar cierre; registrar maintenance tras esa replanificación y antes del outcome; no continuar trabajando entre ambos checkpoints.
+
+## 2026-10-02 — Streamable HTTP initialize framing fails in isolated Bridge candidates; Jev requires Windows system trust
+
+**Estado:** El framing HTTP/1.1 inválido está reproducido en Bridge 0.6.147, en el clean base 0.6.146 y en un servidor MCP mínimo. El problema quedó acotado a la interacción del SDK MCP con el adaptador Node/Hono; el owner exacto y una corrección verificada siguen pendientes. No se atribuye al sidecar Librarian ni a Jev.
+
+**Capa / owner:** MCP Streamable HTTP con sesión, `POST /mcp`, protocolo `2025-06-18`: `@modelcontextprotocol/sdk` 1.30.0 → `@hono/node-server` 2.0.11 → `node:http` en Node 24.19.0. No es el transporte HTTP+SSE antiguo (`GET /sse` y `POST /messages`) ni el protocolo 2026 anunciado por el otro camino del test.
+
+**Síntomas y evidencia:** `npm run test:mcp-dual-era` completa readiness, descubre el catálogo moderno y valida los recursos/binarios antes de fallar al consumir la respuesta del primer initialize con sesión. La sonda TCP envía `POST /mcp`, `Content-Type: application/json`, `Accept: application/json, text/event-stream`, `Content-Length` y ningún `Connection` explícito (persistente por defecto en HTTP/1.1). La respuesta anuncia `Transfer-Encoding: chunked` pero el body empieza por `event: message`, sin tamaño hexadecimal ni CRLF de chunk; Undici lo rechaza como `Invalid character in chunk size`. Agregar `Connection: close` al request no cambia los bytes de respuesta. El mismo resultado se reprodujo en el commit base 0.6.146 bajo Node 24.19.0. Luna reprodujo el framing inválido con `McpServer` + `StreamableHTTPServerTransport` mínimos y las mismas versiones de SDK/Hono; un `Response` SSE normal por Hono solo sí se enmarca bien. El harness PowerShell enviaba por error `2024-11-05` a `/mcp`; ahora negocia `2025-06-18` y agrega `Mcp-Protocol-Version` al DELETE. La suite llega al initialize válido y falla por cierre de conexión. La corrección del harness separa ese error de configuración del defecto de transporte.
+
+**Causa:** Está demostrado que una respuesta del path MCP mínimo, además de Bridge, sale con framing HTTP/1.1 inválido; todavía no se aisló el punto de escritura dentro de SDK/adaptador. El issue oficial cerrado [#1619](https://github.com/modelcontextprotocol/typescript-sdk/issues/1619) describe buffering SSE/`Content-Length` y un error HTTP/2, no reproduce estos bytes HTTP/1.1 ni muestra un PR/arreglo enlazado. El issue oficial abierto [#2730](https://github.com/modelcontextprotocol/typescript-sdk/issues/2730) trata un `400` al procesar notificaciones con `Connection: close`, no el initialize. Son incidencias cercanas del transporte, no una causa o fix confirmado para este caso. Pruebas temporales de retirar headers, forzar cierre de respuesta o usar JSON response mode conservaron el fallo y fueron retiradas; no se dejó un shim sin verificar.
+
+**Corrección / workaround comprobado:** Ninguno para HTTP. Para Jev, Windows Credential Manager contenía la credencial; PowerShell completó TLS hasta `api.typesafe.ai` (HEAD respondió HTTP 404). Node predeterminado reportó `UNABLE_TO_VERIFY_LEAF_SIGNATURE`; Node con `--use-system-ca` alcanzó el endpoint y la llamada real Jev + exact-fetch funcionó. La validación TLS siguió activa y el entorno del servicio no se modificó.
+
+**Regresión / verificación:** Pasan `npm run check`, `npm run test:mssr-semantic-evidence`, `npm run test:skill-routing` y `npm run docs:tools:check`. `npm run test:mcp-dual-era` y `npm run test:regressions` fallan en el initialize Streamable HTTP descrito arriba. El worktree base con readiness extendida confirma que el fallo precede a 0.6.147. `npm run verify:all` no se ejecutó porque incluye checks contra el endpoint activo en 127.0.0.1:3001, no disponible desde este contexto.
+
+**Seguimiento:** Obtener un repro mínimo ejecutable y bisectar el writer/adaptador sin cambiar el framing del protocolo; conservar byte capture de request/response y probar cualquier ajuste primero contra el servidor mínimo y ambos commits. Mantener 0.6.147 como candidata sin adoptar hasta que dual-era y regresiones HTTP pasen. Revisar el lanzador real antes de configurar `--use-system-ca` para el servicio; nunca desactivar TLS ni cambiar el almacén del sistema.
+
+## 2026-10-03 — Dual-era HTTP framing recovered; watchdog dry-run wrote a false acknowledgement
+
+**Estado:** Handshake recuperado en el Bridge principal 0.6.144; watchdog dry-run corregido y probado en el candidato 0.6.149. La causa de la salida del proceso Bridge original sigue sin resolver; el candidato no está desplegado como servidor.
+
+**Capa / owner:** Transporte HTTP Streamable MCP y script `start-bridge-http-watchdog.ps1`.
+
+**Síntoma observable:** El initialize MCP legacy falló durante la recuperación y el cliente túnel repitió intentos. La última ejecución `-DryRun -Once` registró el ack `auto-restart-http-process-exited` aunque el Bridge todavía no estaba disponible. En ese momento los puertos 3001/8081 estaban libres, por lo que el dry-run no inició ni detuvo procesos productivos. El ack falso quedó identificado como `dry-run-no-op`; su JSON original y SHA-256 están preservados bajo `D:\Dev\bridge-mcp\.bridge\recovery\2026-10-03-dry-run-false-restart-ack.json` y se enlazan desde el ledger principal.
+
+**Causa y límites:** La prueba de framing reprodujo que el adapter HTTP anterior no entregaba el body SSE/chunk esperado en el initialize legacy. En el checkout principal, cambiar a `WebStandardStreamableHTTPServerTransport` a través de `toNodeHandler` hace pasar la regresión raw y los flujos moderno `2026-07-28` y legacy `2025-06-18`. Por separado, el watchdog ejecutaba la rama normal de recuperación incluso en `-DryRun`; también podía consumir un pedido pendiente y evaluar el reemplazo de un listener no-ready antes del retorno dry-run. Esto explica el acuse falso; no demuestra por qué terminó el proceso original.
+
+**Corrección:** En el candidato 0.6.149, el dry-run ya no reemplaza listeners, consume pedidos, inicia una recuperación ni escribe ack. La prueba `test:http-watchdog-dry-run` usa un root y puerto temporales; confirma que un listener externo y el archivo de pedido sobreviven y que no aparece un ack. La corrección de framing ya estaba versionada en el candidato 0.6.147, commit `7b6fcd3`, y se hereda en esta rama. El checkout principal contiene una copia local del mismo cambio; el proceso activo sigue reportando 0.6.144, y estas pruebas no determinan qué build exacto cargó el PID 79292.
+
+**Verificación del sistema:** Bridge principal en `D:\Dev\bridge-mcp`, versión 0.6.144, PID 79292, boot `78f66316-43eb-45a9-a3f0-3c4af7356c66`, 185 tools; HTTP 3001 y túnel 8081 responden ready. `npm run check`, build, framing raw y test dual-era pasaron en el árbol principal; las pruebas de telemetría usaron temporales.
+
+**Correlación posterior del proceso actual:** Lectura de solo lectura de WMI confirmó que PID 79292 ejecuta `D:\Dev\bridge-mcp\dist\http.js` y comenzó a las 16:42:15Z. El entrypoint de disco tuvo su última escritura a las 16:37:34Z, incluye `WebStandardStreamableHTTPServerTransport` y el flush SSE, y su SHA-256 coincide con el `dist/http.js` construido y probado en el candidato 0.6.150 (`0DD7A9055BCF017ACBB81C558892A142FC7A41215CE3555ADA399396506995E5`). Esto apoya fuertemente que el PID actual cargó la corrección de framing aunque reporte metadata de paquete 0.6.144. La comparación de archivo y hora de inicio no lee la memoria del proceso ni explica la salida del proceso anterior.
+
+**Seguimiento:** El acceso de inicio usa el helper de este worktree, pero siempre pasa `ProjectRoot=D:\Dev\bridge-mcp`; el proceso, CWD y datos continúan siendo del Bridge principal. El watchdog que ya estaba ejecutándose se lanzó antes del cambio y cargó el script viejo; la corrección aplica al próximo lanzamiento del helper. Migrar el helper a una ruta versionada del checkout principal y verificar un próximo inicio controlado sin confundirlo con un segundo Bridge.
+
+## 2026-10-03 — Startup visible confundido con una segunda sesión Bridge después del reinicio
+
+**Estado:** El reinicio posterior fue limpio y el runtime HTTP/túnel está listo. El fallo histórico anterior continúa sin una causa demostrada. La instrumentación 0.6.151 está publicada y activa en el watchdog; el servidor HTTP productivo continúa en 0.6.144.
+
+**Síntoma observable:** Después del reinicio del PC apareció una consola que parecía otra sesión Bridge. El Startup activo es `BridgeMCP-Watchdog.cmd`; su `start "BridgeMCP Watchdog (Http)" powershell.exe ...` abre una consola visible. Esa consola ejecuta el supervisor, no es por sí misma un segundo servidor HTTP.
+
+**Evidencia:** Windows registró un reinicio solicitado por el usuario y una secuencia ordenada EventLog stop/start. El comando activo inició el helper de `D:\Dev\bridge-mcp-cohort-reconciliation` con `ProjectRoot=D:\Dev\bridge-mcp`. La copia `.bak` conservada apunta al helper antiguo `D:\Dev\bridge-mcp\scripts\start-bridge-http-watchdog.ps1`, que no existe; no hay evidencia de un proceso lanzado desde ese `.bak`. Hay exactamente un listener HTTP 3001 (`node.exe`, PID 23140, Bridge 0.6.144) y un listener de túnel 8081 (PID 2588), ambos responden ready. PID 22544 es un proceso MCP stdio distinto bajo el host MSSR, no otro listener HTTP. El watchdog antiguo PID 21824 fue detenido y reemplazado por el supervisor oculto PID 14888. El archivo `D:\Dev\bridge-mcp\logs\bridge-watchdog-lifecycle.jsonl` recibió dos eventos `process-adopted` que registran Bridge 23140 y túnel 2588; no contiene command lines. Ambos endpoints siguieron ready. El ACK previo corresponde a recuperación por umbral de readiness del túnel; no documenta una caída del proceso HTTP. No se encontró un evento de crash Node/Bridge en los registros Windows consultados, lo cual tampoco identifica la causa de la salida ocurrida anteriormente.
+
+**Causa del aspecto visual:** La consola visible la abre el `start` del `.cmd` activo. La presencia del archivo `.bak` no demuestra que Windows lo haya ejecutado y su ruta destino está ausente. El inventario de procesos/puertos no muestra una segunda instancia HTTP.
+
+**Corrección verificada y activada:** Bridge 0.6.151 agrega eventos JSONL de lifecycle con campos allowlisted y sin command lines/argumentos/salida; preserva observación, exit code conocido, uptime, stop/confirmación, recovery id y PID sustituto. `-DryRun` no escribe estos eventos. La primera prueba reveló que el patrón no reconocía Node bajo `C:\Program Files\nodejs`; el preflight real encontró además que el Bridge actual aparece como `"node" "D:\Dev\bridge-mcp\dist\http.js"`. El patrón y la regresión cubren ambas formas, `.js`/`.ts` y el rechazo de Python. El lifecycle test reproduce el comando bare `node`; la prueba dry-run y lifecycle, `npm run check` y `npm run build` pasan. Un `-DryRun -Once` adoptó Bridge PID 23140 y túnel PID 2588 sin cambiar procesos ni escribir ACK/eventos. Después se recargó únicamente el supervisor: los dos eventos reales `process-adopted` confirman las mismas identidades y la continuidad de ambos servicios.
+
+**Límite y seguimiento:** El `.cmd` de Startup todavía abrirá una consola visible en futuros logons; el supervisor actual PID 14888 se lanzó oculto para esta recarga controlada. La instrumentación puede explicar salidas/restarts futuros, pero no recuperar retrospectivamente la causa del cierre anterior. No atribuir el cierre del proceso de anoche hasta que exista evidencia histórica más directa.
+
+**Revalidación 2026-10-03:** La copia activa de `BridgeMCP-Watchdog.cmd` fue leída y su SHA-256 es `703DAD3F342310D50C9FB8272F384CA1E1BB3CF94530067EC6B196BC0CD819FD`; incluye `-WindowStyle Hidden` y apunta al helper candidato con `ProjectRoot=D:\Dev\bridge-mcp` y `BridgeCodeRoot=D:\Dev\bridge-mcp-cohort-reconciliation`. La nota anterior sobre una consola visible quedó supersedida. El `.bak` inventariado apunta al helper legacy ausente y no hay evidencia de que se haya ejecutado.
+
+## 2026-10-03 — Release consistency used ProjectRoot instead of BridgeCodeRoot
+
+**Estado:** Causa confirmada y corregida en Bridge 0.6.152. El runtime/datos permanecen en `D:\Dev\bridge-mcp`; el servidor HTTP de prueba corría desde el worktree candidato `D:\Dev\bridge-mcp-cohort-reconciliation`.
+
+**Síntoma:** Después de adoptar HTTP 0.6.151, `/readyz` estaba listo y `/status` identificaba 0.6.151, pero el observador C2c abrió una alerta `replica-mismatch` / `runtime-state-mismatch`: esperaba 0.6.144 del `package.json` de ProjectRoot y observaba 0.6.151 en el runtime.
+
+**Causa:** El watchdog ya elegía paquete y entrypoint con `BridgeCodeRoot` y mantenía `WorkingDirectory=ProjectRoot`, pero no transfería la raíz de código al proceso HTTP. El observador de release y las claims propias de Project Situation usaban `process.cwd()` para package, source, generated e installed; por eso confundían el propietario de datos con el binario activo.
+
+**Corrección:** El watchdog pasa la raíz resuelta como `BRIDGE_MCP_CODE_ROOT`. Release consistency toma esa raíz para sus archivos de versión, y Project Situation aplica esas claims al proyecto Bridge identificado por ProjectRoot mientras las carga desde BridgeCodeRoot. El cwd, persistencia, logs, descubrimiento de proyectos, túnel y restart files permanecen en ProjectRoot.
+
+**Regresión:** Se agregaron fixtures donde el package de ProjectRoot declara 0.6.144/0.2.96 y BridgeCodeRoot declara 0.6.151/0.2.101, además de una prueba Project Situation con roots distintos. Deben producir una evaluación `ok` sin mismatches cuando runtime coincide con BridgeCodeRoot.
+
+**Verificación inicial:** El primer Bridge 0.6.151 quedó listo y el túnel existente PID 2588 permaneció intacto. La transición inicial produjo el mismatch descrito, por lo que 0.6.151 no se declara como adopción final hasta activar y verificar la corrección 0.6.152.
+
+## 2026-10-04 — Full verification used the code checkout for a data-backed HTTP smoke
+
+**Estado:** Resuelto y verificado en Bridge 0.6.153. Bridge 0.6.152 permanecía saludable; su `bridge_verify_all` devolvió 2 gates requeridos fallidos, corregidos en esta versión.
+
+**Síntoma:** smoke:http consultó /api/mssr/events y recibió HTTP 401. docs:tools:check también encontró TOOLS.md desactualizado.
+
+**Causa:** bridge_verify_all ejecuta la verificación desde BridgeCodeRoot; el smoke buscaba data/mssr-ingest.token bajo el cwd, aunque el runtime conserva ese token bajo ProjectRoot. El segundo hallazgo era documentación generada que no se había regenerado para el catálogo actual de 185 herramientas.
+
+**Corrección:** El watchdog comparte ProjectRoot como BRIDGE_MCP_PROJECT_ROOT. verify-all.ps1 y test-bridge-http.ps1 resuelven el token desde ese root (con fallback al cwd en checkouts de raíz única); TOOLS.md se regenera con npm run docs:tools. No se copiaron secretos entre raíces.
+
+**Verificación:** Bridge 0.6.153 live; `bridge_verify_all` job `bridge_verify_1791073232248_1` terminó con `ok=true`, `failedRequired=0`, exit 0, sin timeout. Pasaron HTTP smoke autenticado bajo la raíz de datos, check/build, doble era/framing MCP, regresiones completas, routing latency, WAL, liveness, skill routing, `docs:tools:check`, watchdog/restart, métricas y tools-list. Proceso HTTP PID 25952 / boot `ad26f0d1-9b72-45c3-aefb-4a13a1e3956b`; túnel `bridge-local-http` PID 2588 preservado.
+
+## 2026-10-04 — Jev requests failed TLS validation under the managed Node process
+
+**Estado:** Causa reproducida; corrección implementada en el candidato Bridge 0.6.154 aislado `codex/jev-safe-provider-errors-20261004`, revisado y publicado. El archivo de inicio de Windows ya apunta a `.154`; el Bridge live permanece en `.153` hasta completar el handoff controlado.
+
+**Síntoma:** Una prueba Jev sobre documentos reales había funcionado el 2026-10-02, pero intentos posteriores de selección fallaron con un error genérico del proveedor. La búsqueda y la proyección sidecar local sí funcionaban; la falla ocurría antes de recibir una decisión. La comprobación de presencia de credencial pasó, aunque el mensaje genérico también culpaba a Windows Credential Manager.
+
+**Evidencia y causa:** Una petición sin credenciales a `https://api.typesafe.ai/` con el Node v24.16.0 activo reprodujo `UNABLE_TO_VERIFY_LEAF_SIGNATURE`. La misma petición con `NODE_USE_SYSTEM_CA=1` solo en el proceso alcanzó el servicio y recibió el HTTP 404 esperado en la ruta raíz; la validación TLS había pasado. El watchdog activo no configuraba la opción CA de Node. Luego una llamada real del proveedor desde el candidato aislado tuvo éxito con esa variable y Jev seleccionó evidencia MSSR cuyo fetch exacto coincidió en fingerprint. Es una prueba de integración de un caso, no un benchmark de precisión de Jev.
+
+**Corrección y regresión:** El candidato aislado establece `NODE_USE_SYSTEM_CA=1` solo en el proceso hijo HTTP de Windows; no escribe variables de usuario/máquina ni desactiva la validación de certificados. El adapter clasifica timeout SDK, conexión, cancelación, HTTP, configuración SDK y errores no clasificados con mensajes fijos seguros. No expone mensajes crudos, bodies, causas anidadas ni credenciales y limpia los buffers de credenciales. Se añadieron pruebas del proveedor inyectado para esas clases y una fixture de lifecycle que lee la variable del proceso hijo.
+
+**Verificación/seguimiento:** Tras versionar, `npm run check`, `npm run test:mssr-semantic-evidence`, `scripts/test-bridge-http-watchdog-lifecycle.ps1`, `npm run test:project-health`, la suite completa `npm run test:regressions` (exit 0) y `npm run docs:tools:check` pasaron. Esta última gate requirió regenerar el `TOOLS.md` obsoleto para el catálogo actual de 185 herramientas. Luna revisó la corrección y la rama quedó publicada en `ef345b1316c411c51c9ce5c426898d62acaf0b57`. El Startup `.cmd` apunta a `D:\Dev\bridge-mcp-jev-diagnostics`; el respaldo conserva los mismos bytes y SHA-256 `703DAD3F342310D50C9FB8272F384CA1E1BB3CF94530067EC6B196BC0CD819FD`. El handoff live sigue pendiente: la política del host rechazó la acción de detener los PIDs verificados antes de ejecutarla, sin tocar procesos; HTTP PID 25952 sigue en `.153`, túnel PID 2588 sigue `ready` y la telemetría no registra fallos 502/no-status. Próximo gate: activar mediante una vía permitida o el siguiente logon de Windows y volver a verificar el runtime.
+
+## 2026-10-06 — Aislado timeout transitorio en la prueba de framing Streamable HTTP
+
+**Estado:** No reproducido en las repeticiones aisladas ni en la verificación completa posterior; causa no determinada.
+
+**Capa / owner:** Harness `test-mcp-streamable-http-framing.mjs`, incluido por `test:mcp-dual-era` y `verify:all`.
+
+**Síntoma y evidencia:** La primera `npm run verify:all` del candidato Bridge 0.6.159 registró `test:mcp-dual-era` fallido en `scripts/test-mcp-streamable-http-framing.mjs:62`. El resumen del verificador no conservó el error interno del proceso hijo. Después, `npm run test:mcp-streamable-http` pasó por separado (`initializeStatus=200`, una parte chunked, evento SSE válido); `npm run test:mcp-dual-era` pasó con 186 herramientas, siete solicitudes modernas, 41 legacy y framing válido; una segunda verificación completa también pasó con `failedRequired=0`. Evidencia completa: `D:\MSSR-benchmark-artifacts\bridge-0.6.159-verify-20261006-v1\verify-all-transcript-rerun.txt` y `verify-all-receipt.json`.
+
+**Causa:** No resuelta. La evidencia posterior descarta una falla persistente del framing en esta corrida, pero no explica el timeout inicial; no se atribuye a carga, puerto ni transporte sin reproducción.
+
+**Corrección / regresión:** No hubo cambio de código por este evento. Se repitió primero el test de framing aislado y luego `verify:all` completo; ambos pasaron. La verificación final es 14/14 gates requeridos, 0 fallidos.
+
+**Seguimiento:** Si reaparece, capturar la salida/stack original del proceso hijo y correlacionar su puerto aleatorio y duración antes de cambiar timeouts o transporte.

@@ -5,6 +5,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-v060-regression-'));
 process.env.BRIDGE_MCP_CACHE_DIR = path.join(sandbox, 'cache-store');
 process.env.BRIDGE_MCP_SNAPSHOT_DIR = path.join(sandbox, 'snapshot-store');
@@ -236,25 +245,29 @@ try {
   await call('work_finish',{sessionId:backgroundB.id,traceId:'mssr-fixture-background'});
   clearBridgeNotices();
 
-  if (registry.tools.length !== 164) throw new Error(`expected 164 tools, got ${registry.tools.length}`);
+  if (registry.tools.length !== 187) throw new Error(`expected 187 tools, got ${registry.tools.length}`);
   const catalogComparison = await call('bridge_connector_catalog_compare', {
     exposedToolNames: ['skill_catalog', 'skill_recommend', 'skill_load', 'host_private_tool'],
   });
-  if (catalogComparison.runtime.count !== 164 || catalogComparison.mssr.runtime !== 14) throw new Error('connector catalog comparison runtime baseline failed');
-  if (catalogComparison.mssr.directCoveragePercent !== 21.43) throw new Error(`unexpected MSSR direct coverage: ${catalogComparison.mssr.directCoveragePercent}`);
-  if (!catalogComparison.mssr.delegatedViaQuery.includes('skill_bootstrap') || !catalogComparison.mssr.delegatedViaAction.includes('mssr_trace_record') || !catalogComparison.mssr.delegatedViaAction.includes('mssr_trace_working_update')) throw new Error('connector catalog wrapper classification failed');
-  if (!catalogComparison.connectorObservation.unrecognized.includes('host_private_tool') || catalogComparison.interpretation.wrapperReachabilityIsDirectExposure !== false) throw new Error('connector catalog boundary classification failed');
+  if (catalogComparison.runtime.count !== 187 || catalogComparison.mssr.runtime !== 15) throw new Error('connector catalog comparison runtime baseline failed');
+  if (catalogComparison.mssr.directCoveragePercent !== 20) throw new Error(`unexpected MSSR direct coverage: ${catalogComparison.mssr.directCoveragePercent}`);
+  if (!catalogComparison.mssr.delegatedViaQuery.includes('skill_bootstrap') || !catalogComparison.mssr.delegatedViaAction.includes('mssr_trace_record') || !catalogComparison.mssr.delegatedViaAction.includes('mssr_trace_working_update') || !catalogComparison.mssr.delegatedViaAction.includes('mssr_skill_maintenance_index')) throw new Error('connector catalog wrapper classification failed');  if (!catalogComparison.connectorObservation.unrecognized.includes('host_private_tool') || catalogComparison.interpretation.wrapperReachabilityIsDirectExposure !== false) throw new Error('connector catalog boundary classification failed');
   const delegatedQueryTool = registry.tools.find((tool) => tool.name === 'bridge_tool_query');
   const delegatedActionTool = registry.tools.find((tool) => tool.name === 'bridge_tool_action');
   if (!delegatedQueryTool?.description?.includes('use them without another discovery call')) throw new Error('bridge_tool_query must support route-provided immediate fallback');
   if (!delegatedActionTool?.description?.includes('use them without another discovery call')) throw new Error('bridge_tool_action must support route-provided immediate fallback');
   if (!delegatedQueryTool?.inputSchema?.properties?.traceId || !delegatedActionTool?.inputSchema?.properties?.traceId) throw new Error('delegated wrappers must expose optional MSSR trace control');
-  const expectedNeutral = ['mssr_context_ack','godot_scene_open','whiteboard_capture_pc_view', 'whiteboard_add_text', 'whiteboard_add_svg', 'whiteboard_add_diagram', 'whiteboard_insert_image', 'mssr_trace_working_update', 'mssr_trace_record', 'mssr_observatory_epoch_start'];
+  const expectedNeutral = ['mssr_context_ack','mssr_semantic_evidence_relation_review','mssr_librarian_jev_select','blender_activity_trace','godot_scene_open','whiteboard_capture_pc_view', 'whiteboard_add_text', 'whiteboard_add_svg', 'whiteboard_add_diagram', 'whiteboard_insert_image', 'quietdesk_desktop_capture', 'mssr_trace_working_update', 'mssr_trace_record', 'mssr_observatory_epoch_start'];
   if (registry.riskSummary.neutral.length !== expectedNeutral.length || expectedNeutral.some((name) => !registry.riskSummary.neutral.includes(name))) throw new Error(`unexpected neutral tools: ${registry.riskSummary.neutral.join(', ')}`);
   if (!registry.riskSummary.readOnly.includes('project_context_audit') || !registry.riskSummary.readOnly.includes('project_change_consistency')) throw new Error('project context audit/consistency tools must be classified as read-only Bridge tools');
+  if (!registry.riskSummary.readOnly.includes('mssr_librarian_evidence_pack')) throw new Error('mssr_librarian_evidence_pack must be classified as read-only');
   if (!registry.riskSummary.destructive.includes('project_context_update') || !registry.riskSummary.destructive.includes('project_context_maintain')) throw new Error('project_context_update/project_context_maintain must be classified as write/destructive Bridge tools');
-  for (const moduleName of ['project','project-context','workspace','cache','workflow-guides','skill-catalog-and-roblox-proxy','git-publication','roblox-studio-ops','roblox-assets','roblox-photo-capture','notices','mssr-observatory','binary-files','images','media-review','blender','godot','tablet-whiteboard']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
-  for (const toolName of ['project_context_load','project_context_audit','project_context_health','project_context_modularization_plan','project_context_maintain','project_change_consistency','project_context_update','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','bridge_connector_catalog_compare','bridge_tool_schema','bridge_tool_audit','git_multi_repo_publish','skill_catalog','skill_recommend','skill_route_audit','skill_route_vocabulary','skill_route_plan','skill_bootstrap','skill_context_next','skill_load','mssr_observatory_query','mssr_trace_evidence','mssr_trace_working_update','mssr_trace_record','mssr_observatory_epoch_start','bridge_notice_status','bridge_notice_history','bridge_notice_drain','mssr_context_ack','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_studio_list','roblox_mcp_query','roblox_mcp_action','roblox_asset_upload','roblox_studio_window_capture_save','roblox_screen_capture_save','roblox_photo_capture_job','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_file_attach','image_asset_save','image_asset_import_files','image_character_views_prepare','image_reference_pack_prepare','media_review_ingest','blender_status','blender_open','blender_scene_info','blender_viewport_screenshot','blender_focus_review','blender_review_bundle','blender_execute_code','blender_batch_script','blender_validate_reference_pack','blender_install_reference_pack','blender_setup_character_references','blender_character_loop_status','godot_mcp_status','godot_mcp_tool_list','godot_mcp_instance_list','godot_mcp_query','godot_scene_open','godot_scene_create','godot_screen_capture_save','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list','whiteboard_add_text','whiteboard_add_svg','whiteboard_add_diagram','whiteboard_insert_image']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/media/Blender/whiteboard tool ${toolName}`);
+  for (const moduleName of ['project','project-context','workspace','cache','workflow-guides','skill-catalog-and-roblox-proxy','git-publication','roblox-studio-ops','roblox-assets','roblox-photo-capture','notices','mssr-observatory','mssr-semantic-evidence','binary-files','images','media-review','blender','godot','tablet-whiteboard','quietdesk']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
+  for (const toolName of ['mssr_librarian_search','mssr_librarian_fetch','mssr_librarian_evidence_pack','mssr_librarian_jev_select','mssr_semantic_evidence_relation_review','mssr_semantic_evidence_synthesis_preview','project_context_load','project_context_audit','project_context_health','project_context_modularization_plan','project_context_maintain','project_change_consistency','project_context_update','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','bridge_connector_catalog_compare','bridge_tool_schema','bridge_tool_audit','git_multi_repo_publish','skill_catalog','skill_recommend','skill_route_audit','skill_route_vocabulary','skill_route_plan','skill_bootstrap','skill_context_next','skill_load','mssr_observatory_query','mssr_trace_evidence','mssr_trace_working_update','mssr_trace_record','mssr_observatory_epoch_start','bridge_notice_status','bridge_notice_history','bridge_notice_drain','mssr_context_ack','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_studio_list','roblox_mcp_query','roblox_mcp_action','roblox_asset_upload','roblox_studio_window_capture_save','roblox_screen_capture_save','roblox_photo_capture_job','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_file_attach','image_asset_save','image_asset_import_files','image_character_views_prepare','image_reference_pack_prepare','media_review_ingest','blender_status','blender_open','blender_scene_info','blender_activity_trace','blender_viewport_screenshot','blender_focus_review','blender_review_bundle','blender_execute_code','blender_batch_script','blender_validate_reference_pack','blender_install_reference_pack','blender_setup_character_references','blender_character_loop_status','godot_mcp_status','godot_mcp_tool_list','godot_mcp_instance_list','godot_mcp_query','godot_scene_open','godot_scene_create','godot_screen_capture_save','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list','whiteboard_add_text','whiteboard_add_svg','whiteboard_add_diagram','whiteboard_insert_image','quietdesk_status','quietdesk_desktop_snapshot','quietdesk_desktop_coverage','quietdesk_desktop_candidates','quietdesk_desktop_semantic_context','quietdesk_desktop_capture','quietdesk_runtime_telemetry','quietdesk_execute_semantic']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/media/Blender/whiteboard tool ${toolName}`);
+
+  if (!registry.riskSummary.destructive.includes('mssr_skill_maintenance_index')) throw new Error('mssr_skill_maintenance_index must be classified as write/destructive because refresh persists a workspace projection');
+  for (const moduleName of ['project','project-context','workspace','cache','workflow-guides','skill-catalog-and-roblox-proxy','git-publication','roblox-studio-ops','roblox-assets','roblox-photo-capture','notices','mssr-observatory','mssr-semantic-evidence','binary-files','images','media-review','blender','godot','tablet-whiteboard','quietdesk']) if (!registry.modules.includes(moduleName)) throw new Error(`missing module ${moduleName}`);
+  for (const toolName of ['mssr_librarian_search','mssr_librarian_fetch','mssr_librarian_evidence_pack','mssr_librarian_jev_select','mssr_semantic_evidence_relation_review','mssr_semantic_evidence_synthesis_preview','project_context_load','project_context_audit','project_context_health','project_context_modularization_plan','project_context_maintain','project_change_consistency','project_context_update','workflow_guide_recommend','workflow_guide_load','workflow_guide_create','bridge_connector_catalog_compare','bridge_tool_schema','bridge_tool_audit','git_multi_repo_publish','skill_catalog','skill_recommend','skill_route_audit','skill_route_vocabulary','skill_route_plan','skill_bootstrap','skill_context_next','skill_load','mssr_observatory_query','mssr_trace_evidence','mssr_trace_working_update','mssr_trace_record','mssr_observatory_epoch_start','bridge_notice_status','bridge_notice_history','bridge_notice_drain','mssr_context_ack','roblox_mcp_status','roblox_mcp_tool_list','roblox_mcp_studio_list','roblox_mcp_query','roblox_mcp_action','roblox_asset_upload','roblox_studio_window_capture_save','roblox_screen_capture_save','roblox_photo_capture_job','roblox_place_save','binary_file_info','binary_file_read_chunk','binary_file_write','binary_upload_begin','binary_upload_append','binary_upload_status','binary_upload_finish','binary_upload_abort','image_file_attach','image_asset_save','image_asset_import_files','image_character_views_prepare','image_reference_pack_prepare','media_review_ingest','blender_status','blender_open','blender_scene_info','blender_activity_trace','blender_viewport_screenshot','blender_focus_review','blender_review_bundle','blender_execute_code','blender_batch_script','blender_validate_reference_pack','blender_install_reference_pack','blender_setup_character_references','blender_character_loop_status','godot_mcp_status','godot_mcp_tool_list','godot_mcp_instance_list','godot_mcp_query','godot_scene_open','godot_scene_create','godot_screen_capture_save','whiteboard_capture_pc_view','whiteboard_latest_capture','whiteboard_capture_list','whiteboard_add_text','whiteboard_add_svg','whiteboard_add_diagram','whiteboard_insert_image','quietdesk_status','quietdesk_desktop_snapshot','quietdesk_desktop_coverage','quietdesk_desktop_candidates','quietdesk_desktop_semantic_context','quietdesk_desktop_capture','quietdesk_runtime_telemetry','quietdesk_execute_semantic','mssr_skill_maintenance_index','binary_file_attach','image_chat_preview_prepare']) if (!registry.has(toolName)) throw new Error(`missing context/workflow/skill/Roblox/binary/image/media/Blender/whiteboard tool ${toolName}`);
   if (!registry.riskSummary.destructive.includes('roblox_mcp_action') || !registry.riskSummary.destructive.includes('roblox_studio_window_capture_save') || !registry.riskSummary.destructive.includes('roblox_screen_capture_save') || !registry.riskSummary.destructive.includes('roblox_photo_capture_job') || !registry.riskSummary.destructive.includes('roblox_place_save')) throw new Error('Roblox action/capture/save risk classification failed');
   for (const name of ['godot_mcp_status','godot_mcp_tool_list','godot_mcp_instance_list','godot_mcp_query']) if (!registry.riskSummary.readOnly.includes(name)) throw new Error(`Godot query tool ${name} must be read-only`);
   if (!registry.riskSummary.destructive.includes('godot_scene_create') || !registry.riskSummary.destructive.includes('godot_screen_capture_save')) throw new Error('Godot scene creation and capture must be classified as filesystem-writing actions');
@@ -295,16 +308,26 @@ try {
   if (!referenceInstallTool.inputSchema?.properties?.layout || !referenceInstallTool.inputSchema?.properties?.outputBlend) throw new Error('Reference-pack installation schema failed');
 
 
+  const binaryAttachTool = registry.tools.find((tool) => tool.name === 'binary_file_attach');
+  if (!binaryAttachTool || !registry.riskSummary.readOnly.includes('binary_file_attach')) throw new Error('Binary MCP attachment classification failed');
+  if (!binaryAttachTool.inputSchema?.properties?.path || !binaryAttachTool.inputSchema?.properties?.mode || !binaryAttachTool.inputSchema?.properties?.expectedSha256) throw new Error('Binary MCP attachment schema failed');
   const imageAttachTool = registry.tools.find((tool) => tool.name === 'image_file_attach');
   if (!imageAttachTool || !registry.riskSummary.readOnly.includes('image_file_attach')) throw new Error('Local image attachment classification failed');
   if (!imageAttachTool.inputSchema?.properties?.items) throw new Error('Local image attachment schema failed');
+  const chatPreviewTool = registry.tools.find((tool) => tool.name === 'image_chat_preview_prepare');
+  if (!chatPreviewTool || !registry.riskSummary.destructive.includes('image_chat_preview_prepare')) throw new Error('Chat preview preparation classification failed');
+  if (!chatPreviewTool.inputSchema?.properties?.inputPath || !chatPreviewTool.inputSchema?.properties?.outputPath || !chatPreviewTool.inputSchema?.properties?.maxBytes) throw new Error('Chat preview preparation schema failed');
   const imageImportTool = registry.tools.find((tool) => tool.name === 'image_asset_import_files');
   const imageImportFileDef = imageImportTool?.inputSchema?.$defs?.OpenAIFile;
   if (!imageImportTool || !registry.riskSummary.destructive.includes('image_asset_import_files')) throw new Error('Authorized image-file import classification failed');
+  if (!imageImportTool.description?.includes('Primary ChatGPT Web path')) throw new Error('Authorized image-file import must be the primary ChatGPT Web path');
   if (!imageImportTool.inputSchema?.properties?.files || !imageImportTool.inputSchema?.properties?.targets) throw new Error('Authorized image-file import schema failed');
   if (JSON.stringify(imageImportTool._meta?.['openai/fileParams']) !== JSON.stringify(['files'])) throw new Error('Authorized image-file import fileParams metadata failed');
   if (!imageImportFileDef?.properties?.download_url || !imageImportFileDef?.properties?.file_id || !imageImportFileDef?.properties?.mime_type || !imageImportFileDef?.properties?.file_name) throw new Error('Authorized image-file import file schema properties failed');
   if (JSON.stringify(imageImportFileDef.required) !== JSON.stringify(['download_url','file_id'])) throw new Error('Authorized image-file import file schema required fields failed');
+  const imageBase64FallbackTool = registry.tools.find((tool) => tool.name === 'image_asset_save');
+  if (!imageBase64FallbackTool?.description?.includes('Compatibility fallback only') || imageBase64FallbackTool.metadata?.role !== 'fallback') throw new Error('Base64 image persistence must remain explicitly fallback-only');
+  if (registry.has('blender_store_reference_image')) throw new Error('Redundant Blender base64 image persistence tool must not be registered');
   const mediaReviewTool = registry.tools.find((tool) => tool.name === 'media_review_ingest');
   const mediaReviewFileDef = mediaReviewTool?.inputSchema?.$defs?.OpenAIFile;
   if (!mediaReviewTool || !registry.riskSummary.destructive.includes('media_review_ingest')) throw new Error('Authorized media review classification failed');
@@ -328,12 +351,28 @@ try {
   if (!verifyStatusTool || !registry.riskSummary.readOnly.includes('bridge_verify_status')) throw new Error('bridge_verify_status read-only registration failed');
   const watchdogSource = fs.readFileSync(path.join(process.cwd(), 'scripts', 'start-bridge-http-watchdog.ps1'), 'utf8');
   if (!watchdogSource.includes('[int]$ConsecutiveFailureThreshold = 3') || !watchdogSource.includes('$bridgeReadinessFailures -ge $ConsecutiveFailureThreshold') || !watchdogSource.includes('while process is alive; deferring restart') || !watchdogSource.includes('process-exited')) throw new Error('watchdog transient-readiness debounce regression');
+  if (!watchdogSource.includes('$psi.Environment["BRIDGE_MCP_CODE_ROOT"] = $BridgeCodeRoot') || !watchdogSource.includes('$psi.Environment["BRIDGE_MCP_PROJECT_ROOT"] = $ProjectRoot') || !watchdogSource.includes('$psi.WorkingDirectory = $ProjectRoot')) throw new Error('watchdog must keep code-root identity separate from runtime/data working directory');
+  const verifyAllSource = fs.readFileSync(path.join(process.cwd(), 'scripts', 'verify-all.ps1'), 'utf8');
+  const bridgeDoctorSource = fs.readFileSync(path.join(process.cwd(), 'scripts', 'bridge-doctor.ps1'), 'utf8');
+  if (!verifyAllSource.includes('[switch]$SkipTunnelChecks') || !verifyAllSource.includes('if ($SkipTunnelChecks) { $doctorArgs += "-SkipTunnelChecks" }')) throw new Error('verify-all must explicitly forward tunnel-check opt-out to the isolated doctor');
+  if (!bridgeDoctorSource.includes('[switch]$SkipTunnelChecks') || !bridgeDoctorSource.includes('tunnel healthz/readyz: SKIPPED (-SkipTunnelChecks)') || !bridgeDoctorSource.includes('if ($SkipTunnelChecks) {') || !bridgeDoctorSource.includes('if (-not $SkipTunnelChecks) { $interestingPorts += $tunnelPort }')) throw new Error('bridge doctor must report tunnel checks skipped and avoid tunnel probes/listener inventory when requested');
+  const httpSmokeSource = fs.readFileSync(path.join(process.cwd(), 'scripts', 'test-bridge-http.ps1'), 'utf8');
+  if (!verifyAllSource.includes('$RuntimeDataRoot = [string]$env:BRIDGE_MCP_PROJECT_ROOT') || !verifyAllSource.includes('-RuntimeDataRoot $RuntimeDataRoot') || !httpSmokeSource.includes('$RuntimeDataRoot = [string]$env:BRIDGE_MCP_PROJECT_ROOT') || !httpSmokeSource.includes('Join-Path $RuntimeDataRoot') || !httpSmokeSource.includes('mssr-ingest.token')) throw new Error('verify-all HTTP smoke must resolve runtime tokens from ProjectRoot when code and data roots differ');
+  const bridgeBaseUrlDefaultIndex = verifyAllSource.indexOf('[string]$BridgeBaseUrl = ""');
+  const bridgeBaseUrlEnvIndex = verifyAllSource.indexOf('$BridgeBaseUrl = [string]$env:BRIDGE_VERIFY_BASE_URL');
+  const bridgeUriParseIndex = verifyAllSource.indexOf('$bridgeUri = [Uri]$BridgeBaseUrl');
+  if (bridgeBaseUrlDefaultIndex < 0 || bridgeBaseUrlEnvIndex < 0 || bridgeUriParseIndex < 0 || bridgeBaseUrlEnvIndex > bridgeUriParseIndex) throw new Error('verify-all must resolve the isolated BRIDGE_VERIFY_BASE_URL before parsing or deriving MCP target URLs');
+  const expectedVersionGuardIndex = httpSmokeSource.indexOf('HTTP smoke target version mismatch: expected');
+  const firstHttpPostIndex = httpSmokeSource.indexOf('-Method Post');
+  if (expectedVersionGuardIndex < 0 || firstHttpPostIndex < 0 || expectedVersionGuardIndex > firstHttpPostIndex || !verifyAllSource.includes('-ExpectedServerVersion $ExpectedServerVersion')) throw new Error('HTTP smoke must reject the wrong Bridge version before any POST and verify-all must pass the expected version');
+  const verifyMcpCallSource = fs.readFileSync(path.join(process.cwd(), 'scripts', 'verify-mcp-call.mjs'), 'utf8');
+  if (!verifyMcpCallSource.includes('BRIDGE_MCP_VERIFY_BASE') || !verifyAllSource.includes('$env:BRIDGE_MCP_VERIFY_BASE = $mcpBaseUrl')) throw new Error('verify-all read-only MCP checks must use the same isolated Bridge base URL');
   const processDiagnosticsPath = path.join(process.cwd(), 'scripts', 'bridge-process-diagnostics.ps1');
   const processDiagnosticsSource = fs.readFileSync(processDiagnosticsPath, 'utf8');
   if (!watchdogSource.includes('. $processDiagnosticsPath') || !watchdogSource.includes('processDiagnostics = $processDiagnostics') || !watchdogSource.includes('processExitCode = $ProcessExitCode') || !watchdogSource.includes('Get-BridgeProcessDiagnostics -ProcessId $ProcessId -Port $BridgePort') || !watchdogSource.includes('-ProcessExitCode $bridgeProcessExitCode')) throw new Error('watchdog external process diagnostics wiring regression');
   if (/CommandLine|Win32_Process[^\n]*CommandLine/i.test(processDiagnosticsSource)) throw new Error('watchdog process diagnostics must not capture command lines');
   const evidenceIndex = watchdogSource.indexOf('$bridgeRecoveryEvidence = Get-BridgeRecoveryEvidence');
-  const stopIndex = watchdogSource.indexOf('Stop-ProcessState -State $bridgeProcess -Name "bridge HTTP" -ForceExternal', evidenceIndex);
+  const stopIndex = watchdogSource.indexOf('Stop-ProcessState -State $bridgePreviousProcessState -Name "bridge HTTP" -ForceExternal', evidenceIndex);
   if (evidenceIndex < 0 || stopIndex < 0 || evidenceIndex > stopIndex) throw new Error('watchdog must capture recovery evidence before stopping bridge HTTP');
   if (process.platform === 'win32') {
     const quotedDiagnosticsPath = processDiagnosticsPath.replaceAll("'", "''");
@@ -379,15 +418,14 @@ try {
   const stalePendingWorkflow = resolveMetricWorkflowKey({startsNewRoute:true,sessionWorkflowKey:'workflow-b',localWorkflowKey:'workflow-b'});
   if (stalePendingWorkflow !== undefined) throw new Error('a new route inherited a stale pending workflow without an explicit workflowKey');
 
-  const traceTaskHash = 'a'.repeat(64);
   const isolatedTraceTask = resolveMetricTaskKey({
     startsNewRoute:false,
     traceId:'__test_workflow_trace_a',
-    traceTaskHash,
-    explicitTaskKey:'task_bbbbbbbbbbbbbbbb',
-    sessionTaskKey:'task_cccccccccccccccc',
+    traceTaskKey:'context-layer-task-a',
+    explicitTaskKey:'context-layer-task-b',
+    sessionTaskKey:'context-layer-task-c',
   });
-  if (isolatedTraceTask !== 'task_aaaaaaaaaaaaaaaa') throw new Error('an existing trace inherited another task key from the shared session');
+  if (isolatedTraceTask !== 'context-layer-task-a') throw new Error('an existing trace inherited another task key from the shared session');
   const explicitNewTask = resolveMetricTaskKey({
     startsNewRoute:true,
     explicitTaskKey:'task_bbbbbbbbbbbbbbbb',
@@ -473,12 +511,23 @@ try {
   if (auditTool?.metadata?.lifecycle !== 'protected' || auditTool.metadata.family !== 'tool-dispatch' || !registry.riskSummary.readOnly.includes('bridge_tool_audit')) throw new Error('bridge_tool_audit metadata/risk failed');
   const auditSchema = await call('bridge_tool_schema', {toolName:'bridge_tool_audit'});
   if (auditSchema.tool?.metadata?.lifecycle !== 'protected' || !auditSchema.tool?.inputSchema?.properties?.view) throw new Error('bridge_tool_schema did not expose audit metadata');
+  if (auditSchema.provenance?.runtimeBootId !== RUNTIME_BOOT_ID || !/^[0-9a-f]{16}$/.test(auditSchema.provenance?.schemaHash ?? '') || auditSchema.provenance?.source !== 'live-runtime-registry') throw new Error(`bridge_tool_schema runtime provenance failed: ${JSON.stringify(auditSchema.provenance)}`);
+  const auditSchemaRepeat = await call('bridge_tool_schema', {toolName:'bridge_tool_audit'});
+  if (auditSchemaRepeat.provenance?.schemaHash !== auditSchema.provenance.schemaHash) throw new Error('bridge_tool_schema hash must be stable within one runtime boot');
+  const observatorySchema = await call('bridge_tool_schema', {toolName:'mssr_observatory_query'});
+  if (!observatorySchema.tool?.inputSchema?.properties?.detail?.enum?.includes('compact') || !observatorySchema.tool?.inputSchema?.properties?.detail?.enum?.includes('full')) throw new Error('runtime mssr_observatory_query schema must expose detail=compact|full');
+  const maintenanceIndexSchema = await call('bridge_tool_schema', {toolName:'mssr_skill_maintenance_index'});
+  if (!maintenanceIndexSchema.tool?.inputSchema?.properties?.mode?.enum?.includes('status') || !maintenanceIndexSchema.tool?.inputSchema?.properties?.mode?.enum?.includes('refresh')) throw new Error('runtime mssr_skill_maintenance_index schema must expose status|refresh');
+  const maintenanceIndexStatus = await call('mssr_skill_maintenance_index', {mode:'status'});
+  if (maintenanceIndexStatus.mode !== 'background-worker' || maintenanceIndexStatus.reviewOnly !== true || !String(maintenanceIndexStatus.filePath ?? '').endsWith('skill-maintenance-candidates.json')) throw new Error('mssr_skill_maintenance_index status contract failed');
+  const catalogHealth = await call('bridge_health', {check:'catalog'});
+  if (catalogHealth.server?.runtimeBootId !== RUNTIME_BOOT_ID || catalogHealth.toolCatalog?.runtimeBootId !== RUNTIME_BOOT_ID || !/^[0-9a-f]{16}$/.test(catalogHealth.toolCatalog?.hash ?? '')) throw new Error(`bridge_health catalog provenance failed: ${JSON.stringify(catalogHealth)}`);
   const terminalReadSchema = await call('bridge_tool_schema', {toolName:'terminal_read'});
   if (!terminalReadSchema.tool?.metadata?.usage?.preflightTools?.includes('terminal_list')) throw new Error('terminal_read usage preflight metadata failed');
   const skillLoadSchema = await call('bridge_tool_schema', {toolName:'skill_load'});
   if (!skillLoadSchema.tool?.metadata?.usage?.recovery?.some((rule) => rule.code === 'mssr-orphan-skill-load' && rule.toolName === 'skill_bootstrap')) throw new Error('skill_load MSSR recovery metadata failed');
   const aliasAudit = await call('bridge_tool_audit', {view:'aliases',scope:'active',days:30,limit:20});
-  if (aliasAudit.summary?.registeredTools !== 164 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
+  if (aliasAudit.summary?.registeredTools !== 187 || !aliasAudit.items?.some((item) => item.tool === 'work_once' && item.status === 'clarify')) throw new Error('live registry alias audit failed');
   const delegatedMetric = beginToolMetric('bridge_tool_query', {toolName:'bridge_tool_audit',arguments:{view:'all'}}, {caller:'chatgpt-web',sessionKey:'fixture-session',project:'fixture-project'});
   finishToolMetric(delegatedMetric, true, 128);
   const delegatedSnapshot = getToolAuditMetrics(30, 'active');
@@ -620,11 +669,11 @@ try {
   if (loadedTraceSkill.traceId !== structuredRoute.traceId || !loadedTraceSkill.content?.includes('Fixture guidance')) throw new Error('traced skill load failed');
   const neutralDispatch = await call('bridge_tool_action', {toolName:'mssr_trace_record',confirmToolName:'mssr_trace_record',arguments:{traceId:structuredRoute.traceId,eventType:'verification',caller:'chatgpt-web',stage:'verify',status:'success',completedPhases:['discovery','safety','implementation','verification'],contextSources:['current-conversation','project-context'],verificationPassed:true,summary:'Fixture route verified.'}});
   if (neutralDispatch.classification !== 'neutral' || neutralDispatch.delegatedTool !== 'mssr_trace_record' || !neutralDispatch.result?.recorded) throw new Error('neutral fallback dispatch failed');
-  const traceResult = await call('mssr_observatory_query', {kind:'trace',traceId:structuredRoute.traceId,limit:30});
+  const traceResult = await call('mssr_observatory_query', {kind:'trace',detail:'full',traceId:structuredRoute.traceId,limit:30});
   if (!traceResult.trace.some((event) => event.eventType === 'route_planned') || !traceResult.trace.some((event) => event.eventType === 'skill_loaded' && event.ok === true) || !traceResult.trace.some((event) => event.eventType === 'verification')) throw new Error('MSSR observatory trace correlation failed');
   const storedRouteIntent = traceResult.trace.find((event) => event.eventType === 'route_planned')?.details?.intent;
   if (!storedRouteIntent || storedRouteIntent.domains?.[0] !== 'roblox' || storedRouteIntent.risk !== 'write') throw new Error('MSSR direct route lost bounded intent dimensions');
-  if (Object.hasOwn(storedRouteIntent, 'summary')) throw new Error('MSSR route telemetry must not persist intent summaries');
+  if (storedRouteIntent.summary !== 'Sistema Roblox de conexiones y recursos con cambios persistentes' || storedRouteIntent.summary.length > 240) throw new Error('MSSR route telemetry lost or exceeded the bounded human-facing intent summary contract');
   const observatoryStatus = await call('mssr_observatory_query', {kind:'status'});
   if (!observatoryStatus.enabled || !observatoryStatus.privacy || observatoryStatus.privacy.rawPromptsStored !== false) throw new Error('MSSR observatory privacy/status failed');
 
@@ -637,6 +686,9 @@ try {
   const photoOutcome = outcomeSummary.top?.skillOutcomes?.find((item) => item.name === 'roblox-photo-rig-capture');
   if (!photoOutcome || photoOutcome.outcomes !== 1 || photoOutcome.successRate !== 100 || photoOutcome.acceptanceRate !== 100 || photoOutcome.averageScore !== 0.9) throw new Error('MSSR per-skill outcome metrics or latest-outcome dedupe failed');
   if (!outcomeSummary.top?.outcomeSupportingSkills?.some((item) => item.name === 'systematic-debugging' && item.count === 1)) throw new Error('MSSR supporting-skill contribution metric failed');
+  if (outcomeSummary.detail !== 'compact' || outcomeSummary.truncation?.fullAvailable !== true || JSON.stringify(outcomeSummary).length > 66000) throw new Error(`MSSR compact summary budget contract failed: ${JSON.stringify(outcomeSummary.truncation)}`);
+  const outcomeSummaryFull = await call('mssr_observatory_query', {kind:'summary',detail:'full',days:30});
+  if (outcomeSummaryFull.detail !== 'full' || outcomeSummaryFull.truncation !== undefined) throw new Error('MSSR full summary must remain explicit and untruncated');
 
   const callerRoute = await call('skill_route_plan', {
     task:'Revisar un proyecto local desde Codex',
@@ -794,12 +846,60 @@ try {
   const savedSinglePath = path.join(root,'images','single.png');
   const savedSingleBytes = fs.readFileSync(savedSinglePath);
   const savedSingleSha256 = crypto.createHash('sha256').update(savedSingleBytes).digest('hex');
+  const attachedBinary = await call('binary_file_attach', {path:savedSinglePath,mode:'both',expectedSha256:savedSingleSha256});
+  if (attachedBinary.transport !== 'mcp-resource-content' || attachedBinary.sha256 !== savedSingleSha256 || attachedBinary.encodedPayloadExposedInText !== false) throw new Error('binary MCP attachment metadata failed');
+  if (!/^mauroprime:\/\/local-file\//.test(attachedBinary.resource?.uri || '')) throw new Error('binary MCP attachment resource URI failed');
+  if (!Array.isArray(attachedBinary.__bridgeContent) || attachedBinary.__bridgeContent.length !== 2) throw new Error('binary MCP attachment content blocks missing');
+  const attachedBinaryLink = attachedBinary.__bridgeContent.find((item) => item.type === 'resource_link');
+  const attachedBinaryEmbedded = attachedBinary.__bridgeContent.find((item) => item.type === 'resource');
+  if (!attachedBinaryLink || attachedBinaryLink.uri !== attachedBinary.resource.uri || attachedBinaryLink.mimeType !== 'image/png') throw new Error('binary MCP resource_link contract failed');
+  if (!attachedBinaryEmbedded || attachedBinaryEmbedded.resource?.uri !== attachedBinary.resource.uri || Buffer.from(attachedBinaryEmbedded.resource?.blob || '', 'base64').compare(savedSingleBytes) !== 0) throw new Error('binary MCP embedded resource did not preserve exact bytes');
+  let binaryAttachHashRejected = false;
+  try { await call('binary_file_attach', {path:savedSinglePath,mode:'embedded',expectedSha256:'0'.repeat(64)}); } catch (error) { binaryAttachHashRejected = String(error).includes('SHA-256 mismatch'); }
+  if (!binaryAttachHashRejected) throw new Error('binary MCP attachment accepted an incorrect expected hash');
   const attachedImage = await call('image_file_attach', {
     items:[{path:savedSinglePath,label:'fixture-front',expectedSha256:savedSingleSha256}],
   });
   if (attachedImage.mode !== 'single' || attachedImage.itemCount !== 1 || attachedImage.totalBytes !== savedSingleBytes.length || !attachedImage.originalBytesPreserved) throw new Error('local image attachment metadata failed');
   if (attachedImage.attached[0].width !== 2 || attachedImage.attached[0].height !== 2 || attachedImage.attached[0].sha256 !== savedSingleSha256 || attachedImage.attached[0].transformed) throw new Error('local image attachment inspection failed');
   if (!Array.isArray(attachedImage.__bridgeImages) || attachedImage.__bridgeImages.length !== 1 || Buffer.from(attachedImage.__bridgeImages[0].data,'base64').compare(savedSingleBytes) !== 0) throw new Error('local image attachment did not preserve the original image bytes');
+  const chatPreviewPath = path.join(root,'images','chat-preview.jpg');
+  const chatPreview = await call('image_chat_preview_prepare', {
+    inputPath:savedSinglePath,
+    outputPath:chatPreviewPath,
+    maxBytes:16 * 1024,
+  });
+  const chatPreviewBytes = fs.readFileSync(chatPreviewPath);
+  const chatPreviewSha256 = crypto.createHash('sha256').update(chatPreviewBytes).digest('hex');
+  if (chatPreview.source.sha256 !== savedSingleSha256 || chatPreview.source.transformed || !chatPreview.preview.transformed) throw new Error('chat preview source/transform contract failed');
+  if (chatPreview.preview.sha256 !== chatPreviewSha256 || chatPreview.preview.bytes !== chatPreviewBytes.length || chatPreview.preview.mime !== 'image/jpeg') throw new Error('chat preview metadata/hash verification failed');
+  if (chatPreview.preview.bytes > 16 * 1024 || chatPreview.transfer.nextTool !== 'binary_file_read_chunk' || chatPreview.transfer.recommendedChunkBytes !== 12 * 1024) throw new Error('chat preview transfer budget contract failed');
+  if (!Array.isArray(chatPreview.__bridgeImages) || chatPreview.__bridgeImages.length !== 1 || Buffer.from(chatPreview.__bridgeImages[0].data,'base64').compare(chatPreviewBytes) !== 0) throw new Error('chat preview MCP image attachment did not match the transport preview');
+  const previewBeforeRetry = Buffer.from(chatPreviewBytes);
+  let previewOverwriteRejected = false;
+  try {
+    await call('image_chat_preview_prepare', {inputPath:savedSinglePath,outputPath:chatPreviewPath,maxBytes:16 * 1024});
+  } catch (error) {
+    previewOverwriteRejected = String(error).includes('output already exists');
+  }
+  if (!previewOverwriteRejected || fs.readFileSync(chatPreviewPath).compare(previewBeforeRetry) !== 0) throw new Error('chat preview preparation overwrote an existing output');
+  const pixelBombBytes = Buffer.from(savedSingleBytes);
+  pixelBombBytes.writeUInt32BE(7000, 16);
+  pixelBombBytes.writeUInt32BE(7000, 20);
+  pixelBombBytes.writeUInt32BE(crc32(pixelBombBytes.subarray(12, 29)), 29);
+  const pixelBombPath = path.join(root,'images','pixel-bomb.png');
+  const pixelBombOutput = path.join(root,'images','pixel-bomb-preview.jpg');
+  fs.writeFileSync(pixelBombPath, pixelBombBytes);
+  let pixelBombRejected = false;
+  let pixelBombError = '';
+  try {
+    await call('image_chat_preview_prepare', {inputPath:pixelBombPath,outputPath:pixelBombOutput,maxBytes:16 * 1024});
+  } catch (error) {
+    pixelBombError = String(error);
+    pixelBombRejected = /40,000,000|40000000|pixel processing limit|DecompressionBomb/i.test(pixelBombError);
+  }
+  if (!pixelBombRejected || fs.existsSync(pixelBombOutput)) throw new Error(`chat preview preparation did not reject an oversized pixel source before output; rejected=${pixelBombRejected}, outputExists=${fs.existsSync(pixelBombOutput)}, error=${pixelBombError}`);
+  if (fs.readdirSync(path.join(root,'images')).some((name) => name.startsWith('.chat-preview-'))) throw new Error('chat preview source snapshot/config temporary files were not cleaned up');
   let imageHashRejected = false;
   try {
     await call('image_file_attach', {items:[{path:savedSinglePath,expectedSha256:'0'.repeat(64)}]});

@@ -109,7 +109,7 @@ function recommendationFor(tool: BridgeToolSchema, metric: ToolAuditMetricRow | 
 
   const callerContractCategories = new Set([
     "schema-validation", "target-not-found", "permission-or-risk-mismatch", "safety-guard", "expected-safety-guard",
-    "expected-integrity-mismatch", "stale-file-state", "invalid-image-payload", "source-file-unavailable",
+    "expected-integrity-mismatch", "stale-file-state", "invalid-image-payload", "invalid-encoded-payload", "source-file-unavailable",
     "missing-upstream", "no-remote-configured",
   ]);
   if (errorRate >= 20 && callerContractCategories.has(topError?.name ?? "")) {

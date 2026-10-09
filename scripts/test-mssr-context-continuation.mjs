@@ -6,10 +6,11 @@ import path from "node:path";
 /**
  * Focal public-contract regression for Bridge context continuation.
  *
- * This deliberately uses normal discovered Codex skills instead of a test-only
- * input.  Their SKILL.md files have no manifest, so their whole contents are
- * the selected core.  The four exact core sizes reproduce the observed
- * 23,310-char selection against the 18,000-char request budget.
+ * MSSR 0.2.79 makes continuation proportional: unresolved required obligations
+ * may page, while accepted optional roots are allowed to be omitted under
+ * pressure. The required routing fixture therefore owns three required modules
+ * so the chain still exercises cursor integrity without relabeling optional
+ * roots as required.
  */
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "bridge-mssr-context-continuation-"));
 const codexHome = path.join(sandbox, "codex");
@@ -21,8 +22,19 @@ const expectedSkillChars = new Map([
   ["complex-system-design", 5_298],
   ["capability-gap-recovery", 6_508],
 ]);
+const requiredModuleChars = new Map([
+  ["continuation-a", 6_504],
+  ["continuation-b", 5_298],
+  ["continuation-c", 6_508],
+]);
 const expectedSkillNames = [...expectedSkillChars.keys()].sort();
-const expectedCoreChars = [...expectedSkillChars.values()].reduce((sum, chars) => sum + chars, 0);
+const expectedRequiredUnitIds = [
+  "mssr-agent-routing:core",
+  ...[...requiredModuleChars.keys()].map((id) => `mssr-agent-routing:module:${id}`),
+].sort();
+const expectedRequiredChars = expectedSkillChars.get("mssr-agent-routing") + [...requiredModuleChars.values()].reduce((sum, chars) => sum + chars, 0);
+const expectedOptionalRootChars = [...expectedSkillChars.entries()].filter(([name]) => name !== "mssr-agent-routing").reduce((sum, [, chars]) => sum + chars, 0);
+const expectedSelectedChars = expectedRequiredChars + expectedOptionalRootChars;
 
 process.env.CODEX_HOME = codexHome;
 // The test must use only its deterministic local fixtures.  An absent bundled
@@ -42,6 +54,37 @@ function writeExactSkill(name, chars) {
   const prefix = `---\nname: ${name}\ndescription: Continuation regression fixture for ${name}.\n---\n\n# ${name}\n\n`;
   assert.ok(prefix.length < chars, `fixture prefix unexpectedly exceeds ${name} budget`);
   fs.writeFileSync(path.join(directory, "SKILL.md"), prefix.padEnd(chars, "x"), "utf8");
+
+  if (name !== "mssr-agent-routing") return;
+
+  const activeCorePrefix = `# Active skill context: ${name}\n\n`;
+  const coreContentChars = chars - activeCorePrefix.length;
+  assert.ok(coreContentChars > 0, "routing core fixture must leave room for content");
+  fs.writeFileSync(path.join(directory, "core.md"), "r".repeat(coreContentChars), "utf8");
+
+  const modules = [];
+  let fillCode = "a".charCodeAt(0);
+  for (const [id, targetChars] of requiredModuleChars) {
+    const assembledPrefix = `## Selected context module: ${id}\n\n`;
+    const contentChars = targetChars - assembledPrefix.length - 2;
+    assert.ok(contentChars > 0, `required module fixture ${id} must leave room for content`);
+    const filename = `${id}.md`;
+    fs.writeFileSync(path.join(directory, filename), String.fromCharCode(fillCode).repeat(contentChars), "utf8");
+    fillCode += 1;
+    modules.push({
+      id,
+      description: `Required continuation regression module ${id}.`,
+      source: { path: filename },
+      required: true,
+      priority: 50,
+      maxChars: targetChars,
+    });
+  }
+  fs.writeFileSync(path.join(directory, "context-modules.json"), JSON.stringify({
+    schemaVersion: 1,
+    core: { path: "core.md" },
+    modules,
+  }, null, 2), "utf8");
 }
 
 for (const [name, chars] of expectedSkillChars) writeExactSkill(name, chars);
@@ -58,7 +101,7 @@ const intent = {
 
 const bootstrapInput = {
   task: "Repair repeated context budget failures using mssr-agent-routing, systematic-debugging, complex-system-design, and capability-gap-recovery.",
-  context: "Bridge must page accepted skills rather than silently dropping their context.",
+  context: "Bridge must continue unresolved required context while keeping accepted optional roots observable without forcing them through the chain.",
   intent,
   caller: "chatgpt-web",
   stage: "implement",
@@ -85,7 +128,7 @@ function assertBounded(response, label) {
 
 function assertPartial(response, label) {
   assert.equal(response.status, "partial", `${label} must explicitly report partial delivery`);
-  assert.equal(response.mustContinue, true, `${label} must force continuation while selected context remains`);
+  assert.equal(response.mustContinue, true, `${label} must force continuation while required selected context remains`);
   assert.equal(typeof response.cursor, "string", `${label} must return an opaque continuation cursor`);
   assert.ok(response.cursor.length >= 16, `${label} cursor is unexpectedly short`);
   assert.ok(response.nextAction, `${label} must expose a deterministic next action`);
@@ -163,8 +206,10 @@ try {
   const skillDecisions = acceptedOptionalDecisions(route);
 
   const first = await bootstrap({ ...bootstrapInput, traceId: route.traceId, skillDecisions, maxContextChars: budget, maxEnvelopeChars: budget });
-  assert.equal(first.contextAssembly.selectedChars, expectedCoreChars, "fixture must reproduce the 18,000 vs 23,310 selected-context pressure");
+  assert.equal(first.contextAssembly.selectedChars, expectedSelectedChars, "fixture must retain the complete required + accepted selection accounting under pressure");
   assert.equal(first.contextAssembly.requiredCoreReservedChars, expectedSkillChars.get("mssr-agent-routing"), "accepted roots must not be relabeled as required obligations");
+  assert.equal(first.contextAssembly.requiredModuleReservedChars, [...requiredModuleChars.values()].reduce((sum, chars) => sum + chars, 0), "required module pressure must remain explicit");
+  assert.equal(first.contextAssembly.acceptedOverflowChars, expectedOptionalRootChars, "accepted optional roots must remain observable while required continuation is pending");
   assertPartial(first, "first response");
   assertBounded(first, "first response");
 
@@ -175,13 +220,17 @@ try {
     "tampered continuation cursors must fail clearly",
   );
 
-  const delivered = [...loadedNames(first)];
+  const deliveredRequiredUnitIds = first.contextAssembly.units
+    .map((unit) => unit.id)
+    .filter((id) => expectedRequiredUnitIds.includes(id));
   let page = first;
   while (page.mustContinue) {
     const consumedCursor = page.cursor;
     page = await next({ traceId: page.traceId, cursor: consumedCursor });
     assertBounded(page, "continuation response");
-    delivered.push(...loadedNames(page));
+    deliveredRequiredUnitIds.push(...page.contextAssembly.units
+      .map((unit) => unit.id)
+      .filter((id) => expectedRequiredUnitIds.includes(id)));
 
     await assert.rejects(
       () => next({ traceId: page.traceId, cursor: consumedCursor }),
@@ -190,37 +239,40 @@ try {
     );
   }
   assertComplete(page, "final response");
-  assert.deepEqual(delivered.sort(), expectedSkillNames, "the complete continuation chain must deliver every selected unit exactly once");
+  assert.deepEqual(deliveredRequiredUnitIds.sort(), expectedRequiredUnitIds, "the continuation chain must deliver every required unit exactly once");
+  const finalAccepted = page.contextAssembly.skills.filter((item) => item.obligation === "accepted");
+  assert.ok(finalAccepted.every((item) => item.required === false), "accepted optional roots must remain non-required through the continuation chain");
 
-  const completeInOne = await bootstrap({ ...bootstrapInput, skillDecisions, maxContextChars: 30_000, maxEnvelopeChars: 40_000 });
+  const completeInOne = await bootstrap({ ...bootstrapInput, skillDecisions, maxContextChars: 50_000, maxEnvelopeChars: 60_000 });
   assertComplete(completeInOne, "fit-in-one response");
-  assert.deepEqual(loadedNames(completeInOne).sort(), expectedSkillNames, "a fitting selection must deliver each unit once without a cursor");
+  assert.deepEqual(loadedNames(completeInOne).sort(), expectedSkillNames, "a fitting selection must deliver each selected skill without a cursor");
+  assert.equal(completeInOne.contextAssembly.selectedChars, expectedSelectedChars, "fit-in-one accounting must include required and accepted context bytes");
 
   const retainedContextObligations = completeInOne.contextAssembly.units.map(({ id, fingerprint }) => ({ id, fingerprint }));
-  assert.equal(retainedContextObligations.length, expectedSkillNames.length, "fit-in-one response must expose one stable receipt per selected core");
+  assert.equal(retainedContextObligations.length, expectedRequiredUnitIds.length + expectedSkillNames.length - 1, "fit-in-one response must expose one stable receipt per selected unit");
   assert.ok(retainedContextObligations.every((item) => typeof item.id === "string" && /^[A-Za-z0-9_-]{43}$/.test(item.fingerprint)), "every retention receipt must expose a stable id and exact content fingerprint");
 
-  const retained = await bootstrap({ ...bootstrapInput, traceId: completeInOne.traceId, skillDecisions, maxContextChars: 30_000, maxEnvelopeChars: 40_000, retainedContextObligations });
+  const retained = await bootstrap({ ...bootstrapInput, traceId: completeInOne.traceId, skillDecisions, maxContextChars: 50_000, maxEnvelopeChars: 60_000, retainedContextObligations });
   assertComplete(retained, "fully retained response");
   assert.equal(retained.contextAssembly.deliveredChars, 0, "exact retained obligations must suppress duplicate procedural bytes");
-  assert.equal(retained.contextAssembly.retainedContextCharsSaved, expectedCoreChars, "retained savings must equal the exact selected context bytes");
-  assert.equal(retained.contextAssembly.selectedChars, expectedCoreChars, "retained units remain part of the selected context contract");
+  assert.equal(retained.contextAssembly.retainedContextCharsSaved, expectedSelectedChars, "retained savings must equal the exact selected context bytes");
+  assert.equal(retained.contextAssembly.selectedChars, expectedSelectedChars, "retained units remain part of the selected context contract");
   assert.deepEqual(retained.contextAssembly.retained.map((unit) => unit.id).sort(), retainedContextObligations.map((unit) => unit.id).sort(), "Bridge must expose exactly the obligations MSSR accepted as retained");
   assert.deepEqual(loadedNames(retained).sort(), expectedSkillNames, "retained guidance must keep selected skills lifecycle-satisfied without reserializing content");
   assert.ok(retained.loaded.every((item) => item.content === "" && item.contextAssembly.contextSatisfied === true), "fully retained skills must be satisfied with empty re-delivered content");
 
-  const historicalOnly = await bootstrap({ ...bootstrapInput, traceId: retained.traceId, skillDecisions, maxContextChars: 30_000, maxEnvelopeChars: 40_000 });
+  const historicalOnly = await bootstrap({ ...bootstrapInput, traceId: retained.traceId, skillDecisions, maxContextChars: 50_000, maxEnvelopeChars: 60_000 });
   assertComplete(historicalOnly, "historical trace without receipts");
-  assert.equal(historicalOnly.contextAssembly.deliveredChars, expectedCoreChars, "historical skill_load state alone must never prove current-context retention");
+  assert.equal(historicalOnly.contextAssembly.deliveredChars, expectedSelectedChars, "historical skill_load state alone must never prove current-context retention");
   assert.equal(historicalOnly.contextAssembly.retainedContextCharsSaved, 0, "omitting receipts after compaction/restart/handoff must fail open to re-delivery");
 
   const mismatchedReceipts = retainedContextObligations.map((receipt, index) => index === 0
     ? { ...receipt, fingerprint: `${receipt.fingerprint.slice(0, -1)}${receipt.fingerprint.endsWith("A") ? "B" : "A"}` }
     : receipt);
-  const mismatch = await bootstrap({ ...bootstrapInput, skillDecisions, maxContextChars: 30_000, maxEnvelopeChars: 40_000, retainedContextObligations: mismatchedReceipts });
+  const mismatch = await bootstrap({ ...bootstrapInput, skillDecisions, maxContextChars: 50_000, maxEnvelopeChars: 60_000, retainedContextObligations: mismatchedReceipts });
   assertComplete(mismatch, "fingerprint mismatch response");
-  assert.ok(mismatch.contextAssembly.deliveredChars > 0 && mismatch.contextAssembly.deliveredChars < expectedCoreChars, "a changed fingerprint must re-deliver only the unmet unit while preserving exact matches");
-  assert.equal(mismatch.contextAssembly.retainedContextCharsSaved + mismatch.contextAssembly.deliveredChars, expectedCoreChars, "mismatch accounting must partition retained and re-delivered selected bytes exactly");
+  assert.ok(mismatch.contextAssembly.deliveredChars > 0 && mismatch.contextAssembly.deliveredChars < expectedSelectedChars, "a changed fingerprint must re-deliver only the unmet unit while preserving exact matches");
+  assert.equal(mismatch.contextAssembly.retainedContextCharsSaved + mismatch.contextAssembly.deliveredChars, expectedSelectedChars, "mismatch accounting must partition retained and re-delivered selected bytes exactly");
 
   const partialRetainedReceipts = retainedContextObligations.slice(0, 2);
   const retainedPartial = await bootstrap({ ...bootstrapInput, skillDecisions, maxContextChars: 7_000, maxEnvelopeChars: 30_000, retainedContextObligations: partialRetainedReceipts });
@@ -232,9 +284,10 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    expectedCoreChars,
+    expectedRequiredChars,
+    expectedSelectedChars,
     budget,
-    pages: delivered.length,
+    requiredUnits: deliveredRequiredUnitIds.length,
     firstDeliveredChars: first.contextAssembly.deliveredChars,
   }, null, 2));
 } finally {

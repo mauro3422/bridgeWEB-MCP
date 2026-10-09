@@ -69,6 +69,8 @@ Invoke-RestMethod http://127.0.0.1:8081/readyz
 
 ## Watchdog HTTP
 
+`-DryRun` is observational only: it must not stop or replace an external process, consume a restart request, or write a restart acknowledgement. Keep a regression for those side-effect boundaries.
+
 Arranque manual recomendado:
 
 ```powershell

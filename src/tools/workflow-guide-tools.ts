@@ -147,6 +147,22 @@ function tokenize(value: string): Set<string> {
   return new Set(normalizeText(value).split(/\s+/).filter((token) => token.length >= 2));
 }
 
+function containsNormalizedTerm(normalizedText: string, normalizedTerm: string): boolean {
+  if (!normalizedText || !normalizedTerm) return false;
+  return ` ${normalizedText} `.includes(` ${normalizedTerm} `);
+}
+
+function containsNegatedNormalizedTerm(normalizedText: string, normalizedTerm: string): boolean {
+  if (!normalizedText || !normalizedTerm) return false;
+  const paddedText = ` ${normalizedText} `;
+  const needle = ` ${normalizedTerm} `;
+  const index = paddedText.indexOf(needle);
+  if (index < 0) return false;
+  const precedingTokens = paddedText.slice(Math.max(0, index - 72), index).trim().split(/\s+/).filter(Boolean).slice(-6);
+  const negators = new Set(["no", "sin", "evita", "evitar", "evite", "evites", "excluye", "excluir", "excepto", "without", "avoid", "exclude", "not"]);
+  return precedingTokens.some((token) => negators.has(token));
+}
+
 function ensureInside(root: string, candidate: string): string {
   const resolvedRoot = path.resolve(root);
   const resolvedCandidate = path.resolve(candidate);
@@ -374,32 +390,42 @@ function scoreGuide(task: string, guide: DiscoveredGuide) {
   const normalizedTask = normalizeText(task);
   const taskTokens = tokenize(task);
   let score = 0;
+  let strongMatch = false;
   const reasons: string[] = [];
 
   const nameText = normalizeText(`${guide.manifest.name} ${guide.manifest.title}`);
-  if (nameText && normalizedTask.includes(nameText)) {
+  if (nameText && containsNormalizedTerm(normalizedTask, nameText) && !containsNegatedNormalizedTerm(normalizedTask, nameText)) {
     score += 8;
+    strongMatch = true;
     reasons.push("guide name/title appears in task");
   }
 
   for (const phrase of guide.manifest.activation.phrases) {
     const normalizedPhrase = normalizeText(phrase);
-    if (normalizedPhrase && normalizedTask.includes(normalizedPhrase)) {
+    if (normalizedPhrase && containsNormalizedTerm(normalizedTask, normalizedPhrase) && !containsNegatedNormalizedTerm(normalizedTask, normalizedPhrase)) {
       score += 6;
+      strongMatch = true;
       reasons.push(`phrase:${phrase}`);
     }
   }
 
+  let compoundKeywordMatches = 0;
   for (const keyword of guide.manifest.activation.keywords) {
     const normalizedKeyword = normalizeText(keyword);
     if (!normalizedKeyword) continue;
     const keywordTokens = normalizedKeyword.split(/\s+/);
-    const matched = keywordTokens.every((token) => taskTokens.has(token)) || normalizedTask.includes(normalizedKeyword);
-    if (matched) {
+    const matched = keywordTokens.every((token) => taskTokens.has(token));
+    if (matched && !containsNegatedNormalizedTerm(normalizedTask, normalizedKeyword)) {
       score += keywordTokens.length > 1 ? 3 : 2;
+      // A single short compound can be an auxiliary constraint (for example
+      // "dirty tree"). Two independent compounds, or one 3+ token keyword,
+      // are specific enough to count as strong activation evidence.
+      if (keywordTokens.length > 1) compoundKeywordMatches += 1;
+      if (keywordTokens.length >= 3) strongMatch = true;
       reasons.push(`keyword:${keyword}`);
     }
   }
+  if (compoundKeywordMatches >= 2) strongMatch = true;
 
   for (const example of guide.manifest.activation.examples) {
     const exampleTokens = tokenize(example);
@@ -409,6 +435,7 @@ function scoreGuide(task: string, guide: DiscoveredGuide) {
     const ratio = overlap / exampleTokens.size;
     if (ratio >= 0.5) {
       score += 4;
+      strongMatch = true;
       reasons.push("similar to activation example");
       break;
     }
@@ -421,13 +448,13 @@ function scoreGuide(task: string, guide: DiscoveredGuide) {
 
   for (const negative of guide.manifest.activation.negativeKeywords) {
     const normalizedNegative = normalizeText(negative);
-    if (normalizedNegative && normalizedTask.includes(normalizedNegative)) {
+    if (normalizedNegative && containsNormalizedTerm(normalizedTask, normalizedNegative)) {
       score -= 6;
       reasons.push(`negative:${negative}`);
     }
   }
 
-  return { score, reasons };
+  return { score, strongMatch, reasons };
 }
 
 function reusablePattern(task: string) {
@@ -438,7 +465,7 @@ function reusablePattern(task: string) {
     "pasos", "patron", "patrón", "cuando detecte", "rutina", "hook", "estandarizar",
     "standardize", "every time", "from now on", "reusable", "repeatable",
   ];
-  const matchedSignals = signals.filter((signal) => normalized.includes(normalizeText(signal)));
+  const matchedSignals = signals.filter((signal) => containsNormalizedTerm(normalized, normalizeText(signal)));
   return {
     detected: matchedSignals.length > 0,
     score: matchedSignals.length,
@@ -453,7 +480,8 @@ export async function recommendGuide(
 ) {
   const discovery = existingDiscovery ?? await discoverGuides(args.projectRoot);
   const guides = discovery.guides;
-  const ranked = guides
+  const ownershipMetaTask = isSkillCoverageMetaTask(args.task);
+  const ranked = ownershipMetaTask ? [] : guides
     .map((guide) => {
       const scored = scoreGuide(args.task, guide);
       return {
@@ -462,6 +490,7 @@ export async function recommendGuide(
         description: guide.manifest.description,
         scope: guide.scope,
         score: scored.score,
+        strongMatch: scored.strongMatch,
         reasons: scored.reasons,
         recommendedTools: guide.manifest.recommendedTools,
       };
@@ -472,11 +501,10 @@ export async function recommendGuide(
 
   const pattern = reusablePattern(args.task);
   const skillCoverage = existingSkillCoverage ?? await findExistingSkillCoverage(args.task, args.maxResults);
-  const ownershipMetaTask = isSkillCoverageMetaTask(args.task);
   const bestDomainGuide = ranked.find((item) => item.name !== "workflow-guide-builder") ?? null;
   const builderGuide = ranked.find((item) => item.name === "workflow-guide-builder") ?? null;
   const bestSkill = skillCoverage.matches[0] ?? null;
-  const shouldLoadExisting = !ownershipMetaTask && Boolean(bestDomainGuide && bestDomainGuide.score >= 4);
+  const shouldLoadExisting = !ownershipMetaTask && Boolean(bestDomainGuide && bestDomainGuide.score >= 4 && bestDomainGuide.strongMatch);
   const useExistingSkill = !ownershipMetaTask && !shouldLoadExisting && skillCoverage.covered;
   const createNewRecommended = !ownershipMetaTask && !shouldLoadExisting && !useExistingSkill && pattern.detected;
 

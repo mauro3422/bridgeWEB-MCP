@@ -3,16 +3,19 @@ import os from "node:os";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
+import { Worker } from "node:worker_threads";
 import {
   analyzeMssrTelemetry,
   createMssrLearningDigest,
   getMssrTraceClosureState,
   mssrLearningDigestSchema,
   mssrSemanticSignature,
+  persistMssrLearningDigestSemanticExperiences,
   MSSR_CHECKPOINT_TYPES,
   MSSR_OUTCOME_DIMENSION_STATUSES,
   MSSR_OUTCOME_EVIDENCE_KINDS,
   mssrSkillDecisionSchema,
+  evaluateMssrTraceTaskCompatibility,
   mssrTraceWorkingMemorySchema,
   type MssrCheckpointType,
   type MssrLearningContextSelection,
@@ -21,6 +24,7 @@ import {
   type MssrOutcomeEvidenceKind,
   type MssrSkillDecisionRecord,
   type MssrTraceLifecycleState,
+  type MssrTraceTaskIdentity,
   type MssrTraceWorkingMemory,
   mssrTelemetryEnvelopeSchema,
   structuredSkillIntentSchema,
@@ -43,6 +47,7 @@ import {
 } from "./mssr-observability-epoch.js";
 
 type JsonRecord = Record<string, unknown>;
+type MssrSemanticExperiencePersistence = Awaited<ReturnType<typeof persistMssrLearningDigestSemanticExperiences>>;
 type StatementSync = {
   run: (...args: unknown[]) => unknown;
   get: (...args: unknown[]) => JsonRecord | undefined;
@@ -54,7 +59,7 @@ type DatabaseSync = {
   close: () => void;
 };
 type SqliteModule = {
-  DatabaseSync: new (filename: string) => DatabaseSync;
+  DatabaseSync: new (filename: string, options?: { readOnly?: boolean }) => DatabaseSync;
 };
 
 export {
@@ -146,6 +151,9 @@ export type PersistedMssrTraceState = {
   workflowKey: string;
   stage: string;
   taskHash: string;
+  taskKey: string | null;
+  parentTraceId: string | null;
+  supersedesTraceId: string | null;
   caller: string;
   model: string;
   reasoningEffort: string;
@@ -198,6 +206,7 @@ let insertEvent: StatementSync | null = null;
 const recentMssrEventOverlay: MssrStoredEvent[] = [];
 const RECENT_MSSR_EVENT_OVERLAY_LIMIT = 2_000;
 const ephemeralTraceWorkingMemory = new Map<string, MssrTraceWorkingMemory>();
+const skillMaintenanceProjectionPendingEventIds = new Set<string>();
 
 function rememberRecentMssrEvent(event: MssrStoredEvent): void {
   recentMssrEventOverlay.push(event);
@@ -210,6 +219,7 @@ onObservabilityPersistenceAck((timing) => {
   if (timing.kind !== "mssr" || !timing.ok) return;
   const index = recentMssrEventOverlay.findIndex((event) => event.id === timing.id);
   if (index >= 0) recentMssrEventOverlay.splice(index, 1);
+  if (skillMaintenanceProjectionPendingEventIds.delete(timing.id)) scheduleMssrSkillMaintenanceIndexRefresh();
 });
 
 function mergeStoredEvents(persisted: MssrStoredEvent[], overlay: MssrStoredEvent[], limit: number): MssrStoredEvent[] {
@@ -273,6 +283,7 @@ function readMssrStoredTraceEvents(traceId: string, limit = 2_000): MssrStoredEv
 }
 
 export function recordMssrProjectContextSelection(args: {
+  eventId?: string;
   traceId: string;
   caller?: string;
   stage?: string;
@@ -289,6 +300,7 @@ export function recordMssrProjectContextSelection(args: {
     }];
   });
   return recordMssrEvent({
+    eventId: args.eventId,
     traceId: args.traceId,
     eventType: "project_context_selection",
     caller: args.caller,
@@ -349,6 +361,7 @@ export function distillMssrLearningDigest(traceId: string): MssrStoredEvent | nu
       decision: event.details.decision,
       reasonCode: event.details.reasonCode,
       reasonSummary: typeof event.details.reasonSummary === "string" && event.details.reasonSummary.trim() ? event.details.reasonSummary : undefined,
+      relatedSkillName: typeof event.details.relatedSkillName === "string" && event.details.relatedSkillName.trim() ? event.details.relatedSkillName : undefined,
       stage: event.stage,
     });
     if (parsed.success) decisionByKey.set(`${parsed.data.stage ?? "start"}|${parsed.data.skillName}`, parsed.data);
@@ -473,6 +486,62 @@ export function finalizeMssrOutcomeLearning(traceId: string): { digestEvent: Mss
   return { digestEvent, warning, purged };
 }
 
+function resolveMssrSemanticExperienceTraceIdentity(traceId: string): { projectKey: string; workflowKey?: string } {
+  const events = readMssrStoredTraceEvents(traceId);
+  let projectKey: string | undefined;
+  let workflowKey: string | undefined;
+  for (const event of [...events].reverse()) {
+    if (!workflowKey && typeof event.details.workflowKey === "string" && event.details.workflowKey.trim()) {
+      workflowKey = event.details.workflowKey.trim();
+    }
+    if (!projectKey) {
+      const direct = [event.details.projectName, event.details.project].find((value) => typeof value === "string" && value.trim());
+      if (typeof direct === "string") projectKey = direct.trim();
+      if (!projectKey && typeof event.details.projectRoot === "string" && event.details.projectRoot.trim()) {
+        projectKey = path.basename(event.details.projectRoot.trim().replace(/[\\/]+$/, ""));
+      }
+    }
+    if (projectKey && workflowKey) break;
+  }
+  return { projectKey: projectKey || SERVER_NAME, ...(workflowKey ? { workflowKey } : {}) };
+}
+
+export async function persistMssrOutcomeSemanticExperience(
+  traceId: string,
+  digestEvent: MssrStoredEvent | null,
+): Promise<{ result: MssrSemanticExperiencePersistence | null; warning?: string }> {
+  if (!digestEvent) return { result: null };
+  const parsedDigest = mssrLearningDigestSchema.safeParse(digestEvent.details.digest);
+  if (!parsedDigest.success) return { result: null, warning: "Outcome learning digest could not be parsed for Semantic Experience projection." };
+  try {
+    const identity = resolveMssrSemanticExperienceTraceIdentity(traceId);
+    const result = await persistMssrLearningDigestSemanticExperiences({
+      traceId,
+      projectKey: identity.projectKey,
+      ...(identity.workflowKey ? { workflowKey: identity.workflowKey } : {}),
+      digest: parsedDigest.data,
+    });
+    return { result };
+  } catch (error) {
+    return { result: null, warning: redactText(error instanceof Error ? error.message : String(error), 300) };
+  }
+}
+
+export async function finalizeMssrOutcomeLearningWithSemanticExperience(traceId: string): Promise<{
+  digestEvent: MssrStoredEvent | null;
+  warning?: string;
+  purged: boolean;
+  semanticExperience: MssrSemanticExperiencePersistence | null;
+  semanticExperienceWarning?: string;
+}> {
+  const learning = finalizeMssrOutcomeLearning(traceId);
+  const semantic = await persistMssrOutcomeSemanticExperience(traceId, learning.digestEvent);
+  return {
+    ...learning,
+    semanticExperience: semantic.result,
+    ...(semantic.warning ? { semanticExperienceWarning: semantic.warning } : {}),
+  };
+}
 function ensureDirs(): void {
   fs.mkdirSync(metricsDir, { recursive: true });
   fs.mkdirSync(logsDir, { recursive: true });
@@ -489,13 +558,20 @@ function loadSqlite(): SqliteModule | null {
 function getDb(): DatabaseSync | null {
   if (!observatoryEnabled) return null;
   if (db !== undefined) return db;
-  ensureDirs();
+  const readOnly = process.env.BRIDGE_MCP_METRICS_READONLY === "1";
+  if (!readOnly) ensureDirs();
   const sqlite = loadSqlite();
   if (!sqlite) {
     db = null;
     return null;
   }
-  db = new sqlite.DatabaseSync(sqlitePath);
+  db = readOnly
+    ? new sqlite.DatabaseSync(sqlitePath, { readOnly: true })
+    : new sqlite.DatabaseSync(sqlitePath);
+  if (readOnly) {
+    db.exec("PRAGMA busy_timeout = 100; PRAGMA query_only = ON;");
+    return db;
+  }
   db.exec(`
     PRAGMA busy_timeout = 100;
     PRAGMA journal_mode = WAL;
@@ -533,6 +609,14 @@ function getDb(): DatabaseSync | null {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   return db;
+}
+
+/**
+ * Create the observatory schema in the writable host process before any
+ * read-only dashboard worker can open the same database on a cold start.
+ */
+export function initializeMssrObservatoryStorage(): void {
+  getDb();
 }
 
 function redactText(value: string, maxChars = 400): string {
@@ -573,6 +657,32 @@ function validTraceId(value: string): boolean {
   return /^[A-Za-z0-9._:-]{6,128}$/.test(value);
 }
 
+function taskIdentityString(value: unknown, max: number): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, max) : null;
+}
+
+function taskIdentityFromDetails(details: JsonRecord | null | undefined): MssrTraceTaskIdentity {
+  const parentTraceId = taskIdentityString(details?.parentTraceId, 128);
+  const supersedesTraceId = taskIdentityString(details?.supersedesTraceId, 128);
+  return {
+    taskKey: taskIdentityString(details?.taskKey, 160),
+    parentTraceId: parentTraceId && validTraceId(parentTraceId) ? parentTraceId : null,
+    supersedesTraceId: supersedesTraceId && validTraceId(supersedesTraceId) ? supersedesTraceId : null,
+  };
+}
+
+function traceTaskIdentity(events: MssrStoredEvent[]): MssrTraceTaskIdentity {
+  let identity: MssrTraceTaskIdentity = {};
+  for (const event of events) {
+    if (event.eventType !== "route_planned") continue;
+    const compatibility = evaluateMssrTraceTaskCompatibility(identity, taskIdentityFromDetails(event.details));
+    if (compatibility.compatible) identity = compatibility.bound;
+  }
+  return identity;
+}
+
 export function resolveMssrTraceId(value?: unknown): string {
   if (typeof value === "string" && validTraceId(value.trim())) return value.trim();
   return `mssr-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomUUID().slice(0, 12)}`;
@@ -610,7 +720,10 @@ export function recordMssrEvent(input: MssrEventInput): MssrStoredEvent {
   // the HTTP/MCP event loop. The worker is the only steady-state writer.
   const database = getDb();
   if (!database || !insertEvent) return event;
-  enqueueObservabilityPersistence({
+  const needsSkillMaintenanceProjection = event.eventType === "skill_decision"
+    && (event.details.reasonCode === "redundant" || event.details.reasonCode === "irrelevant-domain");
+  if (needsSkillMaintenanceProjection) skillMaintenanceProjectionPendingEventIds.add(event.id);
+  const queued = enqueueObservabilityPersistence({
     kind: "mssr",
     id: event.id,
     eventType: event.eventType,
@@ -637,6 +750,7 @@ export function recordMssrEvent(input: MssrEventInput): MssrStoredEvent {
       os.platform(),
     ],
   });
+  if (!queued && needsSkillMaintenanceProjection) skillMaintenanceProjectionPendingEventIds.delete(event.id);
   return event;
 }
 
@@ -738,6 +852,7 @@ export function recordExternalMssrTelemetry(input: unknown): { event: MssrStored
         decision: decision.decision,
         reasonCode: decision.reasonCode,
         reasonSummary: decision.reasonSummary ? redactText(decision.reasonSummary, 240) : undefined,
+        relatedSkillName: decision.relatedSkillName,
         externalSource: envelope.source,
         emittedAt: envelope.emittedAt,
       },
@@ -749,6 +864,43 @@ export function recordExternalMssrTelemetry(input: unknown): { event: MssrStored
       traceId: envelope.traceId,
       caller: envelope.caller,
       digest: envelope.event.digest,
+    }) };
+  }
+
+  if (envelope.event.kind === "context_assembly") {
+    const assembly = envelope.event;
+    return { duplicate: false, event: recordMssrContextAssembly({
+      eventId: envelope.eventId,
+      traceId: envelope.traceId,
+      caller: envelope.caller,
+      stage: assembly.stage,
+      mode: assembly.mode,
+      page: assembly.page,
+      requestedContextChars: assembly.requestedContextChars,
+      deliveredContextChars: assembly.deliveredContextChars,
+      estimatedCharsSaved: assembly.estimatedCharsSaved,
+      retainedContextCharsSaved: assembly.retainedContextCharsSaved,
+      requiredOverflowChars: assembly.requiredOverflowChars,
+      acceptedOverflowChars: assembly.acceptedOverflowChars,
+      remainingRequiredUnits: assembly.remainingRequiredUnits,
+      remainingAcceptedUnits: assembly.remainingAcceptedUnits,
+      requiredBudgetExceeded: assembly.requiredBudgetExceeded,
+      optionalContextOmitted: assembly.optionalContextOmitted,
+      continuationIssued: assembly.continuationIssued,
+      continuationConsumed: assembly.continuationConsumed,
+      chainCompleted: assembly.chainCompleted,
+    }) };
+  }
+
+  if (envelope.event.kind === "project_context_selection") {
+    const selection = envelope.event;
+    return { duplicate: false, event: recordMssrProjectContextSelection({
+      eventId: envelope.eventId,
+      traceId: envelope.traceId,
+      caller: envelope.caller,
+      stage: selection.stage,
+      projectName: selection.projectName,
+      decisions: selection.decisions,
     }) };
   }
 
@@ -779,7 +931,10 @@ export function recordExternalMssrTelemetry(input: unknown): { event: MssrStored
     externalSource: envelope.source,
     emittedAt: envelope.emittedAt,
   });
-  if (checkpoint.eventType === "outcome") finalizeMssrOutcomeLearning(envelope.traceId);
+  if (checkpoint.eventType === "outcome") {
+    const learning = finalizeMssrOutcomeLearning(envelope.traceId);
+    if (learning.digestEvent) void persistMssrOutcomeSemanticExperience(envelope.traceId, learning.digestEvent);
+  }
   return { event: stored, duplicate: false };
 }
 
@@ -815,11 +970,47 @@ function routeSkills(value: unknown): Array<{ name: string; source?: string; req
   });
 }
 
-function boundedRouteIntent(value: unknown): JsonRecord | undefined {
+function humanizeWorkflowKey(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const normalized = value.trim().replace(/[._-]+/g, " ").replace(/\s+/g, " ");
+  return normalized ? normalized[0].toUpperCase() + normalized.slice(1) : "";
+}
+
+function generatedRouteIntentSummary(
+  intent: { domains: string[]; actions: string[]; artifacts: string[] },
+  workflowKey?: unknown,
+): string {
+  const workflow = humanizeWorkflowKey(workflowKey);
+  const actions = intent.actions.slice(0, 3).join(", ");
+  const domains = intent.domains.slice(0, 2).join(", ");
+  const artifacts = intent.artifacts.slice(0, 2).join(", ");
+  const subject = workflow || domains || artifacts || "MSSR task";
+  const activity = actions || "continue work";
+  const context = domains && domains !== subject ? ` in ${domains}` : artifacts && artifacts !== subject ? ` on ${artifacts}` : "";
+  return redactText(`${subject}: ${activity}${context}.`, 240);
+}
+
+function boundedRouteIntent(value: unknown, workflowKey?: unknown): JsonRecord | undefined {
   const parsed = structuredSkillIntentSchema.safeParse(value);
   if (!parsed.success) return undefined;
-  const { domains, actions, artifacts, needs, signals, risk, ambiguity } = parsed.data;
-  return { domains, actions, artifacts, needs, signals, risk, ambiguity };
+  const { summary, domains, actions, artifacts, needs, signals, risk, ambiguity } = parsed.data;
+  return {
+    summary: summary ? redactText(summary, 240) : generatedRouteIntentSummary({ domains, actions, artifacts }, workflowKey),
+    domains,
+    actions,
+    artifacts,
+    needs,
+    signals,
+    risk,
+    ambiguity,
+  };
+}
+
+function portableRouteIntent(value: unknown): JsonRecord | undefined {
+  const parsed = structuredSkillIntentSchema.safeParse(value);
+  if (!parsed.success) return undefined;
+  const { summary: _summary, ...portable } = parsed.data;
+  return portable;
 }
 
 export function recordMssrRoute(args: {
@@ -844,6 +1035,9 @@ export function recordMssrRoute(args: {
     details: {
       action: args.action,
       workflowKey: typeof args.route.workflowKey === "string" ? args.route.workflowKey : null,
+      taskKey: typeof args.route.taskKey === "string" ? args.route.taskKey : null,
+      parentTraceId: typeof args.route.parentTraceId === "string" ? args.route.parentTraceId : null,
+      supersedesTraceId: typeof args.route.supersedesTraceId === "string" ? args.route.supersedesTraceId : null,
       agentProfile: {
         model: normalizeModelIdentifier(agentProfile.model),
         reasoningEffort: typeof agentProfile.reasoningEffort === "string" ? agentProfile.reasoningEffort : "unknown",
@@ -855,7 +1049,7 @@ export function recordMssrRoute(args: {
       deferredSkills: routeSkills(args.route.deferredSkills),
       loadOrder: Array.isArray(args.route.loadOrder) ? args.route.loadOrder : [],
       deferredLoadOrder: Array.isArray(args.route.deferredLoadOrder) ? args.route.deferredLoadOrder : [],
-      intent: boundedRouteIntent(intent),
+      intent: boundedRouteIntent(intent, args.route.workflowKey),
       signals: Array.isArray(intent.signals) ? intent.signals : [],
       ambiguity: typeof intent.ambiguity === "string" ? intent.ambiguity : undefined,
       requiredPhases: Array.isArray(coverage.requiredPhases) ? coverage.requiredPhases : [],
@@ -946,17 +1140,24 @@ export function recordMssrSkillLoad(args: {
  * never their procedural text.
  */
 export function recordMssrContextAssembly(args: {
+  eventId?: string;
   traceId: string;
   caller?: string;
   stage?: string;
+  mode?: "selective" | "full";
+  page?: number;
   requestedContextChars?: number;
   deliveredContextChars?: number;
+  estimatedCharsSaved?: number;
+  retainedContextCharsSaved?: number;
   responseChars?: number;
   envelopeChars?: number;
   requiredOverflowChars?: number;
   acceptedOverflowChars?: number;
   remainingRequiredUnits?: number;
   remainingAcceptedUnits?: number;
+  requiredBudgetExceeded?: boolean;
+  optionalContextOmitted?: boolean;
   continuationIssued?: boolean;
   continuationConsumed?: boolean;
   chainCompleted?: boolean;
@@ -968,20 +1169,27 @@ export function recordMssrContextAssembly(args: {
   );
   const boundedUnits = (value: number | undefined) => boundedNumber(value, 10_000);
   return recordMssrEvent({
+    eventId: args.eventId,
     traceId: args.traceId,
     eventType: "context_assembly",
     caller: args.caller,
     stage: args.stage,
     ok: true,
     details: {
+      mode: args.mode,
+      page: boundedNumber(args.page, 10_000),
       requestedContextChars: boundedNumber(args.requestedContextChars),
       deliveredContextChars: boundedNumber(args.deliveredContextChars),
+      estimatedCharsSaved: boundedNumber(args.estimatedCharsSaved),
+      retainedContextCharsSaved: boundedNumber(args.retainedContextCharsSaved),
       responseChars: boundedNumber(args.responseChars),
       envelopeChars: boundedNumber(args.envelopeChars),
       requiredOverflowChars: boundedNumber(args.requiredOverflowChars),
       acceptedOverflowChars: boundedNumber(args.acceptedOverflowChars),
       remainingRequiredUnits: boundedUnits(args.remainingRequiredUnits),
       remainingAcceptedUnits: boundedUnits(args.remainingAcceptedUnits),
+      requiredBudgetExceeded: args.requiredBudgetExceeded === true,
+      optionalContextOmitted: args.optionalContextOmitted === true,
       continuationIssued: args.continuationIssued === true,
       continuationConsumed: args.continuationConsumed === true,
       chainCompleted: args.chainCompleted === true,
@@ -1006,6 +1214,7 @@ export function recordMssrSkillDecision(args: {
       decision: decision.decision,
       reasonCode: decision.reasonCode,
       reasonSummary: decision.reasonSummary ? redactText(decision.reasonSummary, 240) : undefined,
+      relatedSkillName: decision.relatedSkillName,
     },
   });
 }
@@ -1187,6 +1396,7 @@ export function readPersistedMssrTraceState(traceId: string): PersistedMssrTrace
     ? latestRoute.details.agentProfile as JsonRecord
     : {};
   const observedTraceContext = resolveObservedTraceContext(traceId);
+  const taskIdentity = traceTaskIdentity(events);
   return {
     traceId,
     workflowKey: typeof latestRoute.details.workflowKey === "string"
@@ -1194,6 +1404,9 @@ export function readPersistedMssrTraceState(traceId: string): PersistedMssrTrace
       : observedTraceContext.workflowKey ?? "unscoped",
     stage: latestRoute.stage ?? "start",
     taskHash: latestRoute.taskHash ?? "",
+    taskKey: taskIdentity.taskKey ?? null,
+    parentTraceId: taskIdentity.parentTraceId ?? null,
+    supersedesTraceId: taskIdentity.supersedesTraceId ?? null,
     caller: latestRoute.caller ?? "other",
     model: typeof profile.model === "string" ? profile.model : "unknown",
     reasoningEffort: typeof profile.reasoningEffort === "string" ? profile.reasoningEffort : "unknown",
@@ -1720,7 +1933,7 @@ function portableIntentAnalysis(events: readonly MssrStoredEvent[]) {
             deferredSkills: Array.isArray(event.details.deferredSkills) ? event.details.deferredSkills : [],
             loadOrder: Array.isArray(event.details.loadOrder) ? event.details.loadOrder : [],
             deferredLoadOrder: Array.isArray(event.details.deferredLoadOrder) ? event.details.deferredLoadOrder : [],
-            intent: event.details.intent,
+            intent: portableRouteIntent(event.details.intent),
             signals: Array.isArray(event.details.signals) ? event.details.signals : [],
             ambiguity: typeof event.details.ambiguity === "string" ? event.details.ambiguity : undefined,
             requiredPhases: Array.isArray(event.details.requiredPhases) ? event.details.requiredPhases : [],
@@ -1755,6 +1968,7 @@ function portableIntentAnalysis(events: readonly MssrStoredEvent[]) {
         decision: event.details.decision,
         reasonCode: event.details.reasonCode,
         reasonSummary: typeof event.details.reasonSummary === "string" && event.details.reasonSummary.trim() ? event.details.reasonSummary : undefined,
+        relatedSkillName: typeof event.details.relatedSkillName === "string" && event.details.relatedSkillName.trim() ? event.details.relatedSkillName : undefined,
         stage: event.stage,
       });
       if (!parsedDecision.success) return [];
@@ -2132,6 +2346,397 @@ function summary(days: number, scope: MssrObservatoryScope) {
   const userCorrections = events.reduce((total, event) => total + (typeof event.details.userCorrections === "number" ? event.details.userCorrections : 0), 0);
   const structuredRoutes = routes.filter((event) => event.classificationMode === "structured-semantic").length;
   const orphanLoads = loads.filter((event) => !traceIdsWithRoutes.has(event.traceId)).length;
+
+  const historyString = (value: unknown): string | null => (
+    typeof value === "string" && value.trim() ? value.trim() : null
+  );
+  const historyProject = (trace: MssrStoredEvent[]): string | null => {
+    for (const event of [...trace].reverse()) {
+      if (event.eventType === "project_context_selection") {
+        const selected = historyString(event.details.projectName) || historyString(event.details.project);
+        if (selected) return selected;
+      }
+    }
+    for (const event of [...trace].reverse()) {
+      const direct = historyString(event.details.projectName) || historyString(event.details.project);
+      if (direct) return direct;
+      const projectRoot = historyString(event.details.projectRoot);
+      if (projectRoot) {
+        const base = path.basename(projectRoot.replace(/[\\/]+$/, ""));
+        if (base) return base;
+      }
+    }
+    return null;
+  };
+  const historyWorkflowKey = (trace: MssrStoredEvent[]): string | null => {
+    for (const event of [...trace].reverse()) {
+      const workflowKey = historyString(event.details.workflowKey);
+      if (workflowKey) return workflowKey;
+    }
+    return null;
+  };
+  const historySyntheticWorkflow = (workflowKey: string | null): boolean => Boolean(
+    workflowKey && (
+      workflowKey.startsWith("__test_")
+      || /(?:^|[-_.])fixture(?:$|[-_.])/i.test(workflowKey)
+      || /^routing-latency-(?:plan-)?regression$/i.test(workflowKey)
+    )
+  );
+  const historySupportWorkflow = (workflowKey: string | null): boolean => Boolean(
+    workflowKey && (
+      /^recent-work-recovery-/i.test(workflowKey)
+      || /^cross-project-recovery-/i.test(workflowKey)
+      || /-recovery-\d{8}$/i.test(workflowKey)
+    )
+  );
+  const historySummary = (trace: MssrStoredEvent[]): string | null => {
+    const latestRoute = [...trace].reverse().find((event) => event.eventType === "route_planned") ?? null;
+    const routeAt = latestRoute ? Date.parse(latestRoute.occurredAt) : 0;
+    const summaryTypes = new Set(["outcome", "persistence", "verification", "phase_completed", "replan"]);
+    for (const event of [...trace].reverse()) {
+      const summary = historyString(event.details.summary);
+      if (!summaryTypes.has(event.eventType) || !summary) continue;
+      if (!routeAt || Date.parse(event.occurredAt) >= routeAt) return redactText(summary, 260);
+    }
+    const intent = latestRoute?.details.intent && typeof latestRoute.details.intent === "object"
+      ? latestRoute.details.intent as JsonRecord
+      : {};
+    const routeSummary = historyString(intent.summary);
+    return routeSummary ? redactText(routeSummary, 260) : null;
+  };
+  const historyLatestStringArray = (trace: MssrStoredEvent[], key: string): string[] => {
+    for (const event of [...trace].reverse()) {
+      const value = event.details[key];
+      if (!Array.isArray(value)) continue;
+      const strings = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+      if (strings.length > 0) return [...new Set(strings)];
+    }
+    return [];
+  };
+  const historyLatestEvidenceRef = (trace: MssrStoredEvent[]): string | null => {
+    for (const event of [...trace].reverse()) {
+      const evidenceRef = historyString(event.details.evidenceRef);
+      if (evidenceRef) return redactText(evidenceRef, 260);
+    }
+    return null;
+  };
+  const substantiveLifecycleTypes = new Set(["phase_completed", "verification", "persistence", "outcome", "friction", "replan"]);
+  const historyLocalDay = (value: string): string => {
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return "unknown";
+    const year = String(date.getFullYear()).padStart(4, "0");
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+  const workTraceRows = [...byTrace.entries()].flatMap(([traceId, trace]) => {
+    const project = historyProject(trace);
+    if (!project) return [];
+    const workflowKey = historyWorkflowKey(trace);
+    const synthetic = historySyntheticWorkflow(workflowKey);
+    const supportWorkflow = historySupportWorkflow(workflowKey);
+    const substantiveToolCalls = (toolCallsByTrace.get(traceId) ?? [])
+      .filter((call) => !PREPARATION_TOOLS.has(effectiveToolName(call))).length;
+    const substantiveLifecycle = trace.some((event) => substantiveLifecycleTypes.has(event.eventType));
+    const substantive = !synthetic && (substantiveLifecycle || substantiveToolCalls > 0);
+    const latest = trace.at(-1)!;
+    const latestRoute = [...trace].reverse().find((event) => event.eventType === "route_planned") ?? null;
+    const taskIdentity = traceTaskIdentity(trace);
+    const latestOutcome = [...trace].reverse().find((event) => event.eventType === "outcome") ?? null;
+    const latestClosureReminder = [...trace].reverse().find((event) => event.eventType === "closure_reminder") ?? null;
+    const latestMaterial = [...trace].reverse().find((event) => event.eventType === "route_planned" || substantiveLifecycleTypes.has(event.eventType)) ?? latestRoute;
+    const closed = Boolean(latestOutcome && (!latestRoute || latestOutcome.occurredAt >= latestRoute.occurredAt));
+    const closureReminderObserved = Boolean(
+      latestClosureReminder
+      && (!latestOutcome || latestClosureReminder.occurredAt > latestOutcome.occurredAt)
+      && (!latestMaterial || latestClosureReminder.occurredAt >= latestMaterial.occurredAt),
+    );
+    return [{
+      traceId,
+      project,
+      workflowKey,
+      taskKey: taskIdentity.taskKey ?? null,
+      parentTraceId: taskIdentity.parentTraceId ?? null,
+      supersedesTraceId: taskIdentity.supersedesTraceId ?? null,
+      synthetic,
+      supportWorkflow,
+      substantive,
+      substantiveToolCalls,
+      firstAt: trace[0]?.occurredAt ?? latest.occurredAt,
+      latestAt: latest.occurredAt,
+      latestEventType: latest.eventType,
+      latestStage: latest.stage ?? null,
+      caller: latest.caller || latestRoute?.caller || null,
+      requiredPhases: historyLatestStringArray(trace, "requiredPhases"),
+      completedPhases: historyLatestStringArray(trace, "completedPhases"),
+      evidenceRef: historyLatestEvidenceRef(trace),
+      closed,
+      closureReminderObserved,
+      needsClosureReview: substantive && !closed && closureReminderObserved,
+      summary: historySummary(trace),
+    }];
+  });
+  const workDays = new Map<string, {
+    date: string;
+    traceIds: Set<string>;
+    projects: Set<string>;
+    workflowKeys: Set<string>;
+    openTraceIds: Set<string>;
+    humanOpenTraceIds: Set<string>;
+    supportOpenTraceIds: Set<string>;
+    closureReviewTraceIds: Set<string>;
+    humanClosureReviewTraceIds: Set<string>;
+    supportClosureReviewTraceIds: Set<string>;
+    latestAt: string;
+    latestSummaries: Array<{ at: string; project: string; summary: string }>;
+  }>();
+  for (const row of workTraceRows.filter((item) => item.substantive)) {
+    const trace = byTrace.get(row.traceId) ?? [];
+    const activeDays = new Set(trace.map((event) => historyLocalDay(event.occurredAt)).filter((day) => day !== "unknown"));
+    for (const date of activeDays) {
+      const current = workDays.get(date) ?? {
+        date,
+        traceIds: new Set<string>(),
+        projects: new Set<string>(),
+        workflowKeys: new Set<string>(),
+        openTraceIds: new Set<string>(),
+        humanOpenTraceIds: new Set<string>(),
+        supportOpenTraceIds: new Set<string>(),
+        closureReviewTraceIds: new Set<string>(),
+        humanClosureReviewTraceIds: new Set<string>(),
+        supportClosureReviewTraceIds: new Set<string>(),
+        latestAt: row.latestAt,
+        latestSummaries: [],
+      };
+      current.traceIds.add(row.traceId);
+      current.projects.add(row.project);
+      if (row.workflowKey) current.workflowKeys.add(row.workflowKey);
+      if (!row.closed) {
+        current.openTraceIds.add(row.traceId);
+        if (row.supportWorkflow) current.supportOpenTraceIds.add(row.traceId);
+        else current.humanOpenTraceIds.add(row.traceId);
+      }
+      if (row.needsClosureReview) {
+        current.closureReviewTraceIds.add(row.traceId);
+        if (row.supportWorkflow) current.supportClosureReviewTraceIds.add(row.traceId);
+        else current.humanClosureReviewTraceIds.add(row.traceId);
+      }
+      const eventsOnDay = trace.filter((event) => historyLocalDay(event.occurredAt) === date);
+      const latestOnDay = eventsOnDay.at(-1)?.occurredAt ?? row.latestAt;
+      if (latestOnDay > current.latestAt) current.latestAt = latestOnDay;
+      if (!row.supportWorkflow && row.summary) current.latestSummaries.push({ at: latestOnDay, project: row.project, summary: row.summary });
+      workDays.set(date, current);
+    }
+  }
+  const workProjects = new Map<string, {
+    name: string;
+    latestAt: string;
+    traceCount: number;
+    substantiveTraceCount: number;
+    closedTraceCount: number;
+    substantiveToolCalls: number;
+    workflowKeys: Set<string>;
+    latestSummary: string | null;
+    latestSummaryAt: string | null;
+    latestTraceId: string;
+  }>();
+  for (const row of workTraceRows) {
+    const key = row.project.toLowerCase();
+    const current = workProjects.get(key) ?? {
+      name: row.project,
+      latestAt: row.latestAt,
+      traceCount: 0,
+      substantiveTraceCount: 0,
+      closedTraceCount: 0,
+      substantiveToolCalls: 0,
+      workflowKeys: new Set<string>(),
+      latestSummary: null,
+      latestSummaryAt: null,
+      latestTraceId: row.traceId,
+    };
+    current.traceCount += 1;
+    if (row.substantive) current.substantiveTraceCount += 1;
+    if (row.closed) current.closedTraceCount += 1;
+    current.substantiveToolCalls += row.substantiveToolCalls;
+    if (row.workflowKey && !row.synthetic) current.workflowKeys.add(row.workflowKey);
+    if (row.latestAt > current.latestAt) {
+      current.latestAt = row.latestAt;
+      current.latestTraceId = row.traceId;
+    }
+    if (row.substantive && !row.supportWorkflow && row.summary && (!current.latestSummaryAt || row.latestAt >= current.latestSummaryAt)) {
+      current.latestSummary = row.summary;
+      current.latestSummaryAt = row.latestAt;
+    }
+    workProjects.set(key, current);
+  }
+  type WorkTraceRow = (typeof workTraceRows)[number];
+  const workTasks = new Map<string, {
+    taskKey: string;
+    taskKeySource: "explicit-mssr" | "derived-project-workflow" | "trace-fallback";
+    project: string;
+    projects: Set<string>;
+    workflowKey: string | null;
+    workflowKeys: Set<string>;
+    traceIds: string[];
+    openTraceIds: string[];
+    closedTraceIds: string[];
+    parentTraceIds: Set<string>;
+    supersedesTraceIds: Set<string>;
+    supportWorkflow: boolean;
+    latest: WorkTraceRow;
+  }>();
+  for (const row of workTraceRows.filter((item) => item.substantive)) {
+    const explicitTaskKey = row.taskKey;
+    const legacyTaskKey = row.workflowKey
+      ? `${row.project.toLowerCase()}::${row.workflowKey}`
+      : `${row.project.toLowerCase()}::trace:${row.traceId}`;
+    const taskKey = explicitTaskKey ?? legacyTaskKey;
+    const taskKeySource = explicitTaskKey ? "explicit-mssr" : row.workflowKey ? "derived-project-workflow" : "trace-fallback";
+    const groupKey = explicitTaskKey ? `explicit:${explicitTaskKey}` : `legacy:${legacyTaskKey}`;
+    const current = workTasks.get(groupKey) ?? {
+      taskKey,
+      taskKeySource,
+      project: row.project,
+      projects: new Set<string>(),
+      workflowKey: row.workflowKey,
+      workflowKeys: new Set<string>(),
+      traceIds: [],
+      openTraceIds: [],
+      closedTraceIds: [],
+      parentTraceIds: new Set<string>(),
+      supersedesTraceIds: new Set<string>(),
+      supportWorkflow: row.supportWorkflow,
+      latest: row,
+    };
+    current.projects.add(row.project);
+    if (row.workflowKey) current.workflowKeys.add(row.workflowKey);
+    current.traceIds.push(row.traceId);
+    if (row.closed) current.closedTraceIds.push(row.traceId);
+    else current.openTraceIds.push(row.traceId);
+    if (row.parentTraceId) current.parentTraceIds.add(row.parentTraceId);
+    if (row.supersedesTraceId) current.supersedesTraceIds.add(row.supersedesTraceId);
+    current.supportWorkflow = current.supportWorkflow && row.supportWorkflow;
+    if (row.latestAt > current.latest.latestAt) {
+      current.latest = row;
+      current.project = row.project;
+      current.workflowKey = row.workflowKey;
+    }
+    workTasks.set(groupKey, current);
+  }
+  const taskStates = [...workTasks.values()]
+    .map((task) => {
+      const latest = task.latest;
+      const currentWork = !latest.closed;
+      const closureDebtTraceIds = task.openTraceIds.filter((traceId) => latest.closed || traceId !== latest.traceId);
+      return {
+        taskKey: task.taskKey,
+        taskKeySource: task.taskKeySource,
+        project: task.project,
+        projects: [...task.projects],
+        workflowKey: task.workflowKey,
+        workflowKeys: [...task.workflowKeys],
+        traceIds: task.traceIds,
+        openTraceIds: task.openTraceIds,
+        closedTraceIds: task.closedTraceIds,
+        parentTraceIds: [...task.parentTraceIds],
+        supersedesTraceIds: [...task.supersedesTraceIds],
+        supportWorkflow: task.supportWorkflow,
+        currentWork,
+        latestTraceClosed: latest.closed,
+        closureDebtTraceCount: closureDebtTraceIds.length,
+        closureDebtTraceIds,
+        latestTraceId: latest.traceId,
+        latestAt: latest.latestAt,
+        latestSummary: latest.summary,
+        latestStage: latest.latestStage,
+        caller: latest.caller,
+        requiredPhases: latest.requiredPhases,
+        completedPhases: latest.completedPhases,
+        evidenceRef: latest.evidenceRef,
+        needsClosureReview: currentWork && latest.needsClosureReview,
+        closureReminderObserved: latest.closureReminderObserved,
+      };
+    })
+    .sort((left, right) => right.latestAt.localeCompare(left.latestAt))
+    .slice(0, 120);
+  const workHistory = {
+    scope,
+    days,
+    since,
+    traceCount: workTraceRows.length,
+    substantiveTraceCount: workTraceRows.filter((row) => row.substantive).length,
+    openSubstantiveTraceCount: workTraceRows.filter((row) => row.substantive && !row.closed).length,
+    humanOpenTraceCount: workTraceRows.filter((row) => row.substantive && !row.closed && !row.supportWorkflow).length,
+    supportOpenTraceCount: workTraceRows.filter((row) => row.substantive && !row.closed && row.supportWorkflow).length,
+    needsClosureReviewCount: workTraceRows.filter((row) => row.needsClosureReview).length,
+    humanNeedsClosureReviewCount: workTraceRows.filter((row) => row.needsClosureReview && !row.supportWorkflow).length,
+    humanCurrentTaskCount: taskStates.filter((task) => task.currentWork && !task.supportWorkflow).length,
+    humanClosureDebtTaskCount: taskStates.filter((task) => !task.currentWork && task.closureDebtTraceCount > 0 && !task.supportWorkflow).length,
+    humanClosureDebtTraceCount: taskStates.filter((task) => !task.supportWorkflow).reduce((total, task) => total + task.closureDebtTraceCount, 0),
+    taskStates,
+    projectCount: workProjects.size,
+    projects: [...workProjects.values()]
+      .map((project) => ({
+        name: project.name,
+        latestAt: project.latestAt,
+        traceCount: project.traceCount,
+        substantiveTraceCount: project.substantiveTraceCount,
+        closedTraceCount: project.closedTraceCount,
+        substantiveToolCalls: project.substantiveToolCalls,
+        workflowKeys: [...project.workflowKeys].slice(0, 12),
+        latestSummary: project.latestSummary,
+        latestTraceId: project.latestTraceId,
+      }))
+      .sort((left, right) => right.latestAt.localeCompare(left.latestAt) || right.substantiveTraceCount - left.substantiveTraceCount)
+      .slice(0, 40),
+    openTraces: workTraceRows
+      .filter((row) => row.substantive && !row.closed)
+      .sort((left, right) => right.latestAt.localeCompare(left.latestAt))
+      .slice(0, 60)
+      .map((row) => ({
+        traceId: row.traceId,
+        project: row.project,
+        workflowKey: row.workflowKey,
+        taskKey: row.taskKey,
+        parentTraceId: row.parentTraceId,
+        supersedesTraceId: row.supersedesTraceId,
+        supportWorkflow: row.supportWorkflow,
+        firstAt: row.firstAt,
+        latestAt: row.latestAt,
+        latestEventType: row.latestEventType,
+        latestStage: row.latestStage,
+        caller: row.caller,
+        requiredPhases: row.requiredPhases,
+        completedPhases: row.completedPhases,
+        evidenceRef: row.evidenceRef,
+        closureReminderObserved: row.closureReminderObserved,
+        needsClosureReview: row.needsClosureReview,
+        summary: row.summary,
+      })),
+    daily: [...workDays.values()]
+      .map((day) => ({
+        date: day.date,
+        latestAt: day.latestAt,
+        traceCount: day.traceIds.size,
+        projectCount: day.projects.size,
+        projects: [...day.projects].slice(0, 20),
+        workflowKeys: [...day.workflowKeys].slice(0, 24),
+        openTraceCount: day.openTraceIds.size,
+        humanOpenTraceCount: day.humanOpenTraceIds.size,
+        supportOpenTraceCount: day.supportOpenTraceIds.size,
+        needsClosureReviewCount: day.closureReviewTraceIds.size,
+        humanNeedsClosureReviewCount: day.humanClosureReviewTraceIds.size,
+        supportNeedsClosureReviewCount: day.supportClosureReviewTraceIds.size,
+        latestSummaries: [...day.latestSummaries]
+          .sort((left, right) => right.at.localeCompare(left.at))
+          .slice(0, 10)
+          .map(({ project, summary }) => ({ project, summary })),
+      }))
+      .sort((left, right) => right.date.localeCompare(left.date))
+      .slice(0, Math.min(31, Math.max(7, days + 1))),
+    note: "Project-time aggregate over complete MSSR events in the requested window. Daily buckets use the Bridge host local calendar. This is evidence of observed work, not an inferred task-completion ledger.",
+  };
+
   const surfaceNames = new Set(
     [...routes, ...outcomeEvents, ...closureReminderEvents, ...intentNormalizedEvents, ...intentCorrectionEvents]
       .map((event) => event.caller || "other"),
@@ -2393,6 +2998,7 @@ function summary(days: number, scope: MssrObservatoryScope) {
     },
     intentAnalysis,
     contextAssembly,
+    workHistory,
     surfaces: surfaceBenchmarks,
     agentProfiles,
     reasoningEffortComparison,
@@ -2409,20 +3015,207 @@ function summary(days: number, scope: MssrObservatoryScope) {
   };
 }
 
+
+type MssrObservatoryDetail = "compact" | "full";
+
+const COMPACT_OBSERVATORY_EVENT_BUDGET = 12_000;
+const COMPACT_OBSERVATORY_SUMMARY_BUDGET = 64_000;
+
+function compactObservatoryDetails(details: JsonRecord): JsonRecord {
+  const compact: JsonRecord = {};
+  const scalarKeys = [
+    "action", "workflowKey", "taskKey", "parentTraceId", "supersedesTraceId", "status",
+    "evidenceKind", "evidenceRef", "metricName", "score", "accepted", "verificationPassed",
+    "persisted", "requestedContextChars", "deliveredContextChars", "responseChars", "envelopeChars",
+    "remainingRequiredUnits", "remainingAcceptedUnits", "continuationIssued", "chainCompleted", "issueCount",
+  ];
+  for (const key of scalarKeys) {
+    const value = details[key];
+    if (typeof value === "string") compact[key] = value.length > 240 ? `${value.slice(0, 237)}...` : value;
+    else if (typeof value === "number" || typeof value === "boolean") compact[key] = value;
+  }
+  for (const key of ["requiredPhases", "completedPhases", "signals", "workflows", "aliasIds", "changedFields", "unresolvedFields", "issueCodes"] as const) {
+    const value = details[key];
+    if (Array.isArray(value)) compact[key] = value.filter((item) => typeof item === "string").slice(0, 12);
+  }
+  const summary = details.summary;
+  if (typeof summary === "string" && summary.trim()) compact.summary = summary.length > 300 ? `${summary.slice(0, 297)}...` : summary;
+  return compact;
+}
+
+function compactObservatoryEvent(event: MssrStoredEvent) {
+  const details = compactObservatoryDetails(event.details);
+  return {
+    id: event.id,
+    occurredAt: event.occurredAt,
+    traceId: event.traceId,
+    eventType: event.eventType,
+    ...(event.caller ? { caller: event.caller } : {}),
+    ...(event.stage ? { stage: event.stage } : {}),
+    ...(event.classificationMode ? { classificationMode: event.classificationMode } : {}),
+    ...(event.skillName ? { skillName: event.skillName } : {}),
+    ...(typeof event.required === "boolean" ? { required: event.required } : {}),
+    ...(typeof event.ok === "boolean" ? { ok: event.ok } : {}),
+    ...(Object.keys(details).length > 0 ? { details } : {}),
+  };
+}
+
+function boundedCompactObservatoryEvents(events: MssrStoredEvent[], budgetChars = COMPACT_OBSERVATORY_EVENT_BUDGET) {
+  const selected: ReturnType<typeof compactObservatoryEvent>[] = [];
+  let chars = 2;
+  for (const event of events) {
+    const compact = compactObservatoryEvent(event);
+    const eventChars = JSON.stringify(compact).length + (selected.length > 0 ? 1 : 0);
+    if (selected.length > 0 && chars + eventChars > budgetChars) break;
+    selected.push(compact);
+    chars += eventChars;
+    if (chars >= budgetChars) break;
+  }
+  return {
+    events: selected,
+    returnedCount: selected.length,
+    omittedCount: Math.max(0, events.length - selected.length),
+    truncated: selected.length < events.length,
+    approxChars: chars,
+    budgetChars,
+  };
+}
+
+function compactObservatorySummary(full: ReturnType<typeof summary>) {
+  if (!("intentAnalysis" in full)) return full;
+  const learning = full.intentAnalysis.learning;
+  const compact = {
+    ...full,
+    intentAnalysis: {
+      ...full.intentAnalysis,
+      maintenanceCandidates: full.intentAnalysis.maintenanceCandidates.slice(0, 8).map((candidate) => ({
+        ...candidate,
+        traceIds: candidate.traceIds.slice(0, 4),
+      })),
+      learning: {
+        ...learning,
+        skillPriors: learning.skillPriors.slice(0, 12),
+        transitions: learning.transitions.slice(0, 12),
+        contextPriors: learning.contextPriors.slice(0, 12),
+      },
+    },
+    contextAssembly: {
+      ...full.contextAssembly,
+      recentTraces: full.contextAssembly.recentTraces.slice(0, 8),
+      skillPressure: full.contextAssembly.skillPressure.slice(0, 12),
+    },
+    workHistory: {
+      ...full.workHistory,
+      taskStates: full.workHistory.taskStates.slice(0, 20).map((task) => ({
+        ...task,
+        traceIds: task.traceIds.slice(0, 4),
+        openTraceIds: task.openTraceIds.slice(0, 4),
+        closedTraceIds: task.closedTraceIds.slice(0, 4),
+        parentTraceIds: task.parentTraceIds.slice(0, 4),
+        supersedesTraceIds: task.supersedesTraceIds.slice(0, 4),
+        closureDebtTraceIds: task.closureDebtTraceIds.slice(0, 4),
+      })),
+      projects: full.workHistory.projects.slice(0, 12).map((project) => ({
+        ...project,
+        workflowKeys: project.workflowKeys.slice(0, 8),
+      })),
+      openTraces: full.workHistory.openTraces.slice(0, 16),
+      daily: full.workHistory.daily.slice(0, 14),
+    },
+    surfaces: full.surfaces.slice(0, 12),
+    agentProfiles: full.agentProfiles.slice(0, 12),
+    reasoningEffortComparison: full.reasoningEffortComparison.slice(0, 8),
+    top: {
+      ...full.top,
+      selectedSkills: full.top.selectedSkills.slice(0, 12),
+      loadedSkills: full.top.loadedSkills.slice(0, 12),
+      skillOutcomes: full.top.skillOutcomes.slice(0, 12),
+      outcomeSupportingSkills: full.top.outcomeSupportingSkills.slice(0, 12),
+      callers: full.top.callers.slice(0, 8),
+      stages: full.top.stages.slice(0, 8),
+      contextSources: full.top.contextSources.slice(0, 8),
+      normalizedIntentAliases: full.top.normalizedIntentAliases.slice(0, 8),
+    },
+  };
+  let approxChars = JSON.stringify(compact).length;
+  if (approxChars > COMPACT_OBSERVATORY_SUMMARY_BUDGET) {
+    compact.intentAnalysis.learning.skillPriors = compact.intentAnalysis.learning.skillPriors.slice(0, 6);
+    compact.intentAnalysis.learning.transitions = compact.intentAnalysis.learning.transitions.slice(0, 6);
+    compact.intentAnalysis.learning.contextPriors = compact.intentAnalysis.learning.contextPriors.slice(0, 6);
+    compact.intentAnalysis.maintenanceCandidates = compact.intentAnalysis.maintenanceCandidates.slice(0, 6);
+    compact.contextAssembly.recentTraces = compact.contextAssembly.recentTraces.slice(0, 6);
+    compact.contextAssembly.skillPressure = compact.contextAssembly.skillPressure.slice(0, 8);
+    compact.workHistory.taskStates = compact.workHistory.taskStates.slice(0, 8);
+    compact.workHistory.projects = compact.workHistory.projects.slice(0, 8);
+    compact.workHistory.openTraces = compact.workHistory.openTraces.slice(0, 6);
+    compact.agentProfiles = compact.agentProfiles.slice(0, 8);
+    approxChars = JSON.stringify(compact).length;
+  }
+  if (approxChars > COMPACT_OBSERVATORY_SUMMARY_BUDGET - 2_000) {
+    compact.intentAnalysis.learning.skillPriors = compact.intentAnalysis.learning.skillPriors.slice(0, 3);
+    compact.intentAnalysis.learning.transitions = compact.intentAnalysis.learning.transitions.slice(0, 3);
+    compact.intentAnalysis.learning.contextPriors = compact.intentAnalysis.learning.contextPriors.slice(0, 3);
+    compact.intentAnalysis.maintenanceCandidates = compact.intentAnalysis.maintenanceCandidates.slice(0, 4);
+    compact.contextAssembly.recentTraces = compact.contextAssembly.recentTraces.slice(0, 4);
+    compact.contextAssembly.skillPressure = compact.contextAssembly.skillPressure.slice(0, 6);
+    compact.workHistory.taskStates = compact.workHistory.taskStates.slice(0, 5);
+    compact.workHistory.projects = compact.workHistory.projects.slice(0, 6);
+    compact.workHistory.openTraces = compact.workHistory.openTraces.slice(0, 4);
+    compact.agentProfiles = compact.agentProfiles.slice(0, 6);
+    compact.reasoningEffortComparison = compact.reasoningEffortComparison.slice(0, 6);
+    compact.top.skillOutcomes = compact.top.skillOutcomes.slice(0, 8);
+    approxChars = JSON.stringify(compact).length;
+  }
+  return {
+    ...compact,
+    truncation: {
+      fullAvailable: true,
+      approxChars,
+      budgetChars: COMPACT_OBSERVATORY_SUMMARY_BUDGET,
+      originalCounts: {
+        skillPriors: learning.skillPriors.length,
+        transitions: learning.transitions.length,
+        contextPriors: learning.contextPriors.length,
+        maintenanceCandidates: full.intentAnalysis.maintenanceCandidates.length,
+        recentTraces: full.contextAssembly.recentTraces.length,
+        skillPressure: full.contextAssembly.skillPressure.length,
+        taskStates: full.workHistory.taskStates.length,
+        projects: full.workHistory.projects.length,
+        openTraces: full.workHistory.openTraces.length,
+      },
+      returnedCounts: {
+        skillPriors: compact.intentAnalysis.learning.skillPriors.length,
+        transitions: compact.intentAnalysis.learning.transitions.length,
+        contextPriors: compact.intentAnalysis.learning.contextPriors.length,
+        maintenanceCandidates: compact.intentAnalysis.maintenanceCandidates.length,
+        recentTraces: compact.contextAssembly.recentTraces.length,
+        skillPressure: compact.contextAssembly.skillPressure.length,
+        taskStates: compact.workHistory.taskStates.length,
+        projects: compact.workHistory.projects.length,
+        openTraces: compact.workHistory.openTraces.length,
+      },
+    },
+  };
+}
 export function queryMssrObservatory(args: {
   kind?: "status" | "summary" | "benchmark" | "recent" | "trace";
+  detail?: MssrObservatoryDetail;
   traceId?: string;
   days?: number;
   limit?: number;
   scope?: MssrObservatoryScope;
 }) {
   const kind = args.kind ?? "summary";
+  const detail: MssrObservatoryDetail = args.detail === "full" ? "full" : "compact";
   const days = Math.max(1, Math.min(365, Math.trunc(args.days ?? 30)));
   const limit = Math.max(1, Math.min(200, Math.trunc(args.limit ?? 50)));
   const scope: MssrObservatoryScope = args.scope === "all" ? "all" : "active";
   const epoch = getMssrObservabilityEpoch();
-  if (kind === "status") return { ...observatoryStatus(), scope };
-  if (kind === "summary" || kind === "benchmark") return summary(days, scope);
+  if (kind === "status") return { ...observatoryStatus(), scope, detail };
+  if (kind === "summary" || kind === "benchmark") {
+    const fullSummary = summary(days, scope);
+    return { ...(detail === "full" ? fullSummary : compactObservatorySummary(fullSummary)), detail };
+  }
   const database = getDb();
   if (kind === "trace") {
     if (!args.traceId || !validTraceId(args.traceId)) throw new Error("traceId is required for kind=trace and must contain only letters, numbers, dot, underscore, colon, or hyphen.");
@@ -2430,7 +3223,24 @@ export function queryMssrObservatory(args: {
     const trace = scope === "active"
       ? decoded.filter((event) => event.details.observabilityEpoch === epoch.activeEpoch)
       : decoded;
-    return { ...observatoryStatus(), scope, traceId: args.traceId, trace };
+    if (detail === "full") return { ...observatoryStatus(), scope, detail, traceId: args.traceId, trace };
+    const compact = boundedCompactObservatoryEvents(trace);
+    return {
+      ...observatoryStatus(),
+      scope,
+      detail,
+      traceId: args.traceId,
+      trace: compact.events,
+      truncation: {
+        requestedLimit: limit,
+        returnedCount: compact.returnedCount,
+        omittedCount: compact.omittedCount,
+        truncated: compact.truncated,
+        approxEventChars: compact.approxChars,
+        eventBudgetChars: compact.budgetChars,
+        fullAvailable: true,
+      },
+    };
   }
   const persisted = database
     ? database.prepare(`
@@ -2446,7 +3256,216 @@ export function queryMssrObservatory(args: {
   const recent = (scope === "active"
     ? merged.filter((event) => event.details.observabilityEpoch === epoch.activeEpoch)
     : merged).slice(0, limit);
-  return { ...observatoryStatus(), scope, recent };
+  if (detail === "full") return { ...observatoryStatus(), scope, detail, recent };
+  const compact = boundedCompactObservatoryEvents(recent);
+  return {
+    ...observatoryStatus(),
+    scope,
+    detail,
+    recent: compact.events,
+    truncation: {
+      requestedLimit: limit,
+      returnedCount: compact.returnedCount,
+      omittedCount: compact.omittedCount,
+      truncated: compact.truncated,
+      approxEventChars: compact.approxChars,
+      eventBudgetChars: compact.budgetChars,
+      fullAvailable: true,
+    },
+  };
+}
+
+const skillMaintenanceIndexDefaultDelayMs = Math.max(100, Math.min(60_000, Number(process.env.BRIDGE_MCP_SKILL_MAINTENANCE_DELAY_MS || 10_000) || 10_000));
+let skillMaintenanceIndexRefreshTimer: NodeJS.Timeout | null = null;
+let skillMaintenanceIndexRefreshInFlight = false;
+let skillMaintenanceIndexRefreshDirty = false;
+let skillMaintenanceIndexRefreshCount = 0;
+let skillMaintenanceIndexRefreshFailureCount = 0;
+let skillMaintenanceIndexLastStartedAt: string | null = null;
+let skillMaintenanceIndexLastCompletedAt: string | null = null;
+let skillMaintenanceIndexLastDurationMs: number | null = null;
+let lastSkillMaintenanceIndexRefresh: { ok: boolean; at: string; result?: JsonRecord; error?: string } | null = null;
+
+function defaultMssrWorkspaceRoot(): string {
+  return path.resolve(process.env.MSSR_WORKSPACE_ROOT || path.dirname(process.cwd()));
+}
+
+export function refreshMssrSkillMaintenanceIndex(options: {
+  workspaceRoot?: string;
+  scope?: MssrObservatoryScope;
+  days?: number;
+  now?: Date;
+} = {}) {
+  const workspaceRoot = path.resolve(options.workspaceRoot ?? defaultMssrWorkspaceRoot());
+  const mssrRoot = path.join(workspaceRoot, ".mssr");
+  const manifestPath = path.join(mssrRoot, "project-context.json");
+  const filePath = path.join(mssrRoot, "runtime", "skill-maintenance-candidates.json");
+  if (!fs.existsSync(manifestPath)) {
+    return {
+      written: false,
+      reason: "workspace-mssr-uninitialized" as const,
+      workspaceRoot,
+      filePath,
+      reviewOnly: true,
+    };
+  }
+
+  const scope: MssrObservatoryScope = options.scope === "all" ? "all" : "active";
+  const days = Math.max(1, Math.min(365, Math.trunc(options.days ?? 30)));
+  const report = summary(days, scope);
+  const intentAnalysis = "intentAnalysis" in report ? report.intentAnalysis : null;
+  const candidates = (intentAnalysis?.maintenanceCandidates ?? [])
+    .filter((candidate) => candidate.kind === "skill-overlap" || candidate.kind === "skill-domain-mismatch")
+    .slice(0, 200);
+  const feedback = (intentAnalysis?.selectionFeedback ?? [])
+    .filter((item) => (item.reasonCounts?.redundant ?? 0) > 0 || (item.reasonCounts?.["irrelevant-domain"] ?? 0) > 0)
+    .map((item) => ({
+      skillName: item.skillName,
+      redundant: item.reasonCounts?.redundant ?? 0,
+      irrelevantDomain: item.reasonCounts?.["irrelevant-domain"] ?? 0,
+      total: item.total,
+      acceptanceRate: item.acceptanceRate,
+    }))
+    .sort((left, right) => (right.redundant + right.irrelevantDomain) - (left.redundant + left.irrelevantDomain)
+      || left.skillName.localeCompare(right.skillName))
+    .slice(0, 100);
+  const epoch = getMssrObservabilityEpoch();
+  const generatedAt = (options.now ?? new Date()).toISOString();
+  const projection = {
+    schemaVersion: 1,
+    generatedAt,
+    workspaceRoot,
+    source: {
+      kind: "mssr-observatory" as const,
+      scope,
+      days,
+      activeEpoch: epoch.activeEpoch,
+      contractVersion: epoch.contractVersion,
+    },
+    reviewOnly: true,
+    authorityInfluence: false,
+    routingInfluence: false,
+    canonicalRewriteAllowed: false,
+    autoApplyAllowed: false,
+    candidateCount: candidates.length,
+    feedbackSkillCount: feedback.length,
+    candidates,
+    feedback,
+    policy: {
+      explicitRelatedSkillIsEvidenceNotEquivalence: true,
+      legacyCandidateSkillsAreHypothesesOnly: true,
+      allowedReviewedResolutions: [
+        "tighten-routing-gates",
+        "add-or-adjust-negative-intents",
+        "requires",
+        "complements",
+        "excludes",
+        "keep-distinct",
+        "owner-reviewed-merge-split-supersede-remove",
+      ],
+    },
+  };
+
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const serialized = `${JSON.stringify(projection, null, 2)}\n`;
+  const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(temporaryPath, serialized, "utf8");
+  fs.renameSync(temporaryPath, filePath);
+  const sha256 = createHash("sha256").update(serialized).digest("hex");
+  lastSkillMaintenanceIndexRefresh = { ok: true, at: generatedAt };
+  return {
+    written: true,
+    workspaceRoot,
+    filePath,
+    generatedAt,
+    sha256,
+    candidateCount: candidates.length,
+    feedbackSkillCount: feedback.length,
+    reviewOnly: true,
+    candidates,
+  };
+}
+
+function runMssrSkillMaintenanceIndexRefreshWorker(): void {
+  if (skillMaintenanceIndexRefreshInFlight || !skillMaintenanceIndexRefreshDirty) return;
+  skillMaintenanceIndexRefreshInFlight = true;
+  skillMaintenanceIndexRefreshDirty = false;
+  skillMaintenanceIndexLastStartedAt = new Date().toISOString();
+  const startedAt = performance.now();
+  const worker = new Worker(new URL("./mssr-skill-maintenance-index-worker.js", import.meta.url), {
+    workerData: { workspaceRoot: defaultMssrWorkspaceRoot(), scope: "active", days: 30 },
+    execArgv: process.execArgv.filter((arg) => !arg.startsWith("--input-type")),
+  });
+  worker.unref();
+  let settled = false;
+
+  const finish = (ok: boolean, result?: JsonRecord, error?: string) => {
+    if (settled) return;
+    settled = true;
+    skillMaintenanceIndexRefreshInFlight = false;
+    skillMaintenanceIndexLastCompletedAt = new Date().toISOString();
+    skillMaintenanceIndexLastDurationMs = Math.round((performance.now() - startedAt) * 100) / 100;
+    if (ok) {
+      skillMaintenanceIndexRefreshCount += 1;
+      lastSkillMaintenanceIndexRefresh = { ok: true, at: skillMaintenanceIndexLastCompletedAt, ...(result ? { result } : {}) };
+    } else {
+      skillMaintenanceIndexRefreshFailureCount += 1;
+      lastSkillMaintenanceIndexRefresh = { ok: false, at: skillMaintenanceIndexLastCompletedAt, error: (error ?? "skill maintenance index worker failed").slice(0, 240) };
+    }
+    void worker.terminate();
+    if (skillMaintenanceIndexRefreshDirty) scheduleMssrSkillMaintenanceIndexRefresh();
+  };
+
+  worker.once("message", (message: unknown) => {
+    const payload = message && typeof message === "object" ? message as JsonRecord : {};
+    if (payload.ok === true) {
+      const result = payload.result && typeof payload.result === "object" && !Array.isArray(payload.result)
+        ? payload.result as JsonRecord
+        : undefined;
+      finish(true, result);
+      return;
+    }
+    finish(false, undefined, typeof payload.error === "string" ? payload.error : "skill maintenance index worker failed");
+  });
+  worker.once("error", (error) => finish(false, undefined, error.message));
+  worker.once("exit", (code) => {
+    if (!settled) finish(false, undefined, `skill maintenance index worker exited without a result (code ${code})`);
+  });
+}
+
+export function scheduleMssrSkillMaintenanceIndexRefresh(delayMs = skillMaintenanceIndexDefaultDelayMs): void {
+  if (process.env.BRIDGE_MCP_DISABLE_GLOBAL_SKILL_MAINTENANCE === "1") return;
+  skillMaintenanceIndexRefreshDirty = true;
+  if (skillMaintenanceIndexRefreshInFlight) return;
+  if (skillMaintenanceIndexRefreshTimer) clearTimeout(skillMaintenanceIndexRefreshTimer);
+  const boundedDelay = Math.max(100, Math.min(60_000, Math.trunc(delayMs)));
+  skillMaintenanceIndexRefreshTimer = setTimeout(() => {
+    skillMaintenanceIndexRefreshTimer = null;
+    runMssrSkillMaintenanceIndexRefreshWorker();
+  }, boundedDelay);
+  skillMaintenanceIndexRefreshTimer.unref?.();
+}
+
+export function getMssrSkillMaintenanceIndexStatus() {
+  const workspaceRoot = defaultMssrWorkspaceRoot();
+  return {
+    mode: "background-worker" as const,
+    pending: skillMaintenanceIndexRefreshTimer !== null || skillMaintenanceIndexRefreshInFlight || skillMaintenanceIndexRefreshDirty,
+    scheduled: skillMaintenanceIndexRefreshTimer !== null,
+    inFlight: skillMaintenanceIndexRefreshInFlight,
+    dirty: skillMaintenanceIndexRefreshDirty,
+    delayMs: skillMaintenanceIndexDefaultDelayMs,
+    refreshCount: skillMaintenanceIndexRefreshCount,
+    failureCount: skillMaintenanceIndexRefreshFailureCount,
+    lastStartedAt: skillMaintenanceIndexLastStartedAt,
+    lastCompletedAt: skillMaintenanceIndexLastCompletedAt,
+    lastDurationMs: skillMaintenanceIndexLastDurationMs,
+    pendingDurableEvidence: skillMaintenanceProjectionPendingEventIds.size,
+    lastRefresh: lastSkillMaintenanceIndexRefresh,
+    workspaceRoot,
+    filePath: path.join(workspaceRoot, ".mssr", "runtime", "skill-maintenance-candidates.json"),
+    reviewOnly: true,
+  };
 }
 export function getMssrTraceEvidence(traceId: string, limit = 500) {
   if (!validTraceId(traceId)) {

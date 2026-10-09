@@ -71,6 +71,19 @@ function isoOrNull(value: number | null): string | null {
   return value === null ? null : new Date(value).toISOString();
 }
 
+function withSyncTimeoutRecovery(result: Record<string, unknown>) {
+  if (result.timedOut !== true) return result;
+  return {
+    ...result,
+    recovery: {
+      reason: "sync-command-timed-out",
+      recommendedTool: "work_begin",
+      alternateTool: "terminal_start",
+      instruction: "Do not retry the unchanged command synchronously. Start it with work_begin/terminal_start and inspect the returned session before deciding whether to stop it.",
+    },
+  };
+}
+
 function isSessionRunning(session: TerminalSession): boolean {
   return session.completedAt === null && session.exitCode === null && session.signal === null;
 }
@@ -366,7 +379,7 @@ function getTerminal(id: string): TerminalSession {
 
 function terminalWrite(id: string, input: string) {
   const session = getTerminal(id);
-  if (!isSessionRunning(session)) throw new Error(`Terminal already exited: ${id}`);
+  if (!isSessionRunning(session)) throw new Error(`[target-not-found] Terminal session is no longer running: ${id}. Use terminal_list/work_show and send input only to a live returned sessionId.`);
   session.child.stdin?.write(input);
   return { id, writtenChars: input.length };
 }
@@ -422,23 +435,23 @@ export function terminalList() {
 export const processToolModule: BridgeToolModule = {
   name: "process",
   tools: [
-    { name: "run_command", description: "Run a shell command in a cwd with timeout and captured stdout/stderr. Accepts optional traceId control metadata for explicit MSSR correlation across projects or processes.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["command"], additionalProperties: false } },
+    { name: "run_command", description: "Run one predictably short shell command synchronously in a cwd with timeout and captured stdout/stderr. Shell syntax follows the OS default; on Windows Node normally uses ComSpec/cmd.exe, so invoke powershell.exe or pwsh explicitly for PowerShell-only syntax. The result reports the resolved shell. For builds, test suites, installs, network work, or anything with uncertain duration, prefer work_begin/terminal_start so progress stays inspectable and one MCP request is not held open. A real synchronous timeout returns structured recovery guidance instead of encouraging an unchanged retry. Accepts optional traceId control metadata for explicit MSSR correlation across projects or processes.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["command"], additionalProperties: false } },
     { name: "terminal_start", description: "Start non-blocking persistent terminal work and return a session id immediately. terminal_start keeps backward-compatible hard timeout behavior by default (timeoutAction=terminate); set observe to make the timeout advisory. Inspect one session deeply with terminal_read before deciding whether to stop it.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, name: { type: "string" }, logFile: { type: "string" }, timeoutMs: { type: "number", minimum: 1000, maximum: MAX_RUN_MS }, timeoutAction: { type: "string", enum: ["observe", "terminate"], default: "terminate" }, cleanupAfterMs: { type: "number", default: DONE_TTL_MS, minimum: 0, maximum: MAX_RUN_MS }, traceId: TRACE_ID_INPUT_SCHEMA }, additionalProperties: false } },
-    { name: "terminal_write", description: "Write input to a persistent terminal session. Accepts optional traceId control metadata to preserve MSSR attribution through the session lifecycle.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, input: { type: "string" }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId", "input"], additionalProperties: false } },
+    { name: "terminal_write", description: "Write input only to a live persistent terminal session. If session liveness is uncertain, inspect terminal_read/terminal_list first; a completed session returns target-not-found rather than accepting stale input. Accepts optional traceId control metadata to preserve MSSR attribution through the session lifecycle.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, input: { type: "string" }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId", "input"], additionalProperties: false } },
     { name: "terminal_read", description: "Deep-inspect one persistent terminal session: bounded stdout/stderr, output counters, progress/timeout state, and a sanitized process-tree/CPU/memory summary. Accepts optional traceId control metadata.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, maxChars: { type: "number", default: 20000 }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId"], additionalProperties: false } },
     { name: "terminal_stop", description: "Explicitly stop the exact persistent terminal session and its process tree, then forget it. Inspect first when the session state is uncertain. Accepts optional traceId control metadata.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId"], additionalProperties: false } },
     { name: "terminal_list", description: "List persistent terminal sessions with lightweight running/progress/timeout/output metadata; does not scan every process tree.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
-    { name: "work_once", description: "Alias of run_command for one short project action. Requests up to 60000 ms (60 seconds) execute synchronously; a larger timeout is accepted only to return a safe redirect to work_begin/terminal_start without executing the command, so one MCP request is not held open. Accepts optional traceId control metadata for explicit MSSR correlation across projects or processes.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS, minimum: 1, maximum: MAX_RUN_MS }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["command"], additionalProperties: false } },
+    { name: "work_once", description: "Alias of run_command for one predictably short project action. Shell syntax follows the OS default; on Windows Node normally uses ComSpec/cmd.exe, so invoke powershell.exe or pwsh explicitly for PowerShell-only syntax. The result reports the resolved shell. Requests up to 60000 ms (60 seconds) execute synchronously; a larger timeout is accepted only to return a safe redirect to work_begin/terminal_start without executing the command, so one MCP request is not held open. Prefer work_begin for builds, test suites, installs, network work, or uncertain duration. A real synchronous timeout returns structured recovery guidance and should not be retried unchanged. Accepts optional traceId control metadata for explicit MSSR correlation across projects or processes.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, timeoutMs: { type: "number", default: DEFAULT_TIMEOUT_MS, minimum: 1, maximum: MAX_RUN_MS }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["command"], additionalProperties: false } },
     { name: "work_begin", description: "Alias of terminal_start for inspectable long-running project work. timeoutAction defaults to observe: crossing timeout raises a Bridge Notice but leaves the tree alive so work_peek can show progress before an explicit work_finish. Multiple sessions may run concurrently.", inputSchema: { type: "object", properties: { command: { type: "string" }, cwd: { type: "string" }, name: { type: "string" }, logFile: { type: "string" }, timeoutMs: { type: "number", minimum: 1000, maximum: MAX_RUN_MS }, timeoutAction: { type: "string", enum: ["observe", "terminate"], default: "observe" }, cleanupAfterMs: { type: "number", default: DONE_TTL_MS, minimum: 0, maximum: MAX_RUN_MS }, traceId: TRACE_ID_INPUT_SCHEMA }, additionalProperties: false } },
     { name: "work_peek", description: "Deep-inspect one project-work session by exact sessionId: output, progress/timeout state, and sanitized process-tree/CPU/memory evidence before deciding whether to stop it.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, maxChars: { type: "number", default: 20000 }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId"], additionalProperties: false } },
     { name: "work_show", description: "List project-work sessions with lightweight state and progress metadata without scanning every process tree. Accepts optional traceId control metadata.", inputSchema: { type: "object", properties: { traceId: TRACE_ID_INPUT_SCHEMA }, additionalProperties: false } },
-    { name: "work_feed", description: "Alias of terminal_write for sending input to project work. Accepts optional traceId control metadata to preserve MSSR attribution.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, input: { type: "string" }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId", "input"], additionalProperties: false } },
+    { name: "work_feed", description: "Alias of terminal_write for sending input only to live project work. Inspect work_peek/work_show first when liveness is uncertain; completed or missing sessions return target-not-found and should not be retried with the stale sessionId. Accepts optional traceId control metadata to preserve MSSR attribution.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, input: { type: "string" }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId", "input"], additionalProperties: false } },
     { name: "work_finish", description: "Alias of terminal_stop for stopping project work. Accepts optional traceId control metadata to preserve MSSR attribution.", inputSchema: { type: "object", properties: { sessionId: { type: "string" }, traceId: TRACE_ID_INPUT_SCHEMA }, required: ["sessionId"], additionalProperties: false } },
   ],
   handlers: {
     run_command: async (args) => {
       const parsed = z.object({ command: z.string().min(1), cwd: z.string().optional(), timeoutMs: z.number().positive().max(10 * 60_000).default(DEFAULT_TIMEOUT_MS), traceId: optionalTraceId }).parse(args);
-      return await runShellCommand(parsed.command, parsed.cwd, parsed.timeoutMs);
+      return withSyncTimeoutRecovery(await runShellCommand(parsed.command, parsed.cwd, parsed.timeoutMs));
     },
     terminal_start: async (args) => {
       const parsed = z.object({ command: z.string().optional(), cwd: z.string().optional(), name: z.string().optional(), logFile: z.string().optional(), timeoutMs: z.number().optional(), timeoutAction: z.enum(["observe", "terminate"]).default("terminate"), cleanupAfterMs: z.number().optional(), traceId: optionalTraceId }).parse(args);
@@ -471,7 +484,7 @@ export const processToolModule: BridgeToolModule = {
           instruction: "Start the same command with work_begin/terminal_start and inspect the returned sessionId before deciding whether to stop it.",
         };
       }
-      return await runShellCommand(parsed.command, parsed.cwd, parsed.timeoutMs);
+      return withSyncTimeoutRecovery(await runShellCommand(parsed.command, parsed.cwd, parsed.timeoutMs));
     },
     work_begin: async (args) => {
       const parsed = z.object({ command: z.string().optional(), cwd: z.string().optional(), name: z.string().optional(), logFile: z.string().optional(), timeoutMs: z.number().optional(), timeoutAction: z.enum(["observe", "terminate"]).default("observe"), cleanupAfterMs: z.number().optional(), traceId: optionalTraceId }).parse(args);

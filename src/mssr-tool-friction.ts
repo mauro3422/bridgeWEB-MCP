@@ -62,6 +62,8 @@ export function classifyBridgeToolFrictionSignature(errorValue: string | null | 
   if (category === "expected-integrity-mismatch") return "integrity:mismatch";
   if (category === "stale-file-state") return "state:stale";
   if (category === "invalid-image-payload") return "image:invalid-payload";
+  if (category === "invalid-encoded-payload") return "payload:invalid-encoding";
+  if (category === "script-runtime-error") return "script:runtime-error";
   if (category === "source-file-unavailable") return "source:unavailable";
   if (category === "missing-upstream") return "git:missing-upstream";
   if (category === "no-remote-configured") return "git:no-remote";

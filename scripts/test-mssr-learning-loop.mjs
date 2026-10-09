@@ -16,6 +16,7 @@ process.env.BRIDGE_MCP_METRICS_SQLITE = path.join(process.env.BRIDGE_MCP_METRICS
 process.env.BRIDGE_MCP_LOG_DIR = logDir;
 process.env.BRIDGE_MCP_MSSR_EVENTS_JSONL = path.join(process.env.BRIDGE_MCP_LOG_DIR, "mssr-events.jsonl");
 process.env.BRIDGE_MCP_MSSR_STATE = path.join(metricsDir, "mssr-observability-state.json");
+process.env.MSSR_STATE_ROOT = path.join(sandbox, "mssr-state");
 
 const skillNames = [
   "mssr-agent-routing",
@@ -42,6 +43,7 @@ const [{ skillCatalogToolModule, closeCodexSkillDiscoveryForTests }, { mssrObser
   import("../dist/mssr-observatory.js"),
   import("../dist/metrics.js"),
 ]);
+const { defaultMssrSemanticExperienceStorePath, readMssrSemanticExperienceStore } = await import("@mauroprime/mssr");
 
 const bootstrap = skillCatalogToolModule.handlers.skill_bootstrap;
 const evidence = mssrObservatoryToolModule.handlers.mssr_trace_evidence;
@@ -147,7 +149,7 @@ if (explicitlySkippedName) {
   assert.ok(skippedFeedback?.reasonCounts?.["irrelevant-domain"] >= 1);
 }
 
-const outcomeRecord = record({
+const outcomeRecord = await record({
   traceId: first.traceId,
   eventType: "outcome",
   caller: "chatgpt-web",
@@ -160,6 +162,20 @@ const outcomeRecord = record({
 });
 assert.equal(outcomeRecord.learningDigest?.recorded, true, "outcome must persist one strict learning digest before purge");
 assert.equal(outcomeRecord.learningDigest?.workingMemoryPurged, true);
+assert.equal(outcomeRecord.learningDigest?.semanticExperience?.persisted, true, "outcome must persist digest-derived Semantic Experience before returning");
+assert.ok(outcomeRecord.learningDigest?.semanticExperience?.added >= 1, "outcome digest should produce at least one shadow experience");
+assert.equal(outcomeRecord.learningDigest?.semanticExperience?.verificationStateChanged, false);
+assert.equal(outcomeRecord.learningDigest?.semanticExperience?.authorityInfluence, false);
+assert.equal(outcomeRecord.learningDigest?.semanticExperience?.routingInfluence, false);
+assert.equal(outcomeRecord.learningDigest?.semanticExperience?.autoApplyAllowed, false);
+const experienceStorePath = defaultMssrSemanticExperienceStorePath();
+assert.equal(experienceStorePath.startsWith(process.env.MSSR_STATE_ROOT), true, "test must isolate Semantic Experience state");
+const experienceStore = await readMssrSemanticExperienceStore({ storePath: experienceStorePath });
+const traceExperiences = experienceStore.observations.filter((item) => item.trace?.traceId === first.traceId);
+assert.ok(traceExperiences.length >= 1, "outcome must create trace-linked Semantic Experience shadows");
+assert.equal(traceExperiences.every((item) => item.verification.status === "unknown"), true, "outcome metadata must never self-confirm semantic decisions");
+assert.equal(traceExperiences.every((item) => item.authorityInfluence === false && item.routingInfluence === false && item.autoApplyAllowed === false), true);
+assert.equal(JSON.stringify(experienceStore).includes("Host-gated selection is under verification."), false, "ephemeral workingSummary must not leak into Semantic Experience");
 trace = evidence({ traceId: first.traceId, limit: 200 });
 assert.equal(trace.workingMemory, null, "working memory must be purged after outcome");
 assert.equal(trace.lifecycle.status, "closed-partial");

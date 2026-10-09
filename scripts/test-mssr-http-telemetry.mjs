@@ -7,6 +7,10 @@ import path from "node:path";
 
 const root = process.cwd();
 const temp = await fs.mkdtemp(path.join(os.tmpdir(), "bridge-mssr-http-"));
+const workspaceRoot = path.join(temp, "workspace");
+await fs.mkdir(path.join(workspaceRoot, ".mssr"), { recursive: true });
+await fs.writeFile(path.join(workspaceRoot, ".mssr", "project-context.json"), "{}\n", "utf8");
+const skillMaintenanceIndexPath = path.join(workspaceRoot, ".mssr", "runtime", "skill-maintenance-candidates.json");
 const tokenPath = path.join(temp, "mssr-ingest.token");
 const port = await new Promise((resolve, reject) => {
   const server = net.createServer();
@@ -50,6 +54,8 @@ const child = spawn(process.execPath, [path.join(root, "dist", "http.js")], {
     BRIDGE_MCP_RUNTIME_HEALTH_PATH: path.join(temp, "data", "runtime-health.json"),
     BRIDGE_MCP_PROJECT_SITUATION_PATH: path.join(temp, "data", "project-situation.json"),
     BRIDGE_MCP_PROJECT_SITUATION_ROOT: root,
+    MSSR_WORKSPACE_ROOT: workspaceRoot,
+    BRIDGE_MCP_SKILL_MAINTENANCE_DELAY_MS: "100",
     BRIDGE_MCP_MSSR_INGEST_TOKEN_FILE: tokenPath,
   },
 });
@@ -111,8 +117,59 @@ try {
   const acceptedBody = await accepted.json();
   assert.equal(acceptedBody.duplicate, false);
   const persistedRoute = await waitForJsonlEvent(mssrEventsPath, (event) => event.id === envelope.eventId);
-  assert.deepEqual(persistedRoute?.details?.intent, envelope.event.route.intent,
-    "Bridge must preserve the bounded structured intent projection");
+  assert.deepEqual(persistedRoute?.details?.intent, {
+    summary: "coding: analyze on code.",
+    ...envelope.event.route.intent,
+  }, "Bridge must preserve the bounded structured intent projection and synthesize its canonical summary when omitted");
+  const contextAssemblyEnvelope = {
+    ...envelope,
+    eventId: "mssr-ext-http-assembly-" + Date.now(),
+    emittedAt: new Date(Date.now() + 1).toISOString(),
+    event: {
+      kind: "context_assembly", stage: "start", mode: "selective", page: 1,
+      requestedContextChars: 1_200, deliveredContextChars: 640, estimatedCharsSaved: 560,
+      retainedContextCharsSaved: 180, requiredOverflowChars: 0, acceptedOverflowChars: 0,
+      remainingRequiredUnits: 0, remainingAcceptedUnits: 1, requiredBudgetExceeded: false,
+      optionalContextOmitted: true, continuationIssued: false, continuationConsumed: false, chainCompleted: true,
+    },
+  };
+  const contextAssemblyResponse = await fetch(base + "/api/mssr/events", {
+    method: "POST",
+    headers: { "authorization": "Bearer " + token, "content-type": "application/json" },
+    body: JSON.stringify(contextAssemblyEnvelope),
+  });
+  assert.equal(contextAssemblyResponse.status, 202, await contextAssemblyResponse.text());
+  const persistedAssembly = await waitForJsonlEvent(mssrEventsPath, (event) => event.id === contextAssemblyEnvelope.eventId);
+  assert.equal(persistedAssembly?.eventType, "context_assembly");
+  assert.equal(persistedAssembly?.details?.mode, "selective");
+  assert.equal(persistedAssembly?.details?.estimatedCharsSaved, 560);
+  assert.equal(persistedAssembly?.details?.retainedContextCharsSaved, 180);
+  assert.equal(persistedAssembly?.details?.optionalContextOmitted, true);
+  const projectSelectionEnvelope = {
+    ...envelope,
+    eventId: "mssr-ext-http-project-selection-" + Date.now(),
+    emittedAt: new Date(Date.now() + 2).toISOString(),
+    event: {
+      kind: "project_context_selection", stage: "verify", projectName: "fixture-workspace",
+      decisions: [
+        { id: "current-state", selected: true, reason: "selected" },
+        { id: "history", selected: false, reason: "stage-mismatch" },
+      ],
+    },
+  };
+  const projectSelectionResponse = await fetch(base + "/api/mssr/events", {
+    method: "POST",
+    headers: { "authorization": "Bearer " + token, "content-type": "application/json" },
+    body: JSON.stringify(projectSelectionEnvelope),
+  });
+  assert.equal(projectSelectionResponse.status, 202, await projectSelectionResponse.text());
+  const persistedProjectSelection = await waitForJsonlEvent(mssrEventsPath, (event) => event.id === projectSelectionEnvelope.eventId);
+  assert.equal(persistedProjectSelection?.eventType, "project_context_selection");
+  assert.equal(persistedProjectSelection?.details?.projectName, "fixture-workspace");
+  assert.deepEqual(persistedProjectSelection?.details?.decisions, [
+    { id: "current-state", selected: true, reason: "selected" },
+    { id: "history", selected: false, reason: "stage-mismatch" },
+  ]);
   const decisionEnvelope = {
     ...envelope,
     eventId: `mssr-ext-http-decision-${Date.now()}`,
@@ -131,6 +188,47 @@ try {
     body: JSON.stringify(decisionEnvelope),
   });
   assert.equal(decisionResponse.status, 202, await decisionResponse.text());
+  const redundantEnvelope = {
+    ...envelope,
+    eventId: `mssr-ext-http-redundant-${Date.now()}`,
+    emittedAt: new Date(Date.now() + 2).toISOString(),
+    event: { kind: "skill_decision", decision: {
+      skillName: "external-overlap-a",
+      decision: "skipped",
+      reasonCode: "redundant",
+      reasonSummary: "Peer already covers this need.",
+      relatedSkillName: "external-overlap-b",
+      stage: "start",
+    } },
+  };
+  const redundantResponse = await fetch(`${base}/api/mssr/events`, {
+    method: "POST",
+    headers: { "authorization": `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify(redundantEnvelope),
+  });
+  assert.equal(redundantResponse.status, 202, await redundantResponse.text());
+  const persistedRedundant = await waitForJsonlEvent(mssrEventsPath, (event) => event.id === redundantEnvelope.eventId);
+  assert.equal(persistedRedundant?.details?.relatedSkillName, "external-overlap-b",
+    "Bridge must preserve the exact observed redundant peer end-to-end");
+  let maintenanceIndex = null;
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    try {
+      maintenanceIndex = JSON.parse(await fs.readFile(skillMaintenanceIndexPath, "utf8"));
+      break;
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.ok(maintenanceIndex, "redundant feedback must schedule an isolated workspace maintenance projection");
+  assert.equal(maintenanceIndex.workspaceRoot, workspaceRoot);
+  assert.equal(maintenanceIndex.reviewOnly, true);
+  assert.equal(maintenanceIndex.authorityInfluence, false);
+  assert.equal(maintenanceIndex.routingInfluence, false);
+  assert.equal(maintenanceIndex.autoApplyAllowed, false);
+  assert.equal(maintenanceIndex.candidateCount, 0, "one redundant trace must remain below the maintenance threshold");
+  const overlapFeedback = maintenanceIndex.feedback?.find((item) => item.skillName === "external-overlap-a");
+  assert.equal(overlapFeedback?.redundant, 1, "global projection must preserve bounded redundancy evidence without auto-activating a relation");
   const beforeSummaryResponse = await fetch(`${base}/api/mssr/summary?scope=all`);
   const beforeOutcome = await beforeSummaryResponse.json();
   assert.equal(beforeSummaryResponse.status, 200, JSON.stringify(beforeOutcome));

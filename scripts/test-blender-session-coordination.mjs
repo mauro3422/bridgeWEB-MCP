@@ -38,12 +38,18 @@ for (const expected of [
   'Reference-only mode forbids opening, focusing, capturing, mutating, or saving',
   'Human-or-external scene activity was observed',
 ]) assert(tools.includes(expected), `missing Blender session guard: ${expected}`);
+assert(tools.includes('Blender exited with code 0 but the Python script reported a traceback'), 'blender_batch_script must fail closed on Python traceback even when Blender exits 0');
+assert(tools.includes('[script-runtime-error]'), 'Blender batch-script runtime errors must expose a stable audit category');
 
 for (const toolName of [
   'blender_scene_info',
+  'blender_activity_trace',
+  'blender_rig_inspect',
   'blender_viewport_screenshot',
   'blender_focus_review',
   'blender_review_bundle',
+  'blender_animation_review',
+  'blender_ik_keyframe',
   'blender_execute_code',
 ]) {
   const toolIndex = tools.indexOf(`name: "${toolName}"`);
