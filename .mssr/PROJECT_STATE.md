@@ -1,5 +1,9 @@
 # Bridge project state
 
+## 0.6.167 Librarian metadata filter schema candidate
+
+This source candidate clarifies exact metadata field/value filters and the singular EvidenceAtom projection keys in the Bridge search schema and docs. Typecheck/build, MCP module and dual-era schema tests, tool documentation checks, and the full isolated regression suite passed. The active process remains 0.6.166 / MSSR 0.2.115 until a controlled watchdog restart and exact schema/readiness readback.
+
 ## 0.6.166 Librarian evidence-pack integration candidate
 
 The candidate adopts exact MSSR 0.2.115 bytes and adds the opt-in `dedupeContainedRanges` field to `mssr_librarian_evidence_pack`. The field defaults to false. When enabled, MSSR validates the supplied handles and removes only strictly contained ranges with matching owner, source, and revision; each removed handle retains its provenance and links to the kept citation. The retained text is unchanged. This does not decide whether the containing range semantically answers the child facet.

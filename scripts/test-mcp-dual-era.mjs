@@ -286,6 +286,11 @@ try {
   const librarianSearchTools = list.result.tools.filter((tool) => tool.name === "mssr_librarian_search");
   assert.equal(librarianSearchTools.length, 1, "HTTP tools/list must expose one existing Librarian search tool, not a duplicate sidecar tool.");
   assert.deepEqual(librarianSearchTools[0].inputSchema?.properties?.metadataMode?.enum, ["off", "project-context-single-section", "project-context-librarian-sidecar"]);
+  const metadataFilterDescription = librarianSearchTools[0].inputSchema?.properties?.query?.properties?.metadata?.description ?? "";
+  for (const field of ["authorityClass", "artifact", "domain", "freshness", "need", "privacyClass", "rangeKind", "risk", "signal", "sourceClass", "action"]) {
+    assert.ok(metadataFilterDescription.includes(field), `HTTP tools/list must document exact EvidenceAtom filter key ${field}`);
+  }
+  assert.match(metadataFilterDescription, /sidecar declarations domains\/actions, query with domain\/action/);
   assert.equal(librarianSearchTools[0].inputSchema?.properties?.query?.properties?.queryVariants?.maxItems, 4, "HTTP tools/list must expose the bounded host-supplied query variants on the existing Librarian search tool.");
   assert.equal(librarianSearchTools[0].inputSchema?.properties?.query?.properties?.queryVariants?.items?.maxLength, 500);
 

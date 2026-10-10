@@ -763,6 +763,12 @@ try {
   assert.equal("metadataMode" in selectorSchema.inputSchema.properties, false, "metadata retrieval is an explicit prior search step");
   const searchSchema = defaultRegistry.tools.find((tool) => tool.name === "mssr_librarian_search");
   assert.deepEqual(searchSchema.inputSchema.properties.metadataMode.enum, ["off", "project-context-single-section", "project-context-librarian-sidecar"]);
+  const metadataFilterDescription = searchSchema.inputSchema.properties.query.properties.metadata.description;
+  for (const field of ["authorityClass", "artifact", "domain", "freshness", "need", "privacyClass", "rangeKind", "risk", "signal", "sourceClass", "action"]) {
+    assert.ok(metadataFilterDescription.includes(field), `Bridge search schema documents exact projection key ${field}`);
+  }
+  assert.match(metadataFilterDescription, /sidecar declarations domains\/actions, query with domain\/action/);
+  assert.match(metadataFilterDescription, /Exact typed field\/value filters/);
   assert.equal(searchSchema.inputSchema.properties.query.properties.queryVariants.maxItems, 4);
   assert.equal(searchSchema.inputSchema.properties.query.properties.queryVariants.items.maxLength, 500);
   assert.equal(searchSchema.inputSchema.properties.query.additionalProperties, false);

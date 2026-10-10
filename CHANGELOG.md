@@ -2,7 +2,7 @@
 
 The canonical Bridge release history now lives under [`changelogs/`](changelogs/INDEX.md).
 
-- Current source release: [0.6.166](changelogs/0.6.166.md) (MSSR 0.2.115 opt-in exact contained-range compaction through the Librarian evidence pack)
+- Current source release: [0.6.167](changelogs/0.6.167.md) (clarify exact metadata filter keys in the Bridge Librarian schema)
 - Version index: [changelogs/INDEX.md](changelogs/INDEX.md)
 - Historical monolithic archive: [changelogs/LEGACY.md](changelogs/LEGACY.md)
 
