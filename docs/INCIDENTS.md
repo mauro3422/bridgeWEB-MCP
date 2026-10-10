@@ -2029,3 +2029,19 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Corrección / regresión:** No hubo cambio de código por este evento. Se repitió primero el test de framing aislado y luego `verify:all` completo; ambos pasaron. La verificación final es 14/14 gates requeridos, 0 fallidos.
 
 **Seguimiento:** Si reaparece, capturar la salida/stack original del proceso hijo y correlacionar su puerto aleatorio y duración antes de cambiar timeouts o transporte.
+
+## 2026-10-10 — Watchdog activo conservó el BridgeCodeRoot anterior tras cambiar Startup
+
+**Estado:** Resuelto y verificado en Bridge 0.6.163 / MSSR 0.2.112. El Bridge HTTP y el túnel siguen `ready`.
+
+**Capa / owner:** Watchdog HTTP de Windows, Bridge runtime y catálogo del conector.
+
+**Síntoma y evidencia:** El archivo `BridgeMCP-Watchdog.cmd` ya apuntaba a `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`, pero tras el reinicio `/status` aún informaba 0.6.162. La inspección WMI mostró el supervisor PID 23032 ejecutando el script y `BridgeCodeRoot` de `bridge-mcp-candidate-0.6.160-mssr-0.2.109`, con su HTTP hijo PID 49820 bajo `dist/http.js` de esa misma carpeta. La raíz de datos era y siguió siendo `D:\Dev\bridge-mcp`. El ack de reinicio anterior fue escrito por ese supervisor viejo y no cambió su raíz de código.
+
+**Causa demostrada:** Editar el launcher de inicio no cambia argumentos ni estado de un watchdog que ya está en ejecución. Su mutex singleton evita que un segundo supervisor del mismo perfil adopte simultáneamente el servicio; el watchdog antiguo reconocía la versión 0.6.162 y mantenía su candidato anterior.
+
+**Corrección:** Se verificaron las identidades exactas y se detuvieron solo PID 23032 y su HTTP hijo PID 49820; el túnel PID 23336 no se detuvo. Se inició el watchdog candidato con `BridgeCodeRoot=D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`, `ProjectRoot=D:\Dev\bridge-mcp`, perfil `bridge-local-http` y el perfil de túnel existente. El supervisor candidato adoptó el túnel listo.
+
+**Regresión / readback:** `/status` confirmó Bridge 0.6.163, boot `502d5b26-269a-45dd-994c-a6c5c1e4a025`, HTTP PID 67524 y transporte `streamable-http-dual-era`; `/readyz`, `bridge_health(all)`, `tunnel_health` y el esquema runtime de búsqueda pasaron. `mssr_librarian_search` schema hash `6bc987b8d512e7d0` contiene `queryVariants`. En un documento MSSR real, búsqueda por sidecar → Jev 1.13.0 → fetch exacto → evidence pack conservó la misma revisión, rango y huella; Choices fueron descriptivos y no calibrados. El conector MSSR directo de esta sesión todavía rechaza `queryVariants`, aunque el catálogo runtime del Bridge ya lo admite.
+
+**Seguimiento:** Reabrir/actualizar el conector MSSR para que lea el catálogo runtime vigente y repetir el smoke desde ese camino. Mantener `D:\Dev\bridge-mcp` como raíz de datos. Si vuelve a cambiarse `BridgeCodeRoot`, reiniciar el supervisor activo además de actualizar el `.cmd`; verificar proceso, `/status`, `/readyz` y schema antes de declarar adopción.
