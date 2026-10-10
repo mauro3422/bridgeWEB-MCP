@@ -3,6 +3,7 @@
 Versioned release notes are the canonical change-history surface for MSSR debugging, maintenance, and persistence checks.
 
 ## Current releases
+- [0.6.166](0.6.166.md) - Adopt MSSR 0.2.115 and expose opt-in exact contained-range compaction through the Librarian evidence-pack tool.
 - [0.6.165](0.6.165.md) - Isolate Bridge observability reads and snapshots; separate worker queue and execution timeouts.
 - [0.6.164](0.6.164.md) - Expose the existing Jev project-context reference-split planner through Bridge.
 - [0.6.163](0.6.163.md) - Adopt MSSR 0.2.112 host-supplied Librarian query variants.

@@ -255,7 +255,15 @@ try {
   assert.equal(baseline.dashboardWorkers?.read?.ready, true, "read worker should acknowledge readiness after first dashboard read");
   assert.equal(baseline.dashboardWorkers?.read?.pendingCount, 0, "read worker should not retain completed bootstrap requests");
   assert.equal(baseline.dashboardWorkers?.snapshot?.ready, true, "snapshot worker should acknowledge readiness after cold snapshot");
-  assert.equal(baseline.dashboardWorkers?.snapshot?.pendingCount, 0, "snapshot worker should not retain completed bootstrap requests");
+  let snapshotWorker = baseline.dashboardWorkers.snapshot;
+  const snapshotIdleDeadline = performance.now() + 30_000;
+  while (snapshotWorker.pendingCount > 0 && performance.now() < snapshotIdleDeadline) {
+    assert.ok(snapshotWorker.pendingCount <= 1, "only the expected background snapshot refresh may remain pending");
+    assert.ok(snapshotWorker.pending.every((request) => request.requestType === "snapshot"), "only snapshot refresh work may remain pending");
+    await sleep(100);
+    snapshotWorker = (await json("/status")).dashboardWorkers.snapshot;
+  }
+  assert.equal(snapshotWorker.pendingCount, 0, `background snapshot refresh should drain within 30 seconds; pending=${JSON.stringify(snapshotWorker.pending)}`);
 
   // MSSR summary can decode and fold a large retained window. It must run in
   // the isolated dashboard process so this work cannot stall HTTP readiness.

@@ -1,10 +1,20 @@
 # Bridge project state
 
+## 0.6.166 Librarian evidence-pack integration candidate
+
+The candidate adopts exact MSSR 0.2.115 bytes and adds the opt-in `dedupeContainedRanges` field to `mssr_librarian_evidence_pack`. The field defaults to false. When enabled, MSSR validates the supplied handles and removes only strictly contained ranges with matching owner, source, and revision; each removed handle retains its provenance and links to the kept citation. The retained text is unchanged. This does not decide whether the containing range semantically answers the child facet.
+
+**Source verification:** `npm run check`, `npm run build`, `node scripts/test-mssr-semantic-evidence-tools.mjs`, and `npm run docs:tools:check` passed. Exact vendored artifact is 1,127,170 bytes, SHA-256 `e83a0f89bb33f4d67006bda7cffa239abdd2c111883e0a98c6d1c7dfed539176`. This focused regression is assembly-contract evidence, not Jev reliability evidence.
+
+**Regression finding:** the first full-suite attempt exposed an existing race in `test-observability-http-liveness.mjs`: the stale snapshot endpoint correctly returned `refreshing=true`, while the test immediately required the background snapshot worker to be idle. The isolated worker test confirmed the request drains. The regression now allows only the expected single snapshot request during refresh and waits up to 30 seconds for it to complete. The corrected isolated liveness test passed with zero event-loop stalls and max `/readyz` of 1.52 ms for MSSR summary, 1.73 ms for audit, and 1.63 ms for concurrent dashboard reads.
+
+**Activation:** not activated. The current live Bridge remains 0.6.165 / MSSR 0.2.112, PID 76804, boot `4ce51c34-dcdf-42a2-a27f-f5f37964ed49`; its active tool catalog has not been refreshed to expose the new field. No restart or runtime data mutation was performed.
+
 ## Current release
 
 Candidate branch `codex/bridge-mssr-0.2.112-query-variants-20261010` builds on the 0.6.164 Jev context-split adapter and 0.6.163/MSSR 0.2.112 Librarian query-variants line. It routes retained-history MSSR, tool-audit and metrics reads to a read-only child, keeps snapshot builds in a separate child, serves a persisted snapshot while storage starts, waits for worker IPC readiness, and separates request queue acceptance (5-minute limit) from accepted execution (120-second limit). `/status` exposes bounded worker health and pending request types. Context-inventory writes use serialized UUID temporary files.
 
-**Active runtime readback:** Bridge 0.6.165, PID 74424, boot `fc9df419-0f50-4222-bc80-e053ed2e932e`, port 3001, `ProjectRoot=D:\Dev\bridge-mcp`; startup watchdog PID 54004 owns the candidate code root. `/readyz` is ready, storage is ready, the live catalog reports 188 tools, and the existing tunnel profile/port 8081 was not restarted.
+**Active runtime readback:** Bridge 0.6.165, PID 76804, boot `4ce51c34-dcdf-42a2-a27f-f5f37964ed49`, port 3001, `ProjectRoot=D:\Dev\bridge-mcp`; startup watchdog PID 54004 owns the candidate code root. `/readyz` is ready, storage is ready, the live catalog reports 188 tools, and the existing tunnel profile/port 8081 was not restarted.
 
 **Verification:** `scripts/verify-all.ps1 -ProjectRoot D:\Dev\bridge-mcp-mssr-0.2.112-query-variants -RuntimeDataRoot D:\Dev\bridge-mcp -ExpectedServerVersion 0.6.165` exited 0 with `failedRequired=0`. It passed typecheck/build, full HTTP smoke, 209.57-second regression suite, dual-era MCP, routing latency, WAL maintenance, 30k liveness, skill routing, generated tool docs, watchdog restart/status, metrics status and tools/list. Live smoke saw 28,459 all-scope MSSR events, 4,872 routes, 360 outcomes, 188 registered tools, 44,857 active / 209,815 total calls and 20 profiles. Isolated liveness reached max `/readyz` 34.37 ms under concurrency and zero event-loop stalls.
 

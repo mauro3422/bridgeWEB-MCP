@@ -648,6 +648,7 @@ const evidencePackInputSchema = z.object({
   projectRoot: projectRootSchema,
   sourceRefs: z.array(sourceRefSchema).min(1).max(MSSR_LIBRARIAN_EVIDENCE_PACK_LIMITS.maxDocuments),
   handles: z.array(mssrLibrarianEvidenceHandleSchema).min(1).max(MSSR_LIBRARIAN_EVIDENCE_PACK_LIMITS.maxHandles),
+  dedupeContainedRanges: z.boolean().optional().default(false),
 }).strict();
 
 const relationInputSchema = z.object({
@@ -705,13 +706,14 @@ function createMssrSemanticEvidenceToolModule(options: MssrSemanticEvidenceToolM
       },
       {
         name: "mssr_librarian_evidence_pack",
-        description: `Re-read up to ${MSSR_LIBRARIAN_EVIDENCE_PACK_LIMITS.maxHandles} exact Librarian handles from explicitly selected project Markdown sources, then package each unchanged range with its citation. Use after mssr_librarian_search and, optionally, mssr_librarian_jev_select. Bridge authorizes and rereads only the supplied canonical sourceRefs; MSSR revalidates each handle's current revision, range, and fingerprint. This operation is read-only: it does not call Jev, summarize or compose prose, crawl, establish truth, or rewrite canonical files. Bridge derives owner and privacy labels from the selected project and its path policy.`,
+        description: `Re-read up to ${MSSR_LIBRARIAN_EVIDENCE_PACK_LIMITS.maxHandles} exact Librarian handles from explicitly selected project Markdown sources, then package each unchanged range with its citation. Use after mssr_librarian_search and, optionally, mssr_librarian_jev_select. Bridge authorizes and rereads only the supplied canonical sourceRefs; MSSR revalidates each handle's current revision, range, and fingerprint. Optional dedupeContainedRanges removes only strict contained ranges with matching owner, source, and revision, and returns each omitted handle's full provenance plus the retained covering citation; it does not assert that the larger range answers the smaller facet. Default false preserves every range. This operation is read-only: it does not call Jev, summarize or compose prose, crawl, establish truth, or rewrite canonical files. Bridge derives owner and privacy labels from the selected project and its path policy.`,
         inputSchema: {
           type: "object",
           properties: {
             projectRoot: { type: "string", minLength: 1, maxLength: 4096 },
             sourceRefs: { type: "array", items: { type: "string", minLength: 1, maxLength: 1000 }, minItems: 1, maxItems: MSSR_LIBRARIAN_EVIDENCE_PACK_LIMITS.maxDocuments, description: "Explicit project-relative Markdown sources for the supplied handles. Every source must be referenced by at least one handle; no directory crawl is performed." },
             handles: { type: "array", items: exactHandleObjectSchema, minItems: 1, maxItems: MSSR_LIBRARIAN_EVIDENCE_PACK_LIMITS.maxHandles, description: "Exact revision-bound handles returned by mssr_librarian_search or selected by mssr_librarian_jev_select. Each handle is revalidated against current source bytes." },
+            dedupeContainedRanges: { type: "boolean", default: false, description: "Opt in to omitting only strictly contained ranges with the same owner, source, and revision. Returns removed-handle provenance and the retained covering citation; does not claim the larger range answers the smaller facet. Default false returns every range." },
           },
           required: ["projectRoot", "sourceRefs", "handles"],
           additionalProperties: false,
@@ -880,7 +882,7 @@ function createMssrSemanticEvidenceToolModule(options: MssrSemanticEvidenceToolM
           throw new Error("Evidence-pack sourceRefs must exactly match the unique sources referenced by handles.");
         }
         const { documents } = await readProjectMarkdownBatch(project, sourceRefs);
-        const pack = buildMssrLibrarianEvidencePack({ documents, handles });
+        const pack = buildMssrLibrarianEvidencePack({ documents, handles, dedupeContainedRanges: args.dedupeContainedRanges });
         return { projectOwner: project.owner, sourceCount: sourceRefs.length, ...pack };
       },
       mssr_semantic_evidence_relation_review: async (raw) => {

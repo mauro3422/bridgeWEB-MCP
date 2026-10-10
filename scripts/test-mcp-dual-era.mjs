@@ -289,6 +289,11 @@ try {
   assert.equal(librarianSearchTools[0].inputSchema?.properties?.query?.properties?.queryVariants?.maxItems, 4, "HTTP tools/list must expose the bounded host-supplied query variants on the existing Librarian search tool.");
   assert.equal(librarianSearchTools[0].inputSchema?.properties?.query?.properties?.queryVariants?.items?.maxLength, 500);
 
+  const evidencePackTools = list.result.tools.filter((tool) => tool.name === "mssr_librarian_evidence_pack");
+  assert.equal(evidencePackTools.length, 1, "HTTP tools/list must retain the existing Librarian evidence-pack tool without adding a duplicate.");
+  assert.equal(evidencePackTools[0].inputSchema?.properties?.dedupeContainedRanges?.default, false, "HTTP tools/list must publish contained-range compaction as opt-in.");
+  assert.match(evidencePackTools[0].description, /strict contained ranges/i, "HTTP tools/list must describe the exact compaction boundary.");
+
   const imageImportTool = list.result.tools.find((tool) => tool.name === "image_asset_import_files");
   assert.ok(imageImportTool, "HTTP tools/list must publish image_asset_import_files.");
   assert.deepEqual(imageImportTool._meta?.["openai/fileParams"], ["files"]);

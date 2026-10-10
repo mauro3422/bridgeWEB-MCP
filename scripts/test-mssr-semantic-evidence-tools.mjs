@@ -184,6 +184,33 @@ try {
   assert.equal(evidencePack.truthAuthority, false);
   assert.equal(evidencePack.canonicalRewriteAllowed, false);
   assert.equal(evidencePack.ownerAndPrivacyAreCallerAsserted, true);
+  assert.equal(evidencePack.rangeCompaction, undefined, "contained-range compaction stays opt-in");
+  const preserveHeadingHandle = selected.results.find((item) => item.handle.rangeKind === "section" && item.handle.startLine > 1)?.handle;
+  assert.ok(preserveHeadingHandle, "search should expose the containing section range");
+  const compactedEvidencePack = await registry.call("mssr_librarian_evidence_pack", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    handles: [preserveHandle, preserveHeadingHandle],
+    dedupeContainedRanges: true,
+  });
+  assert.equal(compactedEvidencePack.paragraphs.length, 1, "only the strict child range is omitted");
+  assert.equal(compactedEvidencePack.rangeCompaction.policy, "strict-contained-range-deduplication");
+  assert.equal(compactedEvidencePack.rangeCompaction.inputHandleCount, 2);
+  assert.equal(compactedEvidencePack.rangeCompaction.retainedHandleCount, 1);
+  assert.equal(compactedEvidencePack.rangeCompaction.removed.length, 1);
+  const removedEvidenceHandle = compactedEvidencePack.rangeCompaction.removed[0];
+  assert.equal(removedEvidenceHandle.handleId, preserveHandle.rangeKind === "block" ? preserveHandle.id : preserveHeadingHandle.id);
+  assert.equal(removedEvidenceHandle.coveredByHandleId, preserveHandle.rangeKind === "section" ? preserveHandle.id : preserveHeadingHandle.id);
+  assert.equal(removedEvidenceHandle.sourceRef, "policy.md");
+  assert.equal(removedEvidenceHandle.owner, root.replace(/\\/g, "/").toLowerCase());
+  assert.equal(removedEvidenceHandle.revision, preserveHandle.rangeKind === "block" ? preserveHandle.revision : preserveHeadingHandle.revision);
+  assert.equal(removedEvidenceHandle.rangeId, preserveHandle.rangeKind === "block" ? preserveHandle.rangeId : preserveHeadingHandle.rangeId);
+  assert.equal(removedEvidenceHandle.startLine, preserveHandle.rangeKind === "block" ? preserveHandle.startLine : preserveHeadingHandle.startLine);
+  assert.equal(removedEvidenceHandle.endLine, preserveHandle.rangeKind === "block" ? preserveHandle.endLine : preserveHeadingHandle.endLine);
+  assert.equal(removedEvidenceHandle.fingerprint, preserveHandle.rangeKind === "block" ? preserveHandle.fingerprint : preserveHeadingHandle.fingerprint);
+  assert.equal(removedEvidenceHandle.privacyClass, "project-metadata");
+  assert.equal(compactedEvidencePack.paragraphs[0].citation.handleId, removedEvidenceHandle.coveredByHandleId, "removed provenance resolves to the retained citation");
+  assert.match(compactedEvidencePack.paragraphs[0].exactText, /TAIL-ONLY-MUST-NOT-BE-SENT/);
   await assert.rejects(registry.call("mssr_librarian_evidence_pack", {
     projectRoot: root,
     sourceRefs: ["policy.md", "other-policy.md"],
@@ -741,6 +768,8 @@ try {
   assert.equal(searchSchema.inputSchema.properties.query.additionalProperties, false);
   const evidencePackSchema = defaultRegistry.tools.find((tool) => tool.name === "mssr_librarian_evidence_pack");
   assert.equal(evidencePackSchema.inputSchema.properties.handles.maxItems, 16);
+  assert.equal(evidencePackSchema.inputSchema.properties.dedupeContainedRanges.default, false);
+  assert.match(evidencePackSchema.inputSchema.properties.dedupeContainedRanges.description, /strictly contained ranges/i);
   assert.ok(defaultRegistry.riskSummary.readOnly.includes("mssr_librarian_evidence_pack"));
   assert.equal(evidencePackSchema.annotations.readOnlyHint, true);
   assert.equal(evidencePackSchema.annotations.destructiveHint, false);
