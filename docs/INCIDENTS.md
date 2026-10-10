@@ -2063,3 +2063,19 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Regresión / readback:** `/status` confirmó Bridge 0.6.163, boot `502d5b26-269a-45dd-994c-a6c5c1e4a025`, HTTP PID 67524 y transporte `streamable-http-dual-era`; `/readyz`, `bridge_health(all)`, `tunnel_health` y el esquema runtime de búsqueda pasaron. `mssr_librarian_search` schema hash `6bc987b8d512e7d0` contiene `queryVariants`. En un documento MSSR real, búsqueda por sidecar → Jev 1.13.0 → fetch exacto → evidence pack conservó la misma revisión, rango y huella; Choices fueron descriptivos y no calibrados. El conector MSSR directo de esta sesión todavía rechaza `queryVariants`, aunque el catálogo runtime del Bridge ya lo admite.
 
 **Seguimiento:** Reabrir/actualizar el conector MSSR para que lea el catálogo runtime vigente y repetir el smoke desde ese camino. Mantener `D:\Dev\bridge-mcp` como raíz de datos. Si vuelve a cambiarse `BridgeCodeRoot`, reiniciar el supervisor activo además de actualizar el `.cmd`; verificar proceso, `/status`, `/readyz` y schema antes de declarar adopción.
+
+## 2026-10-10 — Preflight de lifecycle rechazó el primer restart del release 0.6.166
+
+**Estado:** Resuelto; Bridge 0.6.166 / MSSR 0.2.115 está activo y verificado.
+
+**Capa / owner:** Lifecycle MSSR del host y watchdog HTTP administrado.
+
+**Síntoma y evidencia:** El primer `bridge_request_restart` para activar 0.6.166 fue rechazado con `mssr-lifecycle-preflight-required`; el watchdog no recibió request ni se tocó proceso alguno. La traza abierta previamente pertenecía al proyecto MSSR, mientras que la activación debía ejecutarse bajo una traza cuyo propietario fuera el checkout Bridge. Se creó/reutilizó la traza Bridge `mssr-20261010161106-af8facfa-994`, se completó el replan de cierre y se cargó `skill-maintenance-loop`. El único restart posterior creó request `50c2e09f-8747-4700-bf28-2218e0b400f1`, reconocido por watchdog PID 54004 como `restart-http`.
+
+**Causa demostrada:** El preflight de lifecycle exige que la fase de restart use una traza compatible con el propietario Bridge y con su identidad de tarea. La traza anterior de MSSR no cumplía el requisito; el gate bloqueó antes de escribir la solicitud.
+
+**Corrección / readback:** `/status` confirmó Bridge 0.6.166, PID 73136, boot `860eaa90-3aa0-4c29-a20f-eb0455e22569`, almacenamiento listo; `/readyz` respondió `ready`; `tools/list` reportó 188 herramientas y un solo `mssr_librarian_evidence_pack`, con `dedupeContainedRanges` default `false`; el túnel 8081 respondió HTTP 200 y no se reinició. Typecheck, build, regresiones completas, dual-era MCP, liveness, documentación y `git diff --check` ya habían pasado antes de activar.
+
+**Observación acotada:** El runtime registró un stall de 3.383 ms durante los primeros tres segundos del boot. La métrica seguía igual al leerla a los 33 segundos; no se observó recurrencia ni se determinó causa. No se atribuye al cambio ni se modifica ningún umbral por esta observación aislada.
+
+**Prevención:** Antes de operaciones administradas, confirmar propietario, taskKey y traceId del proyecto que posee el runtime. Si el preflight bloquea, conservar procesos y request state; replanificar con una traza propietaria, nunca reintentar a ciegas.
