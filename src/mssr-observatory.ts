@@ -2077,6 +2077,9 @@ function summary(days: number, scope: MssrObservatoryScope) {
     typeof value === "string" && value && value !== "unknown" ? value : undefined
   );
   const hostIdentityByTrace = new Map<string, TraceHostIdentity>();
+  const firstRouteByTrace = new Map<string, MssrStoredEvent>();
+  const lastRouteByTrace = new Map<string, MssrStoredEvent>();
+  const routeCountByTrace = new Map<string, number>();
   for (const [traceId, calls] of toolCallsByTrace) {
     // Only the authenticated OpenCode plugin exposes these fields.  Rows that
     // merely share a trace do not become host evidence by association alone.
@@ -2183,7 +2186,7 @@ function summary(days: number, scope: MssrObservatoryScope) {
         else if (call.tool === DELEGATED_ACTION_TOOL) delegatedActionCalls += 1;
         else bridgeDirectToolCalls += 1;
       }
-      const firstRoute = profileRoutes.find((route) => route.traceId === traceId);
+      const firstRoute = firstRouteByTrace.get(traceId);
       const substantive = calls.filter((call) => !PREPARATION_TOOLS.has(effectiveToolName(call)));
       const firstAction = substantive[0];
       if (firstRoute && firstAction && typeof firstAction.started_at === "string") {
@@ -2239,6 +2242,11 @@ function summary(days: number, scope: MssrObservatoryScope) {
   };
 
   const routes = events.filter((event) => event.eventType === "route_planned");
+  for (const route of routes) {
+    if (!firstRouteByTrace.has(route.traceId)) firstRouteByTrace.set(route.traceId, route);
+    lastRouteByTrace.set(route.traceId, route);
+    routeCountByTrace.set(route.traceId, (routeCountByTrace.get(route.traceId) ?? 0) + 1);
+  }
   const loads = events.filter((event) => event.eventType === "skill_loaded");
   const successfulLoads = loads.filter((event) => event.ok === true);
   const contextAssembly = summarizeContextAssembly(events);
@@ -2822,7 +2830,7 @@ function summary(days: number, scope: MssrObservatoryScope) {
     const profileEvents = events.filter((event) => profileTraceIds.has(event.traceId));
     const completionDurations = latestOutcomes.flatMap((outcome) => {
       if (!profileTraceIds.has(outcome.traceId)) return [];
-      const firstRoute = profileRoutes.find((route) => route.traceId === outcome.traceId);
+      const firstRoute = firstRouteByTrace.get(outcome.traceId);
       if (!firstRoute) return [];
       const duration = Date.parse(outcome.occurredAt) - Date.parse(firstRoute.occurredAt);
       return Number.isFinite(duration) && duration >= 0 ? [duration] : [];
@@ -2859,7 +2867,7 @@ function summary(days: number, scope: MssrObservatoryScope) {
       averageCompletionMs: completionDurations.length > 0
         ? Math.round(completionDurations.reduce((total, duration) => total + duration, 0) / completionDurations.length)
         : null,
-      replannedTraces: [...profileTraceIds].filter((traceId) => profileRoutes.filter((event) => event.traceId === traceId).length > 1).length,
+      replannedTraces: [...profileTraceIds].filter((traceId) => (routeCountByTrace.get(traceId) ?? 0) > 1).length,
       closureReminderEvents: profileReminderEvents.length,
       closureReminderRate: rate(new Set(profileReminderEvents.map((event) => event.traceId)).size, profileTraceIds.size),
       averageReminderIdleMs: reminderIdleValues.length > 0
@@ -2889,8 +2897,8 @@ function summary(days: number, scope: MssrObservatoryScope) {
   const canonicalBucketByTrace = new Map<string, ReasoningEffortBucket>();
   const canonicalRouteByTrace = new Map<string, MssrStoredEvent>();
   for (const traceId of traceIdsWithRoutes) {
-    const traceRoutes = routes.filter((route) => route.traceId === traceId);
-    const lastRoute = traceRoutes[traceRoutes.length - 1];
+    const lastRoute = lastRouteByTrace.get(traceId);
+    if (!lastRoute) continue;
     const host = hostIdentityByTrace.get(traceId);
     const explicitProfile = lastRoute.details.agentProfile && typeof lastRoute.details.agentProfile === "object"
       ? lastRoute.details.agentProfile as JsonRecord

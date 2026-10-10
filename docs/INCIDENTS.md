@@ -19,6 +19,24 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-10-10 — Candidate observability reads intermittently exceeded execution window
+
+**Estado:** No resuelto como causa; las rutas pasaron las repeticiones y el gate integral posterior.
+
+**Capa/owner:** Child read-only de observabilidad HTTP (`src/http.ts`, `src/dashboard-mssr-worker.ts`) y agregaciones MSSR/métricas sobre SQLite.
+
+**Síntoma observable:** En dos smoke manuales contra el candidato activo 0.6.165, un resumen MSSR y después una lectura de métricas `scope=all` devolvieron HTTP 500. `/status` mostró cada petición aceptada por el read worker, con `pendingCount=1`; `/readyz` siguió disponible. El worker fue detenido al vencer el timeout de ejecución. No se conservó el body HTTP exacto de esos dos primeros fallos.
+
+**Reproducción/evidencia:** En el mismo runtime y base real, las llamadas aisladas posteriores devolvieron HTTP 200: resumen MSSR activo en 2,26 s (15.438 eventos, 1.253 trazas) y métricas `all` en 4,40 s (209.815 llamadas). El smoke HTTP dentro de `scripts/verify-all.ps1` también pasó en 10,1 s y el gate terminó con `failedRequired=0`. La regresión aislada de liveness con 30.000 eventos y 30.000 tool calls mantuvo `/readyz` por debajo de 34,37 ms en concurrencia y registró cero stalls.
+
+**Causa:** No resuelta. Las llamadas aisladas y el gate integral contradicen una lentitud determinista de esas agregaciones; no demuestran por qué dos requests previos tardaron más que el límite.
+
+**Corrección/cobertura:** 0.6.165 distingue aceptación de cola y ejecución, usa 5 minutos para esperar aceptación y 120 segundos para trabajo aceptado, separa snapshot y read workers y expone diagnóstico acotado en `/status`. `verify-all` completo pasó. No se atribuyen los dos 500 a la corrección del timeout.
+
+**Seguimiento:** Si reaparece, capturar body/status exacto y transición de pending/accepted del worker en el momento del fallo; conservar una regresión con las mismas condiciones de carga y revisar si se trata de lock, cola o ejecución antes de cambiar los límites.
+
+---
+
 ## 2026-10-08 — Controlled restart request used BridgeCodeRoot instead of ProjectRoot
 
 **Estado:** Resuelto durante la activación de Bridge 0.6.162; no hubo interrupción del servicio por el primer pedido.

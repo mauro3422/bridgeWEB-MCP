@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 type UnknownRecord = Record<string, unknown>;
@@ -316,10 +317,21 @@ export async function loadContextInventoryCacheState(filePath: string): Promise<
   }
 }
 
-export async function persistContextInventoryCacheState(filePath: string, state: ContextInventoryCacheState): Promise<void> {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.${process.pid}.tmp`;
-  const value = { ...state, savedAt: new Date().toISOString() };
-  await writeFile(tempPath, JSON.stringify(value), "utf8");
-  await rename(tempPath, filePath);
+let contextInventoryCacheWriteTail: Promise<void> = Promise.resolve();
+
+export function persistContextInventoryCacheState(filePath: string, state: ContextInventoryCacheState): Promise<void> {
+  const write = contextInventoryCacheWriteTail.then(async () => {
+    await mkdir(path.dirname(filePath), { recursive: true });
+    const tempPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+    const value = { ...state, savedAt: new Date().toISOString() };
+    try {
+      await writeFile(tempPath, JSON.stringify(value), "utf8");
+      await rename(tempPath, filePath);
+    } catch (error) {
+      await rm(tempPath, { force: true }).catch(() => undefined);
+      throw error;
+    }
+  });
+  contextInventoryCacheWriteTail = write.catch(() => undefined);
+  return write;
 }

@@ -12,12 +12,20 @@ import {
   type ContextInventoryCacheState,
 } from "./context-inventory-cache.js";
 import { compactMssrSummaryForDashboard } from "./dashboard-snapshot.js";
-import { getMetricsDashboardSnapshot, getMetricsErrors, getMetricsTimeline, getRecentMetrics } from "./metrics.js";
+import {
+  getMetricsDashboardSnapshot,
+  getMetricsErrors,
+  getMetricsOverview,
+  getMetricsSummary,
+  getMetricsTimeline,
+  getRecentMetrics,
+} from "./metrics.js";
 import { queryMssrObservatory } from "./mssr-observatory.js";
+import type { ToolAuditView } from "./tool-audit.js";
 import { getSkillHealthReport } from "./skill-health.js";
 import { getProjectHealthReport } from "./project-health.js";
 import { getRuntimeHealthReport } from "./runtime-health.js";
-import { getDefaultToolCatalog } from "./tool-registry.js";
+import { getDefaultToolAudit, getDefaultToolCatalog } from "./tool-registry.js";
 
 const CONTEXT_INVENTORY_STATE_PATH = path.resolve(
   process.env.BRIDGE_MCP_CONTEXT_INVENTORY_STATE
@@ -109,6 +117,7 @@ async function buildSnapshot() {
     recent: getRecentMetrics(20, "active"),
     errors: getMetricsErrors(20, "active"),
     timeline: getMetricsTimeline(500, "active"),
+    toolAudit: getDefaultToolAudit({ view: "all", scope: "active", days: 30, limit: 200 }),
     mssr: compactMssrSummaryForDashboard(mssrSummary),
     skillHealth,
     projectHealth,
@@ -127,9 +136,42 @@ async function buildSnapshot() {
   };
 }
 
-async function handleRequest(requestId: string | null) {
+async function handleRequest(
+  requestId: string | null,
+  type: "snapshot" | "mssr-summary" | "tool-audit" | "metrics-api" = "snapshot",
+  args: {
+    days?: number;
+    scope?: "active" | "all";
+    view?: ToolAuditView;
+    toolName?: string;
+    limit?: number;
+    metricsKind?: "overview" | "summary" | "recent" | "errors" | "timeline";
+  } = {},
+) {
   try {
-    const value = await buildSnapshot();
+    const value = type === "mssr-summary"
+      ? queryMssrObservatory({ kind: "summary", days: args.days, scope: args.scope }) as Record<string, unknown>
+      : type === "tool-audit"
+        ? getDefaultToolAudit({
+            view: args.view ?? "all",
+            ...(args.toolName ? { toolName: args.toolName } : {}),
+            scope: args.scope ?? "active",
+            days: args.days ?? 30,
+            limit: args.limit ?? 127,
+          }) as Record<string, unknown>
+        : type === "metrics-api"
+          ? args.metricsKind === "overview"
+            ? getMetricsOverview(args.scope ?? "active") as Record<string, unknown>
+            : args.metricsKind === "summary"
+              ? getMetricsSummary(args.limit ?? 50, args.scope ?? "active") as Record<string, unknown>
+              : args.metricsKind === "recent"
+                ? getRecentMetrics(args.limit ?? 25, args.scope ?? "active") as Record<string, unknown>
+                : args.metricsKind === "errors"
+                  ? getMetricsErrors(args.limit ?? 25, args.scope ?? "active") as Record<string, unknown>
+                  : args.metricsKind === "timeline"
+                    ? getMetricsTimeline(args.limit ?? 500, args.scope ?? "active") as Record<string, unknown>
+                    : (() => { throw new Error("metricsKind must identify a supported metrics read endpoint."); })()
+        : await buildSnapshot();
     return { ok: true, requestId, value };
   } catch (error) {
     return { ok: false, requestId, error: error instanceof Error ? error.message : String(error) };
@@ -141,17 +183,39 @@ if (parentPort) {
   workerPort.on("message", (message: unknown) => {
     const payload = message && typeof message === "object" ? message as Record<string, unknown> : {};
     const requestId = typeof payload.requestId === "string" ? payload.requestId : null;
-    void handleRequest(requestId).then((result) => workerPort.postMessage(result));
+    const type = payload.type === "mssr-summary" || payload.type === "tool-audit" || payload.type === "metrics-api" ? payload.type : "snapshot";
+    const scope = payload.scope === "all" ? "all" : "active";
+    const days = typeof payload.days === "number" && Number.isFinite(payload.days) ? payload.days : undefined;
+    const view = typeof payload.view === "string" ? payload.view as ToolAuditView : undefined;
+    const toolName = typeof payload.toolName === "string" ? payload.toolName : undefined;
+    const limit = typeof payload.limit === "number" && Number.isFinite(payload.limit) ? payload.limit : undefined;
+    const metricsKind = payload.metricsKind === "overview" || payload.metricsKind === "summary" || payload.metricsKind === "recent" || payload.metricsKind === "errors" || payload.metricsKind === "timeline"
+      ? payload.metricsKind
+      : undefined;
+    workerPort.postMessage({ type: "dashboard-worker-request-accepted", requestId });
+    void handleRequest(requestId, type, { days, scope, view, toolName, limit, metricsKind }).then((result) => workerPort.postMessage(result));
   });
+  workerPort.postMessage({ type: "dashboard-worker-ready" });
 } else if (typeof process.send === "function") {
   process.on("message", (message: unknown) => {
     const payload = message && typeof message === "object" ? message as Record<string, unknown> : {};
-    if (payload.type !== "snapshot") return;
+    if (payload.type !== "snapshot" && payload.type !== "mssr-summary" && payload.type !== "tool-audit" && payload.type !== "metrics-api") return;
     const requestId = typeof payload.requestId === "string" ? payload.requestId : null;
-    void handleRequest(requestId).then((result) => {
+    const type = payload.type === "mssr-summary" || payload.type === "tool-audit" || payload.type === "metrics-api" ? payload.type : "snapshot";
+    const scope = payload.scope === "all" ? "all" : "active";
+    const days = typeof payload.days === "number" && Number.isFinite(payload.days) ? payload.days : undefined;
+    const view = typeof payload.view === "string" ? payload.view as ToolAuditView : undefined;
+    const toolName = typeof payload.toolName === "string" ? payload.toolName : undefined;
+    const limit = typeof payload.limit === "number" && Number.isFinite(payload.limit) ? payload.limit : undefined;
+    const metricsKind = payload.metricsKind === "overview" || payload.metricsKind === "summary" || payload.metricsKind === "recent" || payload.metricsKind === "errors" || payload.metricsKind === "timeline"
+      ? payload.metricsKind
+      : undefined;
+    if (typeof process.send === "function") process.send({ type: "dashboard-worker-request-accepted", requestId });
+    void handleRequest(requestId, type, { days, scope, view, toolName, limit, metricsKind }).then((result) => {
       if (process.connected && typeof process.send === "function") process.send(result);
     });
   });
+  process.send({ type: "dashboard-worker-ready" });
   process.on("disconnect", () => process.exit(0));
 } else {
   void handleRequest(null).then((result) => {

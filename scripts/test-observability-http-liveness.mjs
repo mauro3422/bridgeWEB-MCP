@@ -12,6 +12,14 @@ const metricsDir = path.join(temp, "data");
 const logDir = path.join(temp, "logs");
 const sqlitePath = path.join(metricsDir, "metrics.sqlite");
 const tokenPath = path.join(temp, "mssr-ingest.token");
+const snapshotPath = path.join(metricsDir, "dashboard-snapshot-cache.json");
+await fs.mkdir(metricsDir, { recursive: true });
+await fs.writeFile(snapshotPath, JSON.stringify({
+  schemaVersion: 1,
+  savedAt: new Date().toISOString(),
+  buildMs: 1,
+  value: { restoredFixture: true, mssr: { restoredFixture: true } },
+}));
 
 const port = await new Promise((resolve, reject) => {
   const server = net.createServer();
@@ -33,6 +41,7 @@ const child = spawn(process.execPath, [path.join(root, "dist", "http.js")], {
     BRIDGE_MCP_METRICS_DIR: metricsDir,
     BRIDGE_MCP_LOG_DIR: logDir,
     BRIDGE_MCP_METRICS_SQLITE: sqlitePath,
+    BRIDGE_MCP_DASHBOARD_SNAPSHOT_STATE: snapshotPath,
     BRIDGE_MCP_MSSR_EVENTS_JSONL: path.join(logDir, "mssr-events.jsonl"),
     BRIDGE_MCP_MSSR_INGEST_TOKEN_FILE: tokenPath,
     BRIDGE_MCP_SKILL_HEALTH_PATH: path.join(metricsDir, "skill-health.json"),
@@ -43,7 +52,7 @@ const child = spawn(process.execPath, [path.join(root, "dist", "http.js")], {
     BRIDGE_MCP_PROJECT_SITUATION_ROOT: root,
     BRIDGE_MCP_METRICS_WAL_CHECKPOINT_DELAY_MS: "200",
     BRIDGE_MCP_METRICS_WAL_CHECKPOINT_BUSY_MS: "25",
-    BRIDGE_MCP_TEST_OBSERVABILITY_STORAGE_INIT_DELAY_MS: "5000",
+    BRIDGE_MCP_TEST_OBSERVABILITY_STORAGE_INIT_DELAY_MS: "10000",
   },
 });
 let stderr = "";
@@ -173,7 +182,7 @@ let lockDb;
 try {
   await waitReady();
   const readyStartupMs = performance.now() - serverSpawnedAt;
-  assert.ok(readyStartupMs < 3_000, `HTTP readiness waited for delayed observability initialization: ${readyStartupMs.toFixed(2)} ms`);
+  assert.ok(readyStartupMs < 5_000, `HTTP readiness waited for delayed observability initialization: ${readyStartupMs.toFixed(2)} ms`);
   const token = (await fs.readFile(tokenPath, "utf8")).trim();
   assert.ok(token.length > 0, "MSSR ingest token missing");
 
@@ -231,14 +240,132 @@ try {
   assert.deepEqual(livenessProbe.failures, [], `readyz failed while storage requests waited: ${JSON.stringify(livenessProbe.failures)}`);
   assert.ok(livenessProbe.samples.length >= 20, `expected repeated bootstrap readyz samples, got ${livenessProbe.samples.length}`);
   for (const result of coldStorageResults) {
+    if (result.name === "cold dashboard snapshot") continue;
     assert.ok(result.elapsedMs >= 1_000, `${result.name} bypassed the delayed SQLite bootstrap (${result.elapsedMs.toFixed(2)} ms)`);
   }
   const coldDashboard = coldStorageResults.find(({ name }) => name === "cold dashboard snapshot").value;
   const coldDashboardMs = coldStorageResults.find(({ name }) => name === "cold dashboard snapshot").elapsedMs;
   assert.ok(coldDashboard.mssr && typeof coldDashboard.mssr === "object", "cold dashboard snapshot omitted MSSR summary");
+  assert.equal(coldDashboard.cache?.stale, true, "restored dashboard cache should be served stale during storage bootstrap");
+  assert.equal(coldDashboard.cache?.refreshing, true, "restored dashboard cache should refresh in the background");
+  assert.ok(coldDashboardMs < 1_000, `restored dashboard cache waited for storage bootstrap: ${coldDashboardMs.toFixed(2)} ms`);
   const baseline = await json("/status");
   assert.equal(typeof baseline.runtimeBootId, "string");
   assert.equal(baseline.observabilityStorage?.state, "ready", "observability storage was not ready after bootstrap-gated requests completed");
+  assert.equal(baseline.dashboardWorkers?.read?.ready, true, "read worker should acknowledge readiness after first dashboard read");
+  assert.equal(baseline.dashboardWorkers?.read?.pendingCount, 0, "read worker should not retain completed bootstrap requests");
+  assert.equal(baseline.dashboardWorkers?.snapshot?.ready, true, "snapshot worker should acknowledge readiness after cold snapshot");
+  assert.equal(baseline.dashboardWorkers?.snapshot?.pendingCount, 0, "snapshot worker should not retain completed bootstrap requests");
+
+  // MSSR summary can decode and fold a large retained window. It must run in
+  // the isolated dashboard process so this work cannot stall HTTP readiness.
+  const seedDb = new DatabaseSync(sqlitePath);
+  const seedEvent = seedDb.prepare(`
+    INSERT INTO mssr_events (
+      id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
+      skill_name, required, ok, task_hash, details_json, server_name,
+      server_version, pid, hostname, platform
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const seedAt = new Date().toISOString();
+  seedDb.exec("BEGIN IMMEDIATE;");
+  for (let index = 0; index < 30_000; index += 1) {
+    seedEvent.run(
+      `liveness-seed-${index}`, seedAt, `liveness-seed-trace-${index}`,
+      "synthetic_liveness_seed", "other", null, null, null, null, null, null,
+      "{}", "bridge-test", "0.0.0-test", 1, "localhost", process.platform,
+    );
+  }
+  seedDb.exec("COMMIT;");
+
+  const summaryProbePromise = probeReady(2_000);
+  const summaryStartedAt = performance.now();
+  const largeMssrSummary = await json("/api/mssr/summary?scope=all&days=30", 15_000);
+  const summaryElapsedMs = performance.now() - summaryStartedAt;
+  const summaryProbe = await summaryProbePromise;
+  assert.equal(largeMssrSummary.scope, "all", "isolated MSSR summary lost the requested scope");
+  assert.equal(largeMssrSummary.days, 30, "isolated MSSR summary lost the requested window");
+  assert.deepEqual(summaryProbe.failures, [], `readyz stalled while MSSR summary processed a large window: ${JSON.stringify(summaryProbe.failures)}`);
+  assert.ok(summaryProbe.samples.length >= 20, `expected repeated readyz samples during MSSR summary, got ${summaryProbe.samples.length}`);
+  assert.ok(Math.max(...summaryProbe.samples) < 750, `readyz latency exceeded the MSSR summary isolation budget: ${Math.max(...summaryProbe.samples).toFixed(2)} ms`);
+  console.log("MSSR summary isolated from HTTP event loop PASS", {
+    seedEvents: 30_000,
+    summaryElapsedMs: Math.round(summaryElapsedMs * 100) / 100,
+    readySamples: summaryProbe.samples.length,
+    maxReadyMs: Math.round(Math.max(...summaryProbe.samples) * 100) / 100,
+  });
+
+  const seedToolCall = seedDb.prepare(`
+    INSERT INTO tool_calls (
+      id, started_at, ended_at, duration_ms, tool, ok, output_chars,
+      server_name, server_version, pid, hostname, platform, cwd,
+      session_key, project, result_ok
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  seedDb.exec("BEGIN IMMEDIATE;");
+  for (let index = 0; index < 30_000; index += 1) {
+    seedToolCall.run(
+      `liveness-audit-seed-${index}`, seedAt, seedAt, 1, "liveness_seed_tool", 1, 0,
+      "bridge-test", "0.0.0-test", 1, "localhost", process.platform, root,
+      `liveness-session-${index % 8}`, `liveness-project-${index % 3}`, 1,
+    );
+  }
+  seedDb.exec("COMMIT;");
+  seedDb.close();
+
+  const auditProbePromise = probeReady(2_000);
+  const auditStartedAt = performance.now();
+  const largeToolAudit = await json("/api/tools/audit?view=all&scope=all&days=30&limit=200", 15_000);
+  const auditElapsedMs = performance.now() - auditStartedAt;
+  const auditProbe = await auditProbePromise;
+  assert.equal(largeToolAudit.scope, "all", "isolated tool audit lost the requested scope");
+  assert.equal(largeToolAudit.summary?.registeredTools, 188, "isolated tool audit lost the registered catalog");
+  assert.deepEqual(auditProbe.failures, [], `readyz stalled while tool audit aggregated a large window: ${JSON.stringify(auditProbe.failures)}`);
+  assert.ok(auditProbe.samples.length >= 20, `expected repeated readyz samples during tool audit, got ${auditProbe.samples.length}`);
+  assert.ok(Math.max(...auditProbe.samples) < 750, `readyz latency exceeded the tool-audit isolation budget: ${Math.max(...auditProbe.samples).toFixed(2)} ms`);
+  console.log("tool audit isolated from HTTP event loop PASS", {
+    seedCalls: 30_000,
+    auditElapsedMs: Math.round(auditElapsedMs * 100) / 100,
+    readySamples: auditProbe.samples.length,
+    maxReadyMs: Math.round(Math.max(...auditProbe.samples) * 100) / 100,
+  });
+
+  // Metrics aggregates also read and group the retained tool-call history.
+  // Keep them off the HTTP event loop while exercising the full retained set.
+  const metricsProbePromise = probeReady(3_000);
+  const metricsStartedAt = performance.now();
+  const metricsReads = await Promise.all([
+    json("/api/dashboard/snapshot", 15_000),
+    json("/api/mssr/summary?scope=all&days=30", 15_000),
+    json("/api/metrics/overview?scope=all", 15_000),
+    json("/api/metrics/summary?scope=all&limit=200", 15_000),
+    json("/api/metrics/recent?scope=all&limit=200", 15_000),
+    json("/api/metrics/errors?scope=all&limit=200", 15_000),
+    json("/api/metrics/timeline?scope=all&limit=2000", 15_000),
+  ]);
+  const metricsElapsedMs = performance.now() - metricsStartedAt;
+  const metricsProbe = await metricsProbePromise;
+  const [concurrentDashboardSnapshot, concurrentMssrSummary, largeOverview, largeMetricsSummary, largeRecent, largeErrors, largeTimeline] = metricsReads;
+  assert.ok(concurrentDashboardSnapshot.mssr && typeof concurrentDashboardSnapshot.mssr === "object", "concurrent dashboard snapshot omitted MSSR summary");
+  assert.equal(concurrentMssrSummary.scope, "all", "concurrent MSSR summary lost the requested scope");
+  assert.equal(largeOverview.scope, "all", "metrics overview lost the requested scope");
+  assert.ok(largeOverview.totals?.calls >= 30_000, "metrics overview omitted the retained tool-call workload");
+  assert.equal(largeMetricsSummary.scope, "all", "metrics summary lost the requested scope");
+  assert.equal(largeRecent.scope, "all", "recent metrics lost the requested scope");
+  assert.equal(largeErrors.scope, "all", "metrics errors lost the requested scope");
+  assert.equal(largeTimeline.scope, "all", "metrics timeline lost the requested scope");
+  for (const result of metricsReads.slice(2)) {
+    assert.equal(result.runtime?.pid, baseline.pid, "worker metrics response must preserve the HTTP runtime identity");
+  }
+  assert.deepEqual(metricsProbe.failures, [], `readyz stalled while metrics reads aggregated retained calls: ${JSON.stringify(metricsProbe.failures)}`);
+  assert.ok(metricsProbe.samples.length >= 20, `expected repeated readyz samples during metrics reads, got ${metricsProbe.samples.length}`);
+  assert.ok(Math.max(...metricsProbe.samples) < 750, `readyz latency exceeded metrics aggregation isolation budget: ${Math.max(...metricsProbe.samples).toFixed(2)} ms`);
+  console.log("dashboard snapshot isolated from concurrent read APIs PASS", {
+    seedCalls: 30_000,
+    elapsedMs: Math.round(metricsElapsedMs * 100) / 100,
+    readySamples: metricsProbe.samples.length,
+    maxReadyMs: Math.round(Math.max(...metricsProbe.samples) * 100) / 100,
+  });
 
   lockDb = new DatabaseSync(sqlitePath);
   lockDb.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 1000;");

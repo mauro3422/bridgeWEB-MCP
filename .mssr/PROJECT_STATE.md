@@ -1,5 +1,15 @@
 # Bridge project state
 
+## Current release
+
+Candidate branch `codex/bridge-mssr-0.2.112-query-variants-20261010` builds on the 0.6.164 Jev context-split adapter and 0.6.163/MSSR 0.2.112 Librarian query-variants line. It routes retained-history MSSR, tool-audit and metrics reads to a read-only child, keeps snapshot builds in a separate child, serves a persisted snapshot while storage starts, waits for worker IPC readiness, and separates request queue acceptance (5-minute limit) from accepted execution (120-second limit). `/status` exposes bounded worker health and pending request types. Context-inventory writes use serialized UUID temporary files.
+
+**Active runtime readback:** Bridge 0.6.165, PID 74424, boot `fc9df419-0f50-4222-bc80-e053ed2e932e`, port 3001, `ProjectRoot=D:\Dev\bridge-mcp`; startup watchdog PID 54004 owns the candidate code root. `/readyz` is ready, storage is ready, the live catalog reports 188 tools, and the existing tunnel profile/port 8081 was not restarted.
+
+**Verification:** `scripts/verify-all.ps1 -ProjectRoot D:\Dev\bridge-mcp-mssr-0.2.112-query-variants -RuntimeDataRoot D:\Dev\bridge-mcp -ExpectedServerVersion 0.6.165` exited 0 with `failedRequired=0`. It passed typecheck/build, full HTTP smoke, 209.57-second regression suite, dual-era MCP, routing latency, WAL maintenance, 30k liveness, skill routing, generated tool docs, watchdog restart/status, metrics status and tools/list. Live smoke saw 28,459 all-scope MSSR events, 4,872 routes, 360 outcomes, 188 registered tools, 44,857 active / 209,815 total calls and 20 profiles. Isolated liveness reached max `/readyz` 34.37 ms under concurrency and zero event-loop stalls.
+
+Two earlier manual HTTP smokes returned 500 on accepted read-worker requests; later isolated requests and the full gate passed. The initial delays have no demonstrated cause, so this remains an intermittent unresolved runtime observation; details and follow-up are in [Bridge incidents](../../docs/INCIDENTS.md) and [0.6.165](../../changelogs/0.6.165.md). The direct MSSR connector may still require host refresh if its input schema does not match the live Bridge registry.
+
 ## 0.6.164 source candidate — Jev context-split planner adapter (2026-10-10)
 
 The candidate adds `mssr_project_context_ref_split_plan`, a Bridge adapter for the planner already shipped in MSSR 0.2.112. It resolves the project through Bridge path policy, uses the Windows Credential Manager Jev provider, and persists only the advisory plan plus observe-only semantic evidence in user-local MSSR state. It does not change project Markdown or manifests; the apply operation remains unavailable through Bridge. `npm run check`, `npm run build`, and the focused adapter regression passed. This is source-only until the controlled restart and live `tools/list` schema/readback confirm version 0.6.164 and 188 tools.
@@ -8,9 +18,9 @@ The candidate adds `mssr_project_context_ref_split_plan`, a Bridge adapter for t
 
 Candidate branch `codex/bridge-mssr-0.2.112-query-variants-20261010` is based on `origin/main` 0.6.162 and vendors exact MSSR 0.2.112 bytes (1,121,628 bytes; SHA-256 `78a49828f9f27ebb3a3966b1a163ad9e24f7a3a8c38f1a8a4633d985106fd088`). It adds an optional, bounded host-supplied `queryVariants` field to the strict Librarian search contract; the primary query remains the first ranking group and per-query lexical scores are not confidence. The complete isolated `scripts/verify-all.ps1` gate exited 0 with `failedRequired=0`, including the full 299-second regression suite, live candidate HTTP smoke, routing latency, WAL, liveness, routing and docs checks. Its structured result receipt is outside Git at `D:\MSSR-benchmark-artifacts\bridge-0.6.163-mssr-0.2.112-verify-20261010\verify-all-receipt.json` (SHA-256 `dc109740c2734613b5476afbb18d4060c5953eaab07a144a6114241e8c557005`). **Activated and read back 2026-10-10 06:23 UTC:** Bridge `/status` reports 0.6.163 and boot `502d5b26-269a-45dd-994c-a6c5c1e4a025`; `/readyz`, Bridge health and tunnel health are green. HTTP PID 67524 runs this candidate's `dist/http.js`, while `ProjectRoot=D:\Dev\bridge-mcp` and the existing tunnel PID 23336 was adopted without restart. The live registry exposes search schema `queryVariants` (hash `6bc987b8d512e7d0`). A real MSSR sidecar search → Jev 1.13.0 selection → exact fetch/evidence-pack smoke passed; outcome and limitations are recorded in MSSR `.mssr/PROJECT_STATE.md`. The separately attached direct MSSR connector still exposes the older input schema and is a host-side refresh/reconnect follow-up.
 
-## Current release
+## Prior release baseline
 
-Bridge 0.6.163 / MSSR 0.2.112 is active in the live HTTP Bridge (boot `502d5b26-269a-45dd-994c-a6c5c1e4a025`, port 3001) with 187 runtime tools; tunnel 8081 is ready. The live Bridge registry is current, while the direct MSSR connector schema in this chat is stale. The prior 0.6.162 deployment history and rollback evidence remain in [changelogs/0.6.162.md](../changelogs/0.6.162.md); older handoffs remain archived under `docs/archive/`.
+Bridge 0.6.163 / MSSR 0.2.112 was the active baseline before the 0.6.165 candidate. Its Librarian/Jev behavior and exact package provenance remain recorded below and in [changelogs/0.6.163.md](../changelogs/0.6.163.md). Earlier 0.6.162 rollback evidence remains in [changelogs/0.6.162.md](../changelogs/0.6.162.md); older handoffs remain archived under `docs/archive/`.
 
 ## Liveness and observability
 
@@ -30,4 +40,4 @@ Bridge project control is canonical under `.mssr/`. The archived September knowl
 
 ## Next performance/control work
 
-Refresh/reopen the direct MSSR connector so it accepts the active Bridge 0.6.163/MSSR 0.2.112 schema, then repeat the real-document integration through that connector. Keep independent source-held-out labels separate; the one-candidate live Jev smoke is integration evidence only and all provider scores remain uncalibrated.
+If the intermittent read-worker execution timeout recurs, capture the HTTP error body and the exact worker state transition before changing thresholds. Separately, refresh/reopen the direct MSSR connector if it still exposes a schema older than the live Bridge 0.6.165/MSSR 0.2.112 registry, then repeat the real-document integration through that connector. Keep independent source-held-out labels separate; the one-candidate live Jev smoke is integration evidence only and all provider scores remain uncalibrated.
