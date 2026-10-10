@@ -616,6 +616,10 @@ export type MssrSemanticEvidenceToolModuleOptions = {
 
 const querySchema = z.object({
   query: z.string().trim().min(1).max(500),
+  queryVariants: z.array(z.string().trim().min(1).max(MSSR_LIBRARIAN_RETRIEVAL_LIMITS.maxQueryVariantChars))
+    .max(MSSR_LIBRARIAN_RETRIEVAL_LIMITS.maxQueryVariants)
+    .optional()
+    .describe("Optional alternate phrasings supplied explicitly by the host. The primary query ranks first; each variant is scored separately and scores are not confidence estimates."),
   maxResults: z.number().int().min(1).max(100).default(20),
   maxSnippetChars: z.number().int().min(40).max(240).default(160),
   metadata: z.record(z.string().regex(/^[A-Za-z][A-Za-z0-9_.-]{0,79}$/), z.union([z.string().max(240), z.number().finite(), z.boolean()])).optional().superRefine((value, ctx) => {
@@ -687,7 +691,7 @@ function createMssrSemanticEvidenceToolModule(options: MssrSemanticEvidenceToolM
           properties: {
             projectRoot: { type: "string", minLength: 1, maxLength: 4096 },
             sourceRefs: { type: "array", items: { type: "string", minLength: 1, maxLength: 1000 }, minItems: 1, maxItems: MAX_SOURCE_FILES, description: "Explicit project-relative .md paths. This tool does not crawl directories." },
-            query: { type: "object", properties: { query: { type: "string", minLength: 1, maxLength: 500 }, maxResults: { type: "integer", minimum: 1, maximum: 100, default: 20 }, maxSnippetChars: { type: "integer", minimum: 40, maximum: 240, default: 160 }, metadata: { type: "object", maxProperties: 64, additionalProperties: { oneOf: [{ type: "string", maxLength: 240 }, { type: "number" }, { type: "boolean" }] }, description: "Optional typed metadata filters; project-context selector filters apply only when metadataMode opts in." } }, required: ["query"], additionalProperties: false },
+            query: { type: "object", properties: { query: { type: "string", minLength: 1, maxLength: MSSR_LIBRARIAN_RETRIEVAL_LIMITS.queryChars, description: "Primary host-authored query. Results matching it rank before alternate phrasings." }, queryVariants: { type: "array", items: { type: "string", minLength: 1, maxLength: MSSR_LIBRARIAN_RETRIEVAL_LIMITS.maxQueryVariantChars }, maxItems: MSSR_LIBRARIAN_RETRIEVAL_LIMITS.maxQueryVariants, description: "Optional host-supplied alternate phrasings, such as translations. No automatic translation is performed. Each query is scored separately; scores are lexical relevance signals, not confidence estimates. MSSR validates distinct normalized terms and the 2,000-character combined variant limit." }, maxResults: { type: "integer", minimum: 1, maximum: 100, default: 20 }, maxSnippetChars: { type: "integer", minimum: 40, maximum: 240, default: 160 }, metadata: { type: "object", maxProperties: 64, additionalProperties: { oneOf: [{ type: "string", maxLength: 240 }, { type: "number" }, { type: "boolean" }] }, description: "Optional typed metadata filters; project-context selector filters apply only when metadataMode opts in." } }, required: ["query"], additionalProperties: false },
             metadataMode: { type: "string", enum: ["off", MSSR_PROJECT_CONTEXT_LIBRARIAN_METADATA_MODE, MSSR_PROJECT_CONTEXT_LIBRARIAN_SIDECAR_METADATA_MODE], default: "off", description: "Opt in to project-context metadata. Use project-context-single-section for the legacy selector path or project-context-librarian-sidecar for exact declared librarian headings and fingerprint validation. Default off preserves lexical-only behavior." },
           },
           required: ["projectRoot", "sourceRefs", "query"],

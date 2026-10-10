@@ -141,6 +141,20 @@ try {
   assert.ok(selected.results.length >= 1);
   const preserveHandle = (selected.results.find((item) => item.handle.rangeKind === "block") ?? selected.results[0]).handle;
 
+  const variantSearch = await registry.call("mssr_librarian_search", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    query: { query: "preservar registros operativos", queryVariants: ["preserve operational records"], maxResults: 10 },
+  });
+  assert.ok(variantSearch.results.length >= 1, "host-supplied alternate phrasing should retrieve matching evidence");
+  assert.equal(variantSearch.results[0].scoreQueryIndex, 1, "the primary query ranks first; the matching alternate query remains explicitly identified");
+  assert.deepEqual(variantSearch.results[0].queryMatches.map((match) => match.queryIndex), [1]);
+  await assert.rejects(registry.call("mssr_librarian_search", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    query: { query: "preserve operational records", queryVariants: Array.from({ length: 5 }, (_, index) => `alternate phrasing ${index}`) },
+  }), /queryVariants|variant/i, "Bridge must reject more variants than MSSR supports");
+
   const exact = await registry.call("mssr_librarian_fetch", { projectRoot: root, handle: preserveHandle });
   assert.equal(exact.advisoryOnly, true);
   assert.match(exact.text, /Keep benchmark results/);
@@ -722,6 +736,9 @@ try {
   assert.equal("metadataMode" in selectorSchema.inputSchema.properties, false, "metadata retrieval is an explicit prior search step");
   const searchSchema = defaultRegistry.tools.find((tool) => tool.name === "mssr_librarian_search");
   assert.deepEqual(searchSchema.inputSchema.properties.metadataMode.enum, ["off", "project-context-single-section", "project-context-librarian-sidecar"]);
+  assert.equal(searchSchema.inputSchema.properties.query.properties.queryVariants.maxItems, 4);
+  assert.equal(searchSchema.inputSchema.properties.query.properties.queryVariants.items.maxLength, 500);
+  assert.equal(searchSchema.inputSchema.properties.query.additionalProperties, false);
   const evidencePackSchema = defaultRegistry.tools.find((tool) => tool.name === "mssr_librarian_evidence_pack");
   assert.equal(evidencePackSchema.inputSchema.properties.handles.maxItems, 16);
   assert.ok(defaultRegistry.riskSummary.readOnly.includes("mssr_librarian_evidence_pack"));

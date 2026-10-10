@@ -1227,6 +1227,26 @@
       "required": false,
       "priority": 76,
       "maxChars": 2600
+    },
+    {
+      "id": "bridge-state-history-2026-09",
+      "kind": "state",
+      "description": "Compact index into archived Bridge project-state history from September 2026; not current runtime state.",
+      "source": {
+        "path": ".mssr/knowledge/operations/bridge-state-history-2026-09.md",
+        "sections": ["## Historical Bridge project-state index — September 2026"]
+      },
+      "topic": "state",
+      "area": "project-history",
+      "stages": ["resume"],
+      "domains": ["coding", "filesystem", "agent-orchestration"],
+      "actions": ["recover", "review", "analyze"],
+      "artifacts": ["project", "repository"],
+      "needs": ["history-recovery"],
+      "signals": ["recovery-needed", "conflicting-evidence"],
+      "required": false,
+      "priority": 25,
+      "maxChars": 1800
     }
   ]
 }

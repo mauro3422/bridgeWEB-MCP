@@ -286,6 +286,8 @@ try {
   const librarianSearchTools = list.result.tools.filter((tool) => tool.name === "mssr_librarian_search");
   assert.equal(librarianSearchTools.length, 1, "HTTP tools/list must expose one existing Librarian search tool, not a duplicate sidecar tool.");
   assert.deepEqual(librarianSearchTools[0].inputSchema?.properties?.metadataMode?.enum, ["off", "project-context-single-section", "project-context-librarian-sidecar"]);
+  assert.equal(librarianSearchTools[0].inputSchema?.properties?.query?.properties?.queryVariants?.maxItems, 4, "HTTP tools/list must expose the bounded host-supplied query variants on the existing Librarian search tool.");
+  assert.equal(librarianSearchTools[0].inputSchema?.properties?.query?.properties?.queryVariants?.items?.maxLength, 500);
 
   const imageImportTool = list.result.tools.find((tool) => tool.name === "image_asset_import_files");
   assert.ok(imageImportTool, "HTTP tools/list must publish image_asset_import_files.");
