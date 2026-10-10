@@ -2079,3 +2079,17 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Observación acotada:** El runtime registró un stall de 3.383 ms durante los primeros tres segundos del boot. La métrica seguía igual al leerla a los 33 segundos; no se observó recurrencia ni se determinó causa. No se atribuye al cambio ni se modifica ningún umbral por esta observación aislada.
 
 **Prevención:** Antes de operaciones administradas, confirmar propietario, taskKey y traceId del proyecto que posee el runtime. Si el preflight bloquea, conservar procesos y request state; replanificar con una traza propietaria, nunca reintentar a ciegas.
+
+## 2026-10-10 — Primer restart de 0.6.167 apuntó al root equivocado
+
+**Estado:** Resuelto; Bridge 0.6.167 activo y verificado.
+
+**Capa / owner:** Lifecycle MSSR del host y rutas de request del watchdog HTTP administrado.
+
+**Síntoma y evidencia:** Dos solicitudes iniciales fueron detenidas por `mssr-lifecycle-preflight-required` antes de escribir archivos: la traza anterior no tenía una ruta que el gate reconociera. Se creó la traza propietaria Bridge `bridge-activation-0.6.167-20261010-01`, con `taskKey=bridge-activation-0.6.167-20261010`, y se cargó la fase `verify`. Una solicitud posterior con `cwd=D:\Dev\bridge-mcp-mssr-0.2.112-query-variants` quedó pendiente en ese checkout y no produjo ack. La inspección WMI mostró que el watchdog PID 54004 vigila `ProjectRoot=D:\Dev\bridge-mcp` y ejecuta código desde el candidato mediante `BridgeCodeRoot`. Bridge permaneció en 0.6.166 mientras la solicitud estaba en la raíz equivocada.
+
+**Causa demostrada:** `bridge_request_restart.cwd` selecciona el root donde se escribe `.bridge-restart-request`; no selecciona `BridgeCodeRoot`. Al pasar el checkout de código, el archivo se escribió fuera de la raíz que vigila el watchdog.
+
+**Corrección / readback:** Se mantuvo intacto el proceso y el túnel. Con `cwd` omitido, Bridge escribió la solicitud `b54d0f8d-4439-4e2f-b272-0abd1eed74e8` en `D:\Dev\bridge-mcp`; watchdog PID 54004 la reconoció como `restart-http`. Después se eliminó únicamente el request no consumido `6fdc3d19-2d89-4f42-ba76-350370bd614c` del checkout de código, verificando previamente su ID y root. `/status` confirmó Bridge 0.6.167, PID 85008, boot `d0d360a5-469f-4ddc-8414-67667e2d12d6`; `/readyz` y el túnel 8081 respondieron ready. La herramienta de salud reportó 188 tools y cero nuevos errores de transporte desde el baseline posterior al restart.
+
+**Prevención:** Mantener separados `ProjectRoot` y `BridgeCodeRoot`. Para el watchdog HTTP activo con datos en `D:\Dev\bridge-mcp`, omitir `cwd` en `bridge_request_restart` salvo que se haya verificado explícitamente otro `ProjectRoot`; el code root se mantiene en la configuración del watchdog. Validar ruta, request ID, ack y readback de versión antes de cerrar.

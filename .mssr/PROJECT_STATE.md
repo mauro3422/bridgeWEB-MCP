@@ -1,8 +1,10 @@
 # Bridge project state
 
-## 0.6.167 Librarian metadata filter schema candidate
+## 0.6.167 Librarian metadata filter schema — active
 
-This source candidate clarifies exact metadata field/value filters and the singular EvidenceAtom projection keys in the Bridge search schema and docs. Typecheck/build, MCP module and dual-era schema tests, tool documentation checks, and the full isolated regression suite passed. The active process remains 0.6.166 / MSSR 0.2.115 until a controlled watchdog restart and exact schema/readiness readback.
+This release clarifies exact metadata field/value filters and the singular EvidenceAtom projection keys in the Bridge search schema and docs. Typecheck/build, MCP module and dual-era schema tests, generated tool documentation checks, and the full isolated regression suite passed.
+
+**Active runtime readback (2026-10-10):** The managed watchdog request `b54d0f8d-4439-4e2f-b272-0abd1eed74e8` was acknowledged by watchdog PID 54004 on profile `bridge-local-http`. Bridge 0.6.167 / MSSR 0.2.115 is running from `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`, HTTP PID 85008, boot `d0d360a5-469f-4ddc-8414-67667e2d12d6`; its data root remains `D:\Dev\bridge-mcp`. `/readyz` returned 200/ready. The live catalog reports 188 tools. `mssr_librarian_search` schema hash `b931631885199014` exposes all eleven singular EvidenceAtom projection keys and maps sidecar `domains`/`actions` to query `domain`/`action`. The existing tunnel on 8081 remained healthy/ready and its post-restart baseline recorded zero new 502/no-status failures; it was not restarted.
 
 ## 0.6.166 Librarian evidence-pack integration candidate
 
@@ -20,11 +22,11 @@ The candidate adopts exact MSSR 0.2.115 bytes and adds the opt-in `dedupeContain
 
 Candidate branch `codex/bridge-mssr-0.2.112-query-variants-20261010` builds on the 0.6.164 Jev context-split adapter and 0.6.163/MSSR 0.2.112 Librarian query-variants line. It routes retained-history MSSR, tool-audit and metrics reads to a read-only child, keeps snapshot builds in a separate child, serves a persisted snapshot while storage starts, waits for worker IPC readiness, and separates request queue acceptance (5-minute limit) from accepted execution (120-second limit). `/status` exposes bounded worker health and pending request types. Context-inventory writes use serialized UUID temporary files.
 
-**Active runtime readback:** Bridge 0.6.166 / MSSR 0.2.115, PID 73136, boot `860eaa90-3aa0-4c29-a20f-eb0455e22569`, port 3001, `ProjectRoot=D:\Dev\bridge-mcp`; startup watchdog PID 54004 owns the candidate code root. `/readyz` and storage are ready. The live catalog reports 188 tools, including the opt-in range compaction schema; tunnel 8081 remains healthy and was not restarted.
+**Runtime lineage:** Bridge 0.6.166 / MSSR 0.2.115 (PID 73136, boot `860eaa90-3aa0-4c29-a20f-eb0455e22569`) was the prior active runtime. It was superseded by the 0.6.167 activation above; its verification and boot-window observation remain historical evidence.
 
 **Verification:** The 0.6.165 baseline passed `scripts/verify-all.ps1` with `failedRequired=0`, including typecheck/build, full HTTP smoke, the then-current regression suite, dual-era MCP, routing latency, WAL maintenance, 30k liveness, skill routing, generated tool docs, watchdog restart/status, metrics status and `tools/list`. For 0.6.166, `npm run check`, `npm run build`, full `npm run test:regressions`, `npm run test:mssr-semantic-evidence`, `npm run test:observability-http-liveness`, `npm run test:mcp-dual-era`, `npm run docs:tools:check`, and `git diff --check` passed before activation. Live `/readyz`, `/status`, tunnel health, and `tools/list` were read back after activation. Live smoke history at the 0.6.165 baseline saw 28,459 all-scope MSSR events, 4,872 routes, 360 outcomes, 188 registered tools, 44,857 active / 209,815 total calls and 20 profiles. Isolated liveness reached max `/readyz` 34.37 ms under concurrency and zero event-loop stalls.
 
-Two earlier manual HTTP smokes returned 500 on accepted read-worker requests; later isolated requests and the full gate passed. The initial delays have no demonstrated cause, so this remains an intermittent unresolved runtime observation; details and follow-up are in [Bridge incidents](../../docs/INCIDENTS.md) and [0.6.165](../../changelogs/0.6.165.md). The direct MSSR connector may still require host refresh if its input schema does not match the live Bridge registry.
+Two earlier manual HTTP smokes returned 500 on accepted read-worker requests; later isolated requests and the full gate passed. The initial delays have no demonstrated cause, so this remains an intermittent unresolved runtime observation; details and follow-up are in [Bridge incidents](../../docs/INCIDENTS.md) and [0.6.165](../../changelogs/0.6.165.md). The direct MSSR connector's published input description still lags the live Bridge schema clarification; host refresh/reopen and a direct connector smoke remain follow-up work.
 
 ## 0.6.164 source candidate — Jev context-split planner adapter (2026-10-10)
 
@@ -56,4 +58,4 @@ Bridge project control is canonical under `.mssr/`. The archived September knowl
 
 ## Next performance/control work
 
-If the intermittent read-worker execution timeout recurs, capture the HTTP error body and the exact worker state transition before changing thresholds. Separately, refresh/reopen the direct MSSR connector if it still exposes a schema older than the live Bridge 0.6.166/MSSR 0.2.115 registry, then repeat the real-document integration through that connector. Keep independent source-held-out labels separate; the one-candidate live Jev smoke is integration evidence only and all provider scores remain uncalibrated.
+If the intermittent read-worker execution timeout recurs, capture the HTTP error body and the exact worker state transition before changing thresholds. Separately, refresh/reopen the direct MSSR connector so its input description catches up with the live Bridge 0.6.167/MSSR 0.2.115 registry, then repeat the real-document integration through that connector. Keep independent source-held-out labels separate; the one-candidate live Jev smoke is integration evidence only and all provider scores remain uncalibrated.
