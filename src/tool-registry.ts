@@ -36,6 +36,7 @@ import { windowsAdminToolModule } from "./tools/windows-admin-tools.js";
 import { quietDeskToolModule } from "./tools/quietdesk-tools.js";
 import { storageGrowthToolModule } from "./tools/storage-growth-tools.js";
 import { mssrSemanticEvidenceToolModule } from "./tools/mssr-semantic-evidence-tools.js";
+import { mssrProjectContextRefSplitToolModule } from "./tools/mssr-project-context-ref-split-tools.js";
 import { buildToolAudit, TOOL_AUDIT_VIEWS, type ToolAuditArgs, type ToolAuditView } from "./tool-audit.js";
 import { getToolAuditMetrics, getToolFrictionMetrics, type BridgeMetricsScope } from "./metrics.js";
 import { buildBridgeToolFrictionProjection } from "./mssr-tool-friction.js";
@@ -105,6 +106,7 @@ const mssrControlPlaneToolNames = new Set([
 
 const mssrSubstantialReadToolNames = new Set([
   "mssr_librarian_search", "mssr_librarian_fetch", "mssr_librarian_evidence_pack", "mssr_librarian_jev_select", "mssr_semantic_evidence_synthesis_preview",
+  "mssr_project_context_ref_split_plan",
   "analyze_code", "impact_analysis", "find_duplicate_symbols", "import_graph", "dependency_graph", "call_graph", "find_dead_code",
   "python_validate", "python_symbols", "python_impact_analysis", "python_import_graph", "python_call_graph", "python_dead_code", "python_test_plan", "pytest_testmon",
   "project_context_audit", "project_context_health", "project_context_modularization_plan", "project_change_consistency", "bridge_verify_status",
@@ -119,6 +121,7 @@ const mssrExternalSideEffectToolNames = new Set([
   "quietdesk_execute_semantic",
   "mssr_librarian_jev_select",
   "mssr_semantic_evidence_relation_review",
+  "mssr_project_context_ref_split_plan",
 ]);
 const mssrTrivialInspectToolNames = new Set(["whiteboard_capture_pc_view", "quietdesk_desktop_capture"]);
 
@@ -635,6 +638,7 @@ const defaultToolModules: readonly BridgeToolModule[] = [
   whiteboardToolModule,
   quietDeskToolModule,
   mssrSemanticEvidenceToolModule,
+  mssrProjectContextRefSplitToolModule,
   windowsAdminToolModule,
   bridgeWorkflowToolModule,
 ];

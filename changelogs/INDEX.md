@@ -3,6 +3,7 @@
 Versioned release notes are the canonical change-history surface for MSSR debugging, maintenance, and persistence checks.
 
 ## Current releases
+- [0.6.164](0.6.164.md) - Expose the existing Jev project-context reference-split planner through Bridge.
 - [0.6.163](0.6.163.md) - Adopt MSSR 0.2.112 host-supplied Librarian query variants.
 - [0.6.162](0.6.162.md) - Add secure general-purpose ChatGPT file-parameter import to the active Bridge source line.
 - [0.6.161](0.6.161.md) - adopt corrected MSSR 0.2.110 after restoring read-only overlap diagnostics.

@@ -14,6 +14,7 @@ const groupRules = [
   ["Guias reutilizables", ["project_context_load", "workflow_guide_recommend", "workflow_guide_load", "workflow_guide_create"]],
   ["Imagenes", ["image_file_attach", "image_chat_preview_prepare", "image_asset_import_files", "image_asset_save", "image_character_views_prepare", "image_reference_pack_prepare"]],
   ["Ejecucion / terminal", ["run_command", "terminal_start", "terminal_write", "terminal_read", "terminal_stop", "terminal_list"]],
+  ["MSSR Jev / context curation", ["mssr_project_context_ref_split_plan"]],
   ["Blender", ["blender_status", "blender_open", "blender_scene_info", "blender_viewport_screenshot", "blender_focus_review", "blender_review_bundle", "blender_execute_code", "blender_batch_script", "blender_validate_reference_pack", "blender_install_reference_pack", "blender_setup_character_references", "blender_character_loop_status"]],
   ["Tablet Whiteboard", ["whiteboard_capture_pc_view", "whiteboard_latest_capture", "whiteboard_capture_list"]],
   ["Godot", ["godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list", "godot_mcp_query", "godot_mcp_action", "godot_scene_open", "godot_scene_create", "godot_screen_capture_save"]],
