@@ -6,6 +6,7 @@ import {
   MSSR_PROJECT_CONTROL_FILES,
   mssrProjectRelativePath,
   planMssrProjectKnowledgeCapture,
+  preflightMssrProjectContextWrite,
   projectContextManifestSchema,
   projectContextModuleSchema,
   resolveMssrProjectFile,
@@ -118,6 +119,10 @@ export async function updateProjectContextSection(args: {
 
   const sectionUpdate = upsertMarkdownSection(beforeText, args.heading, args.content);
   const afterText = sectionUpdate.text;
+  const forecast = await preflightMssrProjectContextWrite({ projectRoot, targetPath, nextText: afterText });
+  if (!forecast.contractValid) {
+    throw new Error(`MSSR project-context budget preflight rejected the proposed write. Affected entries: ${forecast.affectedEntries.filter((entry) => entry.exceeded).map((entry) => entry.entryId).join(", ") || "source/maintenance pressure"}. Reduce or split the indexed section.`);
+  }
   const afterSha256 = sha256(afterText);
 
   let afterManifestText: string | null = null;

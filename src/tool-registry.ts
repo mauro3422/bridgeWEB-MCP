@@ -66,7 +66,7 @@ const destructiveToolNames = new Set([
   "write_text_file", "apply_patch", "edit_lines", "run_command", "terminal_start", "terminal_write", "terminal_stop",
   "work_once", "work_begin", "work_feed", "work_finish",
   "git_create_branch", "git_restore_file", "git_set_remote", "git_commit_all", "git_push_current_branch", "git_multi_repo_publish",
-  "project_profile_save", "project_context_initialize", "project_context_update", "project_context_capture", "workspace_snapshot", "workspace_rollback", "cache_prune", "windows_admin_cache_cleanup",
+  "project_profile_save", "project_context_initialize", "project_context_update", "project_context_recover_core", "project_context_capture", "workspace_snapshot", "workspace_rollback", "cache_prune", "windows_admin_cache_cleanup",
   "bridge_request_restart", "bridge_verify_all", "workflow_guide_create", "mssr_skill_maintenance_index", "bridge_tool_action", "roblox_mcp_action", "roblox_studio_window_capture_save", "roblox_screen_capture_save", "roblox_photo_capture_job", "roblox_place_save",
   "roblox_asset_upload",
   "image_asset_save", "image_asset_import_files", "image_chat_preview_prepare", "image_character_views_prepare", "image_reference_pack_prepare",
@@ -95,7 +95,7 @@ const providerProxyToolNames = new Set([
   "quietdesk_status", "quietdesk_desktop_snapshot", "quietdesk_desktop_coverage", "quietdesk_desktop_candidates", "quietdesk_desktop_semantic_context", "quietdesk_desktop_capture", "quietdesk_runtime_telemetry", "quietdesk_execute_semantic",
 ]);
 const protectedToolNames = new Set([
-  "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query", "bridge_tool_action", "bridge_connector_catalog_compare", "project_context_load", "project_context_audit", "project_context_health", "project_context_modularization_plan", "project_context_initialize", "project_context_update", "project_context_capture",
+  "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query", "bridge_tool_action", "bridge_connector_catalog_compare", "project_context_load", "project_context_audit", "project_context_health", "project_context_modularization_plan", "project_context_initialize", "project_context_update", "project_context_recover_core", "project_context_capture",
   "skill_route_plan", "skill_bootstrap", "skill_context_next", "skill_load", "mssr_context_proposal_review", "mssr_trace_record", "mssr_trace_evidence", "mssr_skill_maintenance_index", "bridge_verify_all", "git_multi_repo_publish", "roblox_place_save",
 ]);
 

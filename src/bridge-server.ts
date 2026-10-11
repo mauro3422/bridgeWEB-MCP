@@ -922,7 +922,12 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
         throw new Error(`${prepared.blocked.code}: ${prepared.blocked.message}`);
       }
       if (!modularToolRegistry.has(name)) throw new Error(`Unknown tool: ${name}`);
-      if (lifecyclePreflight?.intercepted) {
+      // Single-purpose break-glass exception: only the direct core recovery tool.
+      // Its handler independently verifies over-budget state, CAS and shrinking.
+      // No generic write/command/delegated tool can inherit this exception.
+      const authorizedCoreRecovery = name === "project_context_recover_core"
+        && effectivePrepared.toolName === name;
+      if (lifecyclePreflight?.intercepted && !authorizedCoreRecovery) {
         return complete({
           executed: false,
           status: "mssr-lifecycle-preflight-required",
@@ -988,6 +993,18 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
       return complete(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (/^Project-context selection exceeds \d+ bytes: |^Project context source '[^']+' exceeds \d+ bytes after selection\./.test(message)) {
+        return complete({
+          error: message,
+          code: "mssr-core-budget-blocked",
+          ordinaryWritesRemainProtected: true,
+          nextAction: {
+            toolName: "project_context_load",
+            instruction: "Revisa el proyecto con includeProjectContext=false y las herramientas de lectura. Si el exceso corresponde a un core indexado, usa exclusivamente project_context_recover_core con SHA-256 y texto revisado que respete el límite. Después repite project_context_load y skill_bootstrap.",
+          },
+          emergencyTool: "project_context_recover_core",
+        }, false, message);
+      }
       return complete({ error: message }, false, message);
     }
   };

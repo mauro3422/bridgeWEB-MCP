@@ -42,7 +42,7 @@
     "test:blender-viewport-capture": "npm run build && node scripts/test-blender-viewport-capture.mjs",
     "test:godot": "npm run build && node scripts/test-godot-tools.mjs",
     "test:mssr-delegated-routing": "npm run build && node scripts/test-delegated-mssr-route-project.mjs",
-    "test:project-context": "npm run build && node scripts/test-project-context-modules.mjs && node scripts/test-project-context-update.mjs && node scripts/test-project-context-lifecycle.mjs && node scripts/test-project-context-maintenance-tool.mjs && node scripts/test-project-memory-ref-migration.mjs && node scripts/test-project-change-consistency.mjs",
+    "test:project-context": "npm run build && node scripts/test-project-context-modules.mjs && node scripts/test-project-context-update.mjs && node scripts/test-project-context-lifecycle.mjs && node scripts/test-project-context-maintenance-tool.mjs && node scripts/test-project-memory-ref-migration.mjs && node scripts/test-project-change-consistency.mjs && node scripts/test-project-context-core-recovery.mjs",
     "test:project-memory-refs": "node scripts/test-project-memory-ref-migration.mjs",
     "test:skill-context": "npm run build && node scripts/test-selective-skill-context.mjs",
     "test:skill-routing": "npm run build && node scripts/test-skill-routing.mjs",

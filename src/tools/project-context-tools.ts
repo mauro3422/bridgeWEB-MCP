@@ -27,6 +27,7 @@ import {
   planMssrProjectContextModularization,
 } from "@mauroprime/mssr";
 import { captureProjectKnowledge, updateProjectContextSection } from "../project-context-writer.js";
+import { recoverOversizedProjectContextCore } from "../project-context-core-recovery.js";
 import { isMssrRoutingSemanticOwnerPath } from "../mssr-project-change-signals.js";
 import { resolveToolPath } from "./shared/path.js";
 import type { BridgeToolModule } from "./types.js";
@@ -409,6 +410,22 @@ export const projectContextToolModule: BridgeToolModule = {
       },
     },
     {
+      name: "project_context_recover_core",
+      description: "Emergency repair ONLY of an already over-budget indexed MSSR core section. Requires full replacement, exact heading and SHA-256; refuses non-core targets, growth, or other writes. Usable when bootstrap is blocked.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectRoot: { type: "string", minLength: 1 },
+          heading: { type: "string", pattern: "^#{1,6}\\s+\\S(?:.*\\S)?$", maxLength: 160 },
+          content: { type: "string", maxLength: 20000 },
+          expectedSha256: { type: "string", pattern: "^[0-9a-fA-F]{64}$" },
+        },
+        required: ["projectRoot", "heading", "content", "expectedSha256"],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    },
+    {
       name: "project_context_capture",
       description: "Persist one reviewed durable project statement as an indexed .mssr/knowledge/<topic>/ module. This is the normal creation/update path for optional kind=memory knowledge; PROJECT_MEMORY.md stays compact and core/cross-area. Portable MSSR plans the topic/kind/path/module; Bridge performs a hash-checked content+manifest transaction with rollback. Existing targets require expectedTargetSha256. Never use for raw conversations, hidden reasoning, secrets, large logs or transient tool output.",
       inputSchema: {
@@ -479,6 +496,15 @@ export const projectContextToolModule: BridgeToolModule = {
         module: moduleRegistrationSchema.optional(),
       }).strict().parse(raw);
       return await updateProjectContextSection(parsed);
+    },
+    project_context_recover_core: async (raw) => {
+      const parsed = z.object({
+        projectRoot: z.string().min(1),
+        heading: z.string().regex(/^#{1,6}\s+\S(?:.*\S)?$/).max(160),
+        content: z.string().max(20_000),
+        expectedSha256: z.string().regex(/^[0-9a-fA-F]{64}$/),
+      }).strict().parse(raw);
+      return await recoverOversizedProjectContextCore(parsed);
     },
     project_context_capture: async (raw) => {
       const parsed = z.object({
