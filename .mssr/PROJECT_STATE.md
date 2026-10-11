@@ -2,7 +2,7 @@
 
 ## Current release
 
-MSSR 0.2.127 is pinned to artifact SHA-256 `70e79ae6e472517501ffdd38c4b0eaad740652c7d570b600bf17f90023703bfc`. Bridge 0.6.172 commit `391a1bb` is published on `origin/main` and active. The HTTP watchdog uses `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants` as `BridgeCodeRoot` and `D:\Dev\bridge-mcp` as `ProjectRoot`; the latter's legacy Git changes remain untouched. Restart `efec831c-9119-4c19-aaab-c4ef0e555687` was acknowledged; active boot `c7d652a8-88c7-42b2-87e0-76bde8b33dcf` reports 189 tools, ready Bridge/tunnel, and zero new tunnel transport failures since baseline. Full readback is in [changelogs/0.6.172.md](../../changelogs/0.6.172.md).
+MSSR 0.2.127 is pinned to artifact SHA-256 `70e79ae6e472517501ffdd38c4b0eaad740652c7d570b600bf17f90023703bfc`. Bridge 0.6.172 commit `391a1bb` is published on `origin/main` and active. The HTTP watchdog uses `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants` as `BridgeCodeRoot` and `D:\Dev\bridge-mcp` as `ProjectRoot`; the latter's legacy Git changes remain untouched. The controlled restart `71edef1e-2e5f-4c51-a88c-b9bbc1ed38aa` returned its planned-maintenance notice and was acknowledged as `restart-http` at 2026-10-11T22:34:49Z by watchdog PID 25000. Active Bridge PID 17148, boot `0f3859cd-6eca-4b4c-b2ad-1d20dd819012`, reports 189 tools; Bridge and tunnel are ready. Prior release activation readback is in [changelogs/0.6.172.md](../../changelogs/0.6.172.md); this post-release restart is recorded here.
 
 Run 28 Jev trace `mssr-20261011192330-63da3054-527` remains `closed-success` with its original outcome; its recovered digest contains all 102 unique context selections. No second outcome or benchmark rerun was created.
 ## Previous release

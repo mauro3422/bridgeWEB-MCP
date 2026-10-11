@@ -3,7 +3,7 @@
 ## Architecture
 `bridge-mcp` is the MauroPrime host/adapter runtime. It exposes local tools, project context, provider adapters, observability, watchdog/restart flow, and ChatGPT Web integration. The Bridge HTTP/MCP adapter is specifically the ChatGPT Web access path; Codex does not use that transport and is handled through MSSR/local host adapters instead. Portable MSSR owns deterministic routing, learning schemas, project-context selection primitives, and cross-host contracts; Bridge consumes `@mauroprime/mssr` and owns filesystem/runtime integration.
 
-HTTP supervision separates `BridgeCodeRoot` (package, `dist/http.js`, and self-release audits) from `ProjectRoot` (working directory and relative runtime/data). When omitted, `BridgeCodeRoot` defaults to `ProjectRoot`; see the indexed watchdog invariant.
+HTTP supervision separates `BridgeCodeRoot` (package, `dist/http.js`, and self-release audits) from `ProjectRoot` (working directory and relative runtime/data). When omitted, `BridgeCodeRoot` defaults to `ProjectRoot`; see the indexed watchdog invariant. A planned `bridge_request_restart` returns a best-effort maintenance notice in the same MCP response with wait-for-readiness guidance; only the external watchdog performs the restart, and transport closure may precede notice delivery.
 
 ## Canonical ownership
 
