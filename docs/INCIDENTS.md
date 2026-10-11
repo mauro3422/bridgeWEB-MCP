@@ -2093,3 +2093,17 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Corrección / readback:** Se mantuvo intacto el proceso y el túnel. Con `cwd` omitido, Bridge escribió la solicitud `b54d0f8d-4439-4e2f-b272-0abd1eed74e8` en `D:\Dev\bridge-mcp`; watchdog PID 54004 la reconoció como `restart-http`. Después se eliminó únicamente el request no consumido `6fdc3d19-2d89-4f42-ba76-350370bd614c` del checkout de código, verificando previamente su ID y root. `/status` confirmó Bridge 0.6.167, PID 85008, boot `d0d360a5-469f-4ddc-8414-67667e2d12d6`; `/readyz` y el túnel 8081 respondieron ready. La herramienta de salud reportó 188 tools y cero nuevos errores de transporte desde el baseline posterior al restart.
 
 **Prevención:** Mantener separados `ProjectRoot` y `BridgeCodeRoot`. Para el watchdog HTTP activo con datos en `D:\Dev\bridge-mcp`, omitir `cwd` en `bridge_request_restart` salvo que se haya verificado explícitamente otro `ProjectRoot`; el code root se mantiene en la configuración del watchdog. Validar ruta, request ID, ack y readback de versión antes de cerrar.
+
+## 2026-10-11 — Bridge sanitizer truncated MSSR learning-digest context selections
+
+**Status:** Resolved in MSSR 0.2.127 / Bridge 0.6.171; live release verification passed.
+
+**Layer / owner:** Portable MSSR learning-digest schema and Bridge observability persistence sanitizer.
+
+**Symptom and evidence:** A real closed trace contained 102 distinct `contextSelections`. The portable learning digest rejected the collection above its 96-item bound; after raising that bound, a Bridge integration fixture still retained only a subset because the generic event sanitizer capped every array at 60. The focused end-to-end regression reproduced the second loss before the Bridge correction and retained all 102 unique IDs afterward.
+
+**Cause:** Two independent limits applied to the same evidence path: MSSR's strict digest schema used `.max(96)`, while Bridge's generic persistence sanitizer silently sliced arrays at 60. The digest could therefore fail entirely at the first limit or be incomplete at the host boundary after the schema was widened.
+
+**Correction / regression:** MSSR 0.2.127 raises the bounded context-selection ceiling to 128 and rejects 129. Bridge 0.6.171 permits up to 96 `project_context_selection.decisions` per event and 128 `learning_digest.contextSelections`, with event-specific byte ceilings and explicit failure above them; unrelated arrays keep the 60-item cap. `test:mssr-learning-loop` records 102 unique decisions, closes the trace and asserts every ID survives the durable digest. The exact MSSR package artifact is pinned and hash-checked in Bridge.
+
+**Readback / follow-up:** Bridge 0.6.171 is live after watchdog restart; the full regression and `verify-all` required gates passed. Continue checking real closed traces for full digest counts and confirm no sanitizer-bound rejection on unusually large evidence. Do not treat the digest as an authorization or rewrite source.
