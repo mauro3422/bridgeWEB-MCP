@@ -23,12 +23,15 @@ Usar la tool mas especifica disponible antes que run_command.
 ## Contexto minimo para operar
 
 ```txt
-Repo: C:\dev\bridge-mcp
+Checkout integrado para Git/release: D:\Dev\bridge-mcp-candidate-0.6.160-mssr-0.2.109 (main)
+BridgeCodeRoot del watchdog activo: D:\Dev\bridge-mcp-mssr-0.2.112-query-variants (mismo source commit e9d91c4)
+ProjectRoot (datos/request/ack; checkout histórico sucio preservado): D:\Dev\bridge-mcp
+MSSR checkout: D:\Dev\mssr
 Perfil activo: bridge-local-http
 Bridge MCP: http://127.0.0.1:3001/mcp
 Tunnel admin: http://127.0.0.1:8081
-Server esperado: bridge-mcp v0.5.1
-Rollback: scripts/start-bridge-watchdog.ps1
+Server verificado 2026-10-11: bridge-mcp v0.6.171 / MSSR 0.2.127 / 189 tools
+Rollback: scripts/start-bridge-watchdog.ps1 (verificar script/ProjectRoot antes de ejecutar)
 ```
 
 Si aparece `8080`, tratarlo como contexto viejo salvo que el perfil haya cambiado intencionalmente.
@@ -87,6 +90,19 @@ import_graph            -> grafo de imports
 dependency_graph        -> resumen de dependencias/ciclos/fan-in/fan-out
 find_dead_code          -> candidatos de codigo muerto
 ```
+
+### Transferencia de archivos ChatGPT → MauroPrime
+
+```txt
+image_asset_import_files   -> PRIMERA opción: imágenes ImageGen/adjuntas, preserva bytes, valida MIME/dimensiones/hash
+asset_import_files         -> primera opción para OTROS formatos (audio, video, ZIP, documentos, .blend); HTTPS con allowlist
+image_asset_save           -> fallback sólo con Base64 YA disponible; no codificar adjuntos para forzarlo
+binary_upload_begin/append/finish -> bytes fragmentados cuando el contenido está realmente accesible
+binary_file_info          -> evidencia local de bytes y SHA-256 después de importar
+Biblioteca central        -> D:\ChatGPT\Biblioteca (destino preferido para nuevos originales, por tipo/tema)
+```
+
+**Runbook completo:** `docs/ASSET_FILE_INGEST.md`. El host debe suministrar `files` vía `_meta["openai/fileParams"]` en el NIVEL SUPERIOR de la tool. No confundir `/mnt/data`, `file_id`, URL, `arguments.files` del wrapper y ruta Windows. Si el catálogo ChatGPT está viejo, inspeccionar `bridge_tool_schema`/`bridge_connector_catalog_compare`; sólo delegar archivos cuando el wrapper mismo exponga `files` top-level. **Prueba real 2026-10-09:** `asset_import_files` rechazó URL ImageGen por hostname no permitido; sin cambiar allowlist, `image_asset_import_files` guardó dos PNG originales de mano. `binary_file_info` confirmó 1.955.933 y 1.921.099 bytes y SHA exactos. Por ello, elegir importer especializado para imágenes, verificar por ruta/hash tras guardar y documentar cualquier error de host genérico sin exponer URLs temporales. Si no hay importador autorizado utilizable, conservar fuente y bloquear sólo etapa dependiente.
 
 ### Git
 
@@ -238,9 +254,10 @@ Esperar:
 
 ```txt
 ok=true
-server v0.5.1
+server v0.6.171 (verificar versión REAL con bridge_health)
 tunnel 8081 live/ready
-git limpio o cambios esperados
+catalog runtime 189 tools (readback 2026-10-11; comparar con la exposición observada del cliente)
+git limpio o cambios esperados, siempre sobre BridgeCodeRoot
 ```
 
 #### 2. Verificar todo antes de cerrar una tanda
@@ -504,10 +521,13 @@ run_command directo a /mcp tools/list
 Proceso:
 
 ```txt
-confirmar tools/list por HTTP
-reiniciar bridge si hace falta
-refrescar/reabrir conector
-nuevo chat si sigue stale
+bridge_health(check=catalog): comprobar catálogo en el Bridge vivo
+bridge_tool_schema(toolName): verificar tool y schema reales
+bridge_connector_catalog_compare(exposedToolNames): comparar host vs runtime
+si el runtime ya tiene la tool, NO reiniciar el servidor para arreglar el snapshot del conector
+reconectar/refrescar plugin o abrir nuevo chat cuando corresponda
+para archivo: confirmar que el schema expuesto al cliente admite files TOP-LEVEL (openai/fileParams)
+si no, detener ese transporte, registrar missing file-param exposure; no inventar URL/Base64
 ```
 
 ### E. Analisis de codigo

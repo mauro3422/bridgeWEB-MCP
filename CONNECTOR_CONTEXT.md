@@ -74,10 +74,13 @@ A host can cache or retain a previously listed tool catalog inside the conversat
 Operational fix:
 
 ```txt
-restart bridge if needed
-refresh or reopen connector
-start a new chat if catalog still looks stale
-verify with direct /mcp tools/list when needed
+primero inspeccionar runtime con bridge_health(check=catalog) y bridge_tool_schema
+comparar dedicated connector exposure con bridge_connector_catalog_compare
+si runtime ya tiene la tool: NO reiniciar Bridge solo para arreglar el cache del host
+refresh o reconectar plugin en ChatGPT / nuevo chat cuando corresponda
+verificar presencia de top-level fileParams en el schema visible del cliente
+si falta, detener la transferencia y registrar bloqueo; nunca fabricar download_url
+verificar con direct /mcp tools/list cuando sea necesario
 ```
 
 For this bridge, use:

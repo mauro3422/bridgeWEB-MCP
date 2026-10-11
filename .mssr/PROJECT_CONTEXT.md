@@ -7,7 +7,7 @@ HTTP supervision separates `BridgeCodeRoot` (package, `dist/http.js`, and self-r
 
 ## Canonical ownership
 
-- Bridge runtime/tools/adapters: `D:\Dev\bridge-mcp\src`.
+- Bridge source, tools and adapters belong to this repository.
 - Remote Linux execution is a Bridge-owned adapter, not a Kairos runtime dependency: `remote-node` uses in-process SSH with pinned host identity and local ignored node configuration; callers select configured node ids rather than supplying arbitrary hosts/users/keys.
 - Portable MSSR contract: `D:\Dev\mssr`.
 - MSSR first-party skills ship from the versioned `@mauroprime/mssr` package; Mauro's non-reserved custom reusable skills remain owned by `D:\Dev\mauroprime-skills` and are discovered through their runtime junctions.

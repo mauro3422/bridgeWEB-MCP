@@ -2107,3 +2107,19 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Correction / regression:** MSSR 0.2.127 raises the bounded context-selection ceiling to 128 and rejects 129. Bridge 0.6.171 permits up to 96 `project_context_selection.decisions` per event and 128 `learning_digest.contextSelections`, with event-specific byte ceilings and explicit failure above them; unrelated arrays keep the 60-item cap. `test:mssr-learning-loop` records 102 unique decisions, closes the trace and asserts every ID survives the durable digest. The exact MSSR package artifact is pinned and hash-checked in Bridge.
 
 **Readback / follow-up:** Bridge 0.6.171 is live after watchdog restart; the full regression and `verify-all` required gates passed. The real Jev Run 28 trace `mssr-20261011192330-63da3054-527` had one closed-success outcome and 102 unique retained context selections but no digest. After adoption, the same deterministic distiller re-derived one digest from those stored events; live Bridge readback confirmed 102/102 selections, while the original outcome ID `mv47vjez-d8806d39-610` remained unchanged and unique. No benchmark was rerun. Future recovery must require exactly one existing outcome and no digest, avoid a second outcome, wait for durable worker acknowledgement, then read back the digest. Do not treat the digest as authorization or rewrite source.
+
+## 2026-10-11 — Stale local MSSR package caused an initial release-gate failure
+
+**Status:** The local install mismatch is resolved; the separate production dependency audit is patched in Bridge 0.6.172 source and awaits runtime activation.
+
+**Layer / owner:** Bridge release verification environment (`node_modules` versus package lock).
+
+**Symptom and evidence:** The first `verify-all.ps1` run from the main checkout failed TypeScript checks because MSSR query-variant and evidence-pack fields were absent from the installed declarations. `package.json` and `package-lock.json` pinned local vendor package 0.2.127, while `node_modules/@mauroprime/mssr` was 0.2.110. The clean release worktree had 0.2.127.
+
+**Cause:** The main checkout's ignored `node_modules` was left over from an older dependency installation after its Git branch advanced.
+
+**Correction / regression:** Stopped that contaminated run, ran `npm ci` from the Bridge main checkout, and verified installed MSSR 0.2.127. The complete `scripts/verify-all.ps1` then passed with `failedRequired=0`, including check/build, isolated regressions, live HTTP smoke, protocol, routing, liveness, tool documentation, and catalog sanity.
+
+**Dependency follow-up:** Updated the lockfile to `@modelcontextprotocol/sdk` 1.32.1, `ip-address` 10.7.4 and `proxy-addr` 2.0.8. `npm audit` now reports zero vulnerabilities; all candidate release gates passed. The HTTP runtime remains on 0.6.171 pending the controlled 0.6.172 restart and readback.
+
+**Prevention:** On a worktree switch, install from the checked-in lockfile before trusting TypeScript or regression failures. The initial run changed no source and produced no release artifact.

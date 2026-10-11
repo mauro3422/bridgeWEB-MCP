@@ -15,11 +15,16 @@ Stack principal:
 - OpenAI Secure MCP Tunnel con `tunnel-client`
 - métricas locales con `node:sqlite`
 
-Ruta principal del repo:
+## Rutas canónicas (promoción verificada 2026-10-11)
 
-```text
-C:\dev\bridge-mcp
-```
+- **Checkout integrado/publicable:** `D:\Dev\bridge-mcp-candidate-0.6.160-mssr-0.2.109` (`main`, Bridge source 0.6.172); el candidato pasó `verify-all.ps1` antes de su activación.
+- **BridgeCodeRoot del watchdog HTTP activo:** `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`, todavía ejecutando 0.6.171 desde el commit `e9d91c4` hasta el reinicio controlado de 0.6.172. Verifica PID, `/status`, `readyz` y argumentos del watchdog antes de cambiar rutas.
+- **ProjectRoot del runtime HTTP:** `D:\Dev\bridge-mcp`, dueño de datos, logs, perfil y archivos request/ack del watchdog. También conserva un checkout histórico con cambios staged, unstaged y untracked: no usarlo para commits de release, no limpiarlo ni fusionarlo a ciegas.
+- **MSSR dueño de routing/contexto:** `D:\Dev\mssr` (MSSR 0.2.127).
+- `C:\dev\bridge-mcp` es una ruta heredada o alias posible: verificar su resolución antes de escribir.
+- Preservar los worktrees y experimentos no reconciliados. No reiniciar Bridge/túnel sólo para documentación o para corregir el cache del catálogo del host.
+
+Antes de escribir: `git_status` del checkout correcto, `bridge_health` del runtime y verificación de versión en `package.json`; diferenciar siempre **BridgeCodeRoot** de **ProjectRoot**.
 
 ## Estado recomendado
 
@@ -49,10 +54,16 @@ ChatGPT
 - No matar procesos del bridge sin verificar cómo volver a levantarlo.
 - No reemplazar archivos grandes a ciegas; preferir patches puntuales.
 - Antes de cambiar código de transporte MCP, probar handshake completo.
+- El catálogo de herramientas de ChatGPT puede quedar **desactualizado** aunque el runtime esté sano. Contrastar los nombres del conector con `bridge_connector_catalog_compare` y el schema del runtime con `bridge_tool_schema`; no suponer que un wrapper equivale a un parámetro MCP top-level ausente.
+- **Selección predeterminada para archivos ChatGPT → PC (verificado 2026-10-09):** imágenes generadas/editadas o adjuntas → `image_asset_import_files` primero; otros formatos (audio, video, ZIP, documentos, `.blend`, etc.) → `asset_import_files` cuando acepte el dominio de descarga autorizado. Ambas usan `_meta["openai/fileParams"]` y `files` top-level expuesto por el host. Nunca inventar `download_url`, convertir `file_id` en URL, ni enviar Base64 grande por `blender_execute_code`.
+- **Fallo concreto probado:** `asset_import_files` puede responder `[unsafe-url] Download hostname not allowlisted` ante una URL temporal genuina, aunque `image_asset_import_files` descargue esos mismos PNG correctamente. Para imágenes, reintentar UNA vez con `image_asset_import_files` y validar hashes; no debilitar allowlist/SSRF del importador genérico ni fabricar intermediarios. Para archivos no-imagen, conservar estado bloqueado y documentar el dominio sin divulgar tokens de la URL; investigar allowlist por separado y con pruebas de seguridad.
+- Verificar `binary_file_info` de CADA destino en `D:` (existencia, bytes, firma/MIME y SHA-256) contra el manifiesto y la fuente antes de informar éxito. Un resultado MCP `saved` por sí solo no prueba archivo utilizable ni Blender abierto. `image_asset_save` y `binary_upload_*` son fallbacks únicamente cuando hay bytes reales accesibles; no traducir un adjunto inaccesible a texto para saltarse el contrato.
+- **Biblioteca central de archivos:** por defecto guardar los originales nuevos en `D:\ChatGPT\Biblioteca` (clasificados como `imagenes`, `audio`, `videos`, `documentos`, `modelos-3d`, `otros`; manifiestos en `manifiestos`). El contrato de almacenamiento y las reglas de copia reutilizable están en `D:\ChatGPT\AGENTS.md` y `D:\ChatGPT\Biblioteca\README.md`. Para Blender, consultar primero la Biblioteca y copiar/usar allí imágenes originales antes del modelo y empaquetarlas en el `.blend`.
+- Copiar/descargar un instalador no autoriza ejecutarlo o instalarlo. No usar Google Drive como relay por defecto. Procedimiento: `docs/ASSET_FILE_INGEST.md`.
 
 ## Comandos obligatorios antes de commitear
 
-Desde `C:\dev\bridge-mcp`:
+Desde el checkout de código canónico (ver **Rutas canónicas**):
 
 ```powershell
 npm run check
@@ -75,7 +86,8 @@ Arranque manual recomendado:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-bridge-http-watchdog.ps1 `
-  -ProjectRoot C:\dev\bridge-mcp `
+  -ProjectRoot D:\Dev\bridge-mcp `
+  -BridgeCodeRoot D:\Dev\bridge-mcp-mssr-0.2.112-query-variants `
   -Profile bridge-local-http `
   -TunnelBaseUrl http://127.0.0.1:8081
 ```
@@ -107,8 +119,8 @@ El watchdog HTTP usa protección singleton. No arrancar otro watchdog production
 Si HTTP falla, volver a stdio:
 
 ```powershell
-cd C:\dev\bridge-mcp
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-bridge-watchdog.ps1 -ProjectRoot C:\dev\bridge-mcp
+cd D:\Dev\bridge-mcp-candidate-0.6.160-mssr-0.2.109
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-bridge-watchdog.ps1 -ProjectRoot D:\Dev\bridge-mcp
 ```
 
 Perfil estable histórico:
