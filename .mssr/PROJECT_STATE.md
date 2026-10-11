@@ -1,10 +1,12 @@
 # Bridge project state
 
-## 0.6.168 MSSR 0.2.120 adoption candidate
+## 0.6.168 MSSR 0.2.120 adoption — active
 
-The clean candidate branch now vendors the exact MSSR 0.2.120 artifact at `vendor/mauroprime-mssr-0.2.120.tgz` (1,136,180 bytes; SHA-256 `52b4bfbf928b222a282f672b22768d70ca3a5fbf344843b0a487429a56789946`). It includes releases 0.2.116–0.2.120: revision-bound list-item ranges, project-context modularization and verified-project breadth gating, and exact metadata-filter schema clarification. Bridge 0.6.168 check/build, focused MSSR integrations, project-context and first-party-skill tests, full isolated regressions, dual-era MCP (188 tools), and generated tool docs pass. This is source-only; the active runtime remains Bridge 0.6.167 / MSSR 0.2.115 because no restart or activation occurred.
+The release branch vendors the exact MSSR 0.2.120 artifact at `vendor/mauroprime-mssr-0.2.120.tgz` (1,136,180 bytes; SHA-256 `52b4bfbf928b222a282f672b22768d70ca3a5fbf344843b0a487429a56789946`). It includes releases 0.2.116–0.2.120: revision-bound list-item ranges, project-context modularization and verified-project breadth gating, and exact metadata-filter schema clarification. Bridge 0.6.168 check/build, focused MSSR integrations, project-context and first-party-skill tests, full isolated regressions, dual-era MCP, and generated tool docs passed before activation.
 
-## 0.6.167 Librarian metadata filter schema — active
+**Active runtime readback (2026-10-11):** Watchdog request `e557812d-c655-461d-bfce-707fd54fc3a7` was acknowledged as `restart-http` by watchdog PID 25000 on profile `bridge-local-http`. Bridge 0.6.168 / MSSR 0.2.120 is running from `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`, HTTP PID 25668, boot `ee6bc4d6-3df7-4a85-b319-82baa6956926`; Bridge `/readyz` and `/status` read back 0.6.168. The live `tools/list` returned 188 tools. The watchdog uses `D:\Dev\bridge-mcp` as its runtime/data `ProjectRoot` and the release checkout as `BridgeCodeRoot`; its request/ack files therefore live under the former. The tunnel client PID 18968 was preserved without restart, with healthz/readyz `live`/`ready`; the PC was not restarted. Tunnel process metrics show one 502 and one no-status during the Bridge restart window and zero new failures since the post-restart baseline at 09:23:06 UTC. A first request written under the code checkout was not consumed; after verifying its exact request ID it was removed, and the correctly rooted HTTP request was acknowledged.
+
+## 0.6.167 Librarian metadata filter schema — previous active baseline
 
 This release clarifies exact metadata field/value filters and the singular EvidenceAtom projection keys in the Bridge search schema and docs. Typecheck/build, MCP module and dual-era schema tests, generated tool documentation checks, and the full isolated regression suite passed.
 
@@ -24,7 +26,7 @@ The candidate adopts exact MSSR 0.2.115 bytes and adds the opt-in `dedupeContain
 
 ## Current release
 
-Bridge 0.6.168 on `codex/bridge-mssr-0.2.112-query-variants-20261010` adopts the exact MSSR 0.2.120 package artifact (1,136,180 bytes; SHA-256 `52b4bfbf928b222a282f672b22768d70ca3a5fbf344843b0a487429a56789946`). The candidate passes check/build, focused Librarian/MSSR integration, project-context, first-party skills, full isolated regressions, dual-era MCP with 188 tools, and generated tool documentation. It remains source-only: the active runtime is 0.6.167 / MSSR 0.2.115 until a separately controlled restart and live readback. Detailed history and earlier runtime observations remain in versioned changelogs and incident records.
+Bridge 0.6.168 / MSSR 0.2.120 is the active release. Its exact artifact, runtime boot, watchdog acknowledgement, 188-tool catalog, preserved tunnel, and post-restart metric baseline are recorded in the active section above and [changelogs/0.6.168.md](../changelogs/0.6.168.md). Detailed history and earlier runtime observations remain in versioned changelogs and incident records.
 
 ## 0.6.164 source candidate — Jev context-split planner adapter (2026-10-10)
 
