@@ -75,6 +75,16 @@ try {
     ],
   }));
   await fs.writeFile(path.join(root, "policy.md"), policyMarkdown, "utf8");
+  const listItemMarkdown = [
+    "# List item evidence",
+    "",
+    "## Atomic records",
+    "",
+    "- Keep full provenance on exact list item ranges.",
+    "- Preserve revision-bound list item fingerprints for exact fetch.",
+    "",
+  ].join("\n");
+  await fs.writeFile(path.join(root, "list-items.md"), listItemMarkdown, "utf8");
   await fs.writeFile(path.join(root, "other-policy.md"), "## Unrelated source\nThis file does not contain the selected search handle.\n", "utf8");
   await fs.mkdir(path.join(root, "docs"), { recursive: true });
   await fs.mkdir(path.join(root, "data"), { recursive: true });
@@ -154,6 +164,21 @@ try {
     sourceRefs: ["policy.md"],
     query: { query: "preserve operational records", queryVariants: Array.from({ length: 5 }, (_, index) => `alternate phrasing ${index}`) },
   }), /queryVariants|variant/i, "Bridge must reject more variants than MSSR supports");
+
+  const listItemSearch = await registry.call("mssr_librarian_search", {
+    projectRoot: root,
+    sourceRefs: ["list-items.md"],
+    query: { query: "preserve revision-bound list item fingerprints exact fetch", maxResults: 10 },
+  });
+  const listItemResult = listItemSearch.results.find((item) => item.handle.rangeId.endsWith("/item-2"));
+  assert.ok(listItemResult, "MSSR 0.2.116+ list-item handles should be searchable through the Bridge adapter");
+  assert.equal(listItemResult.handle.rangeKind, "block");
+  assert.equal(listItemResult.handle.startLine, 6);
+  const exactListItem = await registry.call("mssr_librarian_fetch", {
+    projectRoot: root,
+    handle: listItemResult.handle,
+  });
+  assert.equal(exactListItem.text, "- Preserve revision-bound list item fingerprints for exact fetch.");
 
   const exact = await registry.call("mssr_librarian_fetch", { projectRoot: root, handle: preserveHandle });
   assert.equal(exact.advisoryOnly, true);
