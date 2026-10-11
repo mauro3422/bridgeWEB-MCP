@@ -3,6 +3,7 @@
 Versioned release notes are the canonical change-history surface for MSSR debugging, maintenance, and persistence checks.
 
 ## Current releases
+- [0.6.169](0.6.169.md) - Adopt MSSR 0.2.121 and verify exact Librarian ranges across blank-line-separated list continuations, nested items and siblings.
 - [0.6.168](0.6.168.md) - Adopt MSSR 0.2.120 and verify accumulated Librarian and project-context updates.
 - [0.6.167](0.6.167.md) - document exact Librarian metadata filters and singular EvidenceAtom projection keys in the Bridge schema.
 - [0.6.166](0.6.166.md) - Adopt MSSR 0.2.115 and expose opt-in exact contained-range compaction through the Librarian evidence-pack tool.

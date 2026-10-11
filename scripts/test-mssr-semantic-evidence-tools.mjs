@@ -85,6 +85,20 @@ try {
     "",
   ].join("\n");
   await fs.writeFile(path.join(root, "list-items.md"), listItemMarkdown, "utf8");
+  const continuedListMarkdown = [
+    "# Continued list evidence",
+    "",
+    "- Parent atom must retain the full evidence range.",
+    "",
+    "  Continuation remains attached after a blank line.",
+    "",
+    "  - Nested evidence remains attached to its parent.",
+    "",
+    "- Sibling evidence remains a separate exact range.",
+    "",
+    "Unrelated prose stays outside the list.",
+  ].join("\n");
+  await fs.writeFile(path.join(root, "continued-list-items.md"), continuedListMarkdown, "utf8");
   await fs.writeFile(path.join(root, "other-policy.md"), "## Unrelated source\nThis file does not contain the selected search handle.\n", "utf8");
   await fs.mkdir(path.join(root, "docs"), { recursive: true });
   await fs.mkdir(path.join(root, "data"), { recursive: true });
@@ -179,6 +193,30 @@ try {
     handle: listItemResult.handle,
   });
   assert.equal(exactListItem.text, "- Preserve revision-bound list item fingerprints for exact fetch.");
+
+  const continuedListSearch = await registry.call("mssr_librarian_search", {
+    projectRoot: root,
+    sourceRefs: ["continued-list-items.md"],
+    query: { query: "parent atom continuation nested sibling evidence", maxResults: 10 },
+  });
+  const continuedItemHandles = continuedListSearch.results
+    .filter((item) => item.handle.rangeId.includes("/item-"))
+    .map((item) => item.handle);
+  assert.deepEqual(continuedItemHandles.map((handle) => handle.rangeId), ["block-1/item-1", "block-1/item-2"]);
+  const continuedParentFetch = await registry.call("mssr_librarian_fetch", {
+    projectRoot: root,
+    handle: continuedItemHandles[0],
+  });
+  assert.equal(
+    continuedParentFetch.text,
+    "- Parent atom must retain the full evidence range.\n\n  Continuation remains attached after a blank line.\n\n  - Nested evidence remains attached to its parent.",
+  );
+  const continuedSiblingFetch = await registry.call("mssr_librarian_fetch", {
+    projectRoot: root,
+    handle: continuedItemHandles[1],
+  });
+  assert.equal(continuedSiblingFetch.text, "- Sibling evidence remains a separate exact range.");
+  assert.ok(!continuedSiblingFetch.text.includes("Unrelated prose"));
 
   const exact = await registry.call("mssr_librarian_fetch", { projectRoot: root, handle: preserveHandle });
   assert.equal(exact.advisoryOnly, true);

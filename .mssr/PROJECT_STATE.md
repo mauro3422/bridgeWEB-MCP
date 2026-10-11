@@ -1,6 +1,10 @@
 # Bridge project state
 
-## 0.6.168 MSSR 0.2.120 adoption — active
+## Current release
+
+Bridge 0.6.169 source candidate pins the exact MSSR 0.2.121 release artifact (1,137,867 bytes; SHA-256 `181bf914da4f5767c457755990798169f6d539f56886b420bd8410951b5d8971`) and adds host integration coverage for blank-line-separated list continuations, nested evidence and sibling boundaries. Source verification passed on 2026-10-11: check/build, vendor-to-installed package byte parity, exact Librarian regression, integration, first-party skills, project-context, MCP dual-era, docs and full isolated regressions. Publication and live activation remain pending; the last verified active runtime remains Bridge 0.6.168 / MSSR 0.2.120 with the readback below. Keep `ProjectRoot=D:\Dev\bridge-mcp` and `BridgeCodeRoot=D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`; update/restart only through the watchdog request under ProjectRoot.
+
+## 0.6.168 MSSR 0.2.120 adoption — previous active
 
 The release branch vendors the exact MSSR 0.2.120 artifact at `vendor/mauroprime-mssr-0.2.120.tgz` (1,136,180 bytes; SHA-256 `52b4bfbf928b222a282f672b22768d70ca3a5fbf344843b0a487429a56789946`). It includes releases 0.2.116–0.2.120: revision-bound list-item ranges, project-context modularization and verified-project breadth gating, and exact metadata-filter schema clarification. Bridge 0.6.168 check/build, focused MSSR integrations, project-context and first-party-skill tests, full isolated regressions, dual-era MCP, and generated tool docs passed before activation.
 
@@ -24,9 +28,9 @@ The candidate adopts exact MSSR 0.2.115 bytes and adds the opt-in `dedupeContain
 
 **Startup observation:** `/status` recorded one 3,383 ms event-loop lag during the first three seconds after boot. At uptime 33 seconds, the stall count and lag had not increased. Treat this as a boot-window observation only; cause is undetermined and no recurring liveness regression is established.
 
-## Current release
+## Previous active runtime baseline before 0.6.169
 
-Bridge 0.6.168 / MSSR 0.2.120 is the active release. Its exact artifact, runtime boot, watchdog acknowledgement, 188-tool catalog, preserved tunnel, and post-restart metric baseline are recorded in the active section above and [changelogs/0.6.168.md](../changelogs/0.6.168.md). Detailed history and earlier runtime observations remain in versioned changelogs and incident records.
+Bridge 0.6.168 / MSSR 0.2.120 was the active release before the 0.6.169 candidate. Its exact artifact, runtime boot, watchdog acknowledgement, 188-tool catalog, preserved tunnel, and post-restart metric baseline are recorded above and in [changelogs/0.6.168.md](../changelogs/0.6.168.md). Detailed history and earlier runtime observations remain in versioned changelogs and incident records.
 
 ## 0.6.164 source candidate — Jev context-split planner adapter (2026-10-10)
 
