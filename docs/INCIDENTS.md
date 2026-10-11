@@ -2110,7 +2110,7 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 
 ## 2026-10-11 — Stale local MSSR package caused an initial release-gate failure
 
-**Status:** The local install mismatch is resolved; the separate production dependency audit is patched in Bridge 0.6.172 source and awaits runtime activation.
+**Status:** The local install mismatch is resolved; the production dependency refresh is published and active in Bridge 0.6.172.
 
 **Layer / owner:** Bridge release verification environment (`node_modules` versus package lock).
 
@@ -2120,6 +2120,6 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 
 **Correction / regression:** Stopped that contaminated run, ran `npm ci` from the Bridge main checkout, and verified installed MSSR 0.2.127. The complete `scripts/verify-all.ps1` then passed with `failedRequired=0`, including check/build, isolated regressions, live HTTP smoke, protocol, routing, liveness, tool documentation, and catalog sanity.
 
-**Dependency follow-up:** Updated the lockfile to `@modelcontextprotocol/sdk` 1.32.1, `ip-address` 10.7.4 and `proxy-addr` 2.0.8. `npm audit` now reports zero vulnerabilities; all candidate release gates passed. The HTTP runtime remains on 0.6.171 pending the controlled 0.6.172 restart and readback.
+**Dependency follow-up:** Updated the lockfile to `@modelcontextprotocol/sdk` 1.32.1, `ip-address` 10.7.4 and `proxy-addr` 2.0.8. `npm audit` reports zero vulnerabilities and all candidate release gates passed. The controlled restart request `efec831c-9119-4c19-aaab-c4ef0e555687` was acknowledged at `2026-10-11T21:50:32.746Z`; live readback then confirmed Bridge 0.6.172, boot `c7d652a8-88c7-42b2-87e0-76bde8b33dcf`, PID 23888, 189 tools and catalog `fe34a30b4af0975a`. Bridge and tunnel readiness returned 200; no new tunnel 502/no-status failures appeared after the restart baseline.
 
 **Prevention:** On a worktree switch, install from the checked-in lockfile before trusting TypeScript or regression failures. The initial run changed no source and produced no release artifact.

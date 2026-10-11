@@ -24,13 +24,13 @@ Usar la tool mas especifica disponible antes que run_command.
 
 ```txt
 Checkout integrado para Git/release: D:\Dev\bridge-mcp-candidate-0.6.160-mssr-0.2.109 (main)
-BridgeCodeRoot del watchdog activo: D:\Dev\bridge-mcp-mssr-0.2.112-query-variants (mismo source commit e9d91c4)
+BridgeCodeRoot del watchdog activo: D:\Dev\bridge-mcp-mssr-0.2.112-query-variants (Bridge 0.6.172, source commit 391a1bb)
 ProjectRoot (datos/request/ack; checkout histórico sucio preservado): D:\Dev\bridge-mcp
 MSSR checkout: D:\Dev\mssr
 Perfil activo: bridge-local-http
 Bridge MCP: http://127.0.0.1:3001/mcp
 Tunnel admin: http://127.0.0.1:8081
-Server verificado 2026-10-11: bridge-mcp v0.6.171 / MSSR 0.2.127 / 189 tools
+Server verificado tras el reinicio controlado 2026-10-11: bridge-mcp v0.6.172 / MSSR 0.2.127 / 189 tools; Bridge y túnel ready
 Rollback: scripts/start-bridge-watchdog.ps1 (verificar script/ProjectRoot antes de ejecutar)
 ```
 
@@ -254,7 +254,7 @@ Esperar:
 
 ```txt
 ok=true
-server v0.6.171 (verificar versión REAL con bridge_health)
+server v0.6.172 (verificar versión REAL con bridge_health)
 tunnel 8081 live/ready
 catalog runtime 189 tools (readback 2026-10-11; comparar con la exposición observada del cliente)
 git limpio o cambios esperados, siempre sobre BridgeCodeRoot

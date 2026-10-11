@@ -18,7 +18,7 @@ Stack principal:
 ## Rutas canónicas (promoción verificada 2026-10-11)
 
 - **Checkout integrado/publicable:** `D:\Dev\bridge-mcp-candidate-0.6.160-mssr-0.2.109` (`main`, Bridge source 0.6.172); el candidato pasó `verify-all.ps1` antes de su activación.
-- **BridgeCodeRoot del watchdog HTTP activo:** `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`, todavía ejecutando 0.6.171 desde el commit `e9d91c4` hasta el reinicio controlado de 0.6.172. Verifica PID, `/status`, `readyz` y argumentos del watchdog antes de cambiar rutas.
+- **BridgeCodeRoot del watchdog HTTP activo:** `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`, ejecutando Bridge 0.6.172 desde el commit `391a1bb` tras el reinicio controlado del 2026-10-11. Verifica PID, `/status`, `readyz` y argumentos del watchdog antes de cambiar rutas.
 - **ProjectRoot del runtime HTTP:** `D:\Dev\bridge-mcp`, dueño de datos, logs, perfil y archivos request/ack del watchdog. También conserva un checkout histórico con cambios staged, unstaged y untracked: no usarlo para commits de release, no limpiarlo ni fusionarlo a ciegas.
 - **MSSR dueño de routing/contexto:** `D:\Dev\mssr` (MSSR 0.2.127).
 - `C:\dev\bridge-mcp` es una ruta heredada o alias posible: verificar su resolución antes de escribir.
