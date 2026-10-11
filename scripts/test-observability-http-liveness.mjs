@@ -327,7 +327,7 @@ try {
   const auditElapsedMs = performance.now() - auditStartedAt;
   const auditProbe = await auditProbePromise;
   assert.equal(largeToolAudit.scope, "all", "isolated tool audit lost the requested scope");
-  assert.equal(largeToolAudit.summary?.registeredTools, 188, "isolated tool audit lost the registered catalog");
+  assert.equal(largeToolAudit.summary?.registeredTools, 189, "isolated tool audit lost the registered catalog");
   assert.deepEqual(auditProbe.failures, [], `readyz stalled while tool audit aggregated a large window: ${JSON.stringify(auditProbe.failures)}`);
   assert.ok(auditProbe.samples.length >= 20, `expected repeated readyz samples during tool audit, got ${auditProbe.samples.length}`);
   assert.ok(Math.max(...auditProbe.samples) < 750, `readyz latency exceeded the tool-audit isolation budget: ${Math.max(...auditProbe.samples).toFixed(2)} ms`);

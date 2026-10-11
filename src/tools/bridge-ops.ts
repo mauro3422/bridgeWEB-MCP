@@ -372,7 +372,22 @@ async function bridgeRequestRestart(reason: string, mode: "http" | "tunnel" | "f
   };
   await fs.writeFile(tempPath, JSON.stringify(request, null, 2), "utf8");
   await fs.rename(tempPath, requestPath);
-  return { requested: true, requestPath, request, note: "The MCP server only wrote a restart request file. The external watchdog must perform the actual restart." };
+  return {
+    requested: true,
+    requestPath,
+    request,
+    note: "The MCP server only wrote a restart request file. The external watchdog must perform the actual restart.",
+    maintenanceNotice: {
+      type: "planned-restart",
+      requestId: request.id,
+      mode,
+      planned: true,
+      message: "A planned Bridge restart was requested. This MCP connection may disconnect briefly while the watchdog restarts the service.",
+      callerAction: "Wait until Bridge is ready before retrying an interrupted request.",
+      delivery: "This notice is returned in the same MCP response as the restart request; the transport may still close before the caller receives it.",
+      restartConfirmed: false,
+    },
+  };
 }
 
 export async function bridgeRestartStatus(cwd?: string) {
@@ -429,7 +444,7 @@ export const bridgeOpsToolModule: BridgeToolModule = {
     { name: "bridge_health", description: "Compact read-only bridge health query for tunnel diagnostics, restart status, runtime tool catalog, or all lightweight checks.", inputSchema: { type: "object", properties: { check: { type: "string", enum: ["all", "tunnel", "restart", "catalog"], default: "all" }, cwd: { type: "string" } }, additionalProperties: false } },
     { name: "bridge_connector_catalog_compare", description: "Compare the exact dedicated tool names observable in the current connector with the live Bridge runtime catalog. Use this to distinguish direct schema exposure from wrapper reachability; Bridge cannot inspect or force the host catalog, so exposedToolNames must come from the caller's observable catalog search.", inputSchema: { type: "object", properties: { exposedToolNames: { type: "array", items: { type: "string", minLength: 1, maxLength: 120 }, minItems: 1, maxItems: 256 } }, required: ["exposedToolNames"], additionalProperties: false } },
     { name: "bridge_self_check", description: "Run typecheck, build, Git status, configured tunnel health, and terminal inventory.", inputSchema: { type: "object", properties: { cwd: { type: "string" } }, additionalProperties: false } },
-    { name: "bridge_request_restart", description: "Request a bridge restart by writing a restart-request file for the external watchdog. This tool does not restart or kill processes directly.", inputSchema: { type: "object", properties: { reason: { type: "string" }, mode: { type: "string", enum: ["http", "tunnel", "full"], default: "http" }, cwd: { type: "string" } }, required: ["reason"], additionalProperties: false } },
+    { name: "bridge_request_restart", description: "Request a planned bridge restart by writing a restart-request file for the external watchdog. The response includes a maintenance notice for the caller and reconnect guidance; it does not confirm delivery or restart. This tool does not restart or kill processes directly.", inputSchema: { type: "object", properties: { reason: { type: "string" }, mode: { type: "string", enum: ["http", "tunnel", "full"], default: "http" }, cwd: { type: "string" } }, required: ["reason"], additionalProperties: false } },
     { name: "bridge_restart_status", description: "Return pending restart-request and last restart-ack information for the bridge watchdog.", inputSchema: { type: "object", properties: { cwd: { type: "string" } }, additionalProperties: false } },
   ],
   handlers: {

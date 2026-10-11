@@ -1,5 +1,9 @@
 # Bridge project state
 
+## Current release candidate
+
+Bridge 0.6.170 is the release candidate on top of the active 0.6.169 source line. It includes the isolated fail-closed MSSR core recovery commit and a caller-facing planned-restart notice in the existing `bridge_request_restart` response. The response explicitly does not prove delivery or completed restart. Runtime remains 0.6.169 until release gates pass and the managed watchdog acknowledges activation. Keep `ProjectRoot=D:\Dev\bridge-mcp` and the candidate checkout as `BridgeCodeRoot`; preserve the dirty primary checkout.
+
 ## Current release
 
 Bridge 0.6.169 is active and adopts the exact MSSR 0.2.121 release artifact (1,137,867 bytes; SHA-256 `181bf914da4f5767c457755990798169f6d539f56886b420bd8410951b5d8971`). Source verification and publication passed on 2026-10-11: check/build, vendor-to-installed package byte parity, exact Librarian regression, integration, first-party skills, project-context, MCP dual-era, docs, full isolated regressions, and remote readback of commit `683303b7b00857b2a788a48b996c81e4042104d4`. Watchdog request `18b4db27-1fc8-47c5-b670-dafc194ab57f` was acknowledged on `bridge-local-http` by watchdog PID 25000 at 10:24:53 UTC. Live Bridge reports boot `adf97c06-a668-4ff9-a187-c12ab058bff2`, 188 tools/catalog hash `512f420c7fd952d0`, and the tunnel healthz/readyz remain live/ready; no new transport failures were observed after the 10:24:54 UTC baseline. Windows was not restarted. Keep `ProjectRoot=D:\Dev\bridge-mcp` and `BridgeCodeRoot=D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`; update/restart only through the watchdog request under ProjectRoot.
