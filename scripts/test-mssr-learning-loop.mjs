@@ -135,6 +135,21 @@ const working = await workingUpdate({
 assert.equal(working.updated, true);
 assert.equal(working.durableTelemetryWritten, false);
 
+const overflowSelections = Array.from({ length: 102 }, (_, index) => ({
+  id: `digest-overflow-module-${String(index + 1).padStart(3, "0")}`,
+  selected: index % 3 === 0,
+  reason: index % 3 === 0 ? "selected" : "budget-exceeded",
+}));
+for (let offset = 0; offset < overflowSelections.length; offset += 96) {
+  observatory.recordMssrProjectContextSelection({
+    traceId: first.traceId,
+    caller: "chatgpt-web",
+    stage: "implement",
+    projectName: "digest-overflow-fixture",
+    decisions: overflowSelections.slice(offset, offset + 96),
+  });
+}
+
 let trace = evidence({ traceId: first.traceId, limit: 200 });
 assert.equal(trace.workingMemory?.workingSummary, "Host-gated selection is under verification.");
 
@@ -180,6 +195,9 @@ trace = evidence({ traceId: first.traceId, limit: 200 });
 assert.equal(trace.workingMemory, null, "working memory must be purged after outcome");
 assert.equal(trace.lifecycle.status, "closed-partial");
 assert.ok(trace.learningDigest, "trace evidence must expose the durable learning digest");
+const retainedOverflowSelections = trace.learningDigest.contextSelections.filter((selection) => selection.owner === "digest-overflow-fixture");
+assert.equal(retainedOverflowSelections.length, 102, "outcome digest must persist every one of 102 distinct project-context selections");
+assert.deepEqual(retainedOverflowSelections.map((selection) => selection.module), overflowSelections.map((selection) => selection.id));
 const serializedDigest = JSON.stringify(trace.learningDigest);
 assert.equal(serializedDigest.includes("Host-gated selection is under verification."), false, "workingSummary must never be copied into durable learning");
 assert.equal(serializedDigest.includes("Skipped optional skills stay outside procedural context."), true, "evidence-backed supported findings may survive distillation");

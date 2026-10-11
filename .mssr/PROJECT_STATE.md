@@ -4,6 +4,10 @@
 
 Bridge 0.6.170 is active from `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`, with MSSR 0.2.121, PID 25180, boot `d14a6cde-80b1-4c07-a6bd-a2982e28102a`, 189 tools/catalog hash `2c61021b82279630`. Watchdog request `04d1ba6a-da67-4f7c-bc2c-13035ab46a35` was acknowledged as `restart-http` by PID 25000 on `bridge-local-http` at `2026-10-11T19:07:44Z`. Bridge `/readyz` and tunnel `healthz`/`readyz` are live/ready; the tunnel was preserved. `npm run verify:all` passed with `failedRequired=0`, including the live HTTP smoke, complete isolated regressions, routing, liveness, docs, watchdog/metrics status and tools:list sanity. The planned-restart notice is returned in the same MCP response but cannot guarantee transport delivery; it tells callers to wait for readiness before retrying and does not claim restart completion. The Windows startup launcher remains pointed to this code/data-root split; its stale version comment was aligned to 0.6.170 / MSSR 0.2.121. Keep `ProjectRoot=D:\Dev\bridge-mcp` and `BridgeCodeRoot=D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`; the dirty primary checkout remains preserved.
 
+## 0.6.171 candidate
+
+MSSR source package 0.2.127 is published at `D:\Dev\mssr` commit `a511f69`; its release gate and full `npm run verify` passed. The exact package artifact SHA-256 is `70e79ae6e472517501ffdd38c4b0eaad740652c7d570b600bf17f90023703bfc`. Candidate integration is in progress on this isolated Bridge release branch; production remains Bridge 0.6.170 / MSSR 0.2.121 until the Bridge verification and watchdog readbacks pass. The primary `D:\Dev\bridge-mcp` checkout remains untouched.
+
 ## Previous release
 
 Bridge 0.6.169 / MSSR 0.2.121 was active immediately before 0.6.170 and adopted the exact MSSR 0.2.121 release artifact (1,137,867 bytes; SHA-256 `181bf914da4f5767c457755990798169f6d539f56886b420bd8410951b5d8971`). Its runtime history and earlier watchdog request remain recorded in the 0.6.169 changelog.

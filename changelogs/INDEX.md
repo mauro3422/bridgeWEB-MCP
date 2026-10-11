@@ -3,6 +3,7 @@
 Versioned release notes are the canonical change-history surface for MSSR debugging, maintenance, and persistence checks.
 
 ## Current releases
+- [0.6.171](0.6.171.md) - Adopt MSSR 0.2.127 and preserve complete bounded context-selection evidence in trace learning digests.
 - [0.6.170](0.6.170.md) - Add fail-closed MSSR core recovery and planned-restart maintenance notice.
 - [0.6.169](0.6.169.md) - Adopt MSSR 0.2.121 and verify exact Librarian ranges across blank-line-separated list continuations, nested items and siblings.
 - [0.6.168](0.6.168.md) - Adopt MSSR 0.2.120 and verify accumulated Librarian and project-context updates.

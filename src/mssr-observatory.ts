@@ -626,24 +626,34 @@ function redactText(value: string, maxChars = 400): string {
     .slice(0, maxChars);
 }
 
-function sanitizeValue(value: unknown, depth = 0): unknown {
+function sanitizeValue(value: unknown, depth = 0, arrayLimits: Readonly<Record<string, number>> = {}, arrayKey?: string): unknown {
   if (depth > 5) return "[depth-limit]";
   if (typeof value === "string") return redactText(value);
   if (typeof value === "number" || typeof value === "boolean" || value === null) return value;
-  if (Array.isArray(value)) return value.slice(0, 60).map((item) => sanitizeValue(item, depth + 1));
+  if (Array.isArray(value)) return value.slice(0, arrayKey ? arrayLimits[arrayKey] ?? 60 : 60)
+    .map((item) => sanitizeValue(item, depth + 1, arrayLimits));
   if (!value || typeof value !== "object") return String(value ?? "");
   const output: JsonRecord = {};
   for (const [key, child] of Object.entries(value as JsonRecord).slice(0, 60)) {
     if (/prompt|transcript|chain.?of.?thought|password|secret|api.?key|token|cursor/i.test(key)) continue;
-    output[key] = sanitizeValue(child, depth + 1);
+    output[key] = sanitizeValue(child, depth + 1, arrayLimits, key);
   }
   return output;
 }
 
-function safeDetails(details: JsonRecord = {}): JsonRecord {
-  const sanitized = sanitizeValue(details) as JsonRecord;
+function safeDetails(details: JsonRecord = {}, eventType?: string): JsonRecord {
+  const arrayLimits: Readonly<Record<string, number>> = eventType === "learning_digest"
+    ? { contextSelections: 128 }
+    : eventType === "project_context_selection"
+      ? { decisions: 96 }
+      : {};
+  const maxChars = eventType === "learning_digest" ? 64_000 : eventType === "project_context_selection" ? 32_000 : 24_000;
+  const sanitized = sanitizeValue(details, 0, arrayLimits) as JsonRecord;
   const encoded = JSON.stringify(sanitized);
-  if (encoded.length <= 24_000) return sanitized;
+  if (encoded.length <= maxChars) return sanitized;
+  if (eventType === "learning_digest" || eventType === "project_context_selection") {
+    throw new Error(`Bounded ${eventType} evidence exceeds its ${maxChars}-character persistence limit.`);
+  }
   return { truncated: true, preview: redactText(encoded, 23_000) };
 }
 
@@ -712,7 +722,7 @@ export function recordMssrEvent(input: MssrEventInput): MssrStoredEvent {
       observabilityEpoch: epoch.activeEpoch,
       runtimeBootId: RUNTIME_BOOT_ID,
       contractVersion: epoch.contractVersion,
-    }),
+    }, input.eventType),
   };
   rememberRecentMssrEvent(event);
 
