@@ -3,6 +3,7 @@
 Versioned release notes are the canonical change-history surface for MSSR debugging, maintenance, and persistence checks.
 
 ## Current releases
+- [0.6.173](0.6.173.md) - Pin asset-import connections to validated DNS answers and reject transformed transfer responses.
 - [0.6.172](0.6.172.md) - Refresh vulnerable transitive production dependencies and preserve project-context health budgets.
 - [0.6.171](0.6.171.md) - Adopt MSSR 0.2.127 and preserve complete bounded context-selection evidence in trace learning digests.
 - [0.6.170](0.6.170.md) - Add fail-closed MSSR core recovery and planned-restart maintenance notice.
