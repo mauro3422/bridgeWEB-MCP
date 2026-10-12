@@ -21,15 +21,21 @@ const wav=Buffer.from("RIFFabcdWAVEfmt sample wav","ascii");
 const mp4=Buffer.from([0,0,0,24,...Buffer.from("ftypmp42x"),0,0,0,0,1,2,3,4,5,6]);
 const body={"/img":png,"/audio":wav,"/video":mp4};
 let requestCount=0;
+const observedHosts=[];
+const observedAcceptEncodings=[];
 const server=http.createServer((req,res)=>{
  requestCount+=1;
+ observedHosts.push(req.headers.host ?? "");
+ observedAcceptEncodings.push(req.headers["accept-encoding"] ?? "");
  if(req.url==="/redirect"){res.writeHead(302,{location:"/img"}).end();return}
  if(req.url==="/oversize"){res.writeHead(200,{"content-length":String(512*1024*1024+1)}).end();return}
+ if(req.url==="/encoded"){res.writeHead(200,{"content-encoding":"gzip"}).end(png);return}
  const data=body[req.url];if(!data){res.writeHead(404).end();return}
  res.writeHead(200,{"content-type":"application/octet-stream","content-length":String(data.length)});res.end(data);
 });
 await new Promise(r=>server.listen(0,"127.0.0.1",r));
 const base="http://127.0.0.1:"+server.address().port;
+const pinnedBase="http://asset-import-test.invalid:"+server.address().port;
 const descriptors=[["/img","ref.png","image/png",png],["/audio","sound.wav","audio/wav",wav],["/video","clip.mp4","video/mp4",mp4]];
 const sha=b=>crypto.createHash("sha256").update(b).digest("hex");
 try {
@@ -40,6 +46,14 @@ try {
  assert.equal(done.count,3);assert.equal(done.transport,"chatgpt-authorized-file-parameter");
  descriptors.forEach(([,n,,b])=>assert.deepEqual(fs.readFileSync(path.join(sandbox,n)),b));
  assert.equal(JSON.parse(fs.readFileSync(manifestPath,"utf8")).items.length,3);
+ const pinnedTarget=path.join(sandbox,"pinned-dns.png");
+ await reg.call("asset_import_files",{files:[{...files[0],download_url:pinnedBase+"/img"}],targets:[{outputPath:pinnedTarget,expectedSha256:sha(png)}]});
+ assert.deepEqual(fs.readFileSync(pinnedTarget),png,"request must use the previously validated address even when the hostname has no DNS record");
+ assert.equal(observedHosts.at(-1),"asset-import-test.invalid:"+server.address().port,"DNS pinning must preserve the original Host header");
+ assert.equal(observedAcceptEncodings.at(-1),"identity","binary import must request untransformed source bytes");
+ const encodedTarget=path.join(sandbox,"encoded.png");
+ await assert.rejects(reg.call("asset_import_files",{files:[{...files[0],download_url:pinnedBase+"/encoded"}],targets:[{outputPath:encodedTarget}]}),/Encoded transfer responses are not accepted/);
+ assert(!fs.existsSync(encodedTarget),"encoded responses must not be saved as if they were original file bytes");
  await assert.rejects(reg.call("asset_import_files",{files:[files[0]],targets:[targets[0]]}),/Existing destination/);
  await assert.rejects(reg.call("asset_import_files",{files:[files[0]],targets:[{outputPath:path.join(sandbox,"bad.png"),expectedSha256:"a".repeat(64)}]}),/SHA-256 differs/);
  assert(!fs.existsSync(path.join(sandbox,"bad.png")));
@@ -61,5 +75,5 @@ try {
  await assert.rejects(reg.call("asset_import_files",{files:[{...files[0],download_url:"http://169.254.169.254/"}],targets:[{outputPath:path.join(sandbox,"ssrf.png")}]}),/unsafe-url/);
  await assert.rejects(reg.call("asset_import_files",{files:[files[0]],targets:[{outputPath:path.join(os.tmpdir(),"bridge-asset-outside-policy.png")}]}),/outside bridge-mcp allowed roots/);
  await assert.rejects(reg.call("asset_import_files",{files:[files[0]],targets:[{outputPath:path.join(sandbox,"deny.png")}],overwrite:true}),/Overwrite intentionally unsupported/);
- console.log("asset_import_files PASS: PNG/WAV/MP4 byte-exact, manifest, no-overwrite, SHA rollback, unsafe URL blocked, tool metadata");
+ console.log("asset_import_files PASS: PNG/WAV/MP4 byte-exact, DNS-pinned connection/Host header, identity transfer, manifest, no-overwrite, SHA rollback, unsafe URL blocked, tool metadata");
 } finally {await new Promise(r=>server.close(r));fs.rmSync(sandbox,{force:true,recursive:true});}

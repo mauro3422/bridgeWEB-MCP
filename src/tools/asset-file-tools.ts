@@ -2,8 +2,11 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { lookup } from "node:dns/promises";
-import { BlockList, isIP } from "node:net";
+import { lookup as dnsLookup } from "node:dns/promises";
+import type { LookupAddress } from "node:dns";
+import { BlockList, isIP, type LookupFunction } from "node:net";
+import http from "node:http";
+import https from "node:https";
 import { z } from "zod";
 import type { BridgeToolModule } from "./types.js";
 import { resolveToolPath } from "./shared/path.js";
@@ -57,11 +60,14 @@ function localIp(address: string): boolean {
   }
   return !globalIpv6.check(address, "ipv6") || blockedIpv6.check(address, "ipv6");
 }
-async function checkUrl(raw: string) {
+type CheckedUrl = { url: URL; addresses: LookupAddress[] };
+async function checkUrl(raw: string): Promise<CheckedUrl> {
   const url = new URL(raw);
   const testLocal = process.env.NODE_ENV === "test" && process.env.BRIDGE_MCP_TEST_ASSET_LOCALHOST === "1";
+  if (testLocal && url.protocol === "http:" && url.hostname === "asset-import-test.invalid")
+    return { url, addresses: [{ address: "127.0.0.1", family: 4 }] };
   if (testLocal && url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1"))
-    return url;
+    return { url, addresses: [{ address: "127.0.0.1", family: 4 }] };
   if (url.protocol !== "https:" || url.username || url.password || (url.port && url.port !== "443"))
     throw new Error("[unsafe-url] Only HTTPS standard-port file download URLs are allowed");
   const host = url.hostname.replace(/\.$/, "").toLowerCase();
@@ -69,10 +75,36 @@ async function checkUrl(raw: string) {
   const names = (process.env.BRIDGE_ASSET_FILE_HOSTS || "files.oaiusercontent.com").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
   if (!names.some(n => host === n || (n.startsWith("*.") && host.endsWith(n.slice(1)))))
     throw new Error("[unsafe-url] Download hostname not allowlisted; configure BRIDGE_ASSET_FILE_HOSTS deliberately");
-  const addresses = await lookup(host, { all: true, verbatim: true });
+  const addresses = await dnsLookup(host, { all: true, verbatim: true });
   if (!addresses.length || addresses.some(x => localIp(x.address)))
     throw new Error("[unsafe-url] Private / invalid DNS answer");
-  return url;
+  return { url, addresses };
+}
+function pinnedLookup(addresses: LookupAddress[]): LookupFunction {
+  return (_hostname, options, callback) => {
+    const family = options.family ?? 0;
+    const candidates = addresses.filter(x => !family || x.family === family);
+    if (!candidates.length) {
+      const error = Object.assign(new Error("No validated address matches the requested family"), { code: "ENOTFOUND" });
+      callback(error, "", 0);
+      return;
+    }
+    if (options.all) callback(null, candidates);
+    else callback(null, candidates[0]!.address, candidates[0]!.family);
+  };
+}
+function requestPinned(url: URL, addresses: LookupAddress[], signal: AbortSignal) {
+  return new Promise<http.IncomingMessage>((resolve, reject) => {
+    const transport = url.protocol === "https:" ? https : http;
+    const request = transport.request(url, {
+      method: "GET",
+      headers: { "accept-encoding": "identity" },
+      signal,
+      lookup: pinnedLookup(addresses),
+    }, resolve);
+    request.once("error", reject);
+    request.end();
+  });
 }
 function detectMime(h: Buffer): string {
   if (h.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) return "image/png";
@@ -92,26 +124,37 @@ function detectMime(h: Buffer): string {
 async function transferOne(file: z.infer<typeof fileParam>, target: z.infer<typeof targetParam>, byteBudget: number) {
   const outputPath = resolveToolPath(target.outputPath, { access:"write" });
   const temp = outputPath + ".incoming-" + crypto.randomUUID();
-  const url = await checkUrl(file.download_url);
+  const { url, addresses } = await checkUrl(file.download_url);
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), CHUNK_TIMEOUT);
+  let response: http.IncomingMessage | undefined;
   try {
-    const response = await fetch(url, { signal: abort.signal, redirect: "manual" });
-    if (!response.ok || !response.body) throw new Error("[source-unavailable] Download rejected: " + response.status);
-    const lengthHeader = response.headers.get("content-length");
-    if (lengthHeader && Number(lengthHeader) > byteBudget) throw new Error("[too-large] File exceeds its remaining import budget");
+    response = await requestPinned(url, addresses, abort.signal);
+    if (response.statusCode === undefined || response.statusCode < 200 || response.statusCode >= 300)
+      throw new Error("[source-unavailable] Download rejected: " + (response.statusCode ?? "no-status"));
+    const contentEncoding = response.headers["content-encoding"];
+    if (contentEncoding && contentEncoding.toLowerCase() !== "identity")
+      throw new Error("[source-unavailable] Encoded transfer responses are not accepted");
+    const lengthHeader = response.headers["content-length"];
+    if (lengthHeader && Number(Array.isArray(lengthHeader) ? lengthHeader[0] : lengthHeader) > byteBudget)
+      throw new Error("[too-large] File exceeds its remaining import budget");
     await fs.mkdir(path.dirname(outputPath), { recursive:true });
     const stream = await fs.open(temp, "wx");
     const hash = crypto.createHash("sha256");
     let bytes = 0; let header = Buffer.alloc(0);
     try {
-      for await (const packet of response.body) {
-        const chunk = Buffer.from(packet);
-        bytes += chunk.length;
-        if (bytes > byteBudget) throw new Error("[too-large] Stream exceeded its remaining import budget");
-        if (header.length < 32) header = Buffer.concat([header, chunk]).subarray(0, 32);
-        hash.update(chunk);
-        await stream.writeFile(chunk);
+      try {
+        for await (const packet of response) {
+          const chunk = Buffer.from(packet);
+          bytes += chunk.length;
+          if (bytes > byteBudget) throw new Error("[too-large] Stream exceeded its remaining import budget");
+          if (header.length < 32) header = Buffer.concat([header, chunk]).subarray(0, 32);
+          hash.update(chunk);
+          await stream.writeFile(chunk);
+        }
+      } catch (error) {
+        response.destroy();
+        throw error;
       }
     } finally { await stream.close(); }
     if (!bytes) throw new Error("[source-unavailable] Empty file");
@@ -126,7 +169,7 @@ async function transferOne(file: z.infer<typeof fileParam>, target: z.infer<type
       throw new Error("[integrity-mismatch] Declared MIME differs from signature");
     return { outputPath, temp, bytes, sha256, mime, fileId: file.file_id, sourceName: file.file_name ?? null };
   } catch (error) { await fs.rm(temp, { force: true }).catch(()=>undefined); throw error; }
-  finally { clearTimeout(timer); }
+  finally { response?.destroy(); clearTimeout(timer); }
 }
 type Stage = Awaited<ReturnType<typeof transferOne>>;
 async function importFiles(args: z.infer<typeof input>) {

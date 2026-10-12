@@ -26,7 +26,7 @@ OpenAI define que el host inyecta este objeto autorizado y que la metadata lista
 
 ## Protección de datos y límites
 
-- Sólo HTTPS en puerto estándar, sin credenciales en URL, con host incluido en `BRIDGE_ASSET_FILE_HOSTS` (por defecto `files.oaiusercontent.com`). No sigue redirecciones. Revalida las respuestas DNS contra rangos privados/especiales antes de solicitar el archivo.
+- Sólo HTTPS en puerto estándar, sin credenciales en URL, con host incluido en `BRIDGE_ASSET_FILE_HOSTS` (por defecto `files.oaiusercontent.com`). Resuelve el host una vez, rechaza el lote completo si alguna respuesta es privada/especial y fija la conexión a las direcciones públicas verificadas; no vuelve a resolver durante el connect, preserva el hostname para `Host`/SNI/certificado y no sigue redirecciones. Solicita `identity` y rechaza respuestas con `Content-Encoding` para no guardar bytes transformados como el archivo original. Esto cierra la ventana de DNS rebinding entre validación y descarga.
 - Limita cada archivo a 512 MiB, cada lote a 1 GiB y cada lote a ocho archivos. Aplica el presupuesto del lote mientras transmite y rechaza de antemano presupuestos declarados que ya excedan el máximo.
 - Descarga por streaming a un temporal exclusivo junto al destino, calcula SHA-256 y MIME por firma, compara hash/tamaño declarados y confirma cada destino con hard link sin reemplazo. Ante fallo limpia temporales y destinos creados por ese lote.
 - `resolveToolPath(access=write)` aplica la política de rutas del Bridge. La tool se anuncia como escritura destructiva y de mundo externo; la llamada requiere la decisión/confirmación normal del host.
