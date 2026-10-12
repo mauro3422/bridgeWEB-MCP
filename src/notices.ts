@@ -264,6 +264,7 @@ function noticeRelevance(notice: BridgeNotice, context: BridgeNoticeDeliveryCont
   const noticeWorkflow = normalizedScopeToken(noticeWorkflowKey(notice));
   if (activeWorkflow && noticeWorkflow) return activeWorkflow === noticeWorkflow ? "relevant" : "other";
 
+  if (noticeTrace) return "other";
   return "global";
 }
 

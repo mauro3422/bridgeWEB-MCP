@@ -19,6 +19,26 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-10-12 — Trace-only lifecycle warnings fell through to global delivery
+
+**Estado:** Corregido en el código candidato 0.6.175; reinicio controlado y readback live pendientes.
+
+**Capa/owner:** Entrega contextual de avisos Bridge (src/notices.ts, noticeRelevance).
+
+**Síntoma observable:** Dos avisos distintos de ciclo de vida MSSR, cada uno limitado a una traza chatgpt-web, se incluyeron una vez en respuestas MCP sin una traza Bridge activa comparable. El historial confirmó IDs distintos y deliveryCount=1 en ambos; no fue un reintento del mismo aviso.
+
+**Reproducción/evidencia:** La regresión añadida reproduce la condición con un aviso de warning que solo trae traceId: antes del arreglo, drainBridgeNoticesWithinBudget(..., {}) entregaba su cuerpo y la aserción fallaba. Otra variante incluye contexto de proyecto no comparable para asegurar que tampoco caiga a global. bridge_notice_history conserva los cuerpos para inspección explícita.
+
+**Causa demostrada:** noticeRelevance comparaba identidades de traza sólo cuando ambas estaban presentes. Sin context.traceId, el aviso trazado seguía hacia project/workflow y finalmente devolvía global; deliveryPriority admitía warnings globales.
+
+**Corrección:** Tras probar ámbitos de proyecto/workflow realmente comparables, un aviso que todavía tiene traceId y carece de cualquier ámbito comparable retorna other. Se mantienen el exact match de trace, las coincidencias de proyecto/workflow, los avisos globales sin scope y el historial global read-only.
+
+**Regresión/verificación:** La prueba focal falló primero en la condición original y pasó después con persistencia de avisos desactivada en el proceso de prueba. La suite integral y el readback tras reinicio se registran en el changelog 0.6.175.
+
+**Seguimiento:** Completar verify-all, publicar el lote aislado en la rama de Bridge, solicitar restart-http sin sobrescribir el ProjectRoot, y comprobar Bridge/túnel ready, versión 0.6.175, catálogo y ausencia de entrega cruzada.
+
+---
+
 ## 2026-10-10 — Candidate observability reads intermittently exceeded execution window
 
 **Estado:** No resuelto como causa; las rutas pasaron las repeticiones y el gate integral posterior.

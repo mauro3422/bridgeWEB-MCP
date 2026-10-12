@@ -109,6 +109,59 @@ assert.equal(contextual.otherPending, 1, "other-project attention must remain av
 assert.equal(contextual.remaining, 1);
 assert.equal(peekBridgeNotices(10)[0]?.code, "beta-warning");
 
+// Trace-scoped notices must not fall back to global delivery when no comparable scope exists.
+clearBridgeNotices();
+emitBridgeNotice({
+  severity: "warning",
+  code: "trace-only-warning",
+  source: "mssr-trace-context",
+  message: "Trace-scoped warning body.",
+  details: { traceId: `other-trace-${token}` },
+  dedupeKey: `notice-policy:${token}:trace-only`,
+});
+const untracedTraceOnly = drainBridgeNoticesWithinBudget(1, 4000, {});
+assert.equal(untracedTraceOnly.items.length, 0, "a trace-only notice must stay pending when delivery has no active trace");
+assert.equal(untracedTraceOnly.otherPending, 1, "unmatched trace-only attention remains count-only");
+
+clearBridgeNotices();
+emitBridgeNotice({
+  severity: "warning",
+  code: "trace-only-with-project-context",
+  source: "mssr-trace-context",
+  message: "Private trace warning body.",
+  details: { traceId: `other-trace-${token}` },
+  dedupeKey: `notice-policy:${token}:trace-only-with-project-context`,
+});
+const traceOnlyWithProjectContext = drainBridgeNoticesWithinBudget(1, 4000, { project: "alpha" });
+assert.equal(traceOnlyWithProjectContext.items.length, 0, "an unrelated project context must not make a trace-only notice global");
+assert.equal(traceOnlyWithProjectContext.otherPending, 1);
+
+clearBridgeNotices();
+emitBridgeNotice({
+  severity: "warning",
+  code: "same-trace-warning",
+  source: "mssr-trace-context",
+  message: "Current trace warning body.",
+  details: { project: "alpha", traceId: `active-trace-${token}` },
+  dedupeKey: `notice-policy:${token}:same-trace`,
+});
+const exactTraceDelivery = drainBridgeNoticesWithinBudget(1, 4000, {
+  project: "alpha",
+  traceId: `active-trace-${token}`,
+});
+assert.deepEqual(exactTraceDelivery.items.map((item) => item.code), ["same-trace-warning"]);
+
+clearBridgeNotices();
+emitBridgeNotice({
+  severity: "warning",
+  code: "unscoped-global-warning",
+  source: "fixture",
+  message: "Truly global warning.",
+  dedupeKey: `notice-policy:${token}:unscoped-global`,
+});
+const globalDelivery = drainBridgeNoticesWithinBudget(1, 4000, {});
+assert.deepEqual(globalDelivery.items.map((item) => item.code), ["unscoped-global-warning"]);
+
 // An oversized first notice must never block the queue. It is compacted for delivery if necessary.
 clearBridgeNotices();
 emitBridgeNotice({
