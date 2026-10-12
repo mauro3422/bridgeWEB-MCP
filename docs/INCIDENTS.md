@@ -21,7 +21,7 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ## 2026-10-12 — Trace-only lifecycle warnings fell through to global delivery
 
-**Estado:** Corregido en el código candidato 0.6.175; reinicio controlado y readback live pendientes.
+**Estado:** Corregido, publicado y activo en Bridge 0.6.175 desde 2026-10-12T14:11:18.273Z; commit `2c9378ab532bfab0a2418acfeca6f496ac27ad91` está en la rama remota de release.
 
 **Capa/owner:** Entrega contextual de avisos Bridge (src/notices.ts, noticeRelevance).
 
@@ -33,9 +33,9 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 **Corrección:** Tras probar ámbitos de proyecto/workflow realmente comparables, un aviso que todavía tiene traceId y carece de cualquier ámbito comparable retorna other. Se mantienen el exact match de trace, las coincidencias de proyecto/workflow, los avisos globales sin scope y el historial global read-only.
 
-**Regresión/verificación:** La prueba focal falló primero en la condición original y pasó después con persistencia de avisos desactivada en el proceso de prueba. La suite integral y el readback tras reinicio se registran en el changelog 0.6.175.
+**Regresión/verificación:** La prueba focal reprodujo el leak antes del fix y pasó después. `bridge_verify_all` job `bridge_verify_1791814331331_1` terminó `failedRequired=0` en 356,199 ms; full isolated regressions pasaron en 204.8 s. HTTP smoke leyó 0.6.175/189 tools y healthz/readyz live/ready; MCP moderno/legacy, routing, WAL, HTTP liveness, skill-routing y docs de tools también pasaron.
 
-**Seguimiento:** Completar verify-all, publicar el lote aislado en la rama de Bridge, solicitar restart-http sin sobrescribir el ProjectRoot, y comprobar Bridge/túnel ready, versión 0.6.175, catálogo y ausencia de entrega cruzada.
+**Seguimiento:** No quedan acciones técnicas para este incidente. El watchdog reconoció restart-http `e03ddb7c-94f6-4f0a-b6e4-1e472a6a6f8e`; la llamada devolvió el aviso de mantenimiento al chat solicitante. Los cuatro pares 502/noStatus coincidieron con la ventana de reinicio; no hubo nuevos desde el baseline 2026-10-12 14:11:25.532 UTC.
 
 ---
 
