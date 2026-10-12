@@ -22,8 +22,9 @@ This branch implements **host-only, direct** `project_context_recover_core`.
 1. Read the canonical `.mssr/project-context.json` and target PROJECT_* source by authorized read-only tools; determine the precise over-budget core and proposed human-reviewed reduced section.
 2. Obtain SHA-256 of the **whole current source file**. Do not guess the value.
 3. Call `project_context_recover_core` with `projectRoot`, exact `heading`, replacement `content` (without duplicating the heading), and `expectedSha256`.
-4. Inspect the returned before/after SHA and bytes and re-run `project_context_load`, `project_context_health`, and `skill_bootstrap` normally; resume a managed trace.
-5. If other authorities are invalid, a manifest is broken, another actor changes the file, or a section cannot be reduced safely, **stop** and use normal explicit/manual recovery. Never mutate unknown content merely to pass a length gate.
+4. If the dedicated recovery tool is **missing from ChatGPT's connector catalog**, inspect the *live* schema with `bridge_tool_schema({toolName:"project_context_recover_core"})`, then call `bridge_tool_action` with `toolName` and `confirmToolName` both exactly `project_context_recover_core`, and `arguments` matching the live schema. This narrow fallback has the same SHA, section, size, and project restrictions; ordinary delegated actions never bypass lifecycle protections.
+5. Inspect the returned before/after SHA and bytes and re-run `project_context_load`, `project_context_health`, and `skill_bootstrap` normally; resume a managed trace.
+6. If other authorities are invalid, a manifest is broken, another actor changes the file, or a section cannot be reduced safely, **stop** and use normal explicit/manual recovery. Never mutate unknown content merely to pass a length gate.
 
 Jev/Librarian may later propose what to retain, split, and retrieve; its judgments remain advisory. Human/project-authorized review, exact-source verification and write gates continue to determine persistence. This patch intentionally makes no Jev/runtime/provider changes.
 

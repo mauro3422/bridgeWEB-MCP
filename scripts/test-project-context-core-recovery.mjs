@@ -115,7 +115,33 @@ try {
     content: "Still small and truthful.", expectedSha256: fixed.afterSha256,
   });
   assert.equal(accepted.updated, true);
-  console.log("MSSR core recovery PASS: blocked ordinary writes; emergency constrained to overbudget existing core; hashes/manifest protected; writer preflight prevents recurrence.");
+  // Stale ChatGPT connector catalogs may omit newly added dedicated tools.
+  // Only a confirmed fallback targeting this exact recovery handler may
+  // pass the otherwise mandatory lifecycle gate.
+  const fallbackRoot = path.join(sandbox, "fallback-project");
+  const fallbackDir = path.join(fallbackRoot, ".mssr");
+  const fallbackTarget = path.join(fallbackDir, "PROJECT_CONTEXT.md");
+  await fs.mkdir(fallbackDir, { recursive: true });
+  await fs.writeFile(fallbackTarget, huge);
+  await fs.writeFile(path.join(fallbackDir, "project-context.json"), JSON.stringify(manifest, null, 2));
+  const fallbackArgs = { projectRoot: fallbackRoot, heading: "## Identity", content: "Recovered via delegated fallback.\n", expectedSha256: hash(huge) };
+  const noCommandEscape = await callFresh("bridge_tool_action", {
+    toolName: "write_text_file", confirmToolName: "write_text_file",
+    arguments: { path: path.join(fallbackRoot, "not-authorized.txt"), content: "blocked" },
+  });
+  assert.equal(noCommandEscape.status, "mssr-lifecycle-preflight-required", "Arbitrary delegated writes must remain guarded.");
+  assert.equal(await fs.stat(path.join(fallbackRoot, "not-authorized.txt")).catch(() => null), null);
+  const delegated = await callFresh("bridge_tool_action", {
+    toolName: "project_context_recover_core",
+    confirmToolName: "project_context_recover_core",
+    arguments: fallbackArgs,
+  });
+  const delegatedResult = delegated.result ?? delegated;
+  assert.equal(delegatedResult.recovered, true, "Confirmed fallback must recover core even when route/bootstrap is blocked.");
+  assert.equal(await fs.readFile(fallbackTarget, "utf8"), "## Identity\nRecovered via delegated fallback.\n");
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(fallbackDir, "project-context.json"), "utf8")), manifest);
+
+  console.log("MSSR core recovery PASS: ordinary and delegated writes blocked; exact confirmed fallback restores overbudget core; hashes/manifest protected; writer preflight prevents recurrence.");
 } finally {
   observatory.closeMssrObservatoryForTests();
   metrics.closeMetricsForTests();

@@ -922,11 +922,17 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
         throw new Error(`${prepared.blocked.code}: ${prepared.blocked.message}`);
       }
       if (!modularToolRegistry.has(name)) throw new Error(`Unknown tool: ${name}`);
-      // Single-purpose break-glass exception: only the direct core recovery tool.
-      // Its handler independently verifies over-budget state, CAS and shrinking.
-      // No generic write/command/delegated tool can inherit this exception.
-      const authorizedCoreRecovery = name === "project_context_recover_core"
+      // Break-glass applies ONLY to the exact recovery handler, never to
+      // ordinary writes, commands or arbitrary delegated actions. The connector
+      // may cache an older tool catalog without this dedicated recovery tool:
+      // allow only an explicitly confirmed fallback to the same guarded handler.
+      const directCoreRecovery = name === "project_context_recover_core"
         && effectivePrepared.toolName === name;
+      const exactDelegatedCoreRecovery = name === "bridge_tool_action"
+        && effectivePrepared.toolName === "project_context_recover_core"
+        && args.toolName === "project_context_recover_core"
+        && args.confirmToolName === "project_context_recover_core";
+      const authorizedCoreRecovery = directCoreRecovery || exactDelegatedCoreRecovery;
       if (lifecyclePreflight?.intercepted && !authorizedCoreRecovery) {
         return complete({
           executed: false,
@@ -1000,7 +1006,7 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
           ordinaryWritesRemainProtected: true,
           nextAction: {
             toolName: "project_context_load",
-            instruction: "Revisa el proyecto con includeProjectContext=false y las herramientas de lectura. Si el exceso corresponde a un core indexado, usa exclusivamente project_context_recover_core con SHA-256 y texto revisado que respete el límite. Después repite project_context_load y skill_bootstrap.",
+            instruction: "Revisa el proyecto con includeProjectContext=false y herramientas de lectura. Recupera únicamente el core indexado con project_context_recover_core, SHA-256 y texto revisado. Si el catálogo del conector no muestra esa herramienta, consulta bridge_tool_schema y usa bridge_tool_action con toolName=confirmToolName=project_context_recover_core y los argumentos exactos. Después repite project_context_load y skill_bootstrap.",
           },
           emergencyTool: "project_context_recover_core",
         }, false, message);
