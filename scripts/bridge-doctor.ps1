@@ -6,10 +6,16 @@ param(
   [string]$TunnelBaseUrl = "http://127.0.0.1:8081",
   [string]$StartupFileName = "BridgeMCP-Watchdog.cmd",
   [string]$ExpectedServerVersion = "",
+  [string]$RuntimeDataRoot = "",
   [switch]$SkipTunnelChecks
 )
 
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($RuntimeDataRoot)) {
+  $RuntimeDataRoot = $ProjectRoot
+}
+$RuntimeDataRoot = (Resolve-Path -LiteralPath $RuntimeDataRoot).Path
 
 if ([string]::IsNullOrWhiteSpace($ExpectedServerVersion)) {
   $packagePath = Join-Path $ProjectRoot "package.json"
@@ -185,8 +191,8 @@ else {
 }
 
 Write-Section "Restart coordination"
-$requestPath = Join-Path $ProjectRoot ".bridge-restart-request"
-$ackPath = Join-Path $ProjectRoot ".bridge-restart-ack"
+$requestPath = Join-Path $RuntimeDataRoot ".bridge-restart-request"
+$ackPath = Join-Path $RuntimeDataRoot ".bridge-restart-ack"
 Write-Host "request exists: $(Test-Path -LiteralPath $requestPath) path=$requestPath"
 Write-Host "ack exists:     $(Test-Path -LiteralPath $ackPath) path=$ackPath"
 if (Test-Path -LiteralPath $ackPath) {

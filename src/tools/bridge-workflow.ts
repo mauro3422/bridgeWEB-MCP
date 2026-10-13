@@ -168,7 +168,7 @@ async function verifyJobSnapshot(job: VerifyJob) {
   };
 }
 
-function startVerifyAll(projectRoot: string, expectedServerVersion: string, strictGit: boolean, timeoutMs: number, timeoutAction: "observe" | "terminate") {
+function startVerifyAll(projectRoot: string, runtimeDataRoot: string | undefined, expectedServerVersion: string, strictGit: boolean, timeoutMs: number, timeoutAction: "observe" | "terminate") {
   cleanupVerifyJobs();
   const resolvedRoot = resolveToolPath(projectRoot, { access: "cwd" });
   const args = [
@@ -180,6 +180,9 @@ function startVerifyAll(projectRoot: string, expectedServerVersion: string, stri
     "-ExpectedServerVersion",
     expectedServerVersion,
   ];
+  if (runtimeDataRoot !== undefined) {
+    args.push("-RuntimeDataRoot", resolveToolPath(runtimeDataRoot, { access: "cwd" }));
+  }
   if (strictGit) args.push("-StrictGit");
 
   const child = spawn("powershell", args, { cwd: resolvedRoot, shell: false, windowsHide: true, env: process.env });
@@ -268,6 +271,7 @@ export const bridgeWorkflowToolModule: BridgeToolModule = {
         type: "object",
         properties: {
           cwd: { type: "string" },
+          runtimeDataRoot: { type: "string" },
           expectedServerVersion: { type: "string", default: SERVER_VERSION },
           strictGit: { type: "boolean", default: false },
           timeoutMs: { type: "number", default: 180000, minimum: 30000, maximum: 600000 },
@@ -291,12 +295,13 @@ export const bridgeWorkflowToolModule: BridgeToolModule = {
     bridge_verify_all: (args) => {
       const parsed = z.object({
         cwd: z.string().optional(),
+        runtimeDataRoot: z.string().optional(),
         expectedServerVersion: z.string().default(SERVER_VERSION),
         strictGit: z.boolean().default(false),
         timeoutMs: z.number().int().min(30000).max(600000).default(180000),
         timeoutAction: z.enum(["observe", "terminate"]).default("observe"),
       }).parse(args);
-      return startVerifyAll(parsed.cwd ?? process.cwd(), parsed.expectedServerVersion, parsed.strictGit, parsed.timeoutMs, parsed.timeoutAction);
+      return startVerifyAll(parsed.cwd ?? process.cwd(), parsed.runtimeDataRoot, parsed.expectedServerVersion, parsed.strictGit, parsed.timeoutMs, parsed.timeoutAction);
     },
     bridge_verify_status: async (args) => {
       cleanupVerifyJobs();

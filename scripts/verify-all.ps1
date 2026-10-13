@@ -89,7 +89,7 @@ function Invoke-VerifyStep {
 Set-Location -LiteralPath $ProjectRoot
 
 $steps = @()
-$doctorArgs = @("-ProjectRoot", $ProjectRoot, "-BridgeHost", $bridgeUri.Host, "-BridgePort", $bridgeUri.Port, "-ExpectedServerVersion", $ExpectedServerVersion)
+$doctorArgs = @("-ProjectRoot", $ProjectRoot, "-RuntimeDataRoot", $RuntimeDataRoot, "-BridgeHost", $bridgeUri.Host, "-BridgePort", $bridgeUri.Port, "-ExpectedServerVersion", $ExpectedServerVersion)
 if ($SkipTunnelChecks) { $doctorArgs += "-SkipTunnelChecks" }
 $steps += Invoke-VerifyStep "doctor" { powershell -NoProfile -File .\scripts\bridge-doctor.ps1 @doctorArgs }
 $steps += Invoke-VerifyStep "check" { npm run check }

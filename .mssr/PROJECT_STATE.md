@@ -1,11 +1,17 @@
 # Bridge project state
 
 ## Current release
-Bridge 0.6.176 is active and adopts the exact MSSR 0.2.130 release artifact (1,178,226 bytes; SHA-256 `35d3fe6d2e385efcb9e7bf2ae51490406088c5bbb32a8d2e9e4abc0e1a1a37e6`). It passes explicit Jev selector modes and adds a bounded, best-effort MCP progress notice before a planned restart when the caller provides a progress token. The full post-restart verification job completed with exit 0 and no failed required gates. Follow-up: expose a distinct runtime/data root in `bridge_verify_all` so its doctor restart-file probe checks the same root as the watchdog.
+Bridge 0.6.176 is active and adopts the exact MSSR 0.2.130 release artifact (1,178,226 bytes; SHA-256 `35d3fe6d2e385efcb9e7bf2ae51490406088c5bbb32a8d2e9e4abc0e1a1a37e6`). Candidate Bridge 0.6.177 passes the watchdog runtime/data root into full verification so the doctor checks restart state in the correct directory. Source checks and the complete isolated regression suite pass; controlled activation and live readback remain pending.
 
 **Active runtime readback (2026-10-13):** Watchdog request `49b6c6a1-3d28-41bf-a6a1-095d2f9360b6` was acknowledged at `2026-10-13T04:10:19.5747128Z` on profile `bridge-local-http`. Bridge 0.6.176 / MSSR 0.2.130 is running from `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`, HTTP PID 19564, boot `8fb47c7e-5430-4760-aa6d-b8ac7ad99a76`; live catalog: 189 tools, hash `cc05af79b80303d0`. Bridge and tunnel health/readiness are HTTP 200; restart is not pending. Since baseline `2026-10-13T04:10:20.662Z`, tunnel 502s and local POST-without-status are both zero. Post-restart verification job `bridge_verify_1791864684703_1` completed exit 0, `failedRequired=0`, no timeout. Its doctor subcheck printed restart-file paths under the code checkout; direct `bridge_restart_status` against runtime/data root verified the real ACK. The HTTP smoke emitted one authenticated synthetic `__test_opencode` telemetry trace; exclude it from Jev benchmarks. See the [2026-10-13 verifier-root incident](../docs/INCIDENTS.md).
 
 The active HTTP `BridgeCodeRoot` is `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`; runtime/data `ProjectRoot` is `D:\Dev\bridge-mcp`. The latter is a separate historical checkout with mixed staged, unstaged and untracked work; it remains outside release commits and is not being cleaned or merged here.
+
+## 0.6.177 verifier-root correction candidate
+
+Branch `codex/bridge-0.6.173-activation-readback` contains the 0.6.177 candidate. `bridge_verify_all.runtimeDataRoot` is passed to `verify-all.ps1` and the doctor, while package/Git checks remain under `cwd`/`ProjectRoot`. The isolated doctor regression confirms both explicit split-root routing and the old default. `npm run check`, build, catalog/tool regression, generated tool-doc check, and the full isolated regression suite passed. Pending controlled restart, catalog readback, and post-restart verification. See [0.6.177](../../changelogs/0.6.177.md) and the [verifier-root incident](../docs/INCIDENTS.md).
+
+Release persistence also split the 95%-budget HTTP transport/readiness memory into two indexed owners: pooled-socket/tunnel correlation and readiness/storage/restart recovery. The source paragraph was moved verbatim and verified by hash. Post-split Project Context Health is `watch` with 30 modules, four existing module-budget WATCH findings, and no REVIEW-level finding.
 
 ## Previous release
 

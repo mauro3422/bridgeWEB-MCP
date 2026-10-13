@@ -563,7 +563,7 @@
     {
       "id": "bridge-http-transport-readiness-contract",
       "kind": "memory",
-      "description": "HTTP keep-alive/tunnel correlation and sustained-readiness recovery contract for Bridge runtime stability.",
+      "description": "HTTP sustained-readiness recovery, storage bootstrap health, and restart notice contract for Bridge runtime stability.",
       "source": {
         "path": ".mssr/knowledge/operations/bridge-http-transport-readiness-contract.md"
       },
@@ -581,10 +581,8 @@
         "other"
       ],
       "actions": [
-        "debug",
         "recover",
-        "verify",
-        "maintain"
+        "verify"
       ],
       "artifacts": [
         "mcp",
@@ -596,13 +594,51 @@
         "safe-editing"
       ],
       "signals": [
-        "error-observed",
         "recovery-needed",
-        "conflicting-evidence"
+        "warning-observed"
       ],
       "required": false,
       "priority": 45,
       "maxChars": 2400
+    },
+    {
+      "id": "bridge-http-transport-correlation-contract",
+      "kind": "memory",
+      "description": "HTTP keep-alive/tunnel connection reuse and 502/no-status correlation contract.",
+      "source": {
+        "path": ".mssr/knowledge/operations/bridge-http-transport-correlation-contract.md"
+      },
+      "topic": "operations",
+      "area": "bridge-runtime",
+      "stages": [
+        "start",
+        "verify",
+        "close",
+        "resume"
+      ],
+      "domains": [
+        "coding",
+        "filesystem"
+      ],
+      "actions": [
+        "debug",
+        "verify"
+      ],
+      "artifacts": [
+        "mcp",
+        "code",
+        "repository"
+      ],
+      "needs": [
+        "integrity-verification"
+      ],
+      "signals": [
+        "error-observed",
+        "conflicting-evidence"
+      ],
+      "required": false,
+      "priority": 44,
+      "maxChars": 1200
     },
     {
       "id": "bridge-skill-context-contracts",

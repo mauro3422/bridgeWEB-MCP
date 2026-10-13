@@ -7,6 +7,59 @@ import { workflowGuideToolModule } from "../dist/tools/workflow-guide-tools.js";
 const root = path.join(process.cwd(), "sandbox", "project-context-modules-test");
 const bridgeDir = path.join(root, ".mssr");
 
+const transportSelection = await assembleProjectContext({
+  projectRoot: process.cwd(),
+  intent: {
+    domains: ["coding"],
+    actions: ["debug"],
+    artifacts: ["mcp"],
+    needs: ["integrity-verification"],
+    signals: ["error-observed"],
+    risk: "read-only",
+    ambiguity: "low",
+  },
+  stage: "verify",
+  maxContextChars: 30_000,
+  includeCore: false,
+});
+assert.ok(transportSelection.documents.some((item) => item.id === "bridge-http-transport-correlation-contract"), "HTTP 502/no-status diagnostics should select the dedicated transport contract");
+assert.equal(transportSelection.documents.some((item) => item.id === "bridge-http-transport-readiness-contract"), false, "transport-only errors should not load the readiness/recovery contract");
+
+const readinessSelection = await assembleProjectContext({
+  projectRoot: process.cwd(),
+  intent: {
+    domains: ["coding"],
+    actions: ["recover"],
+    artifacts: ["mcp"],
+    needs: ["integrity-verification"],
+    signals: ["recovery-needed", "error-observed"],
+    risk: "read-only",
+    ambiguity: "low",
+  },
+  stage: "verify",
+  maxContextChars: 30_000,
+  includeCore: false,
+});
+assert.ok(readinessSelection.documents.some((item) => item.id === "bridge-http-transport-readiness-contract"), "readiness recovery should select its owning contract");
+assert.equal(readinessSelection.documents.some((item) => item.id === "bridge-http-transport-correlation-contract"), false, "readiness-only recovery should not load transport correlation");
+
+const unrelatedSelection = await assembleProjectContext({
+  projectRoot: process.cwd(),
+  intent: {
+    domains: ["godot"],
+    actions: ["review"],
+    artifacts: ["document"],
+    needs: [],
+    signals: ["nominal"],
+    risk: "read-only",
+    ambiguity: "low",
+  },
+  stage: "implement",
+  maxContextChars: 30_000,
+  includeCore: false,
+});
+assert.equal(unrelatedSelection.documents.some((item) => item.id.startsWith("bridge-http-transport-")), false, "unrelated nominal work should not load Bridge transport/readiness contracts");
+
 await fs.rm(root, { recursive: true, force: true });
 await fs.mkdir(bridgeDir, { recursive: true });
 
