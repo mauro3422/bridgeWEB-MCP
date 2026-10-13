@@ -39,7 +39,11 @@ export type BridgeToolSchema = {
   metadata?: BridgeToolMetadata;
 };
 
-export type BridgeToolHandler = (args: Record<string, unknown>) => Promise<unknown> | unknown;
+export type BridgeToolCallContext = {
+  sendProgress?: (message: string) => Promise<void>;
+};
+
+export type BridgeToolHandler = (args: Record<string, unknown>, context?: BridgeToolCallContext) => Promise<unknown> | unknown;
 
 export type BridgeToolModule = {
   name: string;
@@ -50,7 +54,7 @@ export type BridgeToolModule = {
 export type BridgeToolRegistry = {
   tools: BridgeToolSchema[];
   has(name: string): boolean;
-  call(name: string, args: Record<string, unknown>): Promise<unknown>;
+  call(name: string, args: Record<string, unknown>, context?: BridgeToolCallContext): Promise<unknown>;
   modules: string[];
   riskSummary: { readOnly: string[]; destructive: string[]; neutral: string[] };
 };

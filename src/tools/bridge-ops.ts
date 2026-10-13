@@ -10,7 +10,7 @@ import {
   SERVER_VERSION,
 } from "../config.js";
 import { RUNTIME_BOOT_ID } from "../runtime-identity.js";
-import type { BridgeToolModule } from "./types.js";
+import type { BridgeToolCallContext, BridgeToolModule } from "./types.js";
 import { fileExists, resolveToolPath, runShellCommand, summarizeCommand, tailText } from "./shared/process.js";
 import { gitStatus } from "./git-tools.js";
 import { terminalList } from "./process-tools.js";
@@ -359,7 +359,29 @@ function getRestartAckPath(cwd?: string) {
   return path.resolve(cwd ? resolveToolPath(cwd) : process.cwd(), DEFAULT_RESTART_ACK_FILE);
 }
 
-async function bridgeRequestRestart(reason: string, mode: "http" | "tunnel" | "full", cwd?: string) {
+type RestartProgressStatus = "sent-to-transport" | "unavailable" | "failed" | "timed-out";
+
+async function sendBestEffortRestartProgress(
+  context: BridgeToolCallContext | undefined,
+  message: string,
+): Promise<RestartProgressStatus> {
+  if (!context?.sendProgress) return "unavailable";
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const send = Promise.resolve()
+    .then(() => context.sendProgress!(message))
+    .then<RestartProgressStatus, RestartProgressStatus>(() => "sent-to-transport", () => "failed");
+  const timeout = new Promise<RestartProgressStatus>((resolve) => {
+    timer = setTimeout(() => resolve("timed-out"), 300);
+  });
+  try {
+    return await Promise.race([send, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function bridgeRequestRestart(reason: string, mode: "http" | "tunnel" | "full", cwd?: string, context?: BridgeToolCallContext) {
   const requestPath = getRestartRequestPath(cwd);
   const tempPath = `${requestPath}.${process.pid}.${Date.now()}.tmp`;
   const request = {
@@ -370,6 +392,8 @@ async function bridgeRequestRestart(reason: string, mode: "http" | "tunnel" | "f
     server: { name: SERVER_NAME, version: SERVER_VERSION, pid: process.pid },
     cwd: cwd ? resolveToolPath(cwd) : process.cwd(),
   };
+  const progressMessage = "A planned Bridge restart is being requested. This connection may disconnect; wait for Bridge readiness before retrying.";
+  const preRestartProgress = await sendBestEffortRestartProgress(context, progressMessage);
   await fs.writeFile(tempPath, JSON.stringify(request, null, 2), "utf8");
   await fs.rename(tempPath, requestPath);
   return {
@@ -384,7 +408,8 @@ async function bridgeRequestRestart(reason: string, mode: "http" | "tunnel" | "f
       planned: true,
       message: "A planned Bridge restart was requested. This MCP connection may disconnect briefly while the watchdog restarts the service.",
       callerAction: "Wait until Bridge is ready before retrying an interrupted request.",
-      delivery: "This notice is returned in the same MCP response as the restart request; the transport may still close before the caller receives it.",
+      delivery: "This notice is returned in the same MCP response. Bridge also attempts a pre-restart progress signal when the caller supplied a progress token; neither path confirms client display or receipt, and the transport may close first.",
+      preRestartProgress: { status: preRestartProgress, deliveryConfirmed: false },
       restartConfirmed: false,
     },
   };
@@ -444,7 +469,7 @@ export const bridgeOpsToolModule: BridgeToolModule = {
     { name: "bridge_health", description: "Compact read-only bridge health query for tunnel diagnostics, restart status, runtime tool catalog, or all lightweight checks.", inputSchema: { type: "object", properties: { check: { type: "string", enum: ["all", "tunnel", "restart", "catalog"], default: "all" }, cwd: { type: "string" } }, additionalProperties: false } },
     { name: "bridge_connector_catalog_compare", description: "Compare the exact dedicated tool names observable in the current connector with the live Bridge runtime catalog. Use this to distinguish direct schema exposure from wrapper reachability; Bridge cannot inspect or force the host catalog, so exposedToolNames must come from the caller's observable catalog search.", inputSchema: { type: "object", properties: { exposedToolNames: { type: "array", items: { type: "string", minLength: 1, maxLength: 120 }, minItems: 1, maxItems: 256 } }, required: ["exposedToolNames"], additionalProperties: false } },
     { name: "bridge_self_check", description: "Run typecheck, build, Git status, configured tunnel health, and terminal inventory.", inputSchema: { type: "object", properties: { cwd: { type: "string" } }, additionalProperties: false } },
-    { name: "bridge_request_restart", description: "Request a planned bridge restart by writing a restart-request file for the external watchdog. The response includes a maintenance notice for the caller and reconnect guidance; it does not confirm delivery or restart. This tool does not restart or kill processes directly.", inputSchema: { type: "object", properties: { reason: { type: "string" }, mode: { type: "string", enum: ["http", "tunnel", "full"], default: "http" }, cwd: { type: "string" } }, required: ["reason"], additionalProperties: false } },
+    { name: "bridge_request_restart", description: "Request a planned bridge restart by writing a restart-request file for the external watchdog. The response includes a maintenance notice and reconnect guidance; when the MCP caller supplied a progress token, Bridge also attempts a best-effort progress notice before writing the request. Neither path confirms client display or receipt, and this tool does not confirm the restart or directly stop processes.", inputSchema: { type: "object", properties: { reason: { type: "string" }, mode: { type: "string", enum: ["http", "tunnel", "full"], default: "http" }, cwd: { type: "string" } }, required: ["reason"], additionalProperties: false } },
     { name: "bridge_restart_status", description: "Return pending restart-request and last restart-ack information for the bridge watchdog.", inputSchema: { type: "object", properties: { cwd: { type: "string" } }, additionalProperties: false } },
   ],
   handlers: {
@@ -464,9 +489,9 @@ export const bridgeOpsToolModule: BridgeToolModule = {
       const parsed = z.object({ cwd: z.string().optional() }).parse(args);
       return await bridgeSelfCheck(parsed.cwd);
     },
-    bridge_request_restart: async (args) => {
+    bridge_request_restart: async (args, context) => {
       const parsed = z.object({ reason: z.string().min(1).max(500), mode: z.enum(["http", "tunnel", "full"]).default("http"), cwd: z.string().optional() }).parse(args);
-      return await bridgeRequestRestart(parsed.reason, parsed.mode, parsed.cwd);
+      return await bridgeRequestRestart(parsed.reason, parsed.mode, parsed.cwd, context);
     },
     bridge_restart_status: async (args) => {
       const parsed = z.object({ cwd: z.string().optional() }).parse(args);

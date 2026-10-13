@@ -40,7 +40,7 @@ import { mssrProjectContextRefSplitToolModule } from "./tools/mssr-project-conte
 import { buildToolAudit, TOOL_AUDIT_VIEWS, type ToolAuditArgs, type ToolAuditView } from "./tool-audit.js";
 import { getToolAuditMetrics, getToolFrictionMetrics, type BridgeMetricsScope } from "./metrics.js";
 import { buildBridgeToolFrictionProjection } from "./mssr-tool-friction.js";
-import type { BridgeMssrLifecycleMetadata, BridgeToolMetadata, BridgeToolModule, BridgeToolRegistry, BridgeToolSchema, BridgeToolUsageGuidance } from "./tools/types.js";
+import type { BridgeMssrLifecycleMetadata, BridgeToolCallContext, BridgeToolMetadata, BridgeToolModule, BridgeToolRegistry, BridgeToolSchema, BridgeToolUsageGuidance } from "./tools/types.js";
 
 const readOnlyToolNames = new Set([
   "system_info", "list_dir", "read_text_file", "list_files_smart", "read_file_lines", "read_many_files", "search_files", "storage_growth_scan",
@@ -369,7 +369,7 @@ function riskSummary(tools: BridgeToolSchema[]) {
 
 export function createToolRegistry(modules: readonly BridgeToolModule[]): BridgeToolRegistry {
   const tools: BridgeToolSchema[] = [];
-  const handlers = new Map<string, (args: Record<string, unknown>) => Promise<unknown> | unknown>();
+  const handlers = new Map<string, (args: Record<string, unknown>, context?: BridgeToolCallContext) => Promise<unknown> | unknown>();
   const moduleNames: string[] = [];
 
   for (const module of modules) {
@@ -536,13 +536,13 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
       scope: rawScope as BridgeMetricsScope,
     });
   });
-  handlers.set("bridge_tool_query", async (args) => {
+  handlers.set("bridge_tool_query", async (args, context) => {
     const name = delegatedToolName(args.toolName);
     const target = tools.find((tool) => tool.name === name);
     if (!target) throw new Error(`Unknown modular tool: ${name}`);
     if (toolRiskClassification(target) !== "read-only") throw new Error(`Tool '${name}' is not classified read-only; use its direct schema or bridge_tool_action.`);
     const handler = handlers.get(name)!;
-    const delegatedResult = await handler(delegatedArguments(args.arguments));
+    const delegatedResult = await handler(delegatedArguments(args.arguments), context);
     if (delegatedResult && typeof delegatedResult === "object" && !Array.isArray(delegatedResult)) {
       const record = delegatedResult as Record<string, unknown>;
       const { __bridgeImages, __bridgeContent, __bridgeNotices, ...publicResult } = record;
@@ -557,7 +557,7 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
     }
     return { delegatedTool: name, classification: "read-only", result: delegatedResult };
   });
-  handlers.set("bridge_tool_action", async (args) => {
+  handlers.set("bridge_tool_action", async (args, context) => {
     const name = delegatedToolName(args.toolName);
     const target = tools.find((tool) => tool.name === name);
     if (!target) throw new Error(`Unknown modular tool: ${name}`);
@@ -575,7 +575,7 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
       if (!Array.isArray(args.files) || args.files.length === 0) throw new Error("files must be a non-empty array when provided.");
       delegated.files = args.files;
     }
-    const delegatedResult = await handler(delegated);
+    const delegatedResult = await handler(delegated, context);
     if (delegatedResult && typeof delegatedResult === "object" && !Array.isArray(delegatedResult)) {
       const record = delegatedResult as Record<string, unknown>;
       const { __bridgeImages, __bridgeContent, __bridgeNotices, ...publicResult } = record;
@@ -596,10 +596,10 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
     modules: moduleNames,
     riskSummary: riskSummary(tools),
     has(name: string) { return handlers.has(name); },
-    async call(name: string, args: Record<string, unknown>) {
+    async call(name: string, args: Record<string, unknown>, context?: BridgeToolCallContext) {
       const handler = handlers.get(name);
       if (!handler) throw new Error(`Unknown modular tool: ${name}`);
-      return await handler(args);
+      return await handler(args, context);
     },
   };
 }

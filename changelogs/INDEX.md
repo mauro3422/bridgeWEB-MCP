@@ -3,6 +3,7 @@
 Versioned release notes are the canonical change-history surface for MSSR debugging, maintenance, and persistence checks.
 
 ## Current releases
+- [0.6.176](0.6.176.md) - Adopt the exact MSSR 0.2.130 artifact and attempt a progress notice before planned restarts when the caller provides a token.
 - [0.6.175](0.6.175.md) - Keep trace-scoped warnings from falling through to global delivery without a comparable context scope.
 - [0.6.174](0.6.174.md) - Permit only exact, confirmed MSSR core recovery via generic fallback when the connector catalog is stale, keeping ordinary writes protected.
 - [0.6.173](0.6.173.md) - Pin asset-import connections to validated DNS answers and reject transformed transfer responses.

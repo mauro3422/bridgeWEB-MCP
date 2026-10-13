@@ -329,6 +329,37 @@ try {
   assert.equal(jevSelection.rangeOverlapDiagnostics.mutationApplied, false, "range diagnostics must stay read-only");
   assert.equal(jevSelection.truthAuthority, false);
   assert.equal(jevSelection.autoApplyAllowed, false);
+  const providerCallsBeforeEmptySearch = providerCalls.length;
+  const emptySearchSelection = await registry.call("mssr_librarian_jev_select", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    query: "Where should an empty search result go?",
+    selectionMode: "search-results",
+    candidateHandles: [],
+  });
+  assert.equal(emptySearchSelection.status, "not-run");
+  assert.equal(emptySearchSelection.reason, "no-search-candidates");
+  assert.equal(emptySearchSelection.jevCallMade, false);
+  assert.equal(providerCalls.length, providerCallsBeforeEmptySearch, "an explicitly empty search pool must not fall back to headings or call Jev");
+  await assert.rejects(registry.call("mssr_librarian_jev_select", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    query: "Do not infer a selection mode for an empty pool.",
+    candidateHandles: [],
+  }), /empty candidate pool must explicitly use search-results mode/);
+  await assert.rejects(registry.call("mssr_librarian_jev_select", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    query: "Do not mix heading selection with search handles.",
+    selectionMode: "all-headings",
+    candidateHandles: [preserveHandle],
+  }), /All-headings mode cannot also supply candidateHandles/);
+  await assert.rejects(registry.call("mssr_librarian_jev_select", {
+    projectRoot: root,
+    sourceRefs: ["policy.md"],
+    query: "Do not omit the search pool in search-results mode.",
+    selectionMode: "search-results",
+  }), /Search-results mode requires candidateHandles/);
   const selectionRequest = providerCalls.at(-1);
   assert.equal(selectionRequest.state.query, "Where should benchmark records and provenance be kept?");
   assert.ok(Object.keys(selectionRequest.questions.selection.options).includes("none"));
@@ -823,6 +854,8 @@ try {
   assert.ok(defaultRegistry.has("mssr_semantic_evidence_relation_review"));
   const selectorSchema = defaultRegistry.tools.find((tool) => tool.name === "mssr_librarian_jev_select");
   assert.equal(selectorSchema.inputSchema.properties.candidateHandles.maxItems, 100);
+  assert.equal(selectorSchema.inputSchema.properties.candidateHandles.minItems, undefined, "an explicit empty search-results pool is valid");
+  assert.deepEqual(selectorSchema.inputSchema.properties.selectionMode.enum, ["search-results", "all-headings"]);
   assert.equal("metadataMode" in selectorSchema.inputSchema.properties, false, "metadata retrieval is an explicit prior search step");
   const searchSchema = defaultRegistry.tools.find((tool) => tool.name === "mssr_librarian_search");
   assert.deepEqual(searchSchema.inputSchema.properties.metadataMode.enum, ["off", "project-context-single-section", "project-context-librarian-sidecar"]);

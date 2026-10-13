@@ -11,6 +11,7 @@ import {
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { SERVER_NAME, SERVER_VERSION } from "./config.js";
+import { createBridgeToolCallContext } from "./mcp-progress.js";
 import { beginToolMetric, classifyMssrRoutingStatus, classifyToolAuditError, extractToolResultMetric, finishToolMetric, type BridgeMetricProfile } from "./metrics.js";
 import {
   drainBridgeNoticesWithinBudget,
@@ -701,8 +702,9 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
       arguments?: Record<string, unknown>;
       _meta?: Record<string, unknown>;
     };
-  }) => {
+  }, extra?: { sendNotification?: (notification: { method: "notifications/progress"; params: { progressToken: string | number; progress: number; total: number; message: string } }) => Promise<void> }) => {
     const name = request.params.name;
+    const toolCallContext = createBridgeToolCallContext(request.params._meta, extra);
     const hostProfile = requestAgentProfile(request.params._meta, server.getClientVersion());
     const profiledArgs = withObservableAgentProfile(
       name,
@@ -966,7 +968,7 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
           emitArchitectureImpactFailure(inheritedProjectRoot, effectivePrepared.toolName, error);
         }
       }
-      const result = await modularToolRegistry.call(name, args);
+      const result = await modularToolRegistry.call(name, args, toolCallContext);
       if (architectureImpactPrepared) {
         try {
           emitArchitectureImpactEvaluation(await evaluatePreparedBridgeArchitectureImpact(architectureImpactPrepared));

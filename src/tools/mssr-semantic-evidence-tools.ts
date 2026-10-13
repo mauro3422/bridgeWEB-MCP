@@ -638,9 +638,20 @@ const jevSelectionInputSchema = z.object({
   projectRoot: projectRootSchema,
   sourceRefs: z.array(sourceRefSchema).min(1).max(MAX_SOURCE_FILES),
   query: z.string().trim().min(1).max(500),
-  candidateHandles: z.array(mssrLibrarianEvidenceHandleSchema).min(1).max(MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles).optional(),
+  selectionMode: z.enum(["search-results", "all-headings"]).optional(),
+  candidateHandles: z.array(mssrLibrarianEvidenceHandleSchema).max(MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles).optional(),
   model: z.string().trim().min(1).max(120).optional(),
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  if (value.selectionMode === "search-results" && value.candidateHandles === undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["candidateHandles"], message: "Search-results mode requires candidateHandles; pass an empty array when search returned no candidates." });
+  }
+  if (value.selectionMode === "all-headings" && value.candidateHandles !== undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["candidateHandles"], message: "All-headings mode cannot also supply candidateHandles." });
+  }
+  if (value.candidateHandles?.length === 0 && value.selectionMode !== "search-results") {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["selectionMode"], message: "An empty candidate pool must explicitly use search-results mode." });
+  }
+});
 
 const fetchInputSchema = z.object({ projectRoot: projectRootSchema, handle: mssrLibrarianEvidenceHandleSchema }).strict();
 
@@ -721,14 +732,15 @@ function createMssrSemanticEvidenceToolModule(options: MssrSemanticEvidenceToolM
       },
       {
         name: "mssr_librarian_jev_select",
-        description: `Make one live TypeSafe Jev Choice call over explicitly selected project Markdown files. By default it offers heading sections; callers may instead pass up to ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles} exact candidateHandles returned by mssr_librarian_search, so Jev can choose query-matched blocks and deeper evidence. To use declared project-context selectors, first call mssr_librarian_search with metadataMode=project-context-single-section or project-context-librarian-sidecar, then pass the returned exact handles here; metadata retrieval and Jev selection remain separate inspectable steps. Bridge reads only sourceRefs and MSSR revalidates each handle against the current owner, source, revision, range, fingerprint, and privacy class before the provider call. The result is advisory; call mssr_librarian_fetch before using source text. Each Choice call preserves its offered option IDs, selected ID, raw confidence, and original probability map when supplied; absent maps are null, never inferred. This external request may incur account usage. It does not crawl, establish truth, generate prose, or write files. At most ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxHeadingCandidates} heading sections or ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles} exact handles plus none are offered; oversized sets are rejected without truncation.`,
+        description: `Make one live TypeSafe Jev Choice call over explicitly selected project Markdown files. selectionMode=all-headings offers source headings; selectionMode=search-results offers exact candidateHandles returned by mssr_librarian_search, including an empty array when search found no candidates. For backward compatibility, omitted selectionMode means all-headings when candidateHandles are omitted, and search-results when non-empty candidateHandles are supplied. Empty candidateHandles require explicit search-results mode. To use declared project-context selectors, first call mssr_librarian_search with metadataMode=project-context-single-section or project-context-librarian-sidecar, then pass the returned exact handles here; metadata retrieval and Jev selection remain separate inspectable steps. Bridge reads only sourceRefs and MSSR revalidates each handle against the current owner, source, revision, range, fingerprint, and privacy class before the provider call. The result is advisory; call mssr_librarian_fetch before using source text. Each Choice call preserves its offered option IDs, selected ID, raw confidence, and original probability map when supplied; absent maps are null, never inferred. This external request may incur account usage. It does not crawl, establish truth, generate prose, or write files. At most ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxHeadingCandidates} heading sections or ${MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles} exact handles plus none are offered; oversized sets are rejected without truncation.`,
         inputSchema: {
           type: "object",
           properties: {
             projectRoot: { type: "string", minLength: 1, maxLength: 4096 },
             sourceRefs: { type: "array", items: { type: "string", minLength: 1, maxLength: 1000 }, minItems: 1, maxItems: MAX_SOURCE_FILES, description: "Explicit project-relative .md paths. This tool does not crawl directories." },
             query: { type: "string", minLength: 1, maxLength: 500 },
-            candidateHandles: { type: "array", items: exactHandleObjectSchema, minItems: 1, maxItems: MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles, description: "Optional exact revision-bound handles returned by mssr_librarian_search. Every handle must refer to one of the explicitly supplied sourceRefs and is revalidated before calling Jev." },
+            selectionMode: { type: "string", enum: ["search-results", "all-headings"], description: "Select explicit search results or explicitly enumerate document headings. Omit only for legacy non-empty candidateHandles or legacy heading selection; empty candidateHandles require search-results." },
+            candidateHandles: { type: "array", items: exactHandleObjectSchema, maxItems: MSSR_LIBRARIAN_JEV_SELECTION_LIMITS.maxCandidateHandles, description: "Exact revision-bound handles returned by mssr_librarian_search. Every handle must refer to one of the explicitly supplied sourceRefs and is revalidated before calling Jev. An empty array is valid only with selectionMode=search-results." },
             model: { type: "string", minLength: 1, maxLength: 120 },
           },
           required: ["projectRoot", "sourceRefs", "query"],
@@ -852,6 +864,7 @@ function createMssrSemanticEvidenceToolModule(options: MssrSemanticEvidenceToolM
         const result = await selectMssrLibrarianEvidenceWithJev({
           documents: prepared.documents,
           query: args.query,
+          selectionMode: args.selectionMode ?? (args.candidateHandles === undefined ? "all-headings" : "search-results"),
           ...(args.candidateHandles ? { candidateHandles: args.candidateHandles } : {}),
           ...(args.model ? { model: args.model } : {}),
         }, evidenceProvider);

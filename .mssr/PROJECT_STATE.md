@@ -1,11 +1,11 @@
 # Bridge project state
 
 ## Current release
-MSSR 0.2.127 remains pinned to artifact SHA-256 `70e79ae6e472517501ffdd38c4b0eaad740652c7d570b600bf17f90023703bfc`. Bridge 0.6.175 commit `2c9378ab532bfab0a2418acfeca6f496ac27ad91` is pushed to `origin/codex/bridge-0.6.173-activation-readback`; direct remote-ref readback matched. It prevents trace-only warnings from falling through to global delivery. Post-adoption `bridge_verify_all` job `bridge_verify_1791814331331_1` passed in 356,199 ms with `failedRequired=0`, including typecheck/build, HTTP smoke, modern/legacy MCP, isolated regressions, routing latency, WAL maintenance, HTTP liveness, skill routing and tool-doc consistency.
+Bridge source candidate 0.6.176 adopts the exact MSSR 0.2.130 release artifact (1,178,226 bytes; SHA-256 `35d3fe6d2e385efcb9e7bf2ae51490406088c5bbb32a8d2e9e4abc0e1a1a37e6`). It also adds a bounded, best-effort MCP progress notice before a planned restart when the caller provides a progress token; the existing same-response notice remains the fallback. Jev selection now passes explicit all-headings/search-results modes, including fail-closed empty search. Full regression, transport, latency, WAL, docs and MSSR adoption checks pass; external skill-routing audit and live activation remain to verify.
 
-Watchdog request `e03ddb7c-94f6-4f0a-b6e4-1e472a6a6f8e` was acknowledged as `restart-http` at 2026-10-12T14:11:18.273Z by watchdog PID 25000/profile `bridge-local-http`. Active Bridge 0.6.175 is PID 29824, boot `165f4d43-61f9-4ba7-89d4-19e0add66d00`, with 189 tools/catalog hash `018b9f91ae7fcff9`. Bridge healthz/readyz are live/ready (200); tunnel healthz/readyz are live/ready (200). The HTTP restart did not restart the tunnel.
+Before activation, the live Bridge remains 0.6.175 / MSSR 0.2.127 at PID 18208, boot `98e20537-ddbc-4d40-82f5-ed6f38a09156`, serving 189 tools/catalog hash `018b9f91ae7fcff9`. Bridge and tunnel healthz/readyz are HTTP 200. No restart request is pending. Since the transport baseline at 2026-10-13T00:21:09.943Z, five service-side 502s and zero new local POST-without-status failures have been observed; these counts do not identify the cause of the 502s.
 
-Transport counters are 37 502 and 37 noStatus in total; four matching pairs occurred during the controlled restart and none since the 2026-10-12 14:11:25.532Z baseline. The Startup launcher points to the right watchdog and roots, but its comment still says 0.6.171; this is stale informational text, not an active runtime mismatch. The dirty legacy checkout at `D:\Dev\bridge-mcp` remains untouched by the release commit.
+The active HTTP `BridgeCodeRoot` is `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`; runtime/data `ProjectRoot` is `D:\Dev\bridge-mcp`. The latter is a separate historical checkout with mixed staged, unstaged and untracked work; it remains outside release commits and is not being cleaned or merged here.
 
 ## Previous release
 
