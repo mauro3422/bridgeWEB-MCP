@@ -1,6 +1,6 @@
 {
   "name": "bridge-mcp",
-  "version": "0.6.178",
+  "version": "0.6.179",
   "description": "Kairos/KChat local MCP bridge for MauroPrime and future laptop agents.",
   "type": "module",
   "bin": {
@@ -84,7 +84,7 @@
     "test:restart-maintenance-notice": "npm run build && node scripts/test-restart-maintenance-notice.mjs"
   },
   "dependencies": {
-    "@mauroprime/mssr": "file:vendor/mauroprime-mssr-0.2.131+sha.689affca.tgz",
+    "@mauroprime/mssr": "file:vendor/mauroprime-mssr-0.2.132+sha.c5655a49.tgz",
     "@modelcontextprotocol/core": "^2.0.0",
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/sdk": "^1.30.0",

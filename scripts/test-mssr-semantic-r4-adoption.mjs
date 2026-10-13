@@ -25,13 +25,13 @@ const installedPackage = JSON.parse(
 );
 assert.equal(installedPackage.version, expectedVersion, `Bridge must consume its pinned MSSR ${expectedVersion} package`);
 const vendorTarball = await fs.readFile(new URL(`../${vendorRelativePath}`, import.meta.url));
-assert.equal(expectedVersion, "0.2.131", "Bridge must adopt the current verified MSSR release");
-assert.equal(vendorTarball.byteLength, 1_187_008, "Bridge must vendor the exact MSSR 0.2.131 release-gate size");
+assert.equal(expectedVersion, "0.2.132", "Bridge must adopt the current verified MSSR release");
+assert.equal(vendorTarball.byteLength, 1_189_174, "Bridge must vendor the exact MSSR 0.2.132 release-gate size");
 const vendorHash = createHash("sha256").update(vendorTarball).digest("hex");
 assert.equal(
   vendorHash,
-  "689affca88e7b79f0d60cbe0d56dccb76d8809dc48fd531fd864f792c9cc3fac",
-  "Bridge must vendor the byte-identical MSSR 0.2.131 release-gate artifact",
+  "c5655a496f2cbb3d3e98cb505e5a6bc2b082333043676ea52506f9e4d892529f",
+  "Bridge must vendor the byte-identical MSSR 0.2.132 release-gate artifact",
 );
 assert.equal(vendorHash.slice(0, 8), expectedArtifactHashPrefix, "Bridge vendor filename must identify the exact artifact hash prefix");
 const lockedMssr = packageLock.packages?.["node_modules/@mauroprime/mssr"];

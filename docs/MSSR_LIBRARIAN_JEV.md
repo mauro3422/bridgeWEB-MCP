@@ -6,6 +6,12 @@ For a capability-by-capability inventory of 100 current, partial, and proposed d
 
 ## Capabilities
 
+## Query-variant ordering
+
+`mssr_librarian_search` accepts host-supplied `queryVariants` and an optional `queryVariantRanking` policy. Omitting the policy preserves `primary-first`; `round-robin` independently ranks each query lane, interleaves distinct exact handles, and applies `maxResults` afterward. Results retain per-query `queryMatches` and `scoreQueryIndex`, and expose `rankingQueryIndex` to show which lane placed a result. Scores are not blended and are not confidence values. Alternate phrasings remain explicit host input; MSSR does not translate queries.
+
+Bridge 0.6.179 keeps `primary-first` as the default and exposes round-robin as an opt-in. The deterministic implementation replay used the nine English top-eight misses from one exposed 35-case MyceliumFront packet in both primary-language directions (18 correlated query arms), without Jev calls, owner labels, or a held-out set. With English primary, provisional top-eight anchor overlap was 9/9 for round-robin, 8/9 for primary-first, and 0/9 for primary-only; exact-range overlap was 2/9 for both variant policies. With Spanish primary, anchor overlap was 9/9 for both variant policies, while exact-range overlap changed from 3/9 with primary-first to 2/9 with round-robin; both reached 5/9 exact ranges at top-16. These are retrieval-rank observations against provisional anchors, not a quality benchmark, confidence calibration, or evidence that round-robin is generally more accurate. The replay record is in the MSSR source tree at `D:\Dev\mssr\experiments\jev-mssr-live\runs\myceliumfront-query-variant-ranking-implementation-20261013T152745Z-v1\derived\IMPLEMENTATION-REPLAY.md`.
+
 ## Exact metadata filters
 
 `query.metadata` applies exact field/value equality against caller-supplied document/range metadata, `searchableMetadata`, and enabled EvidenceAtom projections. The EvidenceAtom projection uses the closed singular keys `authorityClass`, `artifact`, `domain`, `freshness`, `need`, `privacyClass`, `rangeKind`, `risk`, `signal`, `sourceClass`, and `action`. Project Context selector declarations such as `domains` and `actions` map to query keys `domain` and `action`. A missing or non-matching exact field returns no candidate; result `metadataProjectionMatches.filterMatches` identifies projection fields that matched. These filters remain advisory and do not change source authority.
@@ -91,7 +97,7 @@ Use deterministic cache/storage tools and explicit owner, activity, freshness, a
 
 ## Source and package ownership
 
-Portable semantic behavior is versioned in `D:\Dev\mssr`. The active Bridge 0.6.159 vendors MSSR 0.2.108; isolated candidate 0.6.161 pins the exact MSSR 0.2.110 release-gate tarball (1,115,994 bytes; SHA-256 `44f5c57a8eacc53fe3f9012cd113fa27775a382b855cde344c7b3ed4279b25ea`).  The prior candidate 0.6.160/0.2.109 failed the semantic evidence regression because the MSSR package omitted the range-overlap diagnostics already expected by Bridge 0.6.159; MSSR 0.2.110 restores them. `TOOLS.md` is generated from `src/tool-registry.ts` and module schemas. Active health readback currently confirms 0.6.159 and 186 tools but does not expose the loaded MSSR package hash. Candidate artifact and installed-package identity plus the full 0.6.161 verification gate now pass; a controlled production handoff remains. see `.mssr/PROJECT_STATE.md` and `changelogs/0.6.161.md`.
+Portable semantic behavior is versioned in `D:\Dev\mssr`. Bridge 0.6.179 is active with MSSR 0.2.132 pinned as `vendor/mauroprime-mssr-0.2.132+sha.c5655a49.tgz` (1,189,174 bytes; SHA-256 `c5655a496f2cbb3d3e98cb505e5a6bc2b082333043676ea52506f9e4d892529f`). The live watchdog readback, exact installed-package parity, catalog/schema hashes, and tunnel status are in `.mssr/PROJECT_STATE.md`. Bridge health does not expose the loaded MSSR package hash, so adoption relies on source/package/lock/vendor/installed-byte parity plus post-restart readback. `TOOLS.md` is generated from `src/tool-registry.ts` and module schemas.
 
 ## Host adapter prototype boundary
 

@@ -1,7 +1,12 @@
 # Bridge project state
 
 ## Current release
-Bridge 0.6.178 is active and adopts the exact MSSR 0.2.131 release artifact (1,187,008 bytes; SHA-256 `689affca88e7b79f0d60cbe0d56dccb76d8809dc48fd531fd864f792c9cc3fac`). The full release gate passed with `failedRequired=0`; the installed package matches the vendored artifact across 623 files.
+Bridge 0.6.179 is active and adopts the exact MSSR 0.2.132 release artifact (1,189,174 bytes; SHA-256 `c5655a496f2cbb3d3e98cb505e5a6bc2b082333043676ea52506f9e4d892529f`). The full `verify:all` gate passed with `failedRequired=0`; the installed package matches the vendored artifact byte-for-byte across 624 files.
+
+## 0.6.179 active release
+The managed watchdog request `f1f5953b-3892-4805-b9e6-d7b7db5b1ab1` was acknowledged at `2026-10-13T16:11:04.713Z` on profile `bridge-local-http`. Bridge 0.6.179 / MSSR 0.2.132 is running from `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`, HTTP PID 24892, runtime boot `72bd1014-9946-4245-821d-8be20272c823`; runtime/data `ProjectRoot` remains `D:\Dev\bridge-mcp`. The live catalog has 189 tools (hash `0b7ed7fd233cdc9a`), and `mssr_librarian_search` schema hash `0d009e8145a39f5f` exposes `queryVariantRanking: primary-first | round-robin`. Health and readiness returned 200; the existing tunnel on 8081 remained healthy/ready, with zero new 502 or local POST-without-status failures since the post-restart baseline.
+
+The live Librarian smoke compared omitted/default primary-first with round-robin over three explicit Bridge Markdown sources. Round-robin returned `rankingQueryIndex` for both lanes, and exact fetch revalidated the selected source revision and fingerprint. This proves the packaged tool path and schema adoption only; it is not Jev accuracy or calibration evidence. The planned-restart notice was returned in the requesting MCP response; pre-restart progress was unavailable, so client display/receipt is unconfirmed. Release note: [0.6.179](../../changelogs/0.6.179.md).
 
 ## 0.6.178 active release
 

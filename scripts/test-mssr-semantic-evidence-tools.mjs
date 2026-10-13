@@ -75,6 +75,10 @@ try {
     ],
   }));
   await fs.writeFile(path.join(root, "policy.md"), policyMarkdown, "utf8");
+  await fs.mkdir(path.join(root, "docs"), { recursive: true });
+  await fs.writeFile(path.join(root, "docs", "query-primary.md"), "# Primary\n\n## Routing\n\nOnly routing appears here.\n", "utf8");
+  await fs.writeFile(path.join(root, "docs", "query-variant.md"), "# Variant\n\n## Signal\n\nOnly signal appears here.\n", "utf8");
+  await fs.writeFile(path.join(root, "docs", "query-both.md"), "# Both\n\n## Routing and signal\n\nRouting and signal appear here.\n", "utf8");
   const listItemMarkdown = [
     "# List item evidence",
     "",
@@ -173,6 +177,45 @@ try {
   assert.ok(variantSearch.results.length >= 1, "host-supplied alternate phrasing should retrieve matching evidence");
   assert.equal(variantSearch.results[0].scoreQueryIndex, 1, "the primary query ranks first; the matching alternate query remains explicitly identified");
   assert.deepEqual(variantSearch.results[0].queryMatches.map((match) => match.queryIndex), [1]);
+  const rankingSources = ["docs/query-primary.md", "docs/query-variant.md", "docs/query-both.md"];
+  const rankingQuery = { query: "routing architecture and declared decision policy", queryVariants: ["signal"], maxResults: 2 };
+  const omittedRanking = await registry.call("mssr_librarian_search", {
+    projectRoot: root,
+    sourceRefs: rankingSources,
+    query: rankingQuery,
+  });
+  const explicitPrimaryFirst = await registry.call("mssr_librarian_search", {
+    projectRoot: root,
+    sourceRefs: rankingSources,
+    query: { ...rankingQuery, queryVariantRanking: "primary-first" },
+  });
+  assert.deepEqual(
+    explicitPrimaryFirst.results.map((item) => item.handle.id),
+    omittedRanking.results.map((item) => item.handle.id),
+    "omitting queryVariantRanking preserves the explicit primary-first result order",
+  );
+  assert.ok(
+    omittedRanking.results.every((item) => item.scoreQueryIndex === 0),
+    "default primary-first fills the cap with primary-query evidence before variant-only evidence",
+  );
+  const roundRobin = await registry.call("mssr_librarian_search", {
+    projectRoot: root,
+    sourceRefs: rankingSources,
+    query: { ...rankingQuery, queryVariantRanking: "round-robin" },
+  });
+  assert.deepEqual(
+    roundRobin.results.map((item) => item.handle.sourceRef),
+    ["docs/query-both.md", "docs/query-variant.md"],
+    "round-robin interleaves distinct exact handles and gives the variant lane a capped result slot",
+  );
+  assert.deepEqual(roundRobin.results.map((item) => item.rankingQueryIndex), [0, 1]);
+  assert.equal(roundRobin.results[1].scoreQueryIndex, 1, "variant result retains its own lexical-score provenance");
+  assert.deepEqual(roundRobin.results[1].queryMatches.map((match) => match.queryIndex), [1]);
+  await assert.rejects(registry.call("mssr_librarian_search", {
+    projectRoot: root,
+    sourceRefs: rankingSources,
+    query: { ...rankingQuery, queryVariantRanking: "confidence-weighted" },
+  }), /queryVariantRanking/i, "Bridge must reject unsupported query-lane ranking values");
   await assert.rejects(registry.call("mssr_librarian_search", {
     projectRoot: root,
     sourceRefs: ["policy.md"],
@@ -867,6 +910,9 @@ try {
   assert.match(metadataFilterDescription, /Exact typed field\/value filters/);
   assert.equal(searchSchema.inputSchema.properties.query.properties.queryVariants.maxItems, 4);
   assert.equal(searchSchema.inputSchema.properties.query.properties.queryVariants.items.maxLength, 500);
+  assert.deepEqual(searchSchema.inputSchema.properties.query.properties.queryVariantRanking.enum, ["primary-first", "round-robin"]);
+  assert.equal(searchSchema.inputSchema.properties.query.properties.queryVariantRanking.default, undefined, "omission keeps the historical primary-first default");
+  assert.match(searchSchema.inputSchema.properties.query.properties.queryVariantRanking.description, /without combining scores/i);
   assert.equal(searchSchema.inputSchema.properties.query.additionalProperties, false);
   const evidencePackSchema = defaultRegistry.tools.find((tool) => tool.name === "mssr_librarian_evidence_pack");
   assert.equal(evidencePackSchema.inputSchema.properties.handles.maxItems, 16);
