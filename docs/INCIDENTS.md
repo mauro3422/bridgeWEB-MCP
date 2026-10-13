@@ -2143,3 +2143,17 @@ restart Bridge 0.6.62 -> runtime actualizado, catálogo directo del chat sin ref
 **Dependency follow-up:** Updated the lockfile to `@modelcontextprotocol/sdk` 1.32.1, `ip-address` 10.7.4 and `proxy-addr` 2.0.8. `npm audit` reports zero vulnerabilities and all candidate release gates passed. The controlled restart request `efec831c-9119-4c19-aaab-c4ef0e555687` was acknowledged at `2026-10-11T21:50:32.746Z`; live readback then confirmed Bridge 0.6.172, boot `c7d652a8-88c7-42b2-87e0-76bde8b33dcf`, PID 23888, 189 tools and catalog `fe34a30b4af0975a`. Bridge and tunnel readiness returned 200; no new tunnel 502/no-status failures appeared after the restart baseline.
 
 **Prevention:** On a worktree switch, install from the checked-in lockfile before trusting TypeScript or regression failures. The initial run changed no source and produced no release artifact.
+
+## 2026-10-13 — `bridge_verify_all` doctor probe used the code root for runtime restart files
+
+**Status:** The live activation is verified; the verifier's restart-file subcheck is non-authoritative when code and runtime/data roots differ. Wrapper follow-up remains.
+
+**Layer / owner:** Bridge verification wrapper and `scripts/verify-all.ps1` / `scripts/bridge-doctor.ps1` root plumbing.
+
+**Symptom and evidence:** Post-restart job `bridge_verify_1791864684703_1` printed `request exists: False` and `ack exists: False` under `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`, even though the watchdog stores them under `D:\Dev\bridge-mcp`. The full job exited 0 with `failedRequired=0`, and all required checks passed. Direct `bridge_restart_status` readback resolved the discrepancy: request `49b6c6a1-3d28-41bf-a6a1-095d2f9360b6` was acknowledged at `2026-10-13T04:10:19.5747128Z`; no restart is pending. Bridge 0.6.176 / MSSR 0.2.130 is live, PID 19564, boot `8fb47c7e-5430-4760-aa6d-b8ac7ad99a76`, with 189 tools and catalog `cc05af79b80303d0`; Bridge and tunnel are ready.
+
+**Cause:** This `bridge_verify_all` invocation supplied the candidate checkout as `cwd`; the wrapper does not accept a separate `runtimeDataRoot`, so the doctor file probe resolved restart paths under the code root. The active watchdog correctly kept `ProjectRoot=D:\Dev\bridge-mcp` separate from `BridgeCodeRoot=D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`. The false file probe did not indicate a failed restart.
+
+**Correction / regression:** Used the live `bridge_restart_status` against the actual runtime root and `bridge_health` to verify the ACK, active version, catalog, readiness, no-pending state, and zero new tunnel 502/local POST-without-status failures since baseline `2026-10-13T04:10:20.662Z`. The complete verifier also passed check/build, live HTTP smoke, MCP dual-era/framing, full regressions, routing latency, WAL, observability liveness, routing audit, docs, and catalog sanity. Its one HTTP smoke emitted an authenticated synthetic `__test_opencode` trace; this is test telemetry, not Jev benchmark evidence. No benchmark rerun was performed.
+
+**Prevention / follow-up:** Add an explicit `runtimeDataRoot` input to `bridge_verify_all`, pass it through to `verify-all.ps1` and the doctor, and add a regression with deliberately different code and runtime roots. Until then, treat the doctor's request/ACK probe as non-authoritative for candidate-root runs and query `bridge_restart_status` directly. Progress notification behavior was not exercised by this restart because Bridge 0.6.175 initiated the adoption; client display remains unconfirmed.
