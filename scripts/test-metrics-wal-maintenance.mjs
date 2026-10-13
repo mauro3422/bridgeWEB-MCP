@@ -48,8 +48,16 @@ assert.equal(beforeIdleCheckpoint.walMaintenance?.checkpointCount, 0, "checkpoin
 assert.equal(beforeIdleCheckpoint.walMaintenance?.scheduled, true, "quiet-period checkpoint must remain scheduled after the latest write");
 assert.equal(secondBootstrap.bridgeTiming?.totalMs >= 0, true);
 
-await new Promise((resolve) => setTimeout(resolve, 650));
-const status = getMetricsStatus();
+const checkpointDeadline = Date.now() + 5_000;
+let status = getMetricsStatus();
+while (
+  Number(status.walMaintenance?.checkpointCount ?? 0) < 1
+  && Number(status.walMaintenance?.failureCount ?? 0) === 0
+  && Date.now() < checkpointDeadline
+) {
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  status = getMetricsStatus();
+}
 assert.equal(status.walMaintenance?.mode, "passive-worker");
 assert.equal(status.walMaintenance?.autoCheckpointDisabledOnWriters, true);
 assert.equal(status.walMaintenance?.checkpointCount >= 1, true, "checkpoint worker did not run");

@@ -19,6 +19,23 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-10-13 — Bridge 0.6.178 gate exposed stale MSSR package bytes and lifecycle test races
+
+**Estado:** Corregido en el candidato 0.6.178; verificación completa aprobada. Activación live pendiente.
+
+**Capa/owner:** Dependencia local MSSR y consistencia de release (`package.json`, `package-lock.json`, `src/release-consistency.ts`); fixtures MCP/WAL aislados.
+
+**Síntoma observable:** Tras regenerar MSSR 0.2.131, `npm install` dijo `up to date` con el mismo path/version, pero el paquete instalado difería del tar vendor en `changelogs/0.2.131.md`. Al probar un path con sufijo `-689affca`, el parser C2e trató ese hash como prerelease semántico. El fixture MCP podía perder el evento `exit` al instalar el listener después de `kill`, generando `unsettled top-level await`; el test WAL usaba una espera fija de 650 ms.
+
+**Causa demostrada:** La identidad local de npm no cambió con el mismo path/version y se reutilizaron bytes viejos; el sufijo `-hash` es sintácticamente indistinguible de prerelease para el parser existente; el orden del listener/kill dejaba una carrera, y el sleep fijo asumía un tiempo del scheduler.
+
+**Corrección:** El Bridge vendor usa `mauroprime-mssr-0.2.131+sha.689affca.tgz`; lockfile y regresión fijan tamaño, SHA-256, integridad, prefijo de nombre y ruta exacta. C2e separa el sufijo explícito `+sha.<8 hex>` del semver. El fixture registra el listener antes de SIGTERM, comprueba si el hijo ya terminó y usa un timeout acotado activo. WAL espera por condición con deadline de 5 s; no hubo cambio de producción en el scheduler WAL.
+
+**Regresión/verificación:** Paridad exacta del tar/instalado: 623 archivos, cero diferencias. Pasaron `test:mcp-dual-era`, `test:project-situation`, la prueba de adopción y `verify:all` completo con `failedRequired=0`; regresiones: 219,168 ms. La corrida previa a activación validó HTTP contra 0.6.177. No se cambió ni reinició el servicio durante esta verificación.
+
+**Seguimiento:** Publicar el commit de 0.6.178, solicitar restart HTTP con aviso de mantenimiento y confirmar ACK, versión .178/.131, readiness, catálogo y paquete instalado live; conservar el túnel existente.
+
+---
 ## 2026-10-12 — Trace-only lifecycle warnings fell through to global delivery
 
 **Estado:** Corregido, publicado y activo en Bridge 0.6.175 desde 2026-10-12T14:11:18.273Z; commit `2c9378ab532bfab0a2418acfeca6f496ac27ad91` está en la rama remota de release.

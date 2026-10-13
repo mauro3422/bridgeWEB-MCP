@@ -3,6 +3,7 @@
 Versioned release notes are the canonical change-history surface for MSSR debugging, maintenance, and persistence checks.
 
 ## Current releases
+- [0.6.178](0.6.178.md) - Adopt the exact content-addressed MSSR 0.2.131 artifact and make release-gate cleanup/checkpoint tests race-safe.
 - [0.6.177](0.6.177.md) - Pass the runtime/data root through `bridge_verify_all` so the doctor reads restart state from the watchdog's actual data directory.
 - [0.6.176](0.6.176.md) - Adopt the exact MSSR 0.2.130 artifact and attempt a progress notice before planned restarts when the caller provides a token.
 - [0.6.175](0.6.175.md) - Keep trace-scoped warnings from falling through to global delivery without a comparable context scope.

@@ -64,7 +64,7 @@ function extractServerVersion(text: string): string | null {
 function extractMssrDependencyVersion(value: unknown): string | null {
   const dependency = bounded(value, 240);
   if (!dependency) return null;
-  const tarball = dependency.match(/mauroprime-mssr-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\.tgz/i)?.[1];
+  const tarball = dependency.match(/mauroprime-mssr-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\+sha\.[0-9a-f]{8})?\.tgz/i)?.[1];
   if (tarball) return bounded(tarball);
   const exact = dependency.match(/^(?:\^|~)?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/)?.[1];
   return bounded(exact);

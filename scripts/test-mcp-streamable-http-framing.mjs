@@ -223,10 +223,18 @@ try {
 
   console.log(JSON.stringify({ ok: true, initializeStatus: initializeResponse.status, initializeChunks: initializeChunks.length, eventStreamStatus: eventStreamResponse.status, eventStreamNotificationBytes: Buffer.byteLength(notificationText) }));
 } finally {
-  child.kill("SIGTERM");
-  await new Promise((resolve) => {
-    child.once("exit", resolve);
-    setTimeout(resolve, 2000).unref();
-  });
+  if (child.exitCode === null && child.signalCode === null) {
+    await new Promise((resolve) => {
+      let timeout;
+      const finish = () => {
+        if (timeout) clearTimeout(timeout);
+        resolve();
+      };
+      child.once("exit", finish);
+      timeout = setTimeout(finish, 2000);
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+      else finish();
+    });
+  }
   fs.rmSync(tempRoot, { recursive: true, force: true });
 }
