@@ -19,6 +19,24 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-10-14 — Release state edit temporarily removed a required project-context selector
+
+**Estado:** Resuelto durante el cierre documental de 0.6.180; no cambió el runtime.
+
+**Capa/owner:** Selector modular de proyecto (`.mssr/project-context.json`) y su sección fuente en `.mssr/PROJECT_STATE.md`.
+
+**Síntoma observable:** Al relevar el estado previo de 0.6.179 como histórico, `skill_route_plan` y `skill_bootstrap` devolvieron `Expected one project-context heading '## Current release', found 0` antes de cargar el contexto.
+
+**Reproducción y causa demostrada:** Se renombró `## Current release` a `## 0.6.179 previous release`, aunque el manifest selecciona esa sección por su encabezado exacto. El contenido seguía presente, pero el selector dejó de encontrarlo.
+
+**Corrección:** Se restauró `## Current release`, se ubicó 0.6.180 como versión activa y 0.6.179 como subsección histórica. La ruta y el bootstrap posteriores volvieron a cargar el manifest válido y el módulo de estado.
+
+**Verificación/regresión:** La ruta/bootstrap de verificación pasó; también `npm run check`, `npm run build` y `project_change_consistency` en modo persistencia. No hubo cambio de código ni se añadió una prueba automatizada para este contrato documental.
+
+**Prevención:** Preservar encabezados exactos declarados por el manifest. Si un cambio requiere renombrarlos, actualizar el selector y validar de nuevo `skill_route_plan`/`skill_bootstrap` en el mismo cambio.
+
+---
+
 ## 2026-10-13 — Bridge 0.6.178 gate exposed stale MSSR package bytes and lifecycle test races
 
 **Estado:** Corregido en el candidato 0.6.178; verificación completa aprobada. Activación live pendiente.
