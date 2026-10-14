@@ -1,5 +1,8 @@
 # Bridge project state
 
+## 0.6.180 source candidate — activation pending
+Bridge source candidate 0.6.180 adopts exact MSSR 0.2.134 bytes from `vendor/mauroprime-mssr-0.2.134+sha.df40d4ca.tgz` (1,196,357 bytes; SHA-256 `df40d4caaff607327268eabf6ee95b828f0c73c5c57c3222683be31c2e77bdce`; npm integrity `sha512-AxOG3mZ99PCkWInv+FfAZjVysbg/g6uZ6bT+m1PYmGOCbFlxXq75QlFRgdAwBGOuzNm7Lk6dY2bW6MlJMXB/UQ==`). The source release gate passed on 2026-10-14 with `verify-all` `ok=true`, `failedRequired=0`, including the full regression suite and generated docs. MSSR 0.2.134 adds deterministic privacy preflight across semantic curation, Librarian selection and semantic relation review. This is source validation only: runtime is still Bridge 0.6.179 / MSSR 0.2.132, PID 24892, boot `72bd1014-9946-4245-821d-8be20272c823`; no restart request is pending. Follow-up is scoped changelog/state consistency review, commit and normal push on `codex/bridge-0.6.173-activation-readback`, then the already-authorized watchdog restart and exact runtime/package/catalog/tunnel readback. Full note: [0.6.180](../changelogs/0.6.180.md).
+
 ## Current release
 Bridge 0.6.179 is active and adopts the exact MSSR 0.2.132 release artifact (1,189,174 bytes; SHA-256 `c5655a496f2cbb3d3e98cb505e5a6bc2b082333043676ea52506f9e4d892529f`). The full `verify:all` gate passed with `failedRequired=0`; the installed package matches the vendored artifact byte-for-byte across 624 files.
 
