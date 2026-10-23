@@ -97,3 +97,9 @@ Bridge project control is canonical under `.mssr/`. The archived September knowl
 ## Next performance/control work
 
 If the intermittent read-worker execution timeout recurs, capture the HTTP error body and the exact worker state transition before changing thresholds. Separately, refresh/reopen the direct MSSR connector so its input description catches up with the live Bridge 0.6.167/MSSR 0.2.115 registry, then repeat the real-document integration through that connector. Keep independent source-held-out labels separate; the one-candidate live Jev smoke is integration evidence only and all provider scores remain uncalibrated.
+
+## Bambu Studio MCP portable provider activation
+- Supplemental activation 2026-10-23: Bridge 0.6.180 consumes `D:\Dev\bambu-studio-mcp\server.py` via MCP SDK stdio. Provider v0.2.0 now has 12 tools, Bridge publishes **15** wrappers; global catalog **204** after watchdog restart, boot `5c70d757-ff41-4fa0-8b0c-dcba225b19c9`. Code commits `bbb051a` (G-code QA) and `26284c1` (explicit writing tool split), provider commits `741ce2e` and `db7170f`.
+- QA: provider 15/15 Python unit tests; Bridge npm check/build + SDK proxy smoke PASS. Bridge runtime `bambu_slice_inspect` on synthetic G-code PASS, `bambu_slice_compare` read-only synthetic A/B diagnosed Z1.2 path delta; `bambu_slice_compare_images_save` wrote QA PNG pair only after explicit action.
+- Read-only slice inspection/compare tools distinct from image-writing render, compare-save and text-diagnose. Source editable project .3mf cannot be substituted for real exported sliced .gcode.3mf.
+- No Bambu GUI focus changes or printing, still no live unsaved/slicer cache access. User has to export plate sliced file for production failure diagnosis. Bridge release version remains 0.6.180.
