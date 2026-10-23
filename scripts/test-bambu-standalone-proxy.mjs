@@ -53,12 +53,17 @@ const cut=await bambuToolModule.handlers.bambu_slice_text_diagnose({
 });
 assert.equal(cut.mode,"sliced-text-toolpath-qa");
 assert(cut.images.length>=1);
-const diff=await bambuToolModule.handlers.bambu_slice_compare({
+const diffReadOnly=await bambuToolModule.handlers.bambu_slice_compare({
+  beforePath:simulatedGood,afterPath:simulatedBad,projectPath:argsPath,text:"3D Tech"
+});
+assert.equal(diffReadOnly.mode,"post-slice-trajectory-comparison");
+assert(diffReadOnly.differentLayers>=1);
+assert.equal(diffReadOnly.comparisonImages.length,0);
+const diff=await bambuToolModule.handlers.bambu_slice_compare_images_save({
   beforePath:simulatedGood,afterPath:simulatedBad,projectPath:argsPath,text:"3D Tech",
   outputDir:outDir
 });
 assert.equal(diff.mode,"post-slice-trajectory-comparison");
-assert(diff.differentLayers>=1);
 assert.equal(diff.comparisonImages.length,2);
 const windows=await bambuToolModule.handlers.bambu_window_status({});
 assert.equal(windows.mode,"live-window-list");

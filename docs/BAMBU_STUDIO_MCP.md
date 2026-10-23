@@ -73,7 +73,8 @@ El usuario confirmó que `3D Tech` desaparece **también en Previsualización tr
 - `bambu_slice_inspect` (**read-only**): abre exportación `.gcode` o `.gcode.3mf` con `Metadata/plate_N.gcode`, extrae movimientos de extrusión reales y capas Z. No acepta falso positivo de archivo 3MF editable sin G-code.
 - `bambu_slice_layer_render`: crea PNG ortográfico por capa desde trayectorias G-code reales, no captura de ventana.
 - `bambu_slice_text_diagnose`: cruza caja de texto editable guardada con G-code de placa exportada, mide segmentos/recorridos sobre esa región y captura hasta tres capas de Z dentro del texto.
-- `bambu_slice_compare` (**read-only si no se elige outputDir**): compara `antes.gcode.3mf` vs `despues.gcode.3mf`, con restricción opcional a `projectPath` y `text`. Con `outputDir` genera par de imágenes de la capa con mayor diferencia de longitudes.
+- `bambu_slice_compare` (**read-only estricto en Bridge**): compara `antes.gcode.3mf` vs `despues.gcode.3mf`, con restricción opcional a `projectPath` y `text`. No escribe archivos.
+- `bambu_slice_compare_images_save` (**escritura explícita en Bridge**): genera además un par de PNG con la misma región de la capa que mayor diferencia presenta. El proveedor independiente tiene `bambu_slice_compare` con `outputDir` opcional y está etiquetado como herramienta con efectos de escritura.
 
 Flujo desde la app: Archivo → Exportar → Exportar archivo laminado de placa (o equivalente localizado, Ctrl+G donde exista). Exportar con nombres distintos la pieza **sin fusionar** y la **fusionada**. Conservar 3MF del diseño y no reescribir. El MCP puede inspeccionar la exportación en segundo plano sin cambiar el foco. No hay acceso a la caché de rebanado sin exportar ni control de UI automática en v0.2.0.
 

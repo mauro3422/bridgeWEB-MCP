@@ -94,7 +94,8 @@ export const bambuToolModule: BridgeToolModule = {
     {name:"bambu_project_compare",description:"Compare two saved 3MFs via separate Bambu MCP. Read-only.",inputSchema:{type:"object",properties:{beforePath:pathParam,afterPath:pathParam},required:["beforePath","afterPath"],additionalProperties:false}},
     {name:"bambu_slice_inspect",description:"Read actual post-slice G-code in .gcode or .gcode.3mf, enumerate extrusion layers and XY paths. Saved editable project 3MF alone is not sliced.",inputSchema:{type:"object",properties:{path:pathParam,plate:{type:"integer",minimum:1,maximum:50}},required:["path"],additionalProperties:false}},
     {name:"bambu_slice_layer_render",description:"Export PNG showing reconstructed real post-slice extrusion paths at a specified layer/Z. No Bambu focus change.",inputSchema:{type:"object",properties:{path:pathParam,outputDir:pathParam,plate:{type:"integer",minimum:1,maximum:50},layerIndex:{type:"integer",minimum:0,maximum:4000},layerZMm:{type:"number",minimum:-10,maximum:1000}},required:["path","outputDir"],additionalProperties:false}},
-    {name:"bambu_slice_compare",description:"Compare post-slice extrusion toolpaths before vs after Merge; optionally target text region and write paired diagnostic PNGs to outputDir.",inputSchema:{type:"object",properties:{beforePath:pathParam,afterPath:pathParam,projectPath:pathParam,text:pathParam,outputDir:pathParam,plate:{type:"integer",minimum:1,maximum:50}},required:["beforePath","afterPath"],additionalProperties:false}},
+    {name:"bambu_slice_compare",description:"Read-only comparison of post-slice extrusion paths before vs after Merge, optionally limited to text bounds. Does not write files.",inputSchema:{type:"object",properties:{beforePath:pathParam,afterPath:pathParam,projectPath:pathParam,text:pathParam,plate:{type:"integer",minimum:1,maximum:50}},required:["beforePath","afterPath"],additionalProperties:false}},
+    {name:"bambu_slice_compare_images_save",description:"Compare two sliced G-code exports and write paired QA PNGs for the most divergent layer; explicit outputDir required.",inputSchema:{type:"object",properties:{beforePath:pathParam,afterPath:pathParam,projectPath:pathParam,text:pathParam,outputDir:pathParam,plate:{type:"integer",minimum:1,maximum:50}},required:["beforePath","afterPath","outputDir"],additionalProperties:false}},
     {name:"bambu_slice_text_diagnose",description:"Load sliced G-code and saved 3MF text region to output post-slice evidence per engraving layer (PNG files). Requires exported sliced plate, no Bambu GUI operation.",inputSchema:{type:"object",properties:{slicedPath:pathParam,projectPath:pathParam,text:pathParam,outputDir:pathParam,plate:{type:"integer",minimum:1,maximum:50}},required:["slicedPath","projectPath","text","outputDir"],additionalProperties:false}},
     {name:"bambu_window_status",description:"List Bambu Studio window status through separate MCP without changing focus.",inputSchema:empty},
     {name:"bambu_capture_save",description:"Foreground-only Bambu Studio window/viewport capture. Refuses minimized, occluded or out-of-focus windows.",inputSchema:{type:"object",properties:{outputPath:pathParam,region:{type:"string",enum:["window","viewport"]}},required:["outputPath"],additionalProperties:false}},
@@ -137,12 +138,20 @@ export const bambuToolModule: BridgeToolModule = {
     },
     bambu_slice_compare:async args => {
       const x=z.object({beforePath:z.string().min(1),afterPath:z.string().min(1),
-         projectPath:z.string().min(1).optional(),text:z.string().min(1).optional(),outputDir:z.string().min(1).optional(),
+         projectPath:z.string().min(1).optional(),text:z.string().min(1).optional(),
          plate:z.number().int().min(1).max(50).default(1)}).strict().parse(args);
       if(Boolean(x.projectPath)!==Boolean(x.text)) throw new Error("Both projectPath and text required for ROI");
       return providerTool("bambu_slice_compare",{beforePath:sliced(x.beforePath),afterPath:sliced(x.afterPath),
-         plate:x.plate,...(x.projectPath?{projectPath:src(x.projectPath),text:x.text}:{}),
-         ...(x.outputDir?{outputDir:out(x.outputDir)}:{})});
+         plate:x.plate,...(x.projectPath?{projectPath:src(x.projectPath),text:x.text}:{})});
+    },
+    bambu_slice_compare_images_save:async args => {
+      const x=z.object({beforePath:z.string().min(1),afterPath:z.string().min(1),
+        projectPath:z.string().min(1).optional(),text:z.string().min(1).optional(),
+        outputDir:z.string().min(1),plate:z.number().int().min(1).max(50).default(1)}).strict().parse(args);
+      if(Boolean(x.projectPath)!==Boolean(x.text)) throw new Error("Both projectPath and text required for ROI");
+      return providerTool("bambu_slice_compare",{beforePath:sliced(x.beforePath),afterPath:sliced(x.afterPath),
+        plate:x.plate,...(x.projectPath?{projectPath:src(x.projectPath),text:x.text}:{}),
+        outputDir:out(x.outputDir)});
     },
     bambu_slice_text_diagnose:async args => {
       const x=z.object({slicedPath:z.string().min(1),projectPath:z.string().min(1),
