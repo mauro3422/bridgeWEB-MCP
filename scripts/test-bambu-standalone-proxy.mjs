@@ -17,6 +17,8 @@ assert(status.toolCount>=6);
 const catalog=await bambuToolModule.handlers.bambu_mcp_tool_list({});
 assert(catalog.tools.some(t=>t.name==="bambu_project_compare"));
 assert(catalog.tools.some(t=>t.name==="bambu_text_cut_diagnose"));
+assert(catalog.tools.some(t=>t.name==="bambu_slice_inspect"));
+assert(catalog.tools.some(t=>t.name==="bambu_slice_text_diagnose"));
 const inspection=await bambuToolModule.handlers.bambu_project_inspect({path:argsPath});
 assert(inspection.ok);
 const parts=inspection.objects.flatMap(o=>o.parts);
@@ -34,6 +36,30 @@ const negativeText=engraving.texts.find(t=>t.kind==="negative_part");
 if(negativeText) assert(negativeText.interpretation==="negative-subtraction-candidate" || negativeText.interpretation==="not-validated-cut");
 const same=await bambuToolModule.handlers.bambu_project_compare({beforePath:argsPath,afterPath:argsPath});
 assert.equal(same.changed,false);
+// A saved geometry project is not a sliced .gcode.3mf and must fail with actionable guidance.
+let expectedUnsliced=false;
+try{await bambuToolModule.handlers.bambu_slice_inspect({path:argsPath});}
+catch(e){expectedUnsliced=String(e).includes("Export");}
+assert(expectedUnsliced,"must require actual plate-sliced G-code instead of silently reading a model 3MF");
+const fixtureBase="D:\\Dev\\bambu-studio-mcp\\tests\\fixtures\\";
+const simulatedGood=fixtureBase+"synthetic-unmerged.gcode";
+const simulatedBad=fixtureBase+"synthetic-merged.gcode";
+const sliced=await bambuToolModule.handlers.bambu_slice_inspect({path:simulatedGood});
+assert.equal(sliced.mode,"sliced-gcode-toolpath-inspection");
+assert(sliced.layerCount>=2);
+const cut=await bambuToolModule.handlers.bambu_slice_text_diagnose({
+  slicedPath:simulatedGood,projectPath:argsPath,text:"3D Tech",
+  outputDir:outDir
+});
+assert.equal(cut.mode,"sliced-text-toolpath-qa");
+assert(cut.images.length>=1);
+const diff=await bambuToolModule.handlers.bambu_slice_compare({
+  beforePath:simulatedGood,afterPath:simulatedBad,projectPath:argsPath,text:"3D Tech",
+  outputDir:outDir
+});
+assert.equal(diff.mode,"post-slice-trajectory-comparison");
+assert(diff.differentLayers>=1);
+assert.equal(diff.comparisonImages.length,2);
 const windows=await bambuToolModule.handlers.bambu_window_status({});
 assert.equal(windows.mode,"live-window-list");
 const render=await bambuToolModule.handlers.bambu_offscreen_views_save({

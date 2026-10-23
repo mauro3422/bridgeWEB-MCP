@@ -69,6 +69,12 @@ const src = (value:string) => {
   if (path.extname(file).toLowerCase() !== ".3mf") throw new Error("Expected .3mf");
   return file;
 };
+const sliced = (value:string) => {
+  const file=resolveToolPath(value,{access:"read"});
+  const suffix=path.extname(file).toLowerCase();
+  if (suffix!==".gcode" && suffix!==".3mf") throw new Error("Expected saved .gcode or sliced .gcode.3mf");
+  return file;
+};
 const out = (value:string,isFile=false) => {
   const file = resolveToolPath(value,{access:"write"});
   if (isFile && path.extname(file).toLowerCase() !== ".png") throw new Error("Expected .png");
@@ -86,6 +92,10 @@ export const bambuToolModule: BridgeToolModule = {
     {name:"bambu_project_diagnose",description:"Detect negative parts that have no bounding-box intersection with printable geometry in a saved 3MF. Cannot prove real slicing outcome.",inputSchema:{type:"object",properties:{path:pathParam},required:["path"],additionalProperties:false}},
     {name:"bambu_text_cut_diagnose",description:"Diagnose hidden negative text after Merge: retained text metadata, subtype, intersection with merged positive geometry. Saved 3MF only; slicing not proved.",inputSchema:{type:"object",properties:{path:pathParam},required:["path"],additionalProperties:false}},
     {name:"bambu_project_compare",description:"Compare two saved 3MFs via separate Bambu MCP. Read-only.",inputSchema:{type:"object",properties:{beforePath:pathParam,afterPath:pathParam},required:["beforePath","afterPath"],additionalProperties:false}},
+    {name:"bambu_slice_inspect",description:"Read actual post-slice G-code in .gcode or .gcode.3mf, enumerate extrusion layers and XY paths. Saved editable project 3MF alone is not sliced.",inputSchema:{type:"object",properties:{path:pathParam,plate:{type:"integer",minimum:1,maximum:50}},required:["path"],additionalProperties:false}},
+    {name:"bambu_slice_layer_render",description:"Export PNG showing reconstructed real post-slice extrusion paths at a specified layer/Z. No Bambu focus change.",inputSchema:{type:"object",properties:{path:pathParam,outputDir:pathParam,plate:{type:"integer",minimum:1,maximum:50},layerIndex:{type:"integer",minimum:0,maximum:4000},layerZMm:{type:"number",minimum:-10,maximum:1000}},required:["path","outputDir"],additionalProperties:false}},
+    {name:"bambu_slice_compare",description:"Compare post-slice extrusion toolpaths before vs after Merge; optionally target text region and write paired diagnostic PNGs to outputDir.",inputSchema:{type:"object",properties:{beforePath:pathParam,afterPath:pathParam,projectPath:pathParam,text:pathParam,outputDir:pathParam,plate:{type:"integer",minimum:1,maximum:50}},required:["beforePath","afterPath"],additionalProperties:false}},
+    {name:"bambu_slice_text_diagnose",description:"Load sliced G-code and saved 3MF text region to output post-slice evidence per engraving layer (PNG files). Requires exported sliced plate, no Bambu GUI operation.",inputSchema:{type:"object",properties:{slicedPath:pathParam,projectPath:pathParam,text:pathParam,outputDir:pathParam,plate:{type:"integer",minimum:1,maximum:50}},required:["slicedPath","projectPath","text","outputDir"],additionalProperties:false}},
     {name:"bambu_window_status",description:"List Bambu Studio window status through separate MCP without changing focus.",inputSchema:empty},
     {name:"bambu_capture_save",description:"Foreground-only Bambu Studio window/viewport capture. Refuses minimized, occluded or out-of-focus windows.",inputSchema:{type:"object",properties:{outputPath:pathParam,region:{type:"string",enum:["window","viewport"]}},required:["outputPath"],additionalProperties:false}},
     {name:"bambu_saved_views_save",description:"Extract existing 3MF preview PNGs via separate MCP, no live UI interaction.",inputSchema:{type:"object",properties:{path:pathParam,outputDir:pathParam},required:["path","outputDir"],additionalProperties:false}},
@@ -114,6 +124,31 @@ export const bambuToolModule: BridgeToolModule = {
     bambu_project_compare:async args => {
       const x=z.object({beforePath:z.string().min(1),afterPath:z.string().min(1)}).strict().parse(args);
       return providerTool("bambu_project_compare",{beforePath:src(x.beforePath),afterPath:src(x.afterPath)});
+    },
+    bambu_slice_inspect:async args => {
+      const x=z.object({path:z.string().min(1),plate:z.number().int().min(1).max(50).default(1)}).strict().parse(args);
+      return providerTool("bambu_slice_inspect",{path:sliced(x.path),plate:x.plate});
+    },
+    bambu_slice_layer_render:async args => {
+      const x=z.object({path:z.string().min(1),outputDir:z.string().min(1),plate:z.number().int().min(1).max(50).default(1),
+        layerIndex:z.number().int().min(0).max(4000).optional(),layerZMm:z.number().min(-10).max(1000).optional()}).strict().parse(args);
+      return providerTool("bambu_slice_layer_render",{path:sliced(x.path),outputDir:out(x.outputDir),plate:x.plate,
+        ...(x.layerIndex!==undefined?{layerIndex:x.layerIndex}:{}),...(x.layerZMm!==undefined?{layerZMm:x.layerZMm}:{})});
+    },
+    bambu_slice_compare:async args => {
+      const x=z.object({beforePath:z.string().min(1),afterPath:z.string().min(1),
+         projectPath:z.string().min(1).optional(),text:z.string().min(1).optional(),outputDir:z.string().min(1).optional(),
+         plate:z.number().int().min(1).max(50).default(1)}).strict().parse(args);
+      if(Boolean(x.projectPath)!==Boolean(x.text)) throw new Error("Both projectPath and text required for ROI");
+      return providerTool("bambu_slice_compare",{beforePath:sliced(x.beforePath),afterPath:sliced(x.afterPath),
+         plate:x.plate,...(x.projectPath?{projectPath:src(x.projectPath),text:x.text}:{}),
+         ...(x.outputDir?{outputDir:out(x.outputDir)}:{})});
+    },
+    bambu_slice_text_diagnose:async args => {
+      const x=z.object({slicedPath:z.string().min(1),projectPath:z.string().min(1),
+        text:z.string().min(1),outputDir:z.string().min(1),plate:z.number().int().min(1).max(50).default(1)}).strict().parse(args);
+      return providerTool("bambu_slice_text_diagnose",{slicedPath:sliced(x.slicedPath),projectPath:src(x.projectPath),
+        text:x.text,outputDir:out(x.outputDir),plate:x.plate});
     },
     bambu_window_status:async args => {z.object({}).strict().parse(args);return providerTool("bambu_window_status",{});},
     bambu_capture_save:async args => {

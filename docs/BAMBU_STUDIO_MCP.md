@@ -65,3 +65,16 @@ No reiniciar el Bridge activo por cambios de docs. Para activar una versión nue
 - Atajos de vistas señalados en guías Bambu Studio, sujetos a versión: Ctrl+1..7 = superior, inferior, frontal, trasera, izquierda, derecha, isométrica. Verificar en Ayuda > Atajos del programa instalado.
 - Límites: intersección de cajas no demuestra operación booleana real; el render offline no representa los píxeles originales de Bambu; las ediciones sin guardar no se inspeccionan.
 - Pruebas: standalone `python -m unittest discover -s tests -v` **8/8 PASS**; Bridge `npm run check`, `npm run build`, `node scripts/test-bambu-standalone-proxy.mjs` PASS, incluyendo nuevo diagnóstico y vistas top/front/right/isometric.
+
+## Slicer toolpath diagnostics v0.2.0 — actual `.gcode.3mf`
+
+El usuario confirmó que `3D Tech` desaparece **también en Previsualización tras Fusionar**, aunque `text_shape` negativo continúa en el 3MF. La inspección de bounding boxes no alcanza. El proveedor MCP independiente ahora expone cuatro funciones nuevas:
+
+- `bambu_slice_inspect` (**read-only**): abre exportación `.gcode` o `.gcode.3mf` con `Metadata/plate_N.gcode`, extrae movimientos de extrusión reales y capas Z. No acepta falso positivo de archivo 3MF editable sin G-code.
+- `bambu_slice_layer_render`: crea PNG ortográfico por capa desde trayectorias G-code reales, no captura de ventana.
+- `bambu_slice_text_diagnose`: cruza caja de texto editable guardada con G-code de placa exportada, mide segmentos/recorridos sobre esa región y captura hasta tres capas de Z dentro del texto.
+- `bambu_slice_compare` (**read-only si no se elige outputDir**): compara `antes.gcode.3mf` vs `despues.gcode.3mf`, con restricción opcional a `projectPath` y `text`. Con `outputDir` genera par de imágenes de la capa con mayor diferencia de longitudes.
+
+Flujo desde la app: Archivo → Exportar → Exportar archivo laminado de placa (o equivalente localizado, Ctrl+G donde exista). Exportar con nombres distintos la pieza **sin fusionar** y la **fusionada**. Conservar 3MF del diseño y no reescribir. El MCP puede inspeccionar la exportación en segundo plano sin cambiar el foco. No hay acceso a la caché de rebanado sin exportar ni control de UI automática en v0.2.0.
+
+QA: prueba sintética con M83, M82, G92, G90/G91, 2 capas, extracción ZIP G-code, rechazo de proyecto no laminado, generación PNG y comparación de zona; proveedor suite 15/15 PASS y Bridge check/build/proxy smoke PASS. Pruebas contra G-code **real del llavero aún pendientes de exportación**.
