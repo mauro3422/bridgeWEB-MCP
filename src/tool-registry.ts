@@ -55,7 +55,7 @@ const readOnlyToolNames = new Set([
   "project_context_load", "project_context_audit", "project_context_health", "project_context_modularization_plan", "project_change_consistency", "workflow_guide_recommend", "workflow_guide_load", "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query",
   "skill_catalog", "skill_recommend", "skill_route_audit", "skill_route_vocabulary", "skill_route_plan", "skill_bootstrap", "skill_context_next", "skill_load", "mssr_context_proposal_review", "roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list", "roblox_mcp_query",
   "binary_file_info", "binary_file_attach", "binary_file_read_chunk", "binary_upload_status", "image_file_attach",
-  "bambu_project_inspect", "bambu_project_diagnose", "bambu_project_compare", "bambu_window_status", "bambu_mcp_status", "bambu_mcp_tool_list",
+  "bambu_project_inspect", "bambu_project_diagnose", "bambu_text_cut_diagnose", "bambu_project_compare", "bambu_window_status", "bambu_mcp_status", "bambu_mcp_tool_list",
   "blender_status", "blender_scene_info", "blender_rig_inspect", "blender_validate_reference_pack", "blender_character_loop_status",
   "godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list", "godot_mcp_query",
   "whiteboard_latest_capture", "whiteboard_capture_list",

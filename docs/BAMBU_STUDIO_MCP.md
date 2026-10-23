@@ -56,3 +56,12 @@ No reiniciar el Bridge activo por cambios de docs. Para activar una versión nue
 - Bridge regresó con boot `74a78a55-e408-40c5-9df0-3db6fa1b20e5` y **198 tools**, incluidas 9 entradas `bambu_*`. El proveedor externo informó **7 tools** y la consulta live de `bambu_project_inspect` + `bambu_project_diagnose` fue correcta.
 - Código portable en repo independiente `D:\Dev\bambu-studio-mcp`, commit inicial `aeddc58`. Sin cambios de perfil del túnel, sin despliegue remoto ni controles de impresora.
 - Si el conector ChatGPT mantiene el catálogo viejo, descubrir el schema runtime con `bridge_tool_schema` y utilizar `bridge_tool_query` para las consultas read-only; el runtime nuevo ya las admite.
+
+## Mejoras de texto negativo y cámaras ortográficas (2026-10-23)
+
+- Nuevo `bambu_text_cut_diagnose` (read-only): comprueba si la parte de texto negativo persiste en el 3MF tras `Fusionar`, identifica su tipo, posiciones 3D, e intersecciones XYZ con `Merged Parts`. Una parte negativa enterrada puede dejar de verse en «Preparar» sin haber desaparecido; la verificación del grabado real se hace **laminando**.
+- `bambu_offscreen_views_save` ahora admite `top,bottom,front,rear,left,right,isometric` y alias de compatibilidad `side`. Son renders ortográficos desde **el archivo guardado**, sin manipular foco ni cámara de la app.
+- Selección en el viewport Bambu: `Ctrl + clic` para varios objetos, `Alt + clic` para partes internas; para volúmenes negativos invisibles, elegir exactamente la fila `Proceso > Objetos`.
+- Atajos de vistas señalados en guías Bambu Studio, sujetos a versión: Ctrl+1..7 = superior, inferior, frontal, trasera, izquierda, derecha, isométrica. Verificar en Ayuda > Atajos del programa instalado.
+- Límites: intersección de cajas no demuestra operación booleana real; el render offline no representa los píxeles originales de Bambu; las ediciones sin guardar no se inspeccionan.
+- Pruebas: standalone `python -m unittest discover -s tests -v` **8/8 PASS**; Bridge `npm run check`, `npm run build`, `node scripts/test-bambu-standalone-proxy.mjs` PASS, incluyendo nuevo diagnóstico y vistas top/front/right/isometric.

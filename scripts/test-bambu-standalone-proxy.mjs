@@ -16,6 +16,7 @@ assert.equal(status.provider,"standalone-bambu-mcp-stdio");
 assert(status.toolCount>=6);
 const catalog=await bambuToolModule.handlers.bambu_mcp_tool_list({});
 assert(catalog.tools.some(t=>t.name==="bambu_project_compare"));
+assert(catalog.tools.some(t=>t.name==="bambu_text_cut_diagnose"));
 const inspection=await bambuToolModule.handlers.bambu_project_inspect({path:argsPath});
 assert(inspection.ok);
 const parts=inspection.objects.flatMap(o=>o.parts);
@@ -25,15 +26,21 @@ assert(parts.every(p=>p.boundsMm?.size?.every(v=>Number.isFinite(v))),"part boun
 const diagnostic=await bambuToolModule.handlers.bambu_project_diagnose({path:argsPath});
 assert.equal(diagnostic.mode,"saved-3mf-bbox-diagnostic");
 assert(Array.isArray(diagnostic.negativePartChecks));
+const engraving=await bambuToolModule.handlers.bambu_text_cut_diagnose({path:argsPath});
+assert.equal(engraving.mode,"saved-3mf-text-cut-diagnostic");
+assert(Array.isArray(engraving.texts));
+assert(engraving.texts.every(t=>Array.isArray(t.intersections) && typeof t.interpretation==="string"));
+const negativeText=engraving.texts.find(t=>t.kind==="negative_part");
+if(negativeText) assert(negativeText.interpretation==="negative-subtraction-candidate" || negativeText.interpretation==="not-validated-cut");
 const same=await bambuToolModule.handlers.bambu_project_compare({beforePath:argsPath,afterPath:argsPath});
 assert.equal(same.changed,false);
 const windows=await bambuToolModule.handlers.bambu_window_status({});
 assert.equal(windows.mode,"live-window-list");
 const render=await bambuToolModule.handlers.bambu_offscreen_views_save({
-    path:argsPath,outputDir:outDir,views:"top,isometric"
+    path:argsPath,outputDir:outDir,views:"top,front,right,isometric"
 });
 assert.equal(render.mode,"offline-saved-3mf-render");
-assert.equal(render.views.length,2);
+assert.equal(render.views.length,4);
 for(const view of render.views) assert((await fs.stat(view.path)).size>1000);
 let invalid=false;
 try{await bambuToolModule.handlers.bambu_project_inspect({path:"D:\\Dev\\bad.stl"});}

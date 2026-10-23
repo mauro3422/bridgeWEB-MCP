@@ -84,11 +84,12 @@ export const bambuToolModule: BridgeToolModule = {
     {name:"bambu_mcp_tool_list",description:"Discover the current external Bambu Studio MCP tool catalog.",inputSchema:empty},
     {name:"bambu_project_inspect",description:"Read saved 3MF objects, parts, text and location via external Bambu MCP. No live unsaved UI state.",inputSchema:{type:"object",properties:{path:pathParam,maxObjects:{type:"integer",minimum:1,maximum:200}},required:["path"],additionalProperties:false}},
     {name:"bambu_project_diagnose",description:"Detect negative parts that have no bounding-box intersection with printable geometry in a saved 3MF. Cannot prove real slicing outcome.",inputSchema:{type:"object",properties:{path:pathParam},required:["path"],additionalProperties:false}},
+    {name:"bambu_text_cut_diagnose",description:"Diagnose hidden negative text after Merge: retained text metadata, subtype, intersection with merged positive geometry. Saved 3MF only; slicing not proved.",inputSchema:{type:"object",properties:{path:pathParam},required:["path"],additionalProperties:false}},
     {name:"bambu_project_compare",description:"Compare two saved 3MFs via separate Bambu MCP. Read-only.",inputSchema:{type:"object",properties:{beforePath:pathParam,afterPath:pathParam},required:["beforePath","afterPath"],additionalProperties:false}},
     {name:"bambu_window_status",description:"List Bambu Studio window status through separate MCP without changing focus.",inputSchema:empty},
     {name:"bambu_capture_save",description:"Foreground-only Bambu Studio window/viewport capture. Refuses minimized, occluded or out-of-focus windows.",inputSchema:{type:"object",properties:{outputPath:pathParam,region:{type:"string",enum:["window","viewport"]}},required:["outputPath"],additionalProperties:false}},
     {name:"bambu_saved_views_save",description:"Extract existing 3MF preview PNGs via separate MCP, no live UI interaction.",inputSchema:{type:"object",properties:{path:pathParam,outputDir:pathParam},required:["path","outputDir"],additionalProperties:false}},
-    {name:"bambu_offscreen_views_save",description:"Render top/isometric/front/side saved-3MF views offscreen with standalone Bambu MCP. No focus stealing; excludes unsaved changes.",inputSchema:{type:"object",properties:{path:pathParam,outputDir:pathParam,views:{type:"string"}},required:["path","outputDir"],additionalProperties:false}}
+    {name:"bambu_offscreen_views_save",description:"Render top/bottom/front/rear/left/right/isometric saved-3MF orthographic views offscreen via standalone Bambu MCP. No focus stealing; excludes unsaved changes.",inputSchema:{type:"object",properties:{path:pathParam,outputDir:pathParam,views:{type:"string"}},required:["path","outputDir"],additionalProperties:false}}
   ],
   handlers:{
     bambu_mcp_status:async args => {
@@ -105,6 +106,10 @@ export const bambuToolModule: BridgeToolModule = {
     bambu_project_diagnose:async args => {
       const x=z.object({path:z.string().min(1)}).strict().parse(args);
       return providerTool("bambu_project_diagnose",{path:src(x.path)});
+    },
+    bambu_text_cut_diagnose:async args => {
+      const x=z.object({path:z.string().min(1)}).strict().parse(args);
+      return providerTool("bambu_text_cut_diagnose",{path:src(x.path)});
     },
     bambu_project_compare:async args => {
       const x=z.object({beforePath:z.string().min(1),afterPath:z.string().min(1)}).strict().parse(args);
