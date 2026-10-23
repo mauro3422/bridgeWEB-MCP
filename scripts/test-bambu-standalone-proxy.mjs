@@ -19,6 +19,10 @@ assert(catalog.tools.some(t=>t.name==="bambu_project_compare"));
 assert(catalog.tools.some(t=>t.name==="bambu_text_cut_diagnose"));
 assert(catalog.tools.some(t=>t.name==="bambu_slice_inspect"));
 assert(catalog.tools.some(t=>t.name==="bambu_slice_text_diagnose"));
+for(const tool of ["bambu_cache_discover","bambu_case_pair_prepare_save","bambu_cache_slice_snapshot_save",
+ "bambu_slice_region_inspect","bambu_slice_region_images_save","bambu_slice_region_compare"]){
+ assert(catalog.tools.some(t=>t.name===tool),tool+" missing in provider");
+}
 const inspection=await bambuToolModule.handlers.bambu_project_inspect({path:argsPath});
 assert(inspection.ok);
 const parts=inspection.objects.flatMap(o=>o.parts);
@@ -47,24 +51,61 @@ const simulatedBad=fixtureBase+"synthetic-merged.gcode";
 const sliced=await bambuToolModule.handlers.bambu_slice_inspect({path:simulatedGood});
 assert.equal(sliced.mode,"sliced-gcode-toolpath-inspection");
 assert(sliced.layerCount>=2);
-const cut=await bambuToolModule.handlers.bambu_slice_text_diagnose({
-  slicedPath:simulatedGood,projectPath:argsPath,text:"3D Tech",
-  outputDir:outDir
-});
-assert.equal(cut.mode,"sliced-text-toolpath-qa");
-assert(cut.images.length>=1);
+const hasEditable3DTech=engraving.texts.some(t=>t.text==="3D Tech");
+const targetOpts=hasEditable3DTech?{projectPath:argsPath,text:"3D Tech"}:{};
+if(hasEditable3DTech){
+  const cut=await bambuToolModule.handlers.bambu_slice_text_diagnose({
+    slicedPath:simulatedGood,projectPath:argsPath,text:"3D Tech",outputDir:outDir
+  });
+  assert.equal(cut.mode,"sliced-text-toolpath-qa");
+} else {
+  let negativeTextMissing=false;
+  try{await bambuToolModule.handlers.bambu_slice_text_diagnose({
+    slicedPath:simulatedGood,projectPath:argsPath,text:"3D Tech",outputDir:outDir
+  });}catch(e){negativeTextMissing=String(e).includes("No editable text");}
+  assert(negativeTextMissing,"when merged text is baked into the mesh, the MCP must report missing semantic text");
+}
 const diffReadOnly=await bambuToolModule.handlers.bambu_slice_compare({
-  beforePath:simulatedGood,afterPath:simulatedBad,projectPath:argsPath,text:"3D Tech"
+  beforePath:simulatedGood,afterPath:simulatedBad,...targetOpts
 });
 assert.equal(diffReadOnly.mode,"post-slice-trajectory-comparison");
 assert(diffReadOnly.differentLayers>=1);
 assert.equal(diffReadOnly.comparisonImages.length,0);
 const diff=await bambuToolModule.handlers.bambu_slice_compare_images_save({
-  beforePath:simulatedGood,afterPath:simulatedBad,projectPath:argsPath,text:"3D Tech",
-  outputDir:outDir
+  beforePath:simulatedGood,afterPath:simulatedBad,...targetOpts,outputDir:outDir
 });
 assert.equal(diff.mode,"post-slice-trajectory-comparison");
 assert.equal(diff.comparisonImages.length,2);
+const cache=await bambuToolModule.handlers.bambu_cache_discover({projectPath:argsPath});
+assert.equal(cache.mode,"bambu-temporary-cache-discovery");
+assert(Array.isArray(cache.matches));
+const generic=await bambuToolModule.handlers.bambu_slice_region_inspect({
+  slicedPath:simulatedGood,
+  minX:145,minY:149,maxX:191,maxY:161,minZ:0,maxZ:3
+});
+assert.equal(generic.mode,"generic-sliced-region-QA");
+assert(generic.regionLayers>=1);
+const genericObject=await bambuToolModule.handlers.bambu_slice_region_inspect({
+  slicedPath:simulatedGood,projectPath:argsPath,objectName:"Cubo"
+});
+assert.equal(genericObject.target.kind,"object");
+const regionComparison=await bambuToolModule.handlers.bambu_slice_region_compare({
+  beforePath:simulatedGood,afterPath:simulatedBad,
+  minX:144,minY:148,maxX:193,maxY:163,minZ:0,maxZ:3
+});
+assert.equal(regionComparison.mode,"generic-sliced-region-comparison");
+assert(regionComparison.differentLayers>=1);
+assert(regionComparison.comparisonImages.length===0);
+const regionImages=await bambuToolModule.handlers.bambu_slice_region_compare_images_save({
+  beforePath:simulatedGood,afterPath:simulatedBad,
+  minX:144,minY:148,maxX:193,maxY:163,minZ:0,maxZ:3,outputDir:outDir
+});
+assert.equal(regionImages.comparisonImages.length,2);
+const savedRegions=await bambuToolModule.handlers.bambu_slice_region_images_save({
+  slicedPath:simulatedGood,minX:144,minY:148,maxX:193,maxY:163,minZ:0,maxZ:3,
+  outputDir:outDir
+});
+assert(savedRegions.images.length>=1);
 const windows=await bambuToolModule.handlers.bambu_window_status({});
 assert.equal(windows.mode,"live-window-list");
 const render=await bambuToolModule.handlers.bambu_offscreen_views_save({

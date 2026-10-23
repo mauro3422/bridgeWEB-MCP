@@ -79,3 +79,17 @@ El usuario confirmó que `3D Tech` desaparece **también en Previsualización tr
 Flujo desde la app: Archivo → Exportar → Exportar archivo laminado de placa (o equivalente localizado, Ctrl+G donde exista). Exportar con nombres distintos la pieza **sin fusionar** y la **fusionada**. Conservar 3MF del diseño y no reescribir. El MCP puede inspeccionar la exportación en segundo plano sin cambiar el foco. No hay acceso a la caché de rebanado sin exportar ni control de UI automática en v0.2.0.
 
 QA: prueba sintética con M83, M82, G92, G90/G91, 2 capas, extracción ZIP G-code, rechazo de proyecto no laminado, generación PNG y comparación de zona; proveedor suite 15/15 PASS y Bridge check/build/proxy smoke PASS. Pruebas contra G-code **real del llavero aún pendientes de exportación**.
+
+## Bambu cache QA provider v0.3.0 — portable case builder and general XYZ analysis
+
+Bridge consumes the **standalone** MCP in `D:\Dev\bambu-studio-mcp`; its TypeScript code is only an SDK stdio proxy. The v0.3.0 provider now exposes cache/variant workflows:
+
+- `bambu_cache_discover` (query) → read-only matching `%TEMP%/bamboo_model` sessions whose `origin.txt` exactly resolves to requested saved 3MF; returns checksummed cache scene and temporary sliced `.gcode`.
+- `bambu_cache_slice_snapshot_save` (action) → copy newest existing G-code with SHA-256 verification and timestamp in QA directory. It **does not press Slice Plate**.
+- `bambu_case_pair_prepare_save` (action) → self-contained QA file A (saved defect) + file B (recovered cached candidate with companion nested zip `.model` meshes) + optional cached sliced G-code, with separate provenance/timestamp gap and `structuralRegression.lostNegativeTextInSaved`. Never label B as proved working without slicing.
+- `bambu_slice_region_inspect` (query) + `bambu_slice_region_images_save` (action) → actual existing sliced G-code analysis by coordinates `minX/maxX/minY/maxY/minZ/maxZ` or `projectPath` with `objectName`, `partName` or `text`.
+- `bambu_slice_region_compare` (query) + `bambu_slice_region_compare_images_save` (action) → A/B G-code differences with XY + Z filter for any selected region, not text-only.
+
+**Real Auro case evidence (2026-10-23):** source saved defect has `Merged Parts` positive and `Genérico-Cilindro` negative but **no** `3D Tech`. Matching Bambu cache at `Thu_Oct_22/23_07_14#3004#210` has `text_shape` negative `3D Tech` in addition to merged positive and cylinder. Two independent QA 3MF files created under `qa/bambu/cases/Llavero_Auro-20261023T011053-6e71dad`, cache G-code copied separately. Cache 3MF timestamp +33.25s vs cache G-code: **not valid to assign that G-code as verified B slice**. Provider G-code snapshot includes 25 Z layers, 8087 linear deposit segments (169 arcs omitted). No independent B slice has been created/validated yet.
+
+Testing and safety: no GUI focus changes or Bambu project mutations; temp caches are private implementation artifacts, not official APIs. Python unit suite 18/18 PASS; Bridge `npm run check`, `npm run build`, `node scripts/test-bambu-standalone-proxy.mjs` PASS in staging, including XYZ-Z comparisons. CLI headless slicing support was located in official Bambu Studio wiki, but Windows CLI behavior cannot yet be established as safe/noninteractive on user's installed build, so **automatic fresh slicing is not implemented or claimed**.
