@@ -20,7 +20,7 @@ assert(catalog.tools.some(t=>t.name==="bambu_text_cut_diagnose"));
 assert(catalog.tools.some(t=>t.name==="bambu_slice_inspect"));
 assert(catalog.tools.some(t=>t.name==="bambu_slice_text_diagnose"));
 for(const tool of ["bambu_cache_discover","bambu_case_pair_prepare_save","bambu_cache_slice_snapshot_save",
- "bambu_slice_region_inspect","bambu_slice_region_images_save","bambu_slice_region_compare"]){
+ "bambu_slice_region_inspect","bambu_slice_region_images_save","bambu_slice_region_compare","bambu_slice_headless_save"]){
  assert(catalog.tools.some(t=>t.name===tool),tool+" missing in provider");
 }
 const inspection=await bambuToolModule.handlers.bambu_project_inspect({path:argsPath});
@@ -106,6 +106,13 @@ const savedRegions=await bambuToolModule.handlers.bambu_slice_region_images_save
   outputDir:outDir
 });
 assert(savedRegions.images.length>=1);
+let rejectedUnsafeLabel=false;
+try{
+  await bambuToolModule.handlers.bambu_slice_headless_save({
+    inputPath:argsPath,outputDir:outDir,label:"../../unsafe"
+  });
+}catch{rejectedUnsafeLabel=true;}
+assert(rejectedUnsafeLabel,"Headless slicer must reject unsafe label and not execute");
 const windows=await bambuToolModule.handlers.bambu_window_status({});
 assert.equal(windows.mode,"live-window-list");
 const render=await bambuToolModule.handlers.bambu_offscreen_views_save({

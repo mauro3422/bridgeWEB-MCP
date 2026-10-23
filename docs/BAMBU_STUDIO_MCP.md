@@ -93,3 +93,18 @@ Bridge consumes the **standalone** MCP in `D:\Dev\bambu-studio-mcp`; its TypeScr
 **Real Auro case evidence (2026-10-23):** source saved defect has `Merged Parts` positive and `Genérico-Cilindro` negative but **no** `3D Tech`. Matching Bambu cache at `Thu_Oct_22/23_07_14#3004#210` has `text_shape` negative `3D Tech` in addition to merged positive and cylinder. Two independent QA 3MF files created under `qa/bambu/cases/Llavero_Auro-20261023T011053-6e71dad`, cache G-code copied separately. Cache 3MF timestamp +33.25s vs cache G-code: **not valid to assign that G-code as verified B slice**. Provider G-code snapshot includes 25 Z layers, 8087 linear deposit segments (169 arcs omitted). No independent B slice has been created/validated yet.
 
 Testing and safety: no GUI focus changes or Bambu project mutations; temp caches are private implementation artifacts, not official APIs. Python unit suite 18/18 PASS; Bridge `npm run check`, `npm run build`, `node scripts/test-bambu-standalone-proxy.mjs` PASS in staging, including XYZ-Z comparisons. CLI headless slicing support was located in official Bambu Studio wiki, but Windows CLI behavior cannot yet be established as safe/noninteractive on user's installed build, so **automatic fresh slicing is not implemented or claimed**.
+
+## v0.3.1 — isolated Bambu headless slicing tested on Windows 02.08.02.61
+
+New MCP action: `bambu_slice_headless_save` (explicit write; same named Bridge wrapper). Parameters: `inputPath` to independent project 3MF under `qa/`, `outputDir` under `qa/`, safe ASCII `label`, optional `timeoutSeconds` 15–45. Refuses source outside qa, existing output, malformed labels, or reusing isolated profile.
+
+Standalone provider script `scripts/headless_ab_probe.py` invokes installed Bambu CLI with `--slice 1 --datadir isolated-qa-profile --outputdir qa-path --export-3mf name.gcode.3mf qa-copy.3mf`. Hidden process and hard timeout, hash source before/after; verify output ZIP and nonempty G-code instead of assuming exit 0. Does not touch foreground Bambu application or printer. Original Bambu process PID 3004 persisted across both local trials.
+
+Both A/B slices succeeded with identical `Metadata/project_settings.config` content; 25 layers each:
+- Case A defective: `qa/bambu/headless-comparison/case-A-defective-headless.gcode.3mf`; G-code size 376,280 bytes.
+- Case B recovered: `qa/bambu/headless-comparison/case-B-negtext-headless.gcode.3mf`; G-code size 884,577 bytes.
+- Text region Z1.015–3.015 mm has different paths on 10 layers. At Z2.2 A extrudes continuous infill while B shows visible recessed "3D Tech" glyphs. Both still produce raised Auro at Z4.6.
+- Positive mesh facet counts also differ (A 3,896, B 1,412). Do not assume that text-negative state is the only geometric difference; this is proof of a working *recovered variant's output*, not a formal isolated slicer bug experiment.
+- Convenience fixed project copy `modelos/practicas/Llavero_Auro_CORREGIDO_3DTech.3mf` saved without overwriting original. No physical printing.
+
+Safety: Windows native CLI sometimes has bugs; bounded runner terminates only its spawned subprocess, checks the output, and exposes failure status. Provider tests 19 PASS and Bridge TypeScript check/build plus proxy smoke PASS.

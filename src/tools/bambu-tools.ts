@@ -105,6 +105,7 @@ export const bambuToolModule: BridgeToolModule = {
     {name:"bambu_slice_compare",description:"Read-only comparison of post-slice extrusion paths before vs after Merge, optionally limited to text bounds. Does not write files.",inputSchema:{type:"object",properties:{beforePath:pathParam,afterPath:pathParam,projectPath:pathParam,text:pathParam,plate:{type:"integer",minimum:1,maximum:50}},required:["beforePath","afterPath"],additionalProperties:false}},
     {name:"bambu_slice_compare_images_save",description:"Compare two sliced G-code exports and write paired QA PNGs for the most divergent layer; explicit outputDir required.",inputSchema:{type:"object",properties:{beforePath:pathParam,afterPath:pathParam,projectPath:pathParam,text:pathParam,outputDir:pathParam,plate:{type:"integer",minimum:1,maximum:50}},required:["beforePath","afterPath","outputDir"],additionalProperties:false}},
     {name:"bambu_slice_text_diagnose",description:"Load sliced G-code and saved 3MF text region to output post-slice evidence per engraving layer (PNG files). Requires exported sliced plate, no Bambu GUI operation.",inputSchema:{type:"object",properties:{slicedPath:pathParam,projectPath:pathParam,text:pathParam,outputDir:pathParam,plate:{type:"integer",minimum:1,maximum:50}},required:["slicedPath","projectPath","text","outputDir"],additionalProperties:false}},
+    {name:"bambu_slice_headless_save",description:"Run installed Bambu CLI in isolated configuration directory to slice an independent QA-only 3MF and export a validated .gcode.3mf. Does not focus GUI, touch original or print.",inputSchema:{type:"object",properties:{inputPath:pathParam,outputDir:pathParam,label:pathParam,timeoutSeconds:{type:"integer",minimum:15,maximum:45}},required:["inputPath","outputDir","label"],additionalProperties:false}},
     {name:"bambu_cache_discover",description:"Read-only discovery of Bambu Studio's temporary G-code and temporary scene with exact origin match to saved project; timestamps exposed, no UI focus.",inputSchema:{type:"object",properties:{projectPath:pathParam},required:["projectPath"],additionalProperties:false}},
     {name:"bambu_cache_slice_snapshot_save",description:"Save immutable G-code snapshot from Bambu's newest matching temporary slice without focus or re-slicing. Explicit outputDir; no original overwrite.",inputSchema:{type:"object",properties:{projectPath:pathParam,outputDir:pathParam},required:["projectPath","outputDir"],additionalProperties:false}},
     {name:"bambu_case_pair_prepare_save",description:"Create two independent 3MF QA cases: saved defective project and recovered matching temp scene with negative parts if available, plus temp G-code snapshot. Never overwrites originals; case B not proved working.",inputSchema:{type:"object",properties:{projectPath:pathParam,outputDir:pathParam},required:["projectPath","outputDir"],additionalProperties:false}},
@@ -181,6 +182,13 @@ export const bambuToolModule: BridgeToolModule = {
         text:z.string().min(1),outputDir:z.string().min(1),plate:z.number().int().min(1).max(50).default(1)}).strict().parse(args);
       return providerTool("bambu_slice_text_diagnose",{slicedPath:sliced(x.slicedPath),projectPath:src(x.projectPath),
         text:x.text,outputDir:out(x.outputDir),plate:x.plate});
+    },
+    bambu_slice_headless_save:async args => {
+      const x=z.object({inputPath:z.string().min(1),outputDir:z.string().min(1),
+        label:z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+        timeoutSeconds:z.number().int().min(15).max(45).optional()}).strict().parse(args);
+      return providerTool("bambu_slice_headless_save",{inputPath:src(x.inputPath),outputDir:out(x.outputDir),label:x.label,
+        ...(x.timeoutSeconds?{timeoutSeconds:x.timeoutSeconds}:{})});
     },
     bambu_cache_discover:async args => {
       const x=z.object({projectPath:z.string().min(1)}).strict().parse(args);
