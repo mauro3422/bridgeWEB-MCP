@@ -159,7 +159,7 @@ Invoke-Check "Tools portfolio dashboard" {
     throw "Dashboard does not expose the tools portfolio contract"
   }
 
-  $audit = Invoke-RestMethod "$BaseUrl/api/tools/audit?view=all&limit=200&days=30&scope=active"
+  $audit = Invoke-RestMethod "$BaseUrl/api/tools/audit?view=all&limit=512&days=30&scope=active"
   $registeredTools = [int]$audit.summary.registeredTools
   if ($registeredTools -lt 1 -or [int]$audit.items.Count -ne $registeredTools) {
     throw "Tools audit endpoint did not return its full registered tool catalog: registered=$registeredTools items=$([int]$audit.items.Count)"

@@ -5,6 +5,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { getDefaultToolCatalog } from "../dist/tool-registry.js";
 
 const root = process.cwd();
 const temp = await fs.mkdtemp(path.join(os.tmpdir(), "bridge-observability-liveness-"));
@@ -323,11 +324,12 @@ try {
 
   const auditProbePromise = probeReady(2_000);
   const auditStartedAt = performance.now();
-  const largeToolAudit = await json("/api/tools/audit?view=all&scope=all&days=30&limit=200", 15_000);
+  const largeToolAudit = await json("/api/tools/audit?view=all&scope=all&days=30&limit=512", 15_000);
   const auditElapsedMs = performance.now() - auditStartedAt;
   const auditProbe = await auditProbePromise;
   assert.equal(largeToolAudit.scope, "all", "isolated tool audit lost the requested scope");
-  assert.equal(largeToolAudit.summary?.registeredTools, 189, "isolated tool audit lost the registered catalog");
+  assert.equal(largeToolAudit.summary?.registeredTools, getDefaultToolCatalog().length, "isolated tool audit lost the registered catalog");
+  assert.equal(largeToolAudit.items?.length, largeToolAudit.summary.registeredTools, "auditing more than 200 registered tools must not truncate items");
   assert.deepEqual(auditProbe.failures, [], `readyz stalled while tool audit aggregated a large window: ${JSON.stringify(auditProbe.failures)}`);
   assert.ok(auditProbe.samples.length >= 20, `expected repeated readyz samples during tool audit, got ${auditProbe.samples.length}`);
   assert.ok(Math.max(...auditProbe.samples) < 750, `readyz latency exceeded the tool-audit isolation budget: ${Math.max(...auditProbe.samples).toFixed(2)} ms`);

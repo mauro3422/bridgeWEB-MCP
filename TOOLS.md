@@ -5118,7 +5118,7 @@ Parametros:
 - `toolName`: string
 - `scope`: string enum=active|all default="active"
 - `days`: number default=30 min=1 max=365
-- `limit`: number default=50 min=1 max=200
+- `limit`: number default=50 min=1 max=512
 
 <details>
 <summary>Input schema</summary>
@@ -5161,7 +5161,7 @@ Parametros:
       "type": "number",
       "default": 50,
       "minimum": 1,
-      "maximum": 200
+      "maximum": 512
     }
   },
   "additionalProperties": false

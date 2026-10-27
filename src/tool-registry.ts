@@ -424,7 +424,7 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
         toolName: { type: "string", description: "Exact registered tool name; required when view=tool." },
         scope: { type: "string", enum: ["active", "all"], default: "active" },
         days: { type: "number", default: 30, minimum: 1, maximum: 365 },
-        limit: { type: "number", default: 50, minimum: 1, maximum: 200 },
+        limit: { type: "number", default: 50, minimum: 1, maximum: 512 },
       },
       additionalProperties: false,
     },
@@ -526,7 +526,7 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
       return numeric;
     };
     const days = parseBoundedInteger(args.days, 30, 1, 365, "days");
-    const limit = parseBoundedInteger(args.limit, 50, 1, 200, "limit");
+    const limit = parseBoundedInteger(args.limit, 50, 1, 512, "limit");
     const toolName = args.toolName === undefined
       ? undefined
       : typeof args.toolName === "string" && args.toolName.trim()

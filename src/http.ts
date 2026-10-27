@@ -1120,7 +1120,7 @@ async function main() {
           toolName,
           scope: url.searchParams.get("scope") === "all" ? "all" : "active",
           days: getDays(url, 30, 365),
-          limit: getLimit(url, 127, 200),
+          limit: getLimit(url, 127, 512),
         }));
         return;
       }
