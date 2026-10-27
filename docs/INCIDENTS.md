@@ -21,7 +21,7 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ## 2026-10-27 — Missing standalone Blender capture tools in active Bridge catalog
 
-**Estado:** Código corregido en candidato 0.6.181; despliegue y prueba real pendientes. No cerrado.
+**Estado:** Bridge 0.6.181 desplegado y verificado con 214 herramientas; refresco del catálogo de ChatGPT y validación real en Blender pendientes. No cerrado hasta esos dos controles.
 
 **Capa:** Bridge registry + standalone Blender MCP. Bridge 0.6.180 (212 tools) omitía `blender_viewport_capture` y `blender_session_snapshot` pese a estar implementadas en el MCP independiente. Refrescar el cliente no resolvía una omisión upstream.
 
@@ -29,7 +29,7 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 **Verificación:** check + build, contrato de ambos schemas y guardas, HTTP MCP dual-era (214 herramientas anunciadas), PASS en build aislado. No se reinició producción ni se modificó la máscara Kitsune.
 
-**Pendiente:** despliegue por watchdog del Bridge correcto, readback del catálogo desde ChatGPT y pruebas PNG/snapshot sobre escena descartable; Blender no estaba abierto y 9878 no escuchaba.
+**Pendiente:** el host ChatGPT aún presenta 212 nombres frente a 214 herramientas del runtime: se requiere refresco del conector. La prueba Blender PNG/snapshot requiere escena descartable y addon standalone 9878 activo; en este momento no escucha. Un dispatch real de captura llegó hasta ECONNREFUSED y no generó archivo. Reinicio HTTP watchdog 96720654-b325-4f29-b3cd-cccb7fe526eb confirmado a las 05:56:22Z; smoke HTTP sobre 0.6.181 PASS, 214/214 entradas de auditoría.
 
 ---
 
