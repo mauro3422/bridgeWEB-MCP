@@ -19,6 +19,20 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-10-27 — Missing standalone Blender capture tools in active Bridge catalog
+
+**Estado:** Código corregido en candidato 0.6.181; despliegue y prueba real pendientes. No cerrado.
+
+**Capa:** Bridge registry + standalone Blender MCP. Bridge 0.6.180 (212 tools) omitía `blender_viewport_capture` y `blender_session_snapshot` pese a estar implementadas en el MCP independiente. Refrescar el cliente no resolvía una omisión upstream.
+
+**Corrección:** Adaptador explícito y seguro en `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`, verdadero worktree que ejecuta el Bridge. El directorio `D:\Dev\bridge-mcp` aloja el binario del túnel, pero no la fuente del Bridge activo. Véase [changelog 0.6.181](../changelogs/0.6.181.md).
+
+**Verificación:** check + build, contrato de ambos schemas y guardas, HTTP MCP dual-era (214 herramientas anunciadas), PASS en build aislado. No se reinició producción ni se modificó la máscara Kitsune.
+
+**Pendiente:** despliegue por watchdog del Bridge correcto, readback del catálogo desde ChatGPT y pruebas PNG/snapshot sobre escena descartable; Blender no estaba abierto y 9878 no escuchaba.
+
+---
+
 ## 2026-10-14 — Release state edit temporarily removed a required project-context selector
 
 **Estado:** Resuelto durante el cierre documental de 0.6.180; no cambió el runtime.

@@ -4,6 +4,7 @@ import { createBinaryFileToolModule } from "./tools/binary-file-tools.js";
 import { createLocalFileResourceRegistry, type LocalFileResourceRegistry } from "./local-resource-registry.js";
 import { bambuToolModule } from "./tools/bambu-tools.js";
 import { blenderToolModule } from "./tools/blender-tools.js";
+import { blenderStandaloneProxyToolModule } from "./tools/blender-standalone-proxy-tools.js";
 import { bridgeOpsToolModule } from "./tools/bridge-ops.js";
 import { bridgeWorkflowToolModule } from "./tools/bridge-workflow.js";
 import { cacheToolModule } from "./tools/cache-tools.js";
@@ -75,7 +76,7 @@ const destructiveToolNames = new Set([
   "media_review_ingest",
   "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_finish", "binary_upload_abort", "asset_import_files",
   "bambu_capture_save", "bambu_saved_views_save", "bambu_offscreen_views_save", "bambu_slice_layer_render", "bambu_slice_text_diagnose", "bambu_slice_compare_images_save", "bambu_case_pair_prepare_save", "bambu_cache_slice_snapshot_save", "bambu_slice_headless_save", "bambu_slice_region_images_save", "bambu_slice_region_compare_images_save",
-  "blender_open", "blender_viewport_screenshot", "blender_focus_review", "blender_review_bundle", "blender_animation_review", "blender_ik_keyframe", "blender_execute_code", "blender_batch_script", "blender_install_reference_pack", "blender_setup_character_references",
+  "blender_open", "blender_viewport_screenshot", "blender_viewport_capture", "blender_session_snapshot", "blender_focus_review", "blender_review_bundle", "blender_animation_review", "blender_ik_keyframe", "blender_execute_code", "blender_batch_script", "blender_install_reference_pack", "blender_setup_character_references",
   "godot_mcp_action", "godot_scene_create", "godot_screen_capture_save",
   "remote_node_exec", "remote_node_upload_file",
   "quietdesk_execute_semantic",
@@ -638,6 +639,7 @@ const defaultToolModules: readonly BridgeToolModule[] = [
   remoteNodeToolModule,
   bambuToolModule,
   blenderToolModule,
+  blenderStandaloneProxyToolModule,
   godotToolModule,
   whiteboardToolModule,
   quietDeskToolModule,

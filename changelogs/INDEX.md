@@ -3,6 +3,7 @@
 Versioned release notes are the canonical change-history surface for MSSR debugging, maintenance, and persistence checks.
 
 ## Current releases
+- [0.6.181](0.6.181.md) - Candidate: guarded standalone Blender capture and session-snapshot tools; runtime activation and live Blender QA pending.
 - [0.6.180](0.6.180.md) - Adopt exact MSSR 0.2.134 with preflight privacy checks on all direct Jev paths.
 - [0.6.179](0.6.179.md) - Adopt exact MSSR 0.2.132 bytes and add opt-in round-robin query-variant ordering to Librarian search.
 - [0.6.178](0.6.178.md) - Adopt the exact content-addressed MSSR 0.2.131 artifact and make release-gate cleanup/checkpoint tests race-safe.

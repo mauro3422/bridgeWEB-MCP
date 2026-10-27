@@ -282,6 +282,11 @@ try {
   const list = await listResponse.json();
   assert.ok(list.result.tools.length >= 100);
   assert.ok(list.result.tools.some((tool) => tool.name === "skill_bootstrap"));
+  for (const name of ["blender_viewport_capture", "blender_session_snapshot"]) {
+    const matching = list.result.tools.filter((tool) => tool.name === name);
+    assert.equal(matching.length, 1, `Modern HTTP tools/list must advertise exactly one ${name}`);
+    assert.equal(matching[0].annotations?.destructiveHint, true, `${name} must remain side-effectful`);
+  }
 
   const librarianSearchTools = list.result.tools.filter((tool) => tool.name === "mssr_librarian_search");
   assert.equal(librarianSearchTools.length, 1, "HTTP tools/list must expose one existing Librarian search tool, not a duplicate sidecar tool.");
@@ -364,6 +369,11 @@ try {
   await sleep(25);
   const reusedResponse = await legacyRequest(reusableSession, 11, "tools/list");
   assert.equal(reusedResponse.status, 200, "A low-pressure legacy session must remain reusable beyond the reclaim grace window");
+  const reusedBody = await readMcpResponse(reusedResponse);
+  for (const name of ["blender_viewport_capture", "blender_session_snapshot"]) {
+    assert.equal(reusedBody.result.tools.filter((tool) => tool.name === name).length, 1,
+      `Legacy HTTP tools/list must advertise exactly one ${name}`);
+  }
   const legacyAttachResponse = await legacyRequest(reusableSession, 12, "tools/call", {
     name: "binary_file_attach",
     arguments: { path: fixtureBinaryPath, mode: "both" },
