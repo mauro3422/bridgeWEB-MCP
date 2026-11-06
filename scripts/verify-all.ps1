@@ -94,6 +94,7 @@ if ($SkipTunnelChecks) { $doctorArgs += "-SkipTunnelChecks" }
 $steps += Invoke-VerifyStep "doctor" { powershell -NoProfile -File .\scripts\bridge-doctor.ps1 @doctorArgs }
 $steps += Invoke-VerifyStep "check" { npm run check }
 $steps += Invoke-VerifyStep "build" { npm run build }
+$steps += Invoke-VerifyStep "test:http:isolated" { npm run test:http:isolated }
 $steps += Invoke-VerifyStep "smoke:http" { powershell -NoProfile -File .\scripts\test-bridge-http.ps1 -BaseUrl $bridgeAuthority -RuntimeDataRoot $RuntimeDataRoot -ExpectedServerVersion $ExpectedServerVersion }
 $steps += Invoke-VerifyStep "test:mcp-dual-era" { npm run test:mcp-dual-era }
 $steps += Invoke-VerifyStep "test:regressions" { cmd.exe /d /s /c "npm run test:regressions 2>&1" }
