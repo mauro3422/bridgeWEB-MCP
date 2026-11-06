@@ -3,6 +3,7 @@
 Versioned release notes are the canonical change-history surface for MSSR debugging, maintenance, and persistence checks.
 
 ## Current releases
+- [0.6.183](0.6.183.md) - Candidate: expose 12 verified standalone Bambu provider tools; not deployed.
 - [0.6.182](0.6.182.md) - Patch compatible Hono security advisory and restore the verified local HTTP deployment.
 - [0.6.181](0.6.181.md) - Candidate: guarded standalone Blender capture and session-snapshot tools; runtime activation and live Blender QA pending.
 - [0.6.180](0.6.180.md) - Adopt exact MSSR 0.2.134 with preflight privacy checks on all direct Jev paths.
