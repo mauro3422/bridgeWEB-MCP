@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { RUNTIME_BOOT_ID } from "./runtime-identity.js";
 import { createBinaryFileToolModule } from "./tools/binary-file-tools.js";
 import { createLocalFileResourceRegistry, type LocalFileResourceRegistry } from "./local-resource-registry.js";
-import { bambuToolModule } from "./tools/bambu-tools.js";
+import { bambuMcpConnectionToolModule } from "./tools/bambu-mcp-connection.js";
 import { blenderToolModule } from "./tools/blender-tools.js";
 import { blenderStandaloneProxyToolModule } from "./tools/blender-standalone-proxy-tools.js";
 import { bridgeOpsToolModule } from "./tools/bridge-ops.js";
@@ -56,7 +56,7 @@ const readOnlyToolNames = new Set([
   "project_context_load", "project_context_audit", "project_context_health", "project_context_modularization_plan", "project_change_consistency", "workflow_guide_recommend", "workflow_guide_load", "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query",
   "skill_catalog", "skill_recommend", "skill_route_audit", "skill_route_vocabulary", "skill_route_plan", "skill_bootstrap", "skill_context_next", "skill_load", "mssr_context_proposal_review", "roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list", "roblox_mcp_query",
   "binary_file_info", "binary_file_attach", "binary_file_read_chunk", "binary_upload_status", "image_file_attach",
-  "bambu_project_inspect", "bambu_project_diagnose", "bambu_text_cut_diagnose", "bambu_project_compare", "bambu_slice_inspect", "bambu_slice_compare", "bambu_cache_discover", "bambu_slice_region_inspect", "bambu_slice_region_compare", "bambu_window_status", "bambu_mcp_status", "bambu_mcp_tool_list",
+  "bambu_mcp_status", "bambu_mcp_tool_list",
   "blender_status", "blender_scene_info", "blender_rig_inspect", "blender_validate_reference_pack", "blender_character_loop_status",
   "godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list", "godot_mcp_query",
   "whiteboard_latest_capture", "whiteboard_capture_list",
@@ -75,7 +75,7 @@ const destructiveToolNames = new Set([
   "image_asset_save", "image_asset_import_files", "image_chat_preview_prepare", "image_character_views_prepare", "image_reference_pack_prepare",
   "media_review_ingest",
   "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_finish", "binary_upload_abort", "asset_import_files",
-  "bambu_capture_save", "bambu_saved_views_save", "bambu_offscreen_views_save", "bambu_slice_layer_render", "bambu_slice_text_diagnose", "bambu_slice_compare_images_save", "bambu_case_pair_prepare_save", "bambu_cache_slice_snapshot_save", "bambu_slice_headless_save", "bambu_slice_region_images_save", "bambu_slice_region_compare_images_save",
+  "bambu_mcp_tool_call",
   "blender_open", "blender_viewport_screenshot", "blender_viewport_capture", "blender_session_snapshot", "blender_focus_review", "blender_review_bundle", "blender_animation_review", "blender_ik_keyframe", "blender_execute_code", "blender_batch_script", "blender_install_reference_pack", "blender_setup_character_references",
   "godot_mcp_action", "godot_scene_create", "godot_screen_capture_save",
   "remote_node_exec", "remote_node_upload_file",
@@ -96,6 +96,7 @@ const aggregatorToolNames = new Set(["bridge_metrics_query", "bridge_verify_all"
 const providerProxyToolNames = new Set([
   "roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list", "roblox_mcp_query", "roblox_mcp_action",
   "godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list", "godot_mcp_query", "godot_mcp_action",
+  "bambu_mcp_status", "bambu_mcp_tool_list", "bambu_mcp_tool_call",
   "quietdesk_status", "quietdesk_desktop_snapshot", "quietdesk_desktop_coverage", "quietdesk_desktop_candidates", "quietdesk_desktop_semantic_context", "quietdesk_desktop_capture", "quietdesk_runtime_telemetry", "quietdesk_execute_semantic",
 ]);
 const protectedToolNames = new Set([
@@ -637,7 +638,7 @@ const defaultToolModules: readonly BridgeToolModule[] = [
   codeGraphToolModule,
   pythonToolModule,
   remoteNodeToolModule,
-  bambuToolModule,
+  bambuMcpConnectionToolModule,
   blenderToolModule,
   blenderStandaloneProxyToolModule,
   godotToolModule,
