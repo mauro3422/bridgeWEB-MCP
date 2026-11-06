@@ -1,4 +1,7 @@
 # Bridge project state
+## Current local stabilization (2026-11-06)
+Bridge 0.6.182 is the local stabilization candidate on `codex/bridge-stabilization-20261106`. It patches `@hono/node-server` to 2.1.3; Zod 3.25.76 remains an open high-severity dependency advisory pending a coordinated Zod 4/MSSR compatibility change. Bridge 0.6.182 is active and verified on HTTP port 3001, boot `9ffa2a5f-a682-4d44-985d-d0d6b5da1ddb`; tunnel admin port 8081 is ready. Watchdog runs from this code root with expected version 0.6.182; runtime data stays at `D:\Dev\bridge-mcp`. The user Startup launcher now targets this isolated code worktree. Full worktree inventories and verified dirty snapshots are stored outside the repository at `D:\Dev\bridge-recovery-audit-20261106`.
+
 
 ## 0.6.180 active release
 Bridge 0.6.180 adopts the exact MSSR 0.2.134 artifact from `vendor/mauroprime-mssr-0.2.134+sha.df40d4ca.tgz` (1,196,357 bytes; SHA-256 `df40d4caaff607327268eabf6ee95b828f0c73c5c57c3222683be31c2e77bdce`). Release commit `d481bd2b96163f53ef6955a2ede17ea40fba9535` is published on `codex/bridge-0.6.173-activation-readback`; `verify-all` passed with `ok=true`, `failedRequired=0`. MSSR 0.2.134 adds deterministic privacy preflight across semantic curation, Librarian selection and semantic relation review.
