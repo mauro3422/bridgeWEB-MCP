@@ -15,11 +15,12 @@ Stack principal:
 - OpenAI Secure MCP Tunnel con `tunnel-client`
 - métricas locales con `node:sqlite`
 
-## Rutas canónicas (promoción verificada 2026-10-11)
+## Rutas canónicas (estabilización local verificada 2026-11-06)
 
-- **Checkout integrado/publicable:** `D:\Dev\bridge-mcp-candidate-0.6.160-mssr-0.2.109` (`main`, Bridge source 0.6.172); el candidato pasó `verify-all.ps1` antes de su activación.
-- **BridgeCodeRoot del watchdog HTTP activo:** `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`, ejecutando Bridge 0.6.172 desde el commit `391a1bb` tras el reinicio controlado del 2026-10-11. Verifica PID, `/status`, `readyz` y argumentos del watchdog antes de cambiar rutas.
-- **ProjectRoot del runtime HTTP:** `D:\Dev\bridge-mcp`, dueño de datos, logs, perfil y archivos request/ack del watchdog. También conserva un checkout histórico con cambios staged, unstaged y untracked: no usarlo para commits de release, no limpiarlo ni fusionarlo a ciegas.
+- **Checkout local `main`:** `D:\Dev\bridge-mcp-candidate-0.6.160-mssr-0.2.109` (`main`, Bridge 0.6.182, commit `4832f78524c2679a776798bdc36d7d766586a9b4`); versión limpia y verificada para preparar futuros cambios locales.
+- **BridgeCodeRoot activo y watchdog HTTP:** `D:\Dev\bridge-mcp-stabilized-0.6.181` (`codex/bridge-stabilization-20261106`, mismo commit 0.6.182). El launcher de Startup apunta a esta worktree; confirma PID, versión, `/status`, `readyz` y argumentos antes de cambiar rutas.
+- **ProjectRoot del runtime HTTP:** `D:\Dev\bridge-mcp`, dueño de datos, logs, perfil y archivos request/ack del watchdog. Conserva worktrees/cambios históricos staged, unstaged y untracked: no usarlo para commits de release, no limpiarlo ni fusionarlo a ciegas.
+- **Estado remoto:** `main` local está 29 commits adelante de `origin/main`; la estabilización actual no está publicada. No empujar sin una solicitud explícita.
 - **MSSR dueño de routing/contexto:** `D:\Dev\mssr` (MSSR 0.2.130).
 - `C:\dev\bridge-mcp` es una ruta heredada o alias posible: verificar su resolución antes de escribir.
 - Preservar los worktrees y experimentos no reconciliados. No reiniciar Bridge/túnel sólo para documentación o para corregir el cache del catálogo del host.
@@ -52,6 +53,7 @@ ChatGPT
 - No commitear secretos, tokens, `.env`, logs ni bases SQLite.
 - No borrar backups ni scripts de rollback.
 - No matar procesos del bridge sin verificar cómo volver a levantarlo.
+- Avast puso en cuarentena el antiguo `start-bridge-http-watchdog.ps1` de la worktree `query-variants` el 2026-11-05 como `IDP.Generic`; el mismo hash corresponde a la copia versionada inspeccionada. Usar la copia limpia de la worktree de estabilización y no restaurar el objeto opaco de Chest por encima de ella. El evento no prueba que Avast haya detenido el proceso HTTP.
 - No reemplazar archivos grandes a ciegas; preferir patches puntuales.
 - Antes de cambiar código de transporte MCP, probar handshake completo.
 - El catálogo de herramientas de ChatGPT puede quedar **desactualizado** aunque el runtime esté sano. Contrastar los nombres del conector con `bridge_connector_catalog_compare` y el schema del runtime con `bridge_tool_schema`; no suponer que un wrapper equivale a un parámetro MCP top-level ausente.
@@ -87,7 +89,7 @@ Arranque manual recomendado:
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-bridge-http-watchdog.ps1 `
   -ProjectRoot D:\Dev\bridge-mcp `
-  -BridgeCodeRoot D:\Dev\bridge-mcp-mssr-0.2.112-query-variants `
+  -BridgeCodeRoot D:\Dev\bridge-mcp-stabilized-0.6.181 `
   -Profile bridge-local-http `
   -TunnelBaseUrl http://127.0.0.1:8081
 ```
