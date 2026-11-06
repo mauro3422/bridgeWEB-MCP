@@ -20,7 +20,7 @@ Stack principal:
 - **Checkout local `main`:** `D:\Dev\bridge-mcp-candidate-0.6.160-mssr-0.2.109` (`main`, Bridge 0.6.182, commit `4832f78524c2679a776798bdc36d7d766586a9b4`); versión limpia y verificada para preparar futuros cambios locales.
 - **BridgeCodeRoot activo y watchdog HTTP:** `D:\Dev\bridge-mcp-stabilized-0.6.181` (`codex/bridge-stabilization-20261106`, mismo commit 0.6.182). El launcher de Startup apunta a esta worktree; confirma PID, versión, `/status`, `readyz` y argumentos antes de cambiar rutas.
 - **ProjectRoot del runtime HTTP:** `D:\Dev\bridge-mcp`, dueño de datos, logs, perfil y archivos request/ack del watchdog. Conserva worktrees/cambios históricos staged, unstaged y untracked: no usarlo para commits de release, no limpiarlo ni fusionarlo a ciegas.
-- **Estado remoto observado 2026-11-06:** `main` local está 31 commits adelante de `origin/main`; la estabilización actual no está publicada. Verifica las refs antes de actualizar este conteo. No empujar sin una solicitud explícita.
+- **Estado remoto:** esta estabilización local no está publicada. Verifica las refs antes de cambiar esta nota; no empujar sin una solicitud explícita.
 - **MSSR dueño de routing/contexto:** `D:\Dev\mssr` (MSSR 0.2.135 en el checkout local observado el 2026-11-06; el paquete integrado en Bridge 0.6.182 sigue siendo MSSR 0.2.134).
 - `C:\dev\bridge-mcp` es una ruta heredada o alias posible: verificar su resolución antes de escribir.
 - Preservar los worktrees y experimentos no reconciliados. No reiniciar Bridge/túnel sólo para documentación o para corregir el cache del catálogo del host.
