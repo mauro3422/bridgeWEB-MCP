@@ -15,12 +15,11 @@ Stack principal:
 - OpenAI Secure MCP Tunnel con `tunnel-client`
 - métricas locales con `node:sqlite`
 
-## Rutas canónicas (estabilización local verificada 2026-11-06)
+## Rutas canónicas (readback local 2026-11-12)
 
-- **Checkout local `main`:** `D:\Dev\bridge-mcp-candidate-0.6.160-mssr-0.2.109` (`main`, Bridge 0.6.182, commit `4832f78524c2679a776798bdc36d7d766586a9b4`); versión limpia y verificada para preparar futuros cambios locales.
-- **BridgeCodeRoot activo y watchdog HTTP:** `D:\Dev\bridge-mcp-stabilized-0.6.181` (`codex/bridge-stabilization-20261106`, mismo commit 0.6.182). El launcher de Startup apunta a esta worktree; confirma PID, versión, `/status`, `readyz` y argumentos antes de cambiar rutas.
-- **ProjectRoot del runtime HTTP:** `D:\Dev\bridge-mcp`, dueño de datos, logs, perfil y archivos request/ack del watchdog. Conserva worktrees/cambios históricos staged, unstaged y untracked: no usarlo para commits de release, no limpiarlo ni fusionarlo a ciegas.
-- **Estado remoto:** esta estabilización local no está publicada. Verifica las refs antes de cambiar esta nota; no empujar sin una solicitud explícita.
+- **Checkout `main` y BridgeCodeRoot activo:** `D:\Dev\bridge-mcp`, Bridge 0.6.184, commit `034be0198a91ad7f94a4f74ad98871a2c4836572`. El HTTP PID 23192 carga `D:\Dev\bridge-mcp\dist\http.js`; verifica PID, versión, `/status`, `/readyz` y argumentos antes de cambiar rutas.
+- **ProjectRoot del runtime HTTP:** `D:\Dev\bridge-mcp`, dueño de datos, logs, perfil y archivos request/ack del watchdog. En el readback había un único worktree registrado (`main`) y cambios locales mezclados con artefactos untracked de otras tareas: clasifica y preserva antes de stagear; no uses `git add -A`, limpies ni fusiones a ciegas.
+- **Estado remoto observado:** `main`, `origin/main` y el ref directo `origin/refs/heads/main` coincidían en `034be0198a91ad7f94a4f74ad98871a2c4836572` antes de preparar 0.6.185. Comprueba las tres refs otra vez antes de publicar; no reescribas remoto ni uses force.
 - **MSSR dueño de routing/contexto:** `D:\Dev\mssr` (MSSR 0.2.135 en el checkout local observado el 2026-11-06; el paquete integrado en Bridge 0.6.182 sigue siendo MSSR 0.2.134).
 - `C:\dev\bridge-mcp` es una ruta heredada o alias posible: verificar su resolución antes de escribir.
 - Preservar los worktrees y experimentos no reconciliados. No reiniciar Bridge/túnel sólo para documentación o para corregir el cache del catálogo del host.
@@ -89,7 +88,7 @@ Arranque manual recomendado:
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-bridge-http-watchdog.ps1 `
   -ProjectRoot D:\Dev\bridge-mcp `
-  -BridgeCodeRoot D:\Dev\bridge-mcp-stabilized-0.6.181 `
+  -BridgeCodeRoot D:\Dev\bridge-mcp `
   -Profile bridge-local-http `
   -TunnelBaseUrl http://127.0.0.1:8081
 ```
@@ -121,7 +120,7 @@ El watchdog HTTP usa protección singleton. No arrancar otro watchdog production
 Si HTTP falla, volver a stdio:
 
 ```powershell
-cd D:\Dev\bridge-mcp-candidate-0.6.160-mssr-0.2.109
+cd D:\Dev\bridge-mcp
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-bridge-watchdog.ps1 -ProjectRoot D:\Dev\bridge-mcp
 ```
 

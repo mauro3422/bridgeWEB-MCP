@@ -3,6 +3,7 @@
 Versioned release notes are the canonical change-history surface for MSSR debugging, maintenance, and persistence checks.
 
 ## Current releases
+- [0.6.185](0.6.185.md) - Add safe Bambu-only provider reconnect and fix generic MIME handling for authorized image imports.
 - [0.6.184](0.6.184.md) - Expose the complete verified Bambu provider catalog through guarded Bridge wrappers; extend isolated QA slicing and provider health checks.
 - [0.6.183](0.6.183.md) - Candidate: expose 12 verified standalone Bambu provider tools; not deployed.
 - [0.6.182](0.6.182.md) - Patch compatible Hono security advisory and restore the verified local HTTP deployment.

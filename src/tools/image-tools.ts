@@ -514,7 +514,10 @@ async function downloadFileImage(file: OpenAIFileInput, target: AssetTargetInput
   const measured = inspectImageBytes(outputPath, bytes);
   const declaredMime = file.mime_type?.toLowerCase();
   const normalizedDeclaredMime = declaredMime === "image/jpg" ? "image/jpeg" : declaredMime;
-  if (normalizedDeclaredMime && normalizedDeclaredMime !== measured.mime) {
+  // Generic octet-stream is not a type assertion: ChatGPT sometimes labels generated
+  // PNGs this way. inspectImageBytes has already verified signature and extension.
+  const hasSpecificDeclaredMime = Boolean(normalizedDeclaredMime && normalizedDeclaredMime !== "application/octet-stream");
+  if (hasSpecificDeclaredMime && normalizedDeclaredMime !== measured.mime) {
     throw new Error(`[expected-integrity-mismatch] File MIME mismatch for ${file.file_id}: declared ${file.mime_type}, measured ${measured.mime}`);
   }
 

@@ -1,117 +1,17 @@
 # Bridge project state
 ## Current local release and recovery (2026-11-06)
-Bridge 0.6.184 source release is `031022c40b8732b86f26fb75003cdee93eceaa7f`; local `main` also has docs-only recovery commits and is 38 ahead of `origin/main`. Nothing was pushed. Bambu Studio/MCP owns its 0.10.2 tools and behavior; Bridge keeps one generic MCP connection.
+**Readback updated 2026-11-12.**
 
-**Runtime:** Bridge PID 8700 / boot `c8f813a7-e6d3-4b91-949f-4e34e39faf09`, 0.6.184, HTTP 3001 live/ready. Tunnel 8081 live/ready. Startup points to canonical `D:\Dev\bridge-mcp`; watchdog PID 20264 is active from this Codex session.
+**Release/runtime:** Bridge 0.6.184 is live at `D:\Dev\bridge-mcp\dist\http.js`, PID 23192, boot `81f9bd5a-7cc0-47a1-a8ab-71173b5adbb2`, HTTP 3001 ready. Tunnel 8081 is ready, PID 18540. Bambu child PID 26580 runs the standalone provider from 2026-11-11 and still has its earlier 47-tool catalog; source v0.12.0 is newer. No Studio windows were listed; printer connectivity is unknown.
 
-**Gates:** `npm ci` replaced stale ignored MSSR 0.2.96 with lockfile-pinned 0.2.134. Check, build, HTTP smoke, MCP dual-era/framing, Bridge regressions, liveness, docs and 194-tool catalog pass. `verify:all` has one required failure: routing metadata and positive/negative fixtures are missing for external Codex skills `game-ability-storyboards` and `miareader-questionnaire`; this Bridge task did not change that system.
+**Local candidate:** Bridge 0.6.185 adds confirmed Bambu-only stdio replacement and completes authorized image-import MIME validation. Check, Bambu contract, image import, MCP dual-era, isolated HTTP, generated tool-doc and full regression checks pass. Staged Project Change Consistency returned `publishReady: true`; its review advisory was handled by compacting this state. 0.6.185 has not been activated in production.
 
-**Git:** 11 worktrees became 2; 13 local branch names and 8 stashes are archived. Only `main` plus old `query-variants` remain. That worktree's watchdog script is in Avast Chest (`IDP.Generic`); its ZIP/stash are preserved, but Git gets `Permission denied` restoring the quarantined file. The exclusion does not restore existing quarantine items. No forced removal. Full inventory/bundle: `D:\Dev\bridge-recovery-audit-20261106`.
+**Git/preservation:** Before the candidate, local `main`, `origin/main` and direct remote `main` matched at `034be0198a91ad7f94a4f74ad98871a2c4836572`; there was one registered worktree and no stashes/local-only commits. Three Bridge handoffs were updated. Untracked workflow guides from other tasks remain preserved outside this release. A SHA-256 snapshot is at `D:\MSSR\safety-snapshots\bridge-20261112-033919`; the superseded long state snapshot is `PROJECT_STATE.before-compaction.md` there.
 
-**Host boundary:** the local MSSR provider config no longer starts Bridge from Codex; original config is backed up externally. ChatGPT Web continues through HTTP/tunnel. Avast evidence confirms quarantined watchdog scripts only; it does not prove malware or that Avast stopped the HTTP process.
-
-
-## Historical release notes — 0.6.180
-Bridge 0.6.180 adopts the exact MSSR 0.2.134 artifact from `vendor/mauroprime-mssr-0.2.134+sha.df40d4ca.tgz` (1,196,357 bytes; SHA-256 `df40d4caaff607327268eabf6ee95b828f0c73c5c57c3222683be31c2e77bdce`). Release commit `d481bd2b96163f53ef6955a2ede17ea40fba9535` is published on `codex/bridge-0.6.173-activation-readback`; `verify-all` passed with `ok=true`, `failedRequired=0`. MSSR 0.2.134 adds deterministic privacy preflight across semantic curation, Librarian selection and semantic relation review.
-
-**Active runtime readback (2026-10-14):** Watchdog request `16f4e0f2-c829-40ed-b2c6-52ee1fc7e24e` was acknowledged on `bridge-local-http`. Bridge 0.6.180 / MSSR 0.2.134 runs as HTTP PID 16600, boot `c1a3f72c-ae58-473d-9322-4095cd8712b5`, with the runtime/data root still `D:\Dev\bridge-mcp`. The exact package hash matches; Bridge and tunnel 8081 are ready, the catalog has 189 tools (hash `4153ae63bf8be79d`), restart is not pending, and there were zero new transport failures after the `02:07:53Z` baseline. The restart notice was returned in the MCP response and progress was sent to transport; client display is unconfirmed. The real Jev/Bibliotecario search→selection→exact-fetch→evidence-pack smoke also passed; its scores are uncalibrated and are not reliability evidence. Details: [0.6.180](../changelogs/0.6.180.md). The selector incident from documenting this state is in [docs/INCIDENTS.md](../docs/INCIDENTS.md).
-
-## Historical local release notes — 0.6.181
-Bridge 0.6.181 / MSSR 0.2.134 was active after the verified 2026-10-27 watchdog restart. The 0.6.180 and 0.6.181 runtime readbacks below are historical.
-
-**0.6.181 active (2026-10-27):** BridgeCodeRoot `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`, HTTP port 3001 PID 1448, boot `b726cf57-b745-4cb3-a6d8-9a0c4b2d03cc`; watchdog request `96720654-b325-4f29-b3cd-cccb7fe526eb` acknowledged, tunnel 8081 unchanged. Live catalog: **214 tools**, including `blender_viewport_capture` and `blender_session_snapshot`. HTTP smoke (214/214 audit), Bridge regressions, liveness and MCP dual-era PASS. ChatGPT currently displays only 212 direct tools; connector refresh required. Blender standalone 9878 offline, so live capture/snapshot QA pending. Separate user-local routing fixture debt remains documented. Evidence: `changelogs/0.6.181.md` and `docs/INCIDENTS.md`.
-
-### 0.6.179 previous release
-Bridge 0.6.179 adopted the exact MSSR 0.2.132 release artifact (1,189,174 bytes; SHA-256 `c5655a496f2cbb3d3e98cb505e5a6bc2b082333043676ea52506f9e4d892529f`). The full `verify:all` gate passed with `failedRequired=0`; the installed package matched the vendored artifact byte-for-byte across 624 files.
-
-## Historical release notes — 0.6.179
-The managed watchdog request `f1f5953b-3892-4805-b9e6-d7b7db5b1ab1` was acknowledged at `2026-10-13T16:11:04.713Z` on profile `bridge-local-http`. Bridge 0.6.179 / MSSR 0.2.132 is running from `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`, HTTP PID 24892, runtime boot `72bd1014-9946-4245-821d-8be20272c823`; runtime/data `ProjectRoot` remains `D:\Dev\bridge-mcp`. The live catalog has 189 tools (hash `0b7ed7fd233cdc9a`), and `mssr_librarian_search` schema hash `0d009e8145a39f5f` exposes `queryVariantRanking: primary-first | round-robin`. Health and readiness returned 200; the existing tunnel on 8081 remained healthy/ready, with zero new 502 or local POST-without-status failures since the post-restart baseline.
-
-The live Librarian smoke compared omitted/default primary-first with round-robin over three explicit Bridge Markdown sources. Round-robin returned `rankingQueryIndex` for both lanes, and exact fetch revalidated the selected source revision and fingerprint. This proves the packaged tool path and schema adoption only; it is not Jev accuracy or calibration evidence. The planned-restart notice was returned in the requesting MCP response; pre-restart progress was unavailable, so client display/receipt is unconfirmed. Release note: [0.6.179](../../changelogs/0.6.179.md).
-
-## Historical release notes — 0.6.178
-
-Branch `codex/bridge-0.6.173-activation-readback` pushed release commit `ab89f53192bd0a0c87a649d4cac8289b55c7a551` and adopts artifact `mauroprime-mssr-0.2.131+sha.689affca.tgz` (1,187,008 bytes; SHA-256 `689affca88e7b79f0d60cbe0d56dccb76d8809dc48fd531fd864f792c9cc3fac`). Final `verify:all` passed with `failedRequired=0`; package/vendor/installed parity covers 623 files. Focused adoption, project-situation and dual-era tests passed. Watchdog ACK and live readback confirmed activation; full release notes: [0.6.178](../../changelogs/0.6.178.md).
-
-**Active runtime readback (2026-10-13):** Watchdog request `8c825610-3c7f-4474-9202-1d49f8b72be8` was acknowledged at `2026-10-13T13:46:50.334Z` on profile `bridge-local-http`. Bridge 0.6.178 / MSSR 0.2.131 is running from `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`, HTTP PID 10144, boot `00a43ce2-dcad-4355-9c11-960f8729f8e2`; live catalog: 189 tools, hash `0b1cebc7e9169c8e`. `/status`, `/healthz` and `/readyz` report ready/200, observability storage is ready, and restart is not pending. The installed package version is 0.2.131; its vendored artifact hash and size match the release exactly. Runtime/data `ProjectRoot` remains `D:\Dev\bridge-mcp`. Existing tunnel PID 18968 was not restarted and remains live/ready; at `2026-10-13T13:50:06Z`, healthz/readyz were 200 and metrics showed zero new 502 or local POST-without-status failures since the post-restart baseline at `13:46:51Z`. The planned-restart notice was returned in the same MCP response and its progress signal was sent to transport; client display/receipt is unconfirmed.
-
-**Bridge-owned Librarian/Jev integration smoke (2026-10-13):** Against the exposed MSSR ADR 0007, search returned ten revision-bound candidates. A query aligned to the source selected exact `block-9/item-4`, line 35; Jev reported evidence sufficiency 0.94 (uncalibrated). Bridge re-read and validated the selected handle, and the evidence pack retained the 111-character source text with its exact citation and `canonicalRewriteAllowed=false`. An unrelated query about metadata-key behavior abstained because that ADR does not contain the requested rule. This verifies one known-source integration path and an appropriate single abstention only; it is not an owner-labeled benchmark, reliability estimate, or confidence calibration. No canonical project data was changed by the smoke.
-
-The active HTTP `BridgeCodeRoot` is `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`; runtime/data `ProjectRoot` is `D:\Dev\bridge-mcp`. The latter is a separate historical checkout with mixed staged, unstaged and untracked work; it remains outside release commits and is not being cleaned or merged here.
-
-## 0.6.177 previous active release
-
-Branch `codex/bridge-0.6.173-activation-readback` contains the published 0.6.177 release. `bridge_verify_all.runtimeDataRoot` passes through to `verify-all.ps1` and the doctor; package/Git checks remain rooted at the code checkout. The isolated doctor regression verifies explicit split-root routing and the `ProjectRoot` compatibility default. Release verification and live readback are recorded in [0.6.177](../../changelogs/0.6.177.md) and the [verifier-root incident](../docs/INCIDENTS.md).
-
-Release persistence also split the 95%-budget HTTP transport/readiness memory into two indexed owners: pooled-socket/tunnel correlation and readiness/storage/restart recovery. The source paragraph was moved verbatim and verified by hash. Post-split Project Context Health is `watch` with 30 modules, four existing module-budget WATCH findings, and no REVIEW-level finding.
-
-## Previous release
-
-Bridge 0.6.169 / MSSR 0.2.121 was active immediately before 0.6.170 and adopted the exact MSSR 0.2.121 release artifact (1,137,867 bytes; SHA-256 `181bf914da4f5767c457755990798169f6d539f56886b420bd8410951b5d8971`). Its runtime history and earlier watchdog request remain recorded in the 0.6.169 changelog.
-
-**Exploratory real-document Jev smoke (not benchmark/calibration evidence):** the live 1.13.0 provider selected two exact ranges from `.mssr/knowledge/architecture/semantic-evidence-plane.md`. The first selected `block-4` at line 13 and fetched it at the same source revision; it supported the source-authority/revision boundary but only partially covered the two-facet query. A targeted follow-up selected `block-9` at line 26, covering host re-read/revision check, approval/write outside MSSR, and independent verification. Both ranges revalidated and the evidence pack assembled their unchanged text in source order (1,595 UTF-16 code units, two citations, no semantic rewrite). The two calls used 2,795/207 and 1,946/147 input/output tokens; provider confidences were 0.34 and 0.30, Noul estimates 0.79 and 0.54. Both scores remain explicitly uncalibrated; this exploratory sample has no independent owner label and must not be treated as a reliability result. Jev remained advisory and no canonical source was written.
-
-## 0.6.168 MSSR 0.2.120 adoption — previous active
-
-The release branch vendors the exact MSSR 0.2.120 artifact at `vendor/mauroprime-mssr-0.2.120.tgz` (1,136,180 bytes; SHA-256 `52b4bfbf928b222a282f672b22768d70ca3a5fbf344843b0a487429a56789946`). It includes releases 0.2.116–0.2.120: revision-bound list-item ranges, project-context modularization and verified-project breadth gating, and exact metadata-filter schema clarification. Bridge 0.6.168 check/build, focused MSSR integrations, project-context and first-party-skill tests, full isolated regressions, dual-era MCP, and generated tool docs passed before activation.
-
-**Active runtime readback (2026-10-11):** Watchdog request `e557812d-c655-461d-bfce-707fd54fc3a7` was acknowledged as `restart-http` by watchdog PID 25000 on profile `bridge-local-http`. Bridge 0.6.168 / MSSR 0.2.120 is running from `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`, HTTP PID 25668, boot `ee6bc4d6-3df7-4a85-b319-82baa6956926`; Bridge `/readyz` and `/status` read back 0.6.168. The live `tools/list` returned 188 tools. The watchdog uses `D:\Dev\bridge-mcp` as its runtime/data `ProjectRoot` and the release checkout as `BridgeCodeRoot`; its request/ack files therefore live under the former. The tunnel client PID 18968 was preserved without restart, with healthz/readyz `live`/`ready`; the PC was not restarted. Tunnel process metrics show one 502 and one no-status during the Bridge restart window and zero new failures since the post-restart baseline at 09:23:06 UTC. A first request written under the code checkout was not consumed; after verifying its exact request ID it was removed, and the correctly rooted HTTP request was acknowledged.
-
-## 0.6.167 Librarian metadata filter schema — previous active baseline
-
-This release clarifies exact metadata field/value filters and the singular EvidenceAtom projection keys in the Bridge search schema and docs. Typecheck/build, MCP module and dual-era schema tests, generated tool documentation checks, and the full isolated regression suite passed.
-
-**Active runtime readback (2026-10-10):** The managed watchdog request `b54d0f8d-4439-4e2f-b272-0abd1eed74e8` was acknowledged by watchdog PID 54004 on profile `bridge-local-http`. Bridge 0.6.167 / MSSR 0.2.115 is running from `D:\Dev\bridge-mcp-mssr-0.2.112-query-variants`, HTTP PID 85008, boot `d0d360a5-469f-4ddc-8414-67667e2d12d6`; its data root remains `D:\Dev\bridge-mcp`. `/readyz` returned 200/ready. The live catalog reports 188 tools. `mssr_librarian_search` schema hash `b931631885199014` exposes all eleven singular EvidenceAtom projection keys and maps sidecar `domains`/`actions` to query `domain`/`action`. The existing tunnel on 8081 remained healthy/ready and its post-restart baseline recorded zero new 502/no-status failures; it was not restarted.
-
-## 0.6.166 Librarian evidence-pack integration candidate
-
-The candidate adopts exact MSSR 0.2.115 bytes and adds the opt-in `dedupeContainedRanges` field to `mssr_librarian_evidence_pack`. The field defaults to false. When enabled, MSSR validates the supplied handles and removes only strictly contained ranges with matching owner, source, and revision; each removed handle retains its provenance and links to the kept citation. The retained text is unchanged. This does not decide whether the containing range semantically answers the child facet.
-
-**Source verification:** `npm run check`, `npm run build`, `node scripts/test-mssr-semantic-evidence-tools.mjs`, and `npm run docs:tools:check` passed. Exact vendored artifact is 1,127,170 bytes, SHA-256 `e83a0f89bb33f4d67006bda7cffa239abdd2c111883e0a98c6d1c7dfed539176`. This focused regression is assembly-contract evidence, not Jev reliability evidence.
-
-**Regression finding:** the first full-suite attempt exposed an existing race in `test-observability-http-liveness.mjs`: the stale snapshot endpoint correctly returned `refreshing=true`, while the test immediately required the background snapshot worker to be idle. The isolated worker test confirmed the request drains. The regression now allows only the expected single snapshot request during refresh and waits up to 30 seconds for it to complete. The corrected isolated liveness test passed with zero event-loop stalls and max `/readyz` of 1.52 ms for MSSR summary, 1.73 ms for audit, and 1.63 ms for concurrent dashboard reads.
-
-**Activation:** activated through the managed HTTP watchdog request `50c2e09f-8747-4700-bf28-2218e0b400f1` on profile `bridge-local-http`. Live Bridge is 0.6.166 / MSSR 0.2.115, PID 73136, boot `860eaa90-3aa0-4c29-a20f-eb0455e22569`, with `ProjectRoot=D:\Dev\bridge-mcp`; watchdog PID 54004 owns the candidate code root. `/readyz` and observability storage are ready. The live `tools/list` catalog has 188 tools and exactly one `mssr_librarian_evidence_pack`; `dedupeContainedRanges` is present with default `false` and the strict containment/provenance boundary. Tunnel port 8081 returned HTTP 200 and was not restarted.
-
-**Startup observation:** `/status` recorded one 3,383 ms event-loop lag during the first three seconds after boot. At uptime 33 seconds, the stall count and lag had not increased. Treat this as a boot-window observation only; cause is undetermined and no recurring liveness regression is established.
-
-## Previous active runtime baseline before 0.6.169
-
-Bridge 0.6.168 / MSSR 0.2.120 was the active release before the 0.6.169 candidate. Its exact artifact, runtime boot, watchdog acknowledgement, 188-tool catalog, preserved tunnel, and post-restart metric baseline are recorded above and in [changelogs/0.6.168.md](../changelogs/0.6.168.md). Detailed history and earlier runtime observations remain in versioned changelogs and incident records.
-
-## 0.6.164 source candidate — Jev context-split planner adapter (2026-10-10)
-
-The candidate adds `mssr_project_context_ref_split_plan`, a Bridge adapter for the planner already shipped in MSSR 0.2.112. It resolves the project through Bridge path policy, uses the Windows Credential Manager Jev provider, and persists only the advisory plan plus observe-only semantic evidence in user-local MSSR state. It does not change project Markdown or manifests; the apply operation remains unavailable through Bridge. `npm run check`, `npm run build`, and the focused adapter regression passed. This is source-only until the controlled restart and live `tools/list` schema/readback confirm version 0.6.164 and 188 tools.
-
-## Librarian query-variants candidate active in local Bridge runtime — 0.6.163 / MSSR 0.2.112 (2026-10-10)
-
-Candidate branch `codex/bridge-mssr-0.2.112-query-variants-20261010` is based on `origin/main` 0.6.162 and vendors exact MSSR 0.2.112 bytes (1,121,628 bytes; SHA-256 `78a49828f9f27ebb3a3966b1a163ad9e24f7a3a8c38f1a8a4633d985106fd088`). It adds an optional, bounded host-supplied `queryVariants` field to the strict Librarian search contract; the primary query remains the first ranking group and per-query lexical scores are not confidence. The complete isolated `scripts/verify-all.ps1` gate exited 0 with `failedRequired=0`, including the full 299-second regression suite, live candidate HTTP smoke, routing latency, WAL, liveness, routing and docs checks. Its structured result receipt is outside Git at `D:\MSSR-benchmark-artifacts\bridge-0.6.163-mssr-0.2.112-verify-20261010\verify-all-receipt.json` (SHA-256 `dc109740c2734613b5476afbb18d4060c5953eaab07a144a6114241e8c557005`). **Activated and read back 2026-10-10 06:23 UTC:** Bridge `/status` reports 0.6.163 and boot `502d5b26-269a-45dd-994c-a6c5c1e4a025`; `/readyz`, Bridge health and tunnel health are green. HTTP PID 67524 runs this candidate's `dist/http.js`, while `ProjectRoot=D:\Dev\bridge-mcp` and the existing tunnel PID 23336 was adopted without restart. The live registry exposes search schema `queryVariants` (hash `6bc987b8d512e7d0`). A real MSSR sidecar search → Jev 1.13.0 selection → exact fetch/evidence-pack smoke passed; outcome and limitations are recorded in MSSR `.mssr/PROJECT_STATE.md`. The separately attached direct MSSR connector still exposes the older input schema and is a host-side refresh/reconnect follow-up.
-
-## Prior release baseline
-
-Bridge 0.6.163 / MSSR 0.2.112 was the active baseline before the 0.6.165 candidate. Its Librarian/Jev behavior and exact package provenance remain recorded below and in [changelogs/0.6.163.md](../changelogs/0.6.163.md). Earlier 0.6.162 rollback evidence remains in [changelogs/0.6.162.md](../changelogs/0.6.162.md); older handoffs remain archived under `docs/archive/`.
-
-## Liveness and observability
-
-The observability worker, bounded read-your-writes overlay, passive WAL checkpointing, and routing-latency boundaries are described in the indexed `bridge-dashboard-routing-liveness` and `bridge-http-readiness-evidence-boundary` modules. Historical verification receipts stay in their release changelogs.
-
-## Background work lifecycle
-
-`work_begin` and `bridge_verify_all` treat a timeout as an attention deadline by default (`observe`), not permission to kill the process. `work_peek` exposes bounded progress/output counters plus sanitized process-tree CPU/memory evidence for one exact session. Explicit terminate behavior remains available and uses Windows process-tree termination. Notices are advisory; terminal/job state is authoritative.
+**Pending:** first activation of 0.6.185 requires one controlled Bridge HTTP deployment; no production process or tunnel has been restarted. After activation, Bambu source refresh can use `bambu_mcp_reconnect` without restarting Bridge or the tunnel. Read back `/status`, boot id, catalog and both readiness endpoints before claiming deployment. Historical release detail lives in `changelogs/`; the 2026-09 project-state snapshot remains indexed in `knowledge/operations/bridge-state-history-2026-09.md`.
 
 ## Current MSSR learning state
-
-Jev/semantic experience remains shadow evidence only: unverified proposals do not become training truth, change routing, or rewrite canonical project data. Reliability evaluation still needs independently owner-labeled holdout cases and separately measured retrieval, selection, exact fetch, abstention, and synthesis outcomes.
+Jev and semantic-experience proposals remain shadow evidence: they do not become training truth, change routing, or rewrite project authorities. Reliability evaluation still needs independent owner-labeled holdouts and separate retrieval, selection, exact-fetch, abstention and synthesis measurements.
 
 ## Project knowledge migration
-
-Bridge project control is canonical under `.mssr/`. The archived September knowledge-migration and reference-audit snapshot is preserved under `docs/archive/`; rerun Project Context Health for current module/reference counts instead of relying on archived numbers.
-
-## Next performance/control work
-
-If the intermittent read-worker execution timeout recurs, capture the HTTP error body and the exact worker state transition before changing thresholds. Separately, refresh/reopen the direct MSSR connector so its input description catches up with the live Bridge 0.6.167/MSSR 0.2.115 registry, then repeat the real-document integration through that connector. Keep independent source-held-out labels separate; the one-candidate live Jev smoke is integration evidence only and all provider scores remain uncalibrated.
-
-## Bambu Studio MCP portable provider activation
-- Bridge v0.6.180 active with standalone Bambu Studio MCP v0.3.1, 23 Bambu wrappers / 212 total, boot `f5713ffc-a612-4e66-bc68-9c7d863ea68f`, code commit `f726458`, provider `8de407d`. New `bambu_slice_headless_save` action explicitly writes only new QA files using isolated Windows Bambu CLI profile. Provider tests 19/19 PASS; Bridge TypeScript check/build and SDK smoke PASS.
-- End-to-end live Bridge tool invocation sliced B source from `qa/bambu/cases/Llavero_Auro-20261023T012848-6e71dad/case-B-cached-negative-candidate.3mf` to `qa/bambu/headless-comparison/case-B-mcp-final.gcode.3mf`, ZIP G-code `Metadata/plate_1.gcode` 884,577 bytes, source hash unchanged, existing Bambu GUI PID 3004 unchanged.
-- A/B CLI cuts independently performed: A 376,280 bytes G-code and no engraved 3D Tech; B 884,577 bytes G-code and engraved 3D Tech visible in reconstructed toolpath at Z2.2. Both still extrude Auro positive at Z4.6. Source config hashes same; positive meshes facets differ. Original saved defective design untouched; corrected separate copy created.
+Bridge project control is canonical under `.mssr/`. The September migration snapshot is preserved in `docs/archive/`; use current Project Context Health instead of archived module counts.

@@ -75,7 +75,7 @@ const destructiveToolNames = new Set([
   "image_asset_save", "image_asset_import_files", "image_chat_preview_prepare", "image_character_views_prepare", "image_reference_pack_prepare",
   "media_review_ingest",
   "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_finish", "binary_upload_abort", "asset_import_files",
-  "bambu_mcp_tool_call",
+  "bambu_mcp_tool_call", "bambu_mcp_reconnect",
   "blender_open", "blender_viewport_screenshot", "blender_viewport_capture", "blender_session_snapshot", "blender_focus_review", "blender_review_bundle", "blender_animation_review", "blender_ik_keyframe", "blender_execute_code", "blender_batch_script", "blender_install_reference_pack", "blender_setup_character_references",
   "godot_mcp_action", "godot_scene_create", "godot_screen_capture_save",
   "remote_node_exec", "remote_node_upload_file",
@@ -96,7 +96,7 @@ const aggregatorToolNames = new Set(["bridge_metrics_query", "bridge_verify_all"
 const providerProxyToolNames = new Set([
   "roblox_mcp_status", "roblox_mcp_tool_list", "roblox_mcp_studio_list", "roblox_mcp_query", "roblox_mcp_action",
   "godot_mcp_status", "godot_mcp_tool_list", "godot_mcp_instance_list", "godot_mcp_query", "godot_mcp_action",
-  "bambu_mcp_status", "bambu_mcp_tool_list", "bambu_mcp_tool_call",
+  "bambu_mcp_status", "bambu_mcp_tool_list", "bambu_mcp_tool_call", "bambu_mcp_reconnect",
   "quietdesk_status", "quietdesk_desktop_snapshot", "quietdesk_desktop_coverage", "quietdesk_desktop_candidates", "quietdesk_desktop_semantic_context", "quietdesk_desktop_capture", "quietdesk_runtime_telemetry", "quietdesk_execute_semantic",
 ]);
 const protectedToolNames = new Set([
@@ -578,6 +578,11 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
       }
       if (Object.prototype.hasOwnProperty.call(delegated, "files")) throw new Error("Provide authorized files either through top-level files or arguments.files, not both.");
       if (!Array.isArray(args.files) || args.files.length === 0) throw new Error("files must be a non-empty array when provided.");
+      // A bare file ID means the host did not hydrate the file parameter.
+      // Avoid a generic Zod error and never synthesize a download URL here.
+      if (args.files.some((file) => typeof file !== "object" || file === null || Array.isArray(file))) {
+        throw new Error("[authorized-file-param-unresolved] ChatGPT did not hydrate a top-level file into file_id/download_url. Re-submit an authorized file parameter, or materialize the Library file first; do not invent URLs or Base64.");
+      }
       delegated.files = args.files;
     }
     const delegatedResult = await handler(delegated, context);

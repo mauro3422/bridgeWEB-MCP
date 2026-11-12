@@ -112,6 +112,37 @@ try {
   assert.equal(manifest.items[0].metadata.authorizedFile.fileId, 'file_fixture_png');
   assert.equal(manifest.items[0].metadata.authorizedFile.originalBytesPreserved, true);
 
+  // ChatGPT-generated PNG files can be declared as application/octet-stream.
+  // Accept that generic declaration only after validating the actual PNG bytes.
+  const genericMimeOutput = path.join(projectRoot, 'imported-generic-mime.png');
+  const genericMimeResult = await registry.call('image_asset_import_files', {
+    files: [{
+      download_url: `http://127.0.0.1:${address.port}/source.png`,
+      file_id: 'file_fixture_generic_mime_png',
+      mime_type: 'application/octet-stream',
+      file_name: 'generated.png',
+    }],
+    targets: [{ outputPath: genericMimeOutput, role: 'generated-baseline' }],
+  });
+  assert.equal(genericMimeResult.saved[0].mime, 'image/png');
+  assert.deepEqual(fs.readFileSync(genericMimeOutput), pngBytes);
+
+  // An explicit image MIME contradiction must still be rejected.
+  const conflictingMimeOutput = path.join(projectRoot, 'should-reject-conflicting-mime.png');
+  await assert.rejects(
+    () => registry.call('image_asset_import_files', {
+      files: [{
+        download_url: `http://127.0.0.1:${address.port}/source.png`,
+        file_id: 'file_fixture_contradictory_mime_png',
+        mime_type: 'image/jpeg',
+        file_name: 'generated.png',
+      }],
+      targets: [{ outputPath: conflictingMimeOutput }],
+    }),
+    /\[expected-integrity-mismatch\] File MIME mismatch/,
+  );
+  assert.equal(fs.existsSync(conflictingMimeOutput), false);
+
   const wrapperOutputPath = path.join(projectRoot, 'imported-via-wrapper.png');
   const wrapperManifestPath = path.join(projectRoot, 'wrapper-manifest.json');
   const wrapperResult = await registry.call('bridge_tool_action', {
@@ -139,6 +170,19 @@ try {
   assert.equal(wrapperResult.result.saved[0].sha256, expectedSha256);
   assert.deepEqual(fs.readFileSync(wrapperOutputPath), pngBytes);
 
+  // A stale host catalog can leave top-level files as raw strings.
+  // Reject early with a recovery hint rather than a generic schema error.
+  const unresolvedOutput = path.join(projectRoot, 'should-not-import-unresolved.png');
+  await assert.rejects(
+    () => registry.call('bridge_tool_action', {
+      toolName: 'image_asset_import_files',
+      confirmToolName: 'image_asset_import_files',
+      files: ['file_unhydrated_fixture'],
+      arguments: { targets: [{ outputPath: unresolvedOutput }] },
+    }),
+    /\[authorized-file-param-unresolved\]/,
+  );
+  assert.equal(fs.existsSync(unresolvedOutput), false);
   await assert.rejects(
     () => registry.call('bridge_tool_action', {
       toolName: 'write_text_file',
