@@ -15,7 +15,7 @@ Cuando la impresora esté apagada o desconectada, devolver aviso explícito y co
 3. Medir latencia por fase (descubrimiento, routing MSSR, llamada MCP, transferencia de imagen) y registrar tiempos, trazas y posibles reintentos.
 4. Agregar pruebas de regresión para offline, herramienta ausente, timeout y respuesta normal. No cambiar procesos ni configuración sin diagnóstico.
 
-Estado: **la causa de la llamada original sigue sin confirmarse**. La discrepancia de ciclo de vida/catálogo del hijo Bambu de Bridge se reprodujo por separado y tiene una corrección local; su despliegue está pendiente. Este documento no prueba que la impresora estuviera offline.
+Estado: **la causa de la llamada original sigue sin confirmarse**. Al 2026-11-09, la discrepancia de ciclo de vida/catálogo del hijo Bambu de Bridge se había reproducido por separado y su despliegue seguía pendiente. Bridge 0.6.185 y la corrección quedaron activados en los readbacks del 2026-11-12 descritos abajo; eso no recupera la llamada ChatGPT original ni prueba que la impresora estuviera offline.
 
 ## Auditoría de solo lectura — 2026-11-09
 
@@ -37,7 +37,7 @@ Alcance: sin cambios de producción, reinicios, interacción con Studio ni cambi
 
 El MCP local de MSSR no figuró en el catálogo disponible de esta sesión: se aplicó el protocolo local `mssr-agent-routing`, `systematic-debugging` y `capability-gap-recovery`, y se consultó el core `.mssr/` local; no se generó una traza estructurada MSSR. `Get-CimInstance` devolvió acceso denegado, por lo que no se verificaron argumentos ni identidad de procesos por esa vía. Los datos de estado y rutas en documentos históricos difieren del readback actual y no deben tomarse como estado vivo. Sin reiniciar ni alterar producción, obtener evidencia de la sesión ChatGPT y del catálogo live de Bridge por su host autorizado; después repetir el caso fallido y medir las fases. Las pruebas de regresión y cualquier cambio de comportamiento quedan para una intervención posterior autorizada.
 
-## Readback y siguiente gate — 2026-11-12, después del reinicio
+## Readback inicial y siguiente gate — 2026-11-12, 14:50 UTC, después del reinicio del host
 
 - El MCP Bambu directo informa fuente local `current` y `bambu_window_status` responde `ok: true`, `windows: []`, `count: 0`. Esto solo enumera ventanas de Studio; no prueba conectividad de impresora.
 - Bridge HTTP 0.6.185 está activo en PID `14488`, boot `705f8218-6b50-4e50-8284-f3be02da75e6`; HTTP y túnel 8081 reportan `ready`. El catálogo Bridge contiene 195 herramientas e incluye `bambu_mcp_tool_call` y `bambu_mcp_reconnect`.
@@ -45,3 +45,10 @@ El MCP local de MSSR no figuró en el catálogo disponible de esta sesión: se a
 - El wrapper previsto para una herramienta del proveedor es `bambu_mcp_tool_call`, con `toolName` y `confirmToolName` idénticos tras consultar el esquema vivo con `bambu_mcp_tool_list`. Un nombre del proveedor no es una herramienta top-level de Bridge.
 - Falta recuperar o reproducir desde ChatGPT Web el payload exacto del `Unknown tool` histórico, el nombre top-level, la sesión y la marca temporal. Mantener la causa como no probada hasta repetir el recorrido autorizado y correlacionar el resultado.
 - No se consultó el estado de la impresora, ni se cambiaron Studio, AMS, foco, movimiento o impresión.
+
+## Readback después del reinicio completo solicitado — 2026-11-12, 19:33 UTC
+
+- El watchdog consumió la solicitud `3941e6dd-5ab5-4088-9263-f9d25a417f39` y confirmó `restart-full` a las `19:33:30.434Z`. Bridge 0.6.185 volvió con PID `26100` y boot `af13f224-3575-43d3-a9c2-984cd889f941`; HTTP y túnel 8081 responden `ready`.
+- La lista local de procesos no mostró un hijo Bambu bajo el PID nuevo de Bridge. El adaptador inicia su proveedor al primer `bambu_mcp_status`, `bambu_mcp_tool_list` o `bambu_mcp_tool_call`; este readback no consultó el hijo por Bridge MCP. Verificar su versión/catálogo desde el host autorizado antes de afirmar que ya reconectó.
+- Sigue sin recuperarse la solicitud ChatGPT original, su payload exacto, sesión y timestamp. La causa de `Unknown tool` continúa sin prueba.
+- El reinicio fue sólo del HTTP de Bridge y el túnel. No se consultó ni cambió Bambu Studio, AMS, foco, movimiento, impresora o impresión.

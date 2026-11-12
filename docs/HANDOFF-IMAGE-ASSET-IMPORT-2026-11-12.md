@@ -9,12 +9,17 @@
 ## Segundo fallo y corrección fuente (desplegada; prueba con archivo real pendiente)
 - Algunos PNG generados son etiquetados por el host como `application/octet-stream` aunque sus bytes, firma y extensión correspondan a PNG. Bridge acepta esa declaración genérica después de inspeccionar y validar la imagen; los MIME explícitos contradictorios siguen rechazados.
 - Las pruebas locales en `scripts/test-image-file-import.mjs` cubren PNG 1×1 genérico y rechazo de `image/jpeg` contradictorio sin crear el archivo. `npm run test:image-file-import` y la regresión completa pasaron antes de publicar 0.6.185.
-- Readback 2026-11-12: Bridge HTTP 0.6.185 está activo (PID `14488`, boot `705f8218-6b50-4e50-8284-f3be02da75e6`), `/readyz=ready`, túnel 8081 listo y catálogo de 195 herramientas. La corrección está desplegada, pero no se ejecutó una importación real con MIME genérico durante esta activación.
+- Readback de activación inicial 2026-11-12, 14:50 UTC: Bridge HTTP 0.6.185 estaba activo (PID `14488`, boot `705f8218-6b50-4e50-8284-f3be02da75e6`), `/readyz=ready`, túnel 8081 listo y catálogo de 195 herramientas. La corrección está desplegada, pero no se ejecutó una importación real con MIME genérico durante esa activación.
 - El workaround materializado + parámetro superior `files` ya había funcionado sin restart. No reimportar ni sobrescribir las fotos comerciales existentes.
 
 ## Estado de handoff — 2026-11-12
 
 Bridge 0.6.185 quedó activo y listo tras el reinicio del equipo. El arreglo de MIME está desplegado. Sigue pendiente una prueba de importación en runtime con un archivo ChatGPT autorizado etiquetado genéricamente como `application/octet-stream`, verificación SHA-256 del destino y comprobación de que no hubo overwrite. No se reimportaron imágenes ni se sobrescribieron archivos comerciales en esta sesión.
+
+## Readback tras reinicio completo — 2026-11-12, 19:33 UTC
+
+- El watchdog confirmó `restart-full` para `3941e6dd-5ab5-4088-9263-f9d25a417f39`. Bridge HTTP 0.6.185 volvió con PID `26100`, boot `af13f224-3575-43d3-a9c2-984cd889f941` y `/readyz=ready`; túnel 8081 también `ready`.
+- El gate de importación real con `application/octet-stream`, comparación de bytes/SHA-256 del destino y no-overwrite sigue pendiente. Este reinicio no generó ni importó archivos.
 
 ## Próximo trabajo agente
 1. Continuar trabajo fotográfico comercial desde `D:\Dev\Auro-3D\marketing\fotoproductos\compra-flexi-2026-11-11\HANDOFF-MSSR.md`; AURO 3D es dueño canónico, no el laboratorio educativo. Usar `photo-asset-composition` y una traza MSSR propia del proyecto propietario. Proyecto MSSR documenta la prevención de errores de dueño en `D:\Dev\mssr\docs\CROSS_REPO_OWNERSHIP_TRANSACTION_HANDOFF_2026-11-12.md` (propuesta, guardia automática aún pendiente).

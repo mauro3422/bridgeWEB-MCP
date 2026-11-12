@@ -15,16 +15,16 @@ Stack principal:
 - OpenAI Secure MCP Tunnel con `tunnel-client`
 - métricas locales con `node:sqlite`
 
-## Rutas canónicas (readback local 2026-11-12)
+## Rutas canónicas
 
-- **Checkout `main` y BridgeCodeRoot activo:** `D:\Dev\bridge-mcp`, Bridge 0.6.184, commit `034be0198a91ad7f94a4f74ad98871a2c4836572`. El HTTP PID 23192 carga `D:\Dev\bridge-mcp\dist\http.js`; verifica PID, versión, `/status`, `/readyz` y argumentos antes de cambiar rutas.
-- **ProjectRoot del runtime HTTP:** `D:\Dev\bridge-mcp`, dueño de datos, logs, perfil y archivos request/ack del watchdog. En el readback había un único worktree registrado (`main`) y cambios locales mezclados con artefactos untracked de otras tareas: clasifica y preserva antes de stagear; no uses `git add -A`, limpies ni fusiones a ciegas.
-- **Estado remoto observado:** `main`, `origin/main` y el ref directo `origin/refs/heads/main` coincidían en `034be0198a91ad7f94a4f74ad98871a2c4836572` antes de preparar 0.6.185. Comprueba las tres refs otra vez antes de publicar; no reescribas remoto ni uses force.
-- **MSSR dueño de routing/contexto:** `D:\Dev\mssr` (MSSR 0.2.135 en el checkout local observado el 2026-11-06; el paquete integrado en Bridge 0.6.182 sigue siendo MSSR 0.2.134).
+- **Checkout `main`, BridgeCodeRoot y ProjectRoot:** `D:\Dev\bridge-mcp`. Revalida el checkout, la versión y el runtime antes de cambiar rutas o procesos. Los PID, boot IDs, release y estado mutable del árbol viven en `.mssr/PROJECT_STATE.md` y deben confirmarse en vivo.
+- **ProjectRoot** es dueño de datos, logs, perfil y archivos request/ack del watchdog. **BridgeCodeRoot** es dueño del paquete, fuentes, `dist/http.js` y verificaciones de release; pueden diferir y se deben comprobar por separado.
+- **MSSR dueño de routing/contexto portable:** `D:\Dev\mssr`. Los hechos específicos de este proyecto pertenecen al `.mssr/` canónico del repositorio, no a un `.bridge/` histórico.
 - `C:\dev\bridge-mcp` es una ruta heredada o alias posible: verificar su resolución antes de escribir.
-- Preservar los worktrees y experimentos no reconciliados. No reiniciar Bridge/túnel sólo para documentación o para corregir el cache del catálogo del host.
+- Preservar worktrees, cambios previos y experimentos no reconciliados. No usar `git add -A`, limpiar ni fusionar ramas sin clasificar. No reiniciar Bridge/túnel sólo para documentación o para corregir el cache del catálogo del host.
+- **Codex local en Mauro:** usar MSSR, filesystem, terminal y MCPs directos de aplicaciones. No usar `MauroPrime_Bridge` ni `BrigdeMCP-WEB`; ChatGPT Web puede seguir usando Bridge cuando corresponda.
 
-Antes de escribir: `git_status` del checkout correcto, `bridge_health` del runtime y verificación de versión en `package.json`; diferenciar siempre **BridgeCodeRoot** de **ProjectRoot**.
+Antes de escribir: comprobar `git status`, la versión de `package.json` y, desde el host local, `/status`, `/readyz` y el `/readyz` del túnel. No depender de herramientas Bridge MCP desde Codex. Diferenciar siempre **BridgeCodeRoot** de **ProjectRoot**.
 
 ## Estado recomendado
 
