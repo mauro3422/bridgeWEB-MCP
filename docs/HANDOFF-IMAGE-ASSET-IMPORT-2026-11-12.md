@@ -6,20 +6,19 @@
 - Se importaron y verificaron **6 fotos originales, 1 baseline sintético aprobado y 1 recorte de referencia** originalmente al laboratorio, pero el dueño comercial ya estaba definido: originales en `D:\Dev\Auro-3D\compras\flexi\evidencias\2026-11-11` (manifiesto y hashes) y baseline/recorte copiados y verificados bajo `D:\Dev\Auro-3D\marketing\fotoproductos\compra-flexi-2026-11-11`. La copia educativa es histórica, NO autoridad del marketing.
 - Para imágenes, `asset_import_files` puede fallar con `[unsafe-url]` aunque `image_asset_import_files` sí descargue. **No relajar allowlist/SSRF ni interpolar URLs.**
 
-## Segundo fallo y corrección fuente (verificada localmente; despliegue pendiente)
-- Algunos PNG generados son etiquetados por el host `application/octet-stream` aun cuando sus bytes/firma/extensión son PNG reales; runtime anterior rechaza con `[expected-integrity-mismatch] File MIME mismatch ... declared application/octet-stream, measured image/png`.
-- En `src/tools/image-tools.ts`, dentro de `downloadFileImage`, aceptar `application/octet-stream` como declaración genérica/no específica; **mantener rechazo del MIME explícito contradictorio** y `inspectImageBytes` obligatorio para firma, extensión y dimensiones.
-- Pruebas incorporadas a `scripts/test-image-file-import.mjs`: PNG 1×1 con `application/octet-stream` se importa exactamente, con `image/jpeg` se rechaza y no crea archivo.
-- La corrección y regresiones están en `src/tools/image-tools.ts`, `src/tool-registry.ts` y `scripts/test-image-file-import.mjs`. En 0.6.185, `npm run test:image-file-import` y la regresión completa pasaron; los bytes PNG se mantienen exactos y el MIME explícito contradictorio sigue rechazado. **El HTTP activo sigue en 0.6.184**, por lo que el arreglo aún no está desplegado. Para cerrarlo, activar el release con el watchdog, confirmar `runtimeBootId` nuevo y probar un PNG genérico mediante conexión real. El workaround materializado+file param ya funcionó sin restart.
-- No modificar worktrees de estabilización, túnel, perfiles, secretos ni reiniciar automáticamente mientras haya trabajo en progreso. Antes de despliegue: `AGENTS.md`, status runtime `bridge_health`, `git status`, pruebas handshake HTTP, estrategia de rollback.
+## Segundo fallo y corrección fuente (desplegada; prueba con archivo real pendiente)
+- Algunos PNG generados son etiquetados por el host como `application/octet-stream` aunque sus bytes, firma y extensión correspondan a PNG. Bridge acepta esa declaración genérica después de inspeccionar y validar la imagen; los MIME explícitos contradictorios siguen rechazados.
+- Las pruebas locales en `scripts/test-image-file-import.mjs` cubren PNG 1×1 genérico y rechazo de `image/jpeg` contradictorio sin crear el archivo. `npm run test:image-file-import` y la regresión completa pasaron antes de publicar 0.6.185.
+- Readback 2026-11-12: Bridge HTTP 0.6.185 está activo (PID `14488`, boot `705f8218-6b50-4e50-8284-f3be02da75e6`), `/readyz=ready`, túnel 8081 listo y catálogo de 195 herramientas. La corrección está desplegada, pero no se ejecutó una importación real con MIME genérico durante esta activación.
+- El workaround materializado + parámetro superior `files` ya había funcionado sin restart. No reimportar ni sobrescribir las fotos comerciales existentes.
 
 ## Estado de handoff — 2026-11-12
 
-El código y el handoff se preservaron junto con la reconexión selectiva Bambu en Bridge 0.6.185. `npm run test:regressions`, HTTP/MCP aislados y documentación generada pasaron. No se reimportaron imágenes ni se sobrescribieron archivos comerciales. La comprobación local no cambia el estado del HTTP/túnel; la activación y prueba en runtime siguen pendientes.
+Bridge 0.6.185 quedó activo y listo tras el reinicio del equipo. El arreglo de MIME está desplegado. Sigue pendiente una prueba de importación en runtime con un archivo ChatGPT autorizado etiquetado genéricamente como `application/octet-stream`, verificación SHA-256 del destino y comprobación de que no hubo overwrite. No se reimportaron imágenes ni se sobrescribieron archivos comerciales en esta sesión.
 
 ## Próximo trabajo agente
 1. Continuar trabajo fotográfico comercial desde `D:\Dev\Auro-3D\marketing\fotoproductos\compra-flexi-2026-11-11\HANDOFF-MSSR.md`; AURO 3D es dueño canónico, no el laboratorio educativo. Usar `photo-asset-composition` y una traza MSSR propia del proyecto propietario. Proyecto MSSR documenta la prevención de errores de dueño en `D:\Dev\mssr\docs\CROSS_REPO_OWNERSHIP_TRANSACTION_HANDOFF_2026-11-12.md` (propuesta, guardia automática aún pendiente).
-2. Después de la actualización controlada del Bridge, comprobar el MIME genérico con la ruta de import autorizada y verificar rollback. No arrancar un segundo Bridge ni pedir imágenes nuevas por error de transporte.
+2. Con Bridge 0.6.185 ya activo, verificar el MIME genérico mediante una importación autorizada y leer de vuelta los hashes de destino. No usar imágenes comerciales existentes para reimportación ni sobrescribir archivos; si no hay archivo autorizado de prueba, dejar este gate pendiente.
 3. Para otra transferencia usar `bridge_tool_action` top-level `files`, y verificar hash de cada destino. Las seis fuentes y baseline ya están en disco: evitar reimportación/sobrescritura.
 
 **Trazas investigativas:** laboratorio `mssr-20261112025410-0e415e63-b65`, código Bridge `mssr-20261112030126-9470318e-088`. Son evidencia histórica, no se deben presentar como sesión de Codex iniciada ni reutilizar sobre otro projectRoot.

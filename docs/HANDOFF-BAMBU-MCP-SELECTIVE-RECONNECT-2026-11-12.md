@@ -2,7 +2,7 @@
 
 **Actualizado:** 2026-11-12 (America/Argentina/Buenos_Aires)
 **Owner:** `D:\Dev\bridge-mcp`, adaptador MCP del Bridge. Bambu sigue siendo dueño de sus herramientas y comportamiento.
-**Estado:** implementación local en 0.6.185; pruebas de contrato pasan. La activación en el Bridge HTTP existente queda pendiente.
+**Estado:** implementación 0.6.185 activada y verificada en Bridge HTTP tras el reinicio del host; pruebas de contrato pasan. El proveedor Bambu hijo ya arrancó actualizado, así que no hizo falta reconectarlo.
 
 ## Problema y evidencia
 
@@ -24,11 +24,13 @@
 - El proveedor MCP ficticio v1→v2 cubre descubrimiento, drenaje de llamada en vuelo, refresh concurrente, no-op por fuente idéntica, confirmación, timeout de initialize y conservación de la sesión sana tras fallas.
 - Las pruebas no acceden a Bambu Studio ni a la impresora. El HTTP activo permanece en 0.6.184.
 
-## Activación pendiente
+## Activación verificada — 2026-11-12
 
-El Bridge HTTP actual ya cargó el catálogo de herramientas al arrancar y no puede importar este cambio en caliente. Publicar por primera vez `bambu_mcp_reconnect` requiere una actualización/restart controlado del proceso HTTP de Bridge; es un corte único de despliegue. Una vez cargado, futuras actualizaciones Bambu se aplican con reconnect selectivo sin reiniciar Bridge ni el túnel. No se ha reiniciado ni desplegado producción durante esta tarea.
-
-Antes de activar: verificar el diff exacto y las pruebas, confirmar el procedimiento de watchdog/rollback, registrar PID/boot y salud actuales, luego leer de vuelta el catálogo Bridge, llamar `bambu_mcp_tool_list` y probar una herramienta inocua de Bambu. Dejar Studio, AMS e impresión fuera de la prueba.
+- Después del reinicio del equipo, Bridge HTTP 0.6.185 quedó activo en PID `14488`, boot `705f8218-6b50-4e50-8284-f3be02da75e6`, iniciado `2026-11-12T14:50:03.746Z`. `/status` y `/readyz` informaron listo; el proceso pertenece al watchdog documentado PID `15424`.
+- El túnel `127.0.0.1:8081/readyz` también informó `ready`. El catálogo HTTP MCP contiene 195 herramientas, incluida `bambu_mcp_reconnect`.
+- El hijo Bambu informa `bambu-studio-mcp` v0.12.0, 48 herramientas, generación 1 y `sourceChanged=false`; `sourceFingerprint` y `liveSourceFingerprint` coinciden. El host ya inició el proveedor actualizado, por eso no se llamó reconnect ni se forzó un reinicio adicional.
+- El MCP Bambu directo de Codex también informó fuente `current`; `bambu_window_status` devolvió `windows: []`. Solo indica que no se enumeraron ventanas de Studio; la conectividad de impresora es desconocida.
+- No se interactuó con Bambu Studio, AMS ni la impresora y no se inició ninguna impresión. La activación inicial queda cerrada; las futuras actualizaciones del hijo pueden usar `bambu_mcp_reconnect` sin reiniciar Bridge HTTP ni el túnel.
 
 ## Handoff relacionado
 

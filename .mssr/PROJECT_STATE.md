@@ -1,14 +1,16 @@
 # Bridge project state
-## Current local release and recovery (2026-11-06)
-**Readback updated 2026-11-12.**
+## Current local release and recovery (2026-11-12)
+**Readback after the host reboot.**
 
-**Release/runtime:** Bridge 0.6.184 is live at `D:\Dev\bridge-mcp\dist\http.js`, PID 23192, boot `81f9bd5a-7cc0-47a1-a8ab-71173b5adbb2`, HTTP 3001 ready. Tunnel 8081 is ready, PID 18540. Bambu child PID 26580 runs the standalone provider from 2026-11-11 and still has its earlier 47-tool catalog; source v0.12.0 is newer. No Studio windows were listed; printer connectivity is unknown.
+**Runtime:** Bridge 0.6.185, PID `14488`, boot `705f8218-6b50-4e50-8284-f3be02da75e6`, HTTP `/readyz=ready`; watchdog PID `15424`, tunnel 8081 ready. HTTP MCP catalog: 195 tools including `bambu_mcp_reconnect`. Bambu child: v0.12.0, 48 tools, generation 1, source current; no reconnect needed. Direct Codex Bambu reports current source and zero Studio windows; printer connectivity is unknown.
 
-**Local candidate:** Bridge 0.6.185 adds confirmed Bambu-only stdio replacement and completes authorized image-import MIME validation. Check, Bambu contract, image import, MCP dual-era, isolated HTTP, generated tool-doc and full regression checks pass. Staged Project Change Consistency returned `publishReady: true`; its review advisory was handled by compacting this state. 0.6.185 has not been activated in production.
+**Git:** local `main`, `origin/main` and direct remote `main` are synchronized; one Bridge worktree. Three unrelated untracked workflow-guide directories are preserved. Safety snapshot: `D:\MSSR\safety-snapshots\bridge-20261112-033919`.
 
-**Git/preservation:** Release commit `313cf8c46e1bbdb292ae770fd7008efc8d742f06` is verified on local `main`, `origin/main` and direct remote `main`. The staged and tracked worktree is clean; three untracked workflow-guide directories from other tasks remain intact and outside this release. A SHA-256 safety snapshot is at `D:\MSSR\safety-snapshots\bridge-20261112-033919`; the superseded state snapshot is `PROJECT_STATE.before-compaction.md` there.
+**Knowledge health:** valid manifest, `WATCH`, 30 modules, three module-size advisories and no high-priority structural finding.
 
-**Pending:** first activation of 0.6.185 requires one controlled Bridge HTTP deployment; no production process or tunnel has been restarted. After activation, Bambu source refresh can use `bambu_mcp_reconnect` without restarting Bridge or the tunnel. Read back `/status`, boot id, catalog and both readiness endpoints before claiming deployment. Historical release detail lives in `changelogs/`; the 2026-09 project-state snapshot remains indexed in `knowledge/operations/bridge-state-history-2026-09.md`.
+**Pending:** one authorized generic-MIME image import with destination hash readback; reproduce the historical ChatGPT Web `Unknown tool` call with its exact wrapper and session evidence. An empty Studio window list does not establish printer state.
+
+Historical release detail lives in `changelogs/`; the 2026-09 state snapshot remains indexed in `knowledge/operations/bridge-state-history-2026-09.md`.
 
 ## Current MSSR learning state
 Jev and semantic-experience proposals remain shadow evidence: they do not become training truth, change routing, or rewrite project authorities. Reliability evaluation still needs independent owner-labeled holdouts and separate retrieval, selection, exact-fetch, abstention and synthesis measurements.

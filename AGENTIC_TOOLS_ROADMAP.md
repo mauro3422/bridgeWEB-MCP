@@ -8,23 +8,13 @@ The bridge should reduce raw shell usage and give ChatGPT precise, bounded tools
 
 The goal is not to copy Kairos exactly. Kairos is Python-first and has its own memory/UI stack. The bridge is TypeScript MCP over local HTTP. Copy the design patterns, not the implementation.
 
-## Current bridge baseline
+## Current bridge baseline (readback 2026-11-12)
 
-Current bridge version: `v0.6.0`.
+Bridge HTTP `0.6.185` is active and ready. The current HTTP MCP catalog has 195 top-level tools, including the Bambu provider controls; Bambu itself is a separate stdio child. The Bridge main worktree, `origin/main`, and direct remote `main` ref are synchronized.
 
-The bridge now exposes 68 modular tools and covers the full normal loop:
+The navigation and code-intelligence capabilities described in the original v0.6.0 baseline below remain part of the released Bridge. This document is historical design guidance for those tools; use `.mssr/PROJECT_STATE.md`, versioned changelogs, and current handoffs for live runtime or unfinished-work status.
 
-```txt
-navigate files
-edit safely
-analyze symbols
-analyze imports/dependencies
-detect duplicate/dead-code candidates
-verify everything
-commit/push
-```
-
-Code intelligence now has three levels:
+Code intelligence has three levels:
 
 ```txt
 regex        -> quick fallback
@@ -32,12 +22,9 @@ TypeScript AST -> per-file symbols/imports/exports/references
 semantic Program/TypeChecker -> cross-file symbols and references
 ```
 
-Dependency graph resolution now supports:
+Dependency graph resolution supports relative import matching and TypeScript module resolution through tsconfig/baseUrl/paths/barrels.
 
-```txt
-relative string matching
-TypeScript module resolution through tsconfig/baseUrl/paths/barrels
-```
+Long-term opportunities, not committed scope: deeper call attribution, optional retention controls, and project-specific workflows. Promote one only when usage evidence and the owning handoff justify it.
 
 ## Kairos patterns worth adopting
 
