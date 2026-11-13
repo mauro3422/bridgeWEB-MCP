@@ -4,11 +4,11 @@
 
 **Released 0.6.187:** pins reviewed MSSR 0.2.147 (SHA-256 `007951A27E409F4F3B0CA872FDE54294F4DBB96E296D40FA85AA413B0E9295D3`; contract minimum 0.2.142). Lifecycle notices and the journaled one-file cross-repo transaction passed gates. Commit `1f055a2d3521188c1b06907241dee976f7cdd817` is on `origin/main`.
 
-**Runtime observation:** HTTP smoke stopped at MSSR summary/dashboard. Runtime stayed ready (`ok`), but diagnostics showed max event-loop lag `45,617ms`, 15 stalls (latest `1,419ms`) and 49 client errors. Cause is unconfirmed; investigate before another broad smoke.
+**Runtime observation (latest bounded readback, 2026-11-13):** the HTTP smoke stopped while waiting on MSSR summary/dashboard. The latest local `/status` read showed Bridge ready, observability storage ready, and the dashboard read worker PID `44220` ready with `pendingCount=0`. Cumulative event-loop max lag remains `45,617ms`; stall count is now 87, with the latest stall `374ms` at `2026-11-13T21:55:52.941Z`. HTTP `clientErrors` remains 73; the latest was `2026-11-13T21:34:48.824Z`. These counters do not establish an HTTP 500 or identify the cause of the historical maximum. No new broad summary query was run; isolate and profile it before another full smoke.
 
 **MSSR context health:** valid manifest, 31 modules, no missing sources/unindexed knowledge; existing grouping and budget advisories remain.
 
-**Pending:** diagnose runtime latency; fresh Codex catalog and ChatGPT Web `Unknown tool` checks; generic-MIME import hash/no-overwrite check; review four old refs. Historical `traceId=null` is reproduced; ambiguous writes remain blocked.
+**Pending:** isolate and profile summary/dashboard latency; fresh Codex catalog and ChatGPT Web `Unknown tool` checks; generic-MIME import hash/no-overwrite check; review four old refs. Historical `traceId=null` is reproduced; ambiguous writes remain blocked.
 
 ## Current MSSR learning state
 Jev and semantic-experience proposals remain shadow evidence: they do not become training truth, change routing, or rewrite project authorities. Reliability evaluation still needs independent owner-labeled holdouts and separate retrieval, selection, exact-fetch, abstention and synthesis measurements.
