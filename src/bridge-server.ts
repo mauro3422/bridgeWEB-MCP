@@ -1,7 +1,9 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { Server as ModernServer } from "@modelcontextprotocol/server";
 import { createHash } from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
+import { evaluateMssrCrossRepoAssetOwnership, mssrCrossRepoAssetOwnershipInputSchema } from "@mauroprime/mssr";
 import {
   CallToolRequestSchema,
   ErrorCode,
@@ -14,6 +16,7 @@ import { SERVER_NAME, SERVER_VERSION } from "./config.js";
 import { createBridgeToolCallContext } from "./mcp-progress.js";
 import { beginToolMetric, classifyMssrRoutingStatus, classifyToolAuditError, extractToolResultMetric, finishToolMetric, type BridgeMetricProfile } from "./metrics.js";
 import {
+  bridgeOwnerWorkflowCorrelationKey,
   drainBridgeNoticesWithinBudget,
   emitBridgeNotice,
   type BridgeNoticeAction,
@@ -28,8 +31,9 @@ import {
   type BridgeArchitectureImpactEvaluationResult,
 } from "./architecture-impact-host-adapter.js";
 import type { BridgeToolSchema } from "./tools/types.js";
-import { createMssrTraceSessionCoordinator } from "./mssr-trace-context.js";
-import { recordMssrEvent } from "./mssr-observatory.js";
+import { createMssrTraceSessionCoordinator, getSharedMssrTraceProjectRootHint } from "./mssr-trace-context.js";
+import { readPersistedMssrTraceState, recordMssrEvent } from "./mssr-observatory.js";
+import { readCrossRepoTransactionJournal } from "./tools/cross-repo-transaction-tools.js";
 import { createMssrRoutingComplianceNoticeTracker } from "./mssr-routing-compliance.js";
 import { evaluateBridgeMssrLifecyclePreflight } from "./mssr-lifecycle-coverage.js";
 import { RUNTIME_BOOT_ID, normalizeModelIdentifier, normalizeWorkflowKey, resolveMetricTaskKey, resolveMetricWorkflowKey } from "./runtime-identity.js";
@@ -872,7 +876,32 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
         })
       : null;
 
-    const complete = (rawData: unknown, ok = true, error?: string) => {
+    const lifecycleProjectRoot = [
+      profiledArgs.projectRoot,
+      name === "project_context_initialize" ? profiledArgs.root : undefined,
+      inheritedProjectRoot,
+      profiledArgs.cwd,
+    ].find((value): value is string => typeof value === "string" && path.isAbsolute(value));
+    const lifecycleOwner = [
+      metric.project,
+      project,
+      observedProject,
+      lifecycleProjectRoot ? path.basename(path.resolve(lifecycleProjectRoot)) : undefined,
+    ].find((value): value is string => typeof value === "string"
+      && value.trim().length > 0
+      && !["unknown", "multi-project"].includes(value.trim().toLowerCase()));
+    const lifecycleWorkflowKey = [metric.workflowKey, workflowKey, workflowOwner, requestedWorkflowKey]
+      .find((value): value is string => typeof value === "string"
+        && value.trim().length > 0
+        && !["unknown", "unscoped"].includes(value.trim().toLowerCase()));
+    const ownerWorkflowCorrelationKey = bridgeOwnerWorkflowCorrelationKey(lifecycleOwner, lifecycleWorkflowKey);
+
+    const complete = (
+      rawData: unknown,
+      ok = true,
+      error?: string,
+      options: { skipNoticeDelivery?: boolean } = {},
+    ) => {
       if (rawData && typeof rawData === "object" && !Array.isArray(rawData)) {
         const result = rawData as Record<string, unknown>;
         const delegatedResult = result.result && typeof result.result === "object" && !Array.isArray(result.result)
@@ -902,7 +931,7 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
       const event = finishToolMetric(metric, ok, outputChars, error, extractToolResultMetric(name, rawData));
       const bridgeTiming = bridgeTimingFromResult(rawData);
       emitAutomaticMetricNotices(name, event, toolSchema, hasImages, bridgeTiming);
-      const delivery = noticeInspectionTools.has(name)
+      const delivery = options.skipNoticeDelivery || noticeInspectionTools.has(name)
         ? undefined
         : drainBridgeNoticesWithinBudget(
           2,
@@ -913,6 +942,7 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
             workflowKey: metric.workflowKey && metric.workflowKey !== "unknown" && metric.workflowKey !== "unscoped"
               ? metric.workflowKey
               : undefined,
+            ...(ownerWorkflowCorrelationKey ? { ownerWorkflowKey: ownerWorkflowCorrelationKey } : {}),
           },
         );
       const deliveredPayload = withBridgeLatencyMetadata(name, extracted.payload, event.durationMs);
@@ -936,6 +966,52 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
         && args.confirmToolName === "project_context_recover_core";
       const authorizedCoreRecovery = directCoreRecovery || exactDelegatedCoreRecovery;
       if (lifecyclePreflight?.intercepted && !authorizedCoreRecovery) {
+        const reasonCodes = lifecyclePreflight.decision.reasonCodes.slice(0, 12);
+        const correlationMode = lifecyclePreflight.traceId
+          ? "trace"
+          : ownerWorkflowCorrelationKey
+            ? "owner-workflow"
+            : "none";
+        const correlationScope = lifecyclePreflight.traceId
+          ? `trace:${lifecyclePreflight.traceId}`
+          : ownerWorkflowCorrelationKey
+            ? `owner-workflow:${ownerWorkflowCorrelationKey}`
+            : `unscoped:${metric.id}`;
+        emitBridgeNotice({
+          severity: "warning",
+          code: "mssr-lifecycle-preflight-required",
+          source: "mssr-lifecycle-preflight",
+          message: `Bridge bloqueó ${name}; no se ejecutó porque requiere preflight MSSR (${reasonCodes.join(", ") || "lifecycle-review"}).`,
+          details: {
+            status: "mssr-lifecycle-preflight-required",
+            originalTool: name,
+            effectiveTool: lifecyclePreflight.originalTool,
+            effect: lifecyclePreflight.effect,
+            scale: lifecyclePreflight.scale,
+            routePresent: lifecyclePreflight.routePresent,
+            lifecycleAction: lifecyclePreflight.decision.action,
+            reasonCodes,
+            executed: false,
+            traceId: lifecyclePreflight.traceId,
+            ...(lifecycleOwner ? { project: lifecycleOwner } : {}),
+            ...(lifecycleWorkflowKey ? { workflowKey: lifecycleWorkflowKey } : {}),
+            correlation: {
+              mode: correlationMode,
+              ...(correlationMode === "owner-workflow" && ownerWorkflowCorrelationKey
+                ? { ownerWorkflowKey: ownerWorkflowCorrelationKey }
+                : {}),
+            },
+            nextTool: lifecyclePreflight.nextTool,
+          },
+          actions: lifecyclePreflight.nextTool
+            ? [{
+                label: "Completar el preflight MSSR",
+                toolName: lifecyclePreflight.nextTool,
+                instruction: lifecyclePreflight.instruction ?? "Completa el preflight MSSR antes de reintentar; Bridge no ejecutó la operación.",
+              }]
+            : [],
+          dedupeKey: `mssr-lifecycle-preflight-required:${name}:${correlationScope}:${reasonCodes.join(",") || "lifecycle-review"}`,
+        });
         return complete({
           executed: false,
           status: "mssr-lifecycle-preflight-required",
@@ -954,7 +1030,170 @@ function configureBridgeServer(server: BridgeServerSurface, modern: boolean) {
               }
             : null,
           instruction: "La operación original no se ejecutó. Completa el preflight MSSR indicado, procesa su contexto/skills y reintenta la misma operación.",
-        });
+        }, true, undefined, { skipNoticeDelivery: true });
+      }
+      const crossRepoOwnershipInput = name === "bridge_tool_action"
+        && args.crossRepoOwnership !== null
+        && typeof args.crossRepoOwnership === "object"
+        && !Array.isArray(args.crossRepoOwnership)
+        ? args.crossRepoOwnership
+        : undefined;
+      if (crossRepoOwnershipInput) {
+        const parsedOwnership = mssrCrossRepoAssetOwnershipInputSchema.safeParse(crossRepoOwnershipInput);
+        const ownershipDecision = parsedOwnership.success
+          ? evaluateMssrCrossRepoAssetOwnership(parsedOwnership.data)
+          : null;
+        const blockedReasons: string[] = parsedOwnership.success
+          ? []
+          : parsedOwnership.error.issues.slice(0, 8).map((issue) => `invalid:${issue.path.join(".") || "transaction"}`);
+        const transaction = parsedOwnership.success ? parsedOwnership.data : null;
+        const currentTraceId = traceSnapshot.traceId;
+        const currentTraceState = currentTraceId ? readPersistedMssrTraceState(currentTraceId) : null;
+        const relatedTraceState = transaction?.relatedTraceId
+          ? readPersistedMssrTraceState(transaction.relatedTraceId)
+          : null;
+        const actualTargetProject = currentTraceState?.project ?? traceSnapshot.project ?? metric.project;
+        const normalizeProjectId = (value: string | undefined) => value?.trim().toLocaleLowerCase("en-US");
+        const targetRoot = inheritedProjectRoot ?? lifecycleProjectRoot;
+        const resolvedTargetRoot = targetRoot ? path.resolve(targetRoot) : undefined;
+        const requestedWritePath = typeof effectivePrepared.args.path === "string"
+          ? path.resolve(effectivePrepared.args.path)
+          : undefined;
+        const targetRelativePath = resolvedTargetRoot && requestedWritePath
+          ? path.relative(resolvedTargetRoot, requestedWritePath)
+          : undefined;
+        const targetPathIsWithinProject = typeof targetRelativePath === "string"
+          && targetRelativePath.length > 0
+          && targetRelativePath !== ".."
+          && !targetRelativePath.startsWith(`..${path.sep}`)
+          && !path.isAbsolute(targetRelativePath);
+        const normalizedTargetRef = targetRelativePath?.replace(/\\/g, "/").toLocaleLowerCase("en-US");
+
+        if (effectivePrepared.toolName !== "write_text_file") blockedReasons.push("unsupported-write-target");
+        if (ownershipDecision?.hostWriteGate !== "host-preflight-required") blockedReasons.push(`ownership-gate:${ownershipDecision?.hostWriteGate ?? "invalid"}`);
+        if (!transaction?.expectedOwnerProject || !transaction.ownerClaim
+          || normalizeProjectId(transaction.expectedOwnerProject) !== normalizeProjectId(transaction.ownerClaim.ownerProject)) {
+          blockedReasons.push("owner-claim-does-not-match-expected-owner");
+        }
+        if (!currentTraceId || transaction?.currentTraceId !== currentTraceId || !currentTraceState || currentTraceState.closed) {
+          blockedReasons.push("current-target-trace-not-active");
+        }
+        if (transaction && normalizeProjectId(actualTargetProject) !== normalizeProjectId(transaction.targetProject)) {
+          blockedReasons.push("target-project-does-not-match-current-trace");
+        }
+        if (transaction && resolvedTargetRoot
+          && normalizeProjectId(path.basename(resolvedTargetRoot)) !== normalizeProjectId(transaction.targetProject)) {
+          blockedReasons.push("target-root-project-mismatch");
+        }
+        if (transaction && normalizeProjectId(currentTraceState?.project ?? undefined) !== normalizeProjectId(transaction.targetProject)) {
+          blockedReasons.push("current-trace-owner-mismatch");
+        }
+        if (transaction && transaction.sourceProject !== transaction.targetProject
+          && (!relatedTraceState
+            || relatedTraceState.traceId !== transaction.relatedTraceId
+            || normalizeProjectId(relatedTraceState.project) !== normalizeProjectId(transaction.sourceProject))) {
+          blockedReasons.push("related-source-trace-owner-mismatch");
+        }
+        if (transaction && transaction.sourceProject !== transaction.targetProject) {
+          blockedReasons.push("dedicated-bridge-cross-repo-transaction-required");
+        }
+        if (transaction && transaction.sourceProject !== transaction.targetProject && transaction.sourceRefs.length === 0) {
+          blockedReasons.push("source-artifact-ref-required");
+        }
+        if (!resolvedTargetRoot || !targetPathIsWithinProject) blockedReasons.push("destination-outside-observed-target-project");
+        if (!normalizedTargetRef || !transaction?.targetRefs.some((ref) => ref.replace(/\\/g, "/").toLocaleLowerCase("en-US") === normalizedTargetRef)) {
+          blockedReasons.push("destination-ref-not-declared");
+        }
+        if (transaction?.destinationState !== "absent" || !requestedWritePath || fs.existsSync(requestedWritePath)) {
+          blockedReasons.push("destination-not-confirmed-absent");
+        }
+
+        if (blockedReasons.length > 0) {
+          return complete({
+            executed: false,
+            status: "mssr-cross-repo-write-preflight-required",
+            transactionId: transaction?.transactionId ?? null,
+            ownershipDecision,
+            blockedReasons: [...new Set(blockedReasons)],
+            traceId: currentTraceId,
+            targetProject: actualTargetProject ?? null,
+            relatedTraceId: transaction?.relatedTraceId ?? null,
+            instruction: "Bridge no ejecutó la escritura. Resuelve las evidencias de propiedad, trazas y destino indicadas antes de reintentar.",
+          }, true, undefined, { skipNoticeDelivery: true });
+        }
+      }
+      if (name === "bridge_cross_repo_transaction") {
+        const action = effectivePrepared.args.action;
+        const normalizeProjectId = (value: unknown) => typeof value === "string" ? value.trim().toLocaleLowerCase("en-US") : "";
+        const normalizeRoot = (value: unknown) => typeof value === "string" && value.trim()
+          ? (process.platform === "win32" ? path.resolve(value).toLocaleLowerCase("en-US") : path.resolve(value))
+          : "";
+        const blockedReasons: string[] = [];
+        const currentTraceId = traceSnapshot.traceId;
+        const currentTraceState = currentTraceId ? readPersistedMssrTraceState(currentTraceId) : null;
+        if (!currentTraceId || !currentTraceState) blockedReasons.push("active-target-trace-required");
+
+        let transactionId: string | null = typeof effectivePrepared.args.transactionId === "string"
+          ? effectivePrepared.args.transactionId
+          : null;
+        if (action === "stage") {
+          const parsedOwnership = mssrCrossRepoAssetOwnershipInputSchema.safeParse(effectivePrepared.args.ownership);
+          const transaction = parsedOwnership.success ? parsedOwnership.data : null;
+          transactionId = transaction?.transactionId ?? null;
+          if (!parsedOwnership.success) blockedReasons.push(...parsedOwnership.error.issues.slice(0, 8).map((issue) => `invalid:${issue.path.join(".") || "transaction"}`));
+          const relatedTraceState = transaction?.relatedTraceId ? readPersistedMssrTraceState(transaction.relatedTraceId) : null;
+          const targetRootHint = currentTraceId ? getSharedMssrTraceProjectRootHint(currentTraceId) : null;
+          const sourceRootHint = transaction?.relatedTraceId ? getSharedMssrTraceProjectRootHint(transaction.relatedTraceId) : null;
+          const suppliedTargetRoot = normalizeRoot(effectivePrepared.args.targetRoot);
+          const suppliedSourceRoot = normalizeRoot(effectivePrepared.args.sourceRoot);
+          if (!transaction?.explicitCopyReview || !["copy", "export"].includes(transaction.operation)) blockedReasons.push("explicit-reviewed-copy-required");
+          if (!transaction?.expectedOwnerProject || !transaction.ownerClaim
+            || normalizeProjectId(transaction.expectedOwnerProject) !== normalizeProjectId(transaction.ownerClaim.ownerProject)) blockedReasons.push("owner-claim-does-not-match-expected-owner");
+          if (!currentTraceId || transaction?.currentTraceId !== currentTraceId || !currentTraceState || currentTraceState.closed) blockedReasons.push("current-target-trace-not-active");
+          if (transaction && normalizeProjectId(currentTraceState?.project ?? traceSnapshot.project) !== normalizeProjectId(transaction.targetProject)) blockedReasons.push("current-trace-owner-mismatch");
+          if (!transaction?.relatedTraceId || transaction.relatedTraceId === transaction.currentTraceId || !relatedTraceState
+            || normalizeProjectId(relatedTraceState.project) !== normalizeProjectId(transaction.sourceProject)) blockedReasons.push("related-source-trace-owner-mismatch");
+          if (!targetRootHint || suppliedTargetRoot !== normalizeRoot(targetRootHint)) blockedReasons.push("target-root-not-observed-for-active-trace");
+          if (!sourceRootHint || suppliedSourceRoot !== normalizeRoot(sourceRootHint)) blockedReasons.push("source-root-not-observed-for-related-trace");
+          if (inheritedProjectRoot && normalizeRoot(inheritedProjectRoot) !== suppliedTargetRoot) blockedReasons.push("target-root-differs-from-session-context");
+          if (transaction && normalizeProjectId(path.basename(path.resolve(String(effectivePrepared.args.sourceRoot ?? "")))) !== normalizeProjectId(transaction.sourceProject)) blockedReasons.push("source-root-project-mismatch");
+          if (transaction && normalizeProjectId(path.basename(path.resolve(String(effectivePrepared.args.targetRoot ?? "")))) !== normalizeProjectId(transaction.targetProject)) blockedReasons.push("target-root-project-mismatch");
+          if (effectivePrepared.args.confirmTransactionId !== transaction?.transactionId) blockedReasons.push("transaction-id-confirmation-mismatch");
+        } else if (["commit", "recover", "rollback"].includes(String(action))) {
+          if (!transactionId || effectivePrepared.args.confirmTransactionId !== transactionId) blockedReasons.push("transaction-id-confirmation-mismatch");
+          let journal = null;
+          if (transactionId) {
+            try { journal = await readCrossRepoTransactionJournal(transactionId); }
+            catch (error) { blockedReasons.push(`journal-invalid:${error instanceof Error ? error.message : "read-failed"}`); }
+          }
+          if (!journal) blockedReasons.push("durable-transaction-journal-not-found");
+          if (journal && normalizeProjectId(currentTraceState?.project ?? traceSnapshot.project) !== normalizeProjectId(journal.ownership.targetProject)) blockedReasons.push("current-trace-owner-mismatch");
+          const rootHint = currentTraceId ? getSharedMssrTraceProjectRootHint(currentTraceId) : null;
+          if (journal && (!rootHint || normalizeRoot(rootHint) !== normalizeRoot(journal.targetRoot))) blockedReasons.push("target-root-not-observed-for-active-trace");
+          const relatedId = journal && typeof journal.ownership.relatedTraceId === "string" ? journal.ownership.relatedTraceId : null;
+          const relatedState = relatedId ? readPersistedMssrTraceState(relatedId) : null;
+          if (journal && (!relatedState || normalizeProjectId(relatedState.project) !== normalizeProjectId(journal.ownership.sourceProject))) blockedReasons.push("related-source-trace-owner-mismatch");
+          const sourceRootHint = relatedId ? getSharedMssrTraceProjectRootHint(relatedId) : null;
+          if (journal && sourceRootHint && normalizeRoot(sourceRootHint) !== normalizeRoot(journal.sourceRoot)) blockedReasons.push("source-root-differs-from-related-trace");
+          if (journal && action === "commit") {
+            const expectedPointerRef = path.relative(journal.targetRoot, journal.pointerPath).replace(/\\/g, "/").toLocaleLowerCase("en-US");
+            if (typeof effectivePrepared.args.pointerRef !== "string" || effectivePrepared.args.pointerRef.replace(/\\/g, "/").toLocaleLowerCase("en-US") !== expectedPointerRef) blockedReasons.push("pointer-ref-differs-from-transaction-journal");
+          }
+        } else {
+          blockedReasons.push("unsupported-transaction-action");
+        }
+
+        if (blockedReasons.length > 0) {
+          return complete({
+            executed: false,
+            status: "mssr-cross-repo-write-preflight-required",
+            transactionId,
+            traceId: currentTraceId,
+            targetProject: currentTraceState?.project ?? traceSnapshot.project ?? null,
+            blockedReasons: [...new Set(blockedReasons)],
+            instruction: "Bridge no ejecutó la transacción. Carga ambos proyectos, conserva las trazas observadas y corrige cada evidencia antes de reintentar.",
+          }, true, undefined, { skipNoticeDelivery: true });
+        }
       }
       emitRoutingComplianceNotice(name, metric, effectiveToolSchema?.annotations?.destructiveHint === true, routingCompliance);
       if (inheritedProjectRoot) {

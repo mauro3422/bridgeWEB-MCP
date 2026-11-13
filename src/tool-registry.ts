@@ -39,6 +39,7 @@ import { quietDeskToolModule } from "./tools/quietdesk-tools.js";
 import { storageGrowthToolModule } from "./tools/storage-growth-tools.js";
 import { mssrSemanticEvidenceToolModule } from "./tools/mssr-semantic-evidence-tools.js";
 import { mssrProjectContextRefSplitToolModule } from "./tools/mssr-project-context-ref-split-tools.js";
+import { crossRepoTransactionToolModule } from "./tools/cross-repo-transaction-tools.js";
 import { buildToolAudit, TOOL_AUDIT_VIEWS, type ToolAuditArgs, type ToolAuditView } from "./tool-audit.js";
 import { getToolAuditMetrics, getToolFrictionMetrics, type BridgeMetricsScope } from "./metrics.js";
 import { buildBridgeToolFrictionProjection } from "./mssr-tool-friction.js";
@@ -75,6 +76,7 @@ const destructiveToolNames = new Set([
   "image_asset_save", "image_asset_import_files", "image_chat_preview_prepare", "image_character_views_prepare", "image_reference_pack_prepare",
   "media_review_ingest",
   "binary_file_write", "binary_upload_begin", "binary_upload_append", "binary_upload_finish", "binary_upload_abort", "asset_import_files",
+  "bridge_cross_repo_transaction",
   "bambu_mcp_tool_call", "bambu_mcp_reconnect",
   "blender_open", "blender_viewport_screenshot", "blender_viewport_capture", "blender_session_snapshot", "blender_focus_review", "blender_review_bundle", "blender_animation_review", "blender_ik_keyframe", "blender_execute_code", "blender_batch_script", "blender_install_reference_pack", "blender_setup_character_references",
   "godot_mcp_action", "godot_scene_create", "godot_screen_capture_save",
@@ -101,7 +103,7 @@ const providerProxyToolNames = new Set([
 ]);
 const protectedToolNames = new Set([
   "bridge_tool_schema", "bridge_tool_audit", "bridge_tool_query", "bridge_tool_action", "bridge_connector_catalog_compare", "project_context_load", "project_context_audit", "project_context_health", "project_context_modularization_plan", "project_context_initialize", "project_context_update", "project_context_recover_core", "project_context_capture",
-  "skill_route_plan", "skill_bootstrap", "skill_context_next", "skill_load", "mssr_context_proposal_review", "mssr_trace_record", "mssr_trace_evidence", "mssr_skill_maintenance_index", "bridge_verify_all", "git_multi_repo_publish", "roblox_place_save",
+  "skill_route_plan", "skill_bootstrap", "skill_context_next", "skill_load", "mssr_context_proposal_review", "mssr_trace_record", "mssr_trace_evidence", "mssr_skill_maintenance_index", "bridge_verify_all", "git_multi_repo_publish", "roblox_place_save", "bridge_cross_repo_transaction",
 ]);
 
 const mssrControlPlaneToolNames = new Set([
@@ -131,6 +133,14 @@ const mssrExternalSideEffectToolNames = new Set([
 const mssrTrivialInspectToolNames = new Set(["whiteboard_capture_pc_view", "quietdesk_desktop_capture"]);
 
 const toolUsageGuidance = new Map<string, BridgeToolUsageGuidance>([
+  ["bridge_cross_repo_transaction", {
+    prerequisites: ["Load both project contexts and keep separate active traces. Stage one explicitly reviewed sourceRef to one targetRef; Bridge verifies each root against the corresponding observed trace and stores a durable receipt. Update the consumer pointer in the target project only after the copy receipt reports verified, then commit by naming pointerRef. Commit requires that the pointer contain the exact targetRef and source SHA-256. Use recover or rollback with the exact transactionId after interruption."],
+    preflightTools: ["project_context_load", "skill_bootstrap"],
+    recovery: [
+      { code: "destination-content-conflict", instruction: "Preserve the existing target, choose a new targetRef or resolve the conflict explicitly, and use a new transactionId." },
+      { code: "recovery-required", toolName: "bridge_cross_repo_transaction", instruction: "Inspect the durable journal, then call action=recover with disposition=resume only when source and stage hashes are unchanged; choose rollback to remove only matching transaction-owned bytes." },
+    ],
+  }],
   ["project_context_load", {
     prerequisites: ["Use once at the start of substantial work in a known repository."],
     preflightTools: ["skill_bootstrap"],
@@ -446,13 +456,51 @@ export function createToolRegistry(modules: readonly BridgeToolModule[]): Bridge
   };
   const actionTool: BridgeToolSchema = {
     name: "bridge_tool_action",
-    description: "Use this explicit non-read-only fallback when a runtime Bridge tool exists but its dedicated schema is missing from the current connector catalog. When routing or another Bridge response supplied exact fallback arguments, use them without another discovery call; otherwise inspect the target with bridge_tool_schema first and pass arguments matching that exact runtime contract. Delegates to neutral or destructive tools and requires exact target-name confirmation. Stateless or concurrent callers may pass the active MSSR traceId as wrapper control without changing the delegated target schema. For runtime tools that explicitly declare an authorized top-level files parameter through openai/fileParams metadata, pass ChatGPT-authorized files through this wrapper's stable top-level files parameter so newly added file tools remain usable even when their dedicated connector schema has not refreshed yet; never reconstruct those files as Base64 merely to bypass catalog drift.",
+    description: "Use this explicit non-read-only fallback when a runtime Bridge tool exists but its dedicated schema is missing from the current connector catalog. When routing or another Bridge response supplied exact fallback arguments, use them without another discovery call; otherwise inspect the target with bridge_tool_schema first and pass arguments matching that exact runtime contract. Delegates to neutral or destructive tools and requires exact target-name confirmation. Stateless or concurrent callers may pass the active MSSR traceId as wrapper control without changing the delegated target schema. Declared cross-repository writes through this generic wrapper are blocked; use bridge_cross_repo_transaction to copy source-owned bytes, journal and verify them, and commit only after the consumer pointer is updated. MSSR's ownership result remains advisory and never authorizes the host write. For runtime tools that explicitly declare an authorized top-level files parameter through openai/fileParams metadata, pass ChatGPT-authorized files through this wrapper's stable top-level files parameter so newly added file tools remain usable even when their dedicated connector schema has not refreshed yet; never reconstruct those files as Base64 merely to bypass catalog drift.",
     inputSchema: {
       type: "object",
       properties: {
         toolName: { type: "string", description: "Exact runtime tool name to invoke." },
         confirmToolName: { type: "string", description: "Must exactly match toolName to confirm the delegated destructive action." },
         traceId: { type: "string", description: "Optional active MSSR trace control for stateless or concurrent callers. The wrapper uses it for attribution and does not forward it to targets that do not declare traceId." },
+        projectRoot: { type: "string", description: "Optional observed target project root for host preflight. The wrapper uses it to verify destination containment and does not forward it to the target tool." },
+        crossRepoOwnership: {
+          type: "object",
+          description: "Legacy ownership declaration. A cross-repository mutation through bridge_tool_action is blocked; use bridge_cross_repo_transaction for a journaled source-to-target transfer.",
+          properties: {
+            transactionId: { type: "string", minLength: 8, maxLength: 160 },
+            sourceProject: { type: "string", minLength: 2, maxLength: 160 },
+            targetProject: { type: "string", minLength: 2, maxLength: 160 },
+            currentTraceId: { type: "string", minLength: 6, maxLength: 128 },
+            relatedTraceId: { type: "string", minLength: 6, maxLength: 128 },
+            artifactKind: { type: "string", enum: ["asset", "document", "manifest", "handoff", "project-context"] },
+            operation: { type: "string", enum: ["copy", "derive", "export", "move", "update-pointer"] },
+            expectedOwnerProject: { type: "string", minLength: 2, maxLength: 160 },
+            ownerClaim: {
+              type: "object",
+              properties: {
+                ownerProject: { type: "string", minLength: 2, maxLength: 160 },
+                authoritySource: { type: "string", enum: ["AGENTS.md", "project-context", "manifest", "user"] },
+                authorityRevision: { type: "string", minLength: 1, maxLength: 160 },
+                scope: { type: "string", enum: ["raw-evidence", "commercial-work-asset", "approved-public-export", "educational-source", "project-derivative"] },
+                observedAt: { type: "string", format: "date-time" },
+                confidenceKind: { type: "string", enum: ["declared", "observed", "unknown"] },
+                conflicts: { type: "array", maxItems: 12, items: { type: "string", maxLength: 160 } },
+              },
+              required: ["ownerProject", "authoritySource", "authorityRevision", "scope", "observedAt", "confidenceKind"],
+              additionalProperties: false,
+            },
+            explicitCopyReview: { type: "boolean", default: false },
+            ownerDelegatedTransfer: { type: "boolean", default: false },
+            sourceRefs: { type: "array", maxItems: 32, items: { type: "string", minLength: 1, maxLength: 240 } },
+            targetRefs: { type: "array", maxItems: 32, items: { type: "string", minLength: 1, maxLength: 240 } },
+            sourceHash: { type: "string", pattern: "^[a-fA-F0-9]{64}$" },
+            destinationState: { type: "string", enum: ["absent", "matching-hash", "conflicting-hash", "unknown"], default: "unknown" },
+            destinationHash: { type: "string", pattern: "^[a-fA-F0-9]{64}$" },
+          },
+          required: ["transactionId", "sourceProject", "targetProject", "currentTraceId", "relatedTraceId", "artifactKind", "operation", "expectedOwnerProject", "ownerClaim"],
+          additionalProperties: false,
+        },
         files: {
           type: "array",
           minItems: 1,
@@ -619,6 +667,7 @@ const defaultToolModules: readonly BridgeToolModule[] = [
   fileNavigationToolModule,
   storageGrowthToolModule,
   fileWritingToolModule,
+  crossRepoTransactionToolModule,
   workflowGuideToolModule,
   projectContextToolModule,
   skillCatalogToolModule,

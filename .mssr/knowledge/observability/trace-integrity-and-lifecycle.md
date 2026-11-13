@@ -19,3 +19,7 @@ Paged skill-context continuation is part of lifecycle reconciliation. When `skil
 ## Automatic lifecycle coverage
 
 Bridge registry metadata exposes bounded MSSR `effect` + `scale`. The central dispatcher evaluates packaged MSSR lifecycle policy before a tool handler runs: control-plane calls are recursion-exempt; trivial reads remain lightweight; substantial mutation/persist/publish/external work requires a compatible routed lifecycle. When requirements are missing Bridge returns `executed:false` with the required MSSR preflight/replan action and performs no original side effect. The caller processes the selected context/required skills, then retries the operation. Existing compatible lifecycle is reused. C2b routing compliance runs after this gate and remains fallback/recovery evidence, not the primary activation mechanism.
+
+Lifecycle preflight denials enter Notice Plane history without invoking the handler. Correlate by exact `traceId`; without it, use only observed owner+workflow. If either is missing, keep the notice history-only. Dedupe by operation/scope. Early return precedes `mssrTraceSession.observe`, so blocked writes add no material-write count.
+
+Cross-repository ownership remains advisory in MSSR; Bridge host enforcement is maintained in [cross-repo write preflight](../operations/bridge-cross-repo-write-preflight.md).

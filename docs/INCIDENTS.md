@@ -19,6 +19,38 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-11-13 — `blender_asset_review` omitida en el registro de Bridge
+
+**Estado:** causa localizada, corrección pendiente. Capa y owner: adaptador/registro Blender de `bridge-mcp`. `blender-mcp` conserva la implementación de la operación. Caso: revisión de costura de nervaduras del soporte de casco V3 de Auro-3D.
+
+**Síntoma y reproducción:** desde ChatGPT Web, `blender_asset_review` no aparece como herramienta directa. La consulta delegada y la consulta del esquema para el nombre exacto devuelven `Unknown modular tool: blender_asset_review`. El catálogo vivo de Bridge 0.6.185 (PID 26100, boot `af13f224-3575-43d3-a9c2-984cd889f941`, entrada `D:\Dev\bridge-mcp\dist\http.js`, 195 herramientas, hash `e75cad017b93c6e6`) tampoco contiene el nombre. Bridge 3001 y túnel 8081 respondieron `ready`.
+
+**Causa demostrada:** una conexión MCP por stdio al build de `D:\Dev\blender-mcp\dist\src\index.js` completó `initialize` y `tools/list`. El standalone `mauro-blender-mcp` 0.1.0 publicó 52 herramientas, incluida `blender_asset_review`. La implementación está registrada en `src/tools/index.ts` del standalone. En el checkout de Bridge 0.6.186, `src/tools/blender-standalone-proxy-tools.ts` registra explícitamente solo `blender_viewport_capture` y `blender_session_snapshot`. El registro vivo 0.6.185 tampoco publica Asset Review. Refrescar el catálogo web o activar por sí solo el candidato 0.6.186 no aporta el adaptador ausente. Como control independiente, `blender_viewport_capture` sí figura en el runtime y faltó en el catálogo directo web de esta sesión: ese caso sí es una diferencia de exposición entre cliente y servidor.
+
+**Corrección aplicada:** registro y diagnóstico de esta incidencia. Sin cambio de código ni reinicio. Para vistas múltiples, el runtime y el conector web de la sesión sí anuncian `blender_review_bundle`, con esquema resuelto en vivo y puerto predeterminado 9877. Admite vistas ortográficas y oblicuas, filtrado por objeto/colección, hoja de contacto y manifiesto; conservar sus guardas de sesión y actividad. Esta investigación no ejecutó una captura. En el host, 9877 estaba escuchando y 9878 no; es una condición de ejecución separada del registro, que deberá comprobarse si se delega a la sesión standalone.
+
+**Prueba de diagnóstico:** presencia en `tools/list` standalone, ausencia en catálogo vivo de Bridge, fallo de resolución por nombre, guardas y esquema del alternativo inspeccionados. Regresión automatizada pendiente: tras implementar el adaptador, verificar anuncio y schema en `tools/list`, dispatch web hasta el proveedor, ruta de salida y guardas de identidad/actividad; cerrar con un smoke sobre una copia de escena, con PNGs/manifiesto y verificación de que la sesión original queda intacta.
+
+**Seguimiento:** decidir si exponer `blender_asset_review` con un adaptador explícito o cubrir la necesidad desde `blender_review_bundle`. Mantener el diagnóstico de costuras (malla evaluada frente a base, secciones, IDs y profundidad) en `D:\Dev\blender-mcp\docs\HANDOFF-INSPECCION-MALLA-BOOLEANA-20261113.md`. Verificar catálogo web por separado después del registro en Bridge.
+
+---
+
+## 2026-11-13 — Rechazo de bootstrap cross-repo sin aviso de fricción
+
+**Estado:** corrección y mecanismo de `traceId=null` reproducidos en fixture aislado; candidata Bridge 0.6.187. Runtime debe volver a leerse después del reinicio para cerrar activación. Owner: Bridge lifecycle y Operational Notice Plane.
+
+**Evidencia histórica:** las métricas de `auro-3d-web` (PID 26100, sesión fingerprint `2b43087b`) muestran dos `skill_bootstrap` distintos: `2026-11-13T04:09:38.850Z` (`mssr-20261113040759-98dd755d-bd2`) y `04:10:03.945Z` (`mssr-20261113041003-0fba5d0f-97c`), separados por 25.095 segundos. Luego `project_context_load` a `04:14:59.451Z` y `write_text_file` a `04:17:39.423Z` figuran con `traceId=null`. El resolver sólo domina una ruta si es el único candidato reciente o si la ruta más nueva aventaja a la segunda por al menos 90 segundos. En ese historial la diferencia era menor a 90 segundos; al llegar las llamadas posteriores, ninguna ruta era reciente. El resolver conservó los candidatos compatibles y se abstuvo, en vez de elegir una traza. La evidencia identifica el mecanismo de ambigüedad; no conserva la conversación para reconstruir qué quiso hacer el host con cada bootstrap.
+
+**Reproducción aislada:** el fixture crea dos trazas distintas para el mismo owner/workflow, las envejece cinco minutos y hace la continuación desde otra sesión del host. La operación mutante vuelve con `status=mssr-lifecycle-preflight-required`, `executed=false`, `traceId=null`; el archivo no aparece y el aviso pendiente queda correlacionado sólo por owner+workflow. La regresión separada verifica que, cuando sí hay una única ruta compatible persistida, esta se recupera después de resetear la memoria del coordinador. El caso sin ninguna ruta también se bloquea sin side effect. En consecuencia, la duplicidad ambigua sí explica el patrón observado; el fixture no inventa una traza ni debilita el preflight.
+
+**Corrección:** la intercepción conserva el bloqueo original y emite fricción deduplicada al Notice Plane. Con `traceId`, el aviso queda en esa traza; sin ella, sólo se correlaciona por owner+workflow si ambos están observados; sin ese par queda en historial sin entrega global. Un rechazo no se registra como escritura ejecutada.
+
+**Protección cross-repo:** Bridge reemplaza el paquete local MSSR 0.2.134 por el tarball revisado 0.2.147 (SHA-256 `007951A27E409F4F3B0CA872FDE54294F4DBB96E296D40FA85AA413B0E9295D3`); el contrato portable aparece desde 0.2.142. El wrapper genérico bloquea writes declarados cross-repo. `bridge_cross_repo_transaction` limita la copia a un sourceRef y targetRef revisados, confirma owner/raíces/referencias/trazas, evita sobrescribir, conserva journal íntegro, valida staging y readback SHA-256, hace replay idempotente y exige actualizar un puntero del consumer antes del commit. Recuperación revalida bytes; rollback elimina sólo destinos/temporales creados y coincidentes con el hash de la transacción. Esto es compensación durable de una transferencia acotada, no ACID distribuido.
+
+**Verificación:** suite aislada cubre bloqueo, historial, dedupe, entrega al bootstrap compatible, aislamiento entre `Auro-3D`/`auro-3d-web`, silencio en operación sana, ambigüedad vencida, `executed=false`, transferencia, hash/readback, replay, recuperación, commit tras cambio del puntero y rollback conservador. El gate de release registra los comandos y su resultado en `changelogs/0.6.187.md` una vez cerrados. El runtime y el catálogo se verifican tras el reinicio por separado.
+
+**Límites y continuidad:** el nuevo tool protege su ruta declarada; no intercepta cualquier operación manual hecha por shell. MSSR evalúa y valida el contrato pero no autoriza filesystem. La transferencia requiere una revisión explícita y una confirmación exacta del transactionId. Los handoffs propietarios están en `D:\Dev\mssr\docs\HANDOFF_FRICTION_LIFECYCLE_BOOTSTRAP_CROSSREPO_2026-11-13.md` y `D:\Dev\mssr\docs\CROSS_REPO_OWNERSHIP_TRANSACTION_HANDOFF_2026-11-12.md`.
+
 ## 2026-10-27 — Missing standalone Blender capture tools in active Bridge catalog
 
 **Estado:** Bridge 0.6.181 desplegado y verificado con 214 herramientas; refresco del catálogo de ChatGPT y validación real en Blender pendientes. No cerrado hasta esos dos controles.

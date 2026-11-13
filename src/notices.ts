@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { parseMssrNoticeV1, type MssrNotice } from "@mauroprime/mssr";
 
 export type BridgeNoticeSeverity = "info" | "warning" | "error";
@@ -52,6 +53,8 @@ export type BridgeNoticeDeliveryContext = {
   traceId?: string;
   project?: string;
   workflowKey?: string;
+  /** Strict owner+workflow scope for notices whose originating trace is unknown. */
+  ownerWorkflowKey?: string;
 };
 
 export type BridgeNoticeDeliverySummary = {
@@ -194,6 +197,14 @@ function noticeWorkflowKey(notice: BridgeNotice): string | undefined {
   return stringField(detailsRecord(notice).workflowKey);
 }
 
+/** Hashes only an observed project owner and workflow; never use task prose or a guessed owner. */
+export function bridgeOwnerWorkflowCorrelationKey(owner: string | undefined, workflowKey: string | undefined): string | undefined {
+  const normalizedOwner = normalizedScopeToken(owner);
+  const normalizedWorkflow = normalizedScopeToken(workflowKey);
+  if (!normalizedOwner || !normalizedWorkflow || normalizedOwner === "unknown" || normalizedWorkflow === "unscoped") return undefined;
+  return createHash("sha256").update(`${normalizedOwner}\0${normalizedWorkflow}`).digest("hex");
+}
+
 function noticeAttentionKey(notice: BridgeNotice): string {
   if (notice.mssrNotice) return `mssr:${notice.mssrNotice.noticeId}`;
   const details = detailsRecord(notice);
@@ -252,6 +263,23 @@ function reconcilePendingNotices(items: BridgeNotice[]): BridgeNotice[] {
 function noticeRelevance(notice: BridgeNotice, context: BridgeNoticeDeliveryContext): "relevant" | "other" | "global" {
   const activeTrace = normalizedScopeToken(context.traceId);
   const noticeTrace = normalizedScopeToken(noticeTraceId(notice));
+  const correlation = detailsRecord(notice).correlation;
+  const correlationMode = correlation && typeof correlation === "object" && !Array.isArray(correlation)
+    ? stringField((correlation as Record<string, unknown>).mode)
+    : undefined;
+  if (correlationMode === "trace") {
+    return activeTrace && noticeTrace && activeTrace === noticeTrace ? "relevant" : "other";
+  }
+  if (correlationMode === "owner-workflow") {
+    const noticeOwnerWorkflowKey = correlation && typeof correlation === "object" && !Array.isArray(correlation)
+      ? stringField((correlation as Record<string, unknown>).ownerWorkflowKey)
+      : undefined;
+    const activeOwnerWorkflowKey = stringField(context.ownerWorkflowKey);
+    return noticeOwnerWorkflowKey && activeOwnerWorkflowKey && noticeOwnerWorkflowKey === activeOwnerWorkflowKey
+      ? "relevant"
+      : "other";
+  }
+  if (correlationMode === "none") return "other";
   if (activeTrace && noticeTrace) return activeTrace === noticeTrace ? "relevant" : "other";
 
   const activeProjects = new Set(scopeTokenVariants(context.project));

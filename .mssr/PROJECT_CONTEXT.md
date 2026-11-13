@@ -1,7 +1,7 @@
 # Bridge project context
 
 ## Architecture
-`bridge-mcp` is the MauroPrime host/adapter runtime. It exposes local tools, project context, provider adapters, observability, watchdog/restart flow, and ChatGPT Web integration. The Bridge HTTP/MCP adapter is specifically the ChatGPT Web access path; Codex does not use that transport and is handled through MSSR/local host adapters instead. Portable MSSR owns deterministic routing, learning schemas, project-context selection primitives, and cross-host contracts; Bridge consumes `@mauroprime/mssr` and owns filesystem/runtime integration.
+`bridge-mcp` is MauroPrime's host/adapter runtime for tools, project context, providers, observability, and supervision. HTTP/MCP is the ChatGPT Web path; Codex uses MSSR/local adapters. Portable MSSR owns routing, learning schemas, project-context selection and cross-host contracts; Bridge owns host, filesystem and runtime integration.
 
 HTTP supervision separates `BridgeCodeRoot` (package, `dist/http.js`, and self-release audits) from `ProjectRoot` (working directory and relative runtime/data). When omitted, `BridgeCodeRoot` defaults to `ProjectRoot`; see the indexed watchdog invariant.
 
@@ -9,16 +9,17 @@ HTTP supervision separates `BridgeCodeRoot` (package, `dist/http.js`, and self-r
 
 - Bridge source, tools and adapters belong to this repository.
 - Bambu owns tool behavior; Bridge owns confirmed, allowlisted stdio reconnect.
-- Remote Linux execution is a Bridge-owned adapter, not a Kairos runtime dependency: `remote-node` uses in-process SSH with pinned host identity and local ignored node configuration; callers select configured node ids rather than supplying arbitrary hosts/users/keys.
+- Remote Linux execution is Bridge-owned through pinned-key SSH and configured node ids; callers cannot supply arbitrary hosts or credentials.
 - Portable MSSR contract: `D:\Dev\mssr`.
 - MSSR first-party skills ship from the versioned `@mauroprime/mssr` package; Mauro's non-reserved custom reusable skills remain owned by `D:\Dev\mauroprime-skills` and are discovered through their runtime junctions.
-- Cross-project skill-maintenance projections are generated review-only evidence under workspace `.mssr/runtime`; they never become routing or canonical authority by themselves. Bridge transport/runtime rules for that projection live in the indexed `bridge-skill-maintenance-projection` knowledge module, while portable relation/routing semantics remain owned by MSSR.
-- MSSR-owned project control is canonical-only under this repository's `.mssr/` home. `.mssr/project-context.json` is the sole manifest; `.mssr/knowledge/` stores topic/area modules and `.mssr/runtime/` stores ephemeral receipts/cache. `.bridge/` is never read as MSSR authority; only a bounded set of old MSSR-owned artifacts may be detected/removed during explicit initialization, while unrelated Bridge-specific `.bridge` data keeps its own owner/location.
+- Cross-project skill-maintenance projections are review-only evidence under `.mssr/runtime`; MSSR owns their semantics and the indexed `bridge-skill-maintenance-projection` module owns Bridge transport details.
+- `.mssr/` is the sole MSSR project-control home: `project-context.json` is its manifest, `knowledge/` stores indexed modules, and `runtime/` stores ephemeral receipts/cache. `.bridge/` is never MSSR authority; legacy MSSR artifacts are removed only during explicit initialization, while Bridge-specific `.bridge` data keeps its owner.
 - Versioned release history lives under `changelogs/`; the root `CHANGELOG.md` is a compatibility entry point.
-- Packaged MSSR owns routing, lifecycle, context-selection and semantic policies; Bridge owns host integration, observation, persistence, transport and delivery. Detailed contracts stay in indexed `.mssr/knowledge/` modules and are loaded only when relevant.
+- Packaged MSSR owns routing, lifecycle and semantic policies; Bridge owns host integration, observation, persistence and delivery. Detailed boundaries stay in indexed `.mssr/knowledge/` modules.
+- Cross-repository ownership decisions from MSSR are advisory; Bridge's scoped host pre-write checks and current coverage boundary are indexed in [cross-repo write preflight](knowledge/operations/bridge-cross-repo-write-preflight.md).
 - Binary MCP resource links are scoped to stateful server sessions. The unauthenticated modern endpoint is stateless, so it returns immediate embedded attachments and rejects deferred link-only reads; see [MCP binary and image transport](../docs/MCP_BINARY_AND_IMAGE_TRANSPORT.md).
-- Dashboard/Human Cockpit are read-only projections over canonical owners. Keep analytics off the HTTP/MCP loop, caches/snapshots acceleration-only, and capabilities live-discovered. The v2 shell is `Inicio / Trabajo / Salud / Explorar` + Inspector. Current work stays distinct from `observed` (24 h/7 d) and `historical` (30 d); neither drives health/lifecycle. See indexed Human Cockpit and resume-inventory modules.
-- MSSR owns Librarian/Jev semantics; Bridge provides bounded search, exact fetch/evidence packs, relation/preview tools, and advisory reference-split planning. It enforces authorized `.mssr/` reads and exact revisions; Jev metadata and plans stay advisory, and Bridge does not apply them to project truth.
+- Dashboard/Human Cockpit are read-only projections; keep analytics off the MCP loop, caches acceleration-only, and current work separate from observed/history. See indexed cockpit and resume-inventory modules.
+- MSSR owns Librarian/Jev semantics; Bridge provides bounded source reads, evidence packs and advisory plans. Jev metadata stays advisory, and Bridge does not apply plans to project truth.
 ## Project knowledge governance
 
 Project memory is explicit and reviewed. Portable MSSR may combine trace stage with privacy-safe host metadata—changed-path categories, material-write counts, package/runtime adoption, routing/skill-structure changes, Context Plane freshness and user corrections—to produce `NONE`/`WATCH`/`REVIEW`/`REQUIRED` owner advisories. `WATCH` stays low-noise evidence; `REVIEW`/`REQUIRED` activates the maintenance pass and only the relevant authority/recipe. Audit, telemetry and learning digests never invent or silently rewrite `AGENTS.md`, `.mssr/PROJECT_CONTEXT.md`, `.mssr/PROJECT_MEMORY.md`, `.mssr/PROJECT_STATE.md`, routing semantics, skills or references. A release changelog declares whether each PROJECT_* authority was `updated`, `reviewed-none`, or remains `pending`.

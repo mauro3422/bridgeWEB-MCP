@@ -63,16 +63,21 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 try {
   let status;
+  let lastReadback = null;
   for (let attempt = 0; attempt < 200; attempt += 1) {
     try {
       const response = await fetch(`${base}/status`, { signal: AbortSignal.timeout(500) });
-      if (response.ok || response.status === 503) status = await response.json();
+      const payload = await response.json();
+      lastReadback = { statusCode: response.status, storageState: payload?.observabilityStorage?.state, ready: payload?.ready };
+      if (response.ok || response.status === 503) status = payload;
       if (status?.observabilityStorage?.state === "failed") break;
-    } catch {}
+    } catch (error) {
+      lastReadback = { error: error instanceof Error ? error.message : String(error) };
+    }
     if (child.exitCode !== null) break;
     await sleep(25);
   }
-  assert.equal(status?.observabilityStorage?.state, "failed", `bootstrap failure was not reported: ${stderr}`);
+  assert.equal(status?.observabilityStorage?.state, "failed", `bootstrap failure was not reported: readback=${JSON.stringify(lastReadback)} childExit=${child.exitCode} stderr=${stderr}`);
 
   const [health, ready, failedStatus] = await Promise.all([
     timedFetch(`${base}/healthz`),

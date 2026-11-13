@@ -1769,6 +1769,11 @@ export function ageSharedMssrTraceForTests(traceId: string, ageMs: number): void
   state.updatedAt = Date.now() - age;
 }
 
+export function getSharedMssrTraceProjectRootHint(traceId: string): string | null {
+  const state = sharedTraces.get(traceId);
+  return state && !state.closed ? state.projectRootHint : null;
+}
+
 export function resetSharedMssrTraceRegistryForTests(): void {
   for (const traceId of closureTimers.keys()) clearClosureTimer(traceId);
   sharedTraces.clear();
