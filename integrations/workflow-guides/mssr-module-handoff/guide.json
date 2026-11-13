@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "name": "mssr-module-handoff",
+  "title": "MSSR Module & Agent Handoff Protocol",
+  "description": "Cross-project protocol: when the user asks for a new MSSR module, reusable pattern/skill, handoff or follow-up for another agent, resolve canonical ownership, create a bounded durable handoff, register only appropriate MSSR context/skill metadata, and verify routing and persistence without equating documentation to activation.",
+  "activation": {
+    "keywords": [
+      "mssr",
+      "modulo",
+      "módulo",
+      "handoff",
+      "handover",
+      "protocolo",
+      "skill",
+      "otro agente",
+      "continuar",
+      "registrar",
+      "memoria",
+      "handoff en mssr",
+      "integracion"
+    ],
+    "phrases": [
+      "deja un handoff en mssr",
+      "dejá un handoff en mssr",
+      "crea un modulo de esto",
+      "creá un módulo de esto",
+      "haceme un módulo para esto en mssr",
+      "quiero un protocolo para otro agente",
+      "agregalo a mssr para continuar en codex",
+      "registralo como módulo reutilizable y hacé el handoff",
+      "guarda esto para que otro agente lo retome"
+    ],
+    "negativeKeywords": [
+      "solo explicar",
+      "sin guardar",
+      "no modificar",
+      "no crear archivo",
+      "no persistir",
+      "definición de módulo"
+    ],
+    "examples": [
+      "Estamos repitiendo el trabajo de forma manual; creá un módulo en MSSR y un handoff para Codex.",
+      "Dejá en MSSR un protocolo de esto para que cuando te lo pida otra vez se active y avise al otro agente.",
+      "Actualizá los módulos y el handoff entre Auro 3D, el laboratorio y Bambu MCP."
+    ]
+  },
+  "entrypoint": "GUIDE.md",
+  "phases": {
+    "detect": "phases/detect.md",
+    "own": "phases/own.md",
+    "handoff": "phases/handoff.md",
+    "integrate": "phases/integrate.md",
+    "verify": "phases/verify.md",
+    "close": "phases/close.md"
+  },
+  "recommendedTools": [
+    "project_context_load",
+    "skill_route_plan",
+    "skill_bootstrap",
+    "workflow_guide_recommend",
+    "workflow_guide_load",
+    "project_context_update",
+    "project_context_health",
+    "git_status",
+    "read_text_file",
+    "write_text_file",
+    "mssr_trace_record",
+    "bambu_mcp_tool_list"
+  ],
+  "scopeNotes": "Global guide available to all projects connected through Mauro's Bridge MCP."
+}

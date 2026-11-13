@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "name": "audio-transcription-fidelity",
+  "title": "Transcripción fiel de audio (Whisper + Google Speech)",
+  "description": "Activar el flujo MSSR audio-transcription-fidelity para transcribir notas de voz WhatsApp, audio OGG, mensajes de voz, entrevistas y grabaciones, seleccionando Whisper local o Google Speech y corrigiendo errores contextuales sin inventar.",
+  "activation": {
+    "keywords": [
+      "transcribir",
+      "transcripción",
+      "audio",
+      "voz",
+      "WhatsApp",
+      "ogg",
+      "whisper",
+      "subtítulos"
+    ],
+    "phrases": [
+      "transcribí este audio",
+      "necesito que me transcribas este audio",
+      "pasá este audio a texto",
+      "transcripción literal del audio",
+      "transcribir nota de voz de WhatsApp",
+      "comparar whisper con google speech"
+    ],
+    "negativeKeywords": [
+      "resumir texto",
+      "traducir texto",
+      "editar video",
+      "generar voz",
+      "texto a voz"
+    ],
+    "examples": [
+      "Necesito que me transcribas este audio fielmente.",
+      "Pasame a texto esta nota de voz de WhatsApp y corregí palabras mal reconocidas.",
+      "Compará Whisper local y Google Speech para este mensaje de voz."
+    ]
+  },
+  "entrypoint": "GUIDE.md",
+  "phases": {
+    "source": "phases/source.md",
+    "provider": "phases/provider.md",
+    "recognize": "phases/recognize.md",
+    "review": "phases/review.md",
+    "verify": "phases/verify.md"
+  },
+  "recommendedTools": [
+    "project_context_load",
+    "skill_bootstrap",
+    "skill_catalog",
+    "skill_load",
+    "media_review_ingest",
+    "run_command",
+    "binary_file_info",
+    "mssr_trace_record"
+  ],
+  "scopeNotes": "Global guide available to all projects connected through Mauro's Bridge MCP."
+}

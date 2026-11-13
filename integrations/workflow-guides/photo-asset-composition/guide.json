@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "name": "photo-asset-composition",
+  "title": "Fotocomposición por assets con escala y escena fija",
+  "description": "Workflow reusable para fotos reales de productos: escena/cámara inmutable, medidas físicas, extracción de assets, edición localizada, composición por capas, QA visual y handoff MSSR; previene drift por regeneración completa.",
+  "activation": {
+    "keywords": [
+      "fotocomposición",
+      "fotografia producto",
+      "composición por partes",
+      "assets",
+      "recortar objetos",
+      "imagegen",
+      "image gen",
+      "escala real",
+      "editar fotos",
+      "fondo fijo",
+      "extraer assets",
+      "mantener encuadre",
+      "mantener la perspectiva",
+      "fotografía real",
+      "corregir proporciones",
+      "sin cambiar la cámara",
+      "composición fotográfica"
+    ],
+    "phrases": [
+      "armemos por partes la imagen",
+      "separá los assets y recomponé la foto",
+      "no cambies la cámara ni mi mesa",
+      "extraer los objetos y armar composición",
+      "me cambia la escala al regenerar",
+      "corregir los clickers o vasos sin rehacer toda la foto",
+      "fijá el fondo y modificá los objetos",
+      "sin cambiar el encuadre ni la mesa",
+      "mejorar la foto respetando la perspectiva original",
+      "corregir tamaño de vasos y switches en mi foto",
+      "recortar partes reales y volver a armar la escena",
+      "sin que se modifique la cámara o el fondo",
+      "corregir tamaño de objetos en mi fotografía",
+      "organizar por partes una foto",
+      "conservar perspectivas y tamaños al recomponer"
+    ],
+    "negativeKeywords": [
+      "sin relación con fotografías",
+      "animación de personajes",
+      "desde cero libremente",
+      "escena fantástica inventada"
+    ],
+    "examples": [
+      "Arreglá los vasos y clickers sin cambiar mi mesa ni la cámara; trabajá por assets.",
+      "Composición fotográfica real de ocho bobinas y accesorios con tamaños correctos.",
+      "Quiero extraer assets del vaso y switch de una fotografía real para mejorarla sin cambiar el encuadre ni la mesa.",
+      "Extraé cada objeto de mi foto de productos para corregir tamaños sin modificar el fondo ni el ángulo de cámara.",
+      "Editá solo los clickers de la fotografía real, conservando idénticos carretes, vasos, mesa y perspectiva.",
+      "Recortá componentes en PNG transparente y armá la escena sobre el fondo aprobado, cuidando escala real.",
+      "Corregí los tamaños de productos de una foto pero preservá la toma y la mesa original.",
+      "Corrijamos el tamaño de los objetos de mi fotografía sin que se modifique la cámara o el fondo.",
+      "Necesito organizar por partes una foto de carretes y llaveros, conservando perspectivas y tamaños."
+    ]
+  },
+  "entrypoint": "GUIDE.md",
+  "phases": {
+    "detect": "phases/detect.md",
+    "measure": "phases/measure.md",
+    "extract": "phases/extract.md",
+    "repair": "phases/repair.md",
+    "compose": "phases/compose.md",
+    "verify": "phases/verify.md",
+    "persist": "phases/persist.md"
+  },
+  "recommendedTools": [
+    "project_context_load",
+    "skill_route_plan",
+    "skill_bootstrap",
+    "workflow_guide_load",
+    "image_asset_import_files",
+    "bridge_tool_action",
+    "read_text_file",
+    "write_text_file",
+    "binary_file_info",
+    "mssr_trace_record"
+  ],
+  "scopeNotes": "Global guide available to all projects connected through Mauro's Bridge MCP."
+}
