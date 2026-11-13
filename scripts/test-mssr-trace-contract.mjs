@@ -231,6 +231,7 @@ try {
   });
   const summary = await callFresh('mssr_observatory_query', { kind: 'summary', scope: 'active', days: 30 });
   assert.equal(summary.scope, 'active');
+  assert.equal(typeof summary.totals.events, 'number', 'The complete MCP summary must preserve all-history status totals.');
   assert.equal(summary.observability.contractVersion, 'trace-contract-v1');
   assert.match(summary.observability.activeEpoch, /^trace-contract-v1-/);
   assert.equal(summary.benchmark.correlatedRouteLoadCoverage, 100);
@@ -279,9 +280,17 @@ try {
     legacyDb.close();
   }
   const activeAfterLegacy = await callFresh('mssr_observatory_query', { kind: 'summary', scope: 'active', days: 30 });
+  const dashboardActiveAfterLegacy = observatory.queryMssrObservatory({
+    kind: 'summary',
+    scope: 'active',
+    days: 30,
+    dashboardProjection: true,
+  });
   const allAfterLegacy = await callFresh('mssr_observatory_query', { kind: 'summary', scope: 'all', days: 30 });
   assert.equal(activeAfterLegacy.eventCount, summary.eventCount, 'Legacy telemetry must not enter the active epoch.');
   assert.equal(activeAfterLegacy.activeTotals.events, summary.eventCount, 'Active totals must use exact epoch membership, not timestamp alone.');
+  assert.equal(dashboardActiveAfterLegacy.totals, null, 'The dashboard projection must skip expensive all-history totals.');
+  assert.equal(dashboardActiveAfterLegacy.activeTotals.events, summary.eventCount, 'The dashboard projection must preserve exact active-epoch totals.');
   assert.equal(allAfterLegacy.eventCount, summary.eventCount + 1, 'All-history scope must preserve legacy telemetry.');
   assert.equal(allAfterLegacy.benchmark.routeEvents, summary.benchmark.routeEvents + 1);
 

@@ -50,7 +50,7 @@ fs.writeFileSync(inventoryStatePath, JSON.stringify({
   }],
 }, null, 2));
 const child = fork(workerPath, [], {
-  stdio: ["ignore", "ignore", "ignore", "ipc"],
+  stdio: ["ignore", "ignore", "inherit", "ipc"],
   execArgv: [],
   env: {
     ...process.env,
@@ -70,7 +70,7 @@ function requestSnapshot() {
       reject(new Error(`dashboard worker request ${requestId} timed out`));
     }, 120_000);
     const onMessage = (message) => {
-      if (message?.requestId !== requestId) return;
+      if (message?.requestId !== requestId || typeof message.ok !== "boolean") return;
       clearTimeout(timeout);
       child.off("message", onMessage);
       resolve({ message, durationMs: Math.round((performance.now() - startedAt) * 100) / 100 });

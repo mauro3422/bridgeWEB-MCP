@@ -1848,36 +1848,56 @@ function summarizeContextAssembly(events: MssrStoredEvent[]) {
 
 
 
-function observatoryStatus() {
+function observatoryStatus(dashboardProjection = false) {
   const database = getDb();
   const epoch = getMssrObservabilityEpoch();
-  const totals = database?.prepare(`
+  const totals = dashboardProjection ? null : database?.prepare(`
     SELECT COUNT(*) AS events, COUNT(DISTINCT trace_id) AS traces, MAX(occurred_at) AS latest
     FROM mssr_events
     WHERE trace_id NOT LIKE '__test_%'
   `).get() ?? { events: 0, traces: 0, latest: null };
-  const persistedActiveEvents = database?.prepare(`
-    SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
-           skill_name, required, ok, task_hash, details_json
-    FROM mssr_events
-    WHERE occurred_at >= ? AND trace_id NOT LIKE '__test_%'
-    ORDER BY occurred_at ASC
-  `).all(epoch.baselineAt).map(decodeRow)
-    .filter((event) => event.details.observabilityEpoch === epoch.activeEpoch) ?? [];
   const overlayActiveEvents = recentMssrEventOverlay.filter((event) =>
     event.occurredAt >= epoch.baselineAt
     && !event.traceId.startsWith("__test_")
     && event.details.observabilityEpoch === epoch.activeEpoch);
-  const activeEvents = mergeStoredEvents(
-    persistedActiveEvents,
-    overlayActiveEvents,
-    Math.max(1, persistedActiveEvents.length + overlayActiveEvents.length),
-  );
-  const activeTotals = {
-    events: activeEvents.length,
-    traces: new Set(activeEvents.map((event) => event.traceId)).size,
-    latest: activeEvents.at(-1)?.occurredAt ?? null,
-  };
+  let activeTotals: { events: number; traces: number; latest: string | null };
+  if (overlayActiveEvents.length > 0) {
+    // Preserve read-your-writes and id-based deduplication while persistence is pending.
+    const persistedActiveEvents = database?.prepare(`
+      SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
+             skill_name, required, ok, task_hash, details_json
+      FROM mssr_events
+      WHERE occurred_at >= ? AND trace_id NOT LIKE '__test_%'
+      ORDER BY occurred_at ASC
+    `).all(epoch.baselineAt).map(decodeRow)
+      .filter((event) => event.details.observabilityEpoch === epoch.activeEpoch) ?? [];
+    const activeEvents = mergeStoredEvents(
+      persistedActiveEvents,
+      overlayActiveEvents,
+      Math.max(1, persistedActiveEvents.length + overlayActiveEvents.length),
+    );
+    activeTotals = {
+      events: activeEvents.length,
+      traces: new Set(activeEvents.map((event) => event.traceId)).size,
+      latest: activeEvents.at(-1)?.occurredAt ?? null,
+    };
+  } else {
+    const aggregate = database?.prepare(`
+      SELECT COUNT(*) AS events, COUNT(DISTINCT trace_id) AS traces, MAX(occurred_at) AS latest
+      FROM mssr_events
+      WHERE occurred_at >= ?
+        AND trace_id NOT LIKE '__test_%'
+        AND CASE WHEN json_valid(details_json)
+          THEN json_extract(details_json, '$.observabilityEpoch')
+          ELSE NULL
+        END = ?
+    `).get(epoch.baselineAt, epoch.activeEpoch);
+    activeTotals = {
+      events: Number(aggregate?.events ?? 0),
+      traces: Number(aggregate?.traces ?? 0),
+      latest: typeof aggregate?.latest === "string" ? aggregate.latest : null,
+    };
+  }
   return {
     enabled: observatoryEnabled,
     sqliteAvailable: Boolean(database),
@@ -2018,19 +2038,26 @@ function portableIntentAnalysis(events: readonly MssrStoredEvent[]) {
   };
 }
 
-function summary(days: number, scope: MssrObservatoryScope) {
+function summary(days: number, scope: MssrObservatoryScope, dashboardProjection = false) {
   const database = getDb();
   const epoch = getMssrObservabilityEpoch();
-  if (!database) return { ...observatoryStatus(), scope, days, benchmark: null, top: {} };
+  if (!database) return { ...observatoryStatus(dashboardProjection), scope, days, benchmark: null, top: {} };
   const windowSince = new Date(Date.now() - days * 86_400_000).toISOString();
   const since = scope === "active" && epoch.baselineAt > windowSince ? epoch.baselineAt : windowSince;
+  const activeEventFilter = scope === "active"
+    ? `AND CASE WHEN json_valid(details_json)
+        THEN json_extract(details_json, '$.observabilityEpoch')
+        ELSE NULL
+      END = ?`
+    : "";
   const persistedEvents = database.prepare(`
     SELECT id, occurred_at, trace_id, event_type, caller, stage, classification_mode,
            skill_name, required, ok, task_hash, details_json
     FROM mssr_events
     WHERE occurred_at >= ? AND trace_id NOT LIKE '__test_%'
+      ${activeEventFilter}
     ORDER BY occurred_at ASC
-  `).all(since).map(decodeRow);
+  `).all(...(scope === "active" ? [since, epoch.activeEpoch] : [since])).map(decodeRow);
   const overlayEvents = recentMssrEventOverlay.filter((event) => event.occurredAt >= since && !event.traceId.startsWith("__test_"));
   const decoded = mergeStoredEvents(
     persistedEvents,
@@ -2041,6 +2068,7 @@ function summary(days: number, scope: MssrObservatoryScope) {
     ? decoded.filter((event) => event.details.observabilityEpoch === epoch.activeEpoch)
     : decoded;
   const intentAnalysis = portableIntentAnalysis(events);
+  const activeToolFilter = scope === "active" ? "AND observability_epoch = ?" : "";
   const persistedToolCalls = database.prepare(`
     SELECT id, trace_id, started_at, ended_at, duration_ms, tool, operation_subject,
            observability_epoch, ok, caller, client_name, session_key,
@@ -2048,8 +2076,9 @@ function summary(days: number, scope: MssrObservatoryScope) {
     FROM tool_calls
     WHERE started_at >= ? AND trace_id IS NOT NULL AND trace_id <> ''
       AND trace_id NOT LIKE '__test_%'
+      ${activeToolFilter}
     ORDER BY started_at ASC
-  `).all(since);
+  `).all(...(scope === "active" ? [since, epoch.activeEpoch] : [since]));
   const pendingToolCalls = getPendingTraceToolRowsSince(since);
   const toolCallsById = new Map<string, JsonRecord>();
   for (const row of persistedToolCalls) toolCallsById.set(String(row.id ?? `${row.started_at}:${row.tool}`), row);
@@ -2963,7 +2992,7 @@ function summary(days: number, scope: MssrObservatoryScope) {
 
   const overallExecution = executionMetrics(traceIdsWithRoutes, routes);
   return {
-    ...observatoryStatus(),
+    ...observatoryStatus(dashboardProjection),
     scope,
     days,
     since,
@@ -3222,16 +3251,19 @@ export function queryMssrObservatory(args: {
   days?: number;
   limit?: number;
   scope?: MssrObservatoryScope;
+  /** Internal dashboard projection omits the expensive all-history status totals. */
+  dashboardProjection?: boolean;
 }) {
   const kind = args.kind ?? "summary";
   const detail: MssrObservatoryDetail = args.detail === "full" ? "full" : "compact";
   const days = Math.max(1, Math.min(365, Math.trunc(args.days ?? 30)));
   const limit = Math.max(1, Math.min(200, Math.trunc(args.limit ?? 50)));
   const scope: MssrObservatoryScope = args.scope === "all" ? "all" : "active";
+  const dashboardProjection = args.dashboardProjection === true;
   const epoch = getMssrObservabilityEpoch();
   if (kind === "status") return { ...observatoryStatus(), scope, detail };
   if (kind === "summary" || kind === "benchmark") {
-    const fullSummary = summary(days, scope);
+    const fullSummary = summary(days, scope, dashboardProjection);
     return { ...(detail === "full" ? fullSummary : compactObservatorySummary(fullSummary)), detail };
   }
   const database = getDb();
@@ -3274,10 +3306,10 @@ export function queryMssrObservatory(args: {
   const recent = (scope === "active"
     ? merged.filter((event) => event.details.observabilityEpoch === epoch.activeEpoch)
     : merged).slice(0, limit);
-  if (detail === "full") return { ...observatoryStatus(), scope, detail, recent };
+  if (detail === "full") return { ...observatoryStatus(dashboardProjection), scope, detail, recent };
   const compact = boundedCompactObservatoryEvents(recent);
   return {
-    ...observatoryStatus(),
+    ...observatoryStatus(dashboardProjection),
     scope,
     detail,
     recent: compact.events,

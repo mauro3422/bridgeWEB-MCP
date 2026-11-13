@@ -2,7 +2,7 @@
 
 The canonical Bridge release history now lives under [`changelogs/`](changelogs/INDEX.md).
 
-- Current source release: [0.6.185](changelogs/0.6.185.md) (safe Bambu-only provider reconnect and generic MIME handling for authorized image imports)
+- Current source release: [0.6.188](changelogs/0.6.188.md) (reduce redundant all-history MSSR dashboard reads while preserving full MCP summary status)
 - Version index: [changelogs/INDEX.md](changelogs/INDEX.md)
 - Historical monolithic archive: [changelogs/LEGACY.md](changelogs/LEGACY.md)
 

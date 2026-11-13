@@ -54,8 +54,8 @@ async function countWorkflowGuides(): Promise<number> {
 
 async function buildSnapshot() {
   const metrics = getMetricsDashboardSnapshot(12, "active");
-  const mssrSummary = queryMssrObservatory({ kind: "summary", days: 30, scope: "active" });
-  const mssrRecent = queryMssrObservatory({ kind: "recent", days: 3, scope: "active", limit: 200 });
+  const mssrSummary = queryMssrObservatory({ kind: "summary", days: 30, scope: "active", dashboardProjection: true });
+  const mssrRecent = queryMssrObservatory({ kind: "recent", days: 3, scope: "active", limit: 200, dashboardProjection: true });
   const [projectHealth, skillHealth, runtimeHealth, workflowGuideCount, cachedInventory] = await Promise.all([
     getProjectHealthReport(),
     getSkillHealthReport(),
@@ -71,7 +71,7 @@ async function buildSnapshot() {
   });
   let inventoryState = cachedInventory;
   if (inventoryDecision.refresh) {
-    const rebuiltWeeklySummary = queryMssrObservatory({ kind: "summary", days: 7, scope: "all" });
+    const rebuiltWeeklySummary = queryMssrObservatory({ kind: "summary", days: 7, scope: "all", dashboardProjection: true });
     const rebuiltWeeklyGitStates = await collectWeeklyGitStates({ projectHealth, weeklySummary: rebuiltWeeklySummary, maxProjects: 12 });
     inventoryState = buildContextInventoryCacheState({
       weeklySummary: rebuiltWeeklySummary,
@@ -150,7 +150,7 @@ async function handleRequest(
 ) {
   try {
     const value = type === "mssr-summary"
-      ? queryMssrObservatory({ kind: "summary", days: args.days, scope: args.scope }) as Record<string, unknown>
+      ? queryMssrObservatory({ kind: "summary", days: args.days, scope: args.scope, dashboardProjection: true }) as Record<string, unknown>
       : type === "tool-audit"
         ? getDefaultToolAudit({
             view: args.view ?? "all",
