@@ -22,9 +22,9 @@ Stack principal:
 - **MSSR dueño de routing/contexto portable:** `D:\Dev\mssr`. Los hechos específicos de este proyecto pertenecen al `.mssr/` canónico del repositorio, no a un `.bridge/` histórico.
 - `C:\dev\bridge-mcp` es una ruta heredada o alias posible: verificar su resolución antes de escribir.
 - Preservar worktrees, cambios previos y experimentos no reconciliados. No usar `git add -A`, limpiar ni fusionar ramas sin clasificar. No reiniciar Bridge/túnel sólo para documentación o para corregir el cache del catálogo del host.
-- **Codex local en Mauro:** usar MSSR, filesystem, terminal y MCPs directos de aplicaciones. No usar `MauroPrime_Bridge` ni `BrigdeMCP-WEB`; ChatGPT Web puede seguir usando Bridge cuando corresponda.
+- **Codex local en Mauro:** usar MSSR, filesystem, terminal y MCPs directos de aplicaciones para fuente, archivos y Git. En este repositorio, Codex puede usar `MauroPrime_Bridge` para comprobar y operar el runtime o proveedores de Bridge cuando haga falta; ChatGPT Web puede seguir usando Bridge.
 
-Antes de escribir: comprobar `git status`, la versión de `package.json` y, desde el host local, `/status`, `/readyz` y el `/readyz` del túnel. No depender de herramientas Bridge MCP desde Codex. Diferenciar siempre **BridgeCodeRoot** de **ProjectRoot**.
+Antes de escribir: comprobar `git status`, la versión de `package.json` y `/status`, `/readyz` y el `/readyz` del túnel. Para el estado vivo, preferir el host local y usar `MauroPrime_Bridge` desde Codex cuando se requiera una comprobación u operación propia del runtime/proveedor Bridge. Mantener archivos y Git como autoridad local. Diferenciar siempre **BridgeCodeRoot** de **ProjectRoot**.
 
 ## Estado recomendado
 

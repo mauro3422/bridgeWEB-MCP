@@ -19,6 +19,19 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ---
 
+## 2026-11-14 — HTTP runtime and tunnel recovered; probe cause unlogged
+
+**Estado:** Bridge HTTP y túnel listos; recuperación del túnel confirmada; causa interna de los probes no resuelta. Owner: watchdog HTTP/runtime Bridge.
+
+**Síntoma y evidencia:** Bridge 0.6.188 permaneció activo como PID `27836`, boot `7fcaceaf-6275-42f0-8bea-303d2de23b12`. En el arranque del watchdog, el cliente de túnel PID `11120` llegó al umbral tras 9 fallos y fue reemplazado por PID `14704`; éste llegó a 3 fallos y fue reemplazado por PID `19000` a `2026-11-14T02:53:13Z`. El ACK `6afd9ef7-04f7-4e56-be38-c9b4c2cfae72` confirma `auto-restart-tunnel-readiness-threshold`, sin request pendiente. La lectura actual confirmó `/status.ready=true`, readiness HTTP 200 en `3001/readyz` y `8081/readyz`, y cero fallos de transporte del túnel. No se reinició de nuevo.
+
+**Causa:** No resuelta. El ledger registra conteo, PID y reemplazo, pero `Test-HttpText` descarta status y excepción del probe; no hay evidencia para asignar causa al proceso del túnel o al Bridge.
+
+**Corrección/verificación:** No se cambió código de transporte ni se debilitó el umbral. `npm run check`, `npm run build` y `node scripts/.test-mssr-lifecycle-host-adoption.debug-local.mjs` pasaron; la regresión cubre el aviso de fricción, historial, aislamiento, `executed=false` y transacción cross-repo. Métricas de persistencia: 0 fallos/drops y WAL passive checkpoint exitoso; `/status` acumuló 3,065 ms de lag máximo y 18 stalls, observación de rendimiento que no demuestra causalidad con el arranque.
+
+**Seguimiento:** añadir evidencia acotada de status/categoría de excepción por probe en una futura corrección con su regresión. La lectura worker de 120 s contra la DB viva no se repitió. El snapshot previo interrumpido (605,941,760 bytes y journal de 1 KiB) no se valida ni se modifica; obtener una copia SQLite consistente aislada antes del perfil frío. Bridge continúa fijando MSSR 0.2.147 en su vendor tarball; el test cross-repo pasó con ese paquete. MSSR 0.2.157 pasó localmente `npm run verify`, pero el registry público responde 404 y no se intentó publicar.
+
+---
 ## 2026-11-13 — `blender_asset_review` omitida en el registro de Bridge
 
 **Estado:** causa localizada, corrección pendiente. Capa y owner: adaptador/registro Blender de `bridge-mcp`. `blender-mcp` conserva la implementación de la operación. Caso: revisión de costura de nervaduras del soporte de casco V3 de Auro-3D.
