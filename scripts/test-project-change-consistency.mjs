@@ -25,7 +25,14 @@ try {
   await fs.writeFile(path.join(bridgeDir, "project-context.json"), JSON.stringify({
     schemaVersion: 1,
     core: [{ id: "architecture", kind: "context", description: "Architecture", source: { path: ".mssr/PROJECT_CONTEXT.md", sections: ["## Architecture"] } }],
-    modules: [{ id: "current", kind: "state", description: "Current state", source: { path: ".mssr/PROJECT_STATE.md", sections: ["## Current"] }, actions: ["maintain"] }],
+    modules: Array.from({ length: 55 }, (_, index) => ({
+      id: `current-${index}`,
+      kind: "state",
+      description: "Current state",
+      source: { path: ".mssr/PROJECT_STATE.md", sections: ["## Current"] },
+      actions: ["maintain"],
+      ...(index >= 32 ? { curationScope: "research" } : {}),
+    })),
   }, null, 2), "utf8");
   await fs.writeFile(path.join(changelogDir, "INDEX.md"), "# Changelog index\n\n- [1.2.3](1.2.3.md) — fixture baseline.\n", "utf8");
   await fs.writeFile(path.join(changelogDir, "1.2.3.md"), [
@@ -49,6 +56,11 @@ try {
 
   await fs.writeFile(path.join(root, "src.txt"), "changed without release note\n", "utf8");
   const stale = await projectContextToolModule.handlers.project_change_consistency({ projectRoot: root, mode: "persist" });
+  assert.equal(stale.projectAuthority.manifestStatus, "valid", JSON.stringify(stale.projectAuthority));
+  assert.equal(stale.projectAuthority.health.moduleCount, 55);
+  assert.equal(stale.projectAuthority.health.activeModuleCount, 32);
+  assert.equal(stale.projectAuthority.health.researchModuleCount, 23);
+  assert.equal(stale.projectAuthority.health.findings.find((item) => item.code === "many-modules")?.level, "watch");
   assert.equal(stale.publishReady, false);
   assert.equal(stale.issues.some((issue) => issue.code === "current-version-changelog-not-updated" && issue.severity === "error"), true);
 
@@ -73,7 +85,7 @@ try {
   const ready = await projectContextToolModule.handlers.project_change_consistency({ projectRoot: root, mode: "persist" });
   assert.equal(ready.publishReady, true, JSON.stringify(ready.issues));
   assert.equal(ready.issues.length, 0, JSON.stringify(ready.issues));
-  assert.equal(ready.projectAuthority.authorityStatus, "modular");
+  assert.equal(ready.projectAuthority.authorityStatus, "watch");
 
   const registry = createToolRegistry([projectContextToolModule]);
   const delegatedReady = await registry.call("bridge_tool_query", {
