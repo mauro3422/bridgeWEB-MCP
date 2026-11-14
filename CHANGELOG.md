@@ -2,7 +2,7 @@
 
 The canonical Bridge release history now lives under [`changelogs/`](changelogs/INDEX.md).
 
-- Current source release: [0.6.189](changelogs/0.6.189.md) (adopt MSSR 0.2.158 and accept curated active/research context manifests)
+- Current source release: [0.6.190](changelogs/0.6.190.md) (adopt MSSR 0.2.159 with explicit research-context opt-in on route and bootstrap)
 - Version index: [changelogs/INDEX.md](changelogs/INDEX.md)
 - Historical monolithic archive: [changelogs/LEGACY.md](changelogs/LEGACY.md)
 

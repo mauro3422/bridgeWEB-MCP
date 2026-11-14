@@ -30,6 +30,7 @@ try {
       kind: "state",
       description: "Current state",
       source: { path: ".mssr/PROJECT_STATE.md", sections: ["## Current"] },
+      area: index >= 32 ? "research" : index < 13 ? "active-overloaded" : `active-${index % 3}`,
       actions: ["maintain"],
       ...(index >= 32 ? { curationScope: "research" } : {}),
     })),

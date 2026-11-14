@@ -137,6 +137,7 @@ export async function assembleProjectContext(args: {
   stage: SkillStage;
   maxContextChars: number;
   includeCore?: boolean;
+  includeResearch?: boolean;
 }): Promise<ProjectContextAssembly> {
   const projectRoot = path.resolve(args.projectRoot);
   const manifestResolution = await resolveMssrProjectFile(projectRoot, MSSR_PROJECT_CONTROL_FILES.projectContextManifest);
@@ -204,6 +205,7 @@ export async function assembleProjectContext(args: {
     stage: args.stage,
     maxChars: maxContextChars,
     includeCore: coreIncluded,
+    ...(args.includeResearch !== undefined ? { includeResearch: args.includeResearch } : {}),
   });
   if (loaded.manifestStatus !== "loaded") {
     return emptyAssembly({

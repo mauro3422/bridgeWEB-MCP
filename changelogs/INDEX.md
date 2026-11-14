@@ -3,6 +3,7 @@
 Versioned release notes are the canonical change-history surface for MSSR debugging, maintenance, and persistence checks.
 
 ## Current releases
+- [0.6.190](0.6.190.md) - Adopt exact MSSR 0.2.159 and expose explicit research-context opt-in through route and bootstrap.
 - [0.6.189](0.6.189.md) - Adopt exact MSSR 0.2.158 and preserve valid WATCH health for active/research project-context manifests.
 - [0.6.188](0.6.188.md) - Remove redundant all-history status reads from dashboard projections and aggregate active-epoch counts in SQLite.
 - [0.6.187](0.6.187.md) - Complete the reviewed one-file cross-repository transaction and reproduce ambiguous trace recovery denial; activation pending.

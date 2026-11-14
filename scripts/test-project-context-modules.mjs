@@ -265,6 +265,7 @@ try {
       kind: "memory",
       description: `Watch fixture ${index}.`,
       source: { path: relativePath },
+      area: `group-${index % 3}`,
       domains: ["coding"],
       actions: ["review"],
       stages: ["implement"],
@@ -290,10 +291,22 @@ try {
     stage: "implement",
     includeGuides: false,
   };
+  const groupedHealth = await workflowGuideToolModule.handlers.project_context_load(watchArgs);
+  assert.equal(groupedHealth.projectContextHealth.findings.some((finding) => finding.code === "many-modules"), false);
+
+  watchModules.forEach((module, index) => {
+    module.area = index < 13 ? "area-overloaded" : `group-${index % 3}`;
+  });
+  await fs.writeFile(path.join(bridgeDir, "project-context.json"), JSON.stringify({
+    schemaVersion: 1,
+    core: [],
+    modules: watchModules,
+  }, null, 2), "utf8");
   const firstWatch = await workflowGuideToolModule.handlers.project_context_load(watchArgs);
   assert.equal(firstWatch.projectContextHealth.level, "watch");
   assert.equal(firstWatch.projectContextHealth.presentation?.stableWatchSuppressed, false);
   assert.equal(firstWatch.projectContextHealth.findings.some((finding) => finding.code === "many-modules"), true);
+  assert.match(firstWatch.projectContextHealth.findings.find((finding) => finding.code === "many-modules")?.message ?? "", /largest active area has 13/);
 
   const repeatedWatch = await workflowGuideToolModule.handlers.project_context_load(watchArgs);
   assert.equal(repeatedWatch.projectContextHealth.level, "watch");
@@ -309,6 +322,7 @@ try {
     kind: "memory",
     description: "Changed watch fixture.",
     source: { path: changedPath },
+    area: "area-overloaded",
     domains: ["coding"],
     actions: ["review"],
     stages: ["implement"],

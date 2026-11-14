@@ -407,6 +407,7 @@ async function prepareMssrContextPlane(args: {
   intent: unknown;
   stage: unknown;
   contextNow?: unknown;
+  includeResearch?: boolean;
   maxProjectContextChars: number;
   maxProjectContextModules: number;
   maxContextMessages: number;
@@ -423,6 +424,7 @@ async function prepareMssrContextPlane(args: {
     maxContextMessages: Math.min(Math.max(0, Math.floor(args.maxContextMessages)), 32),
     maxContextMessageChars: Math.min(Math.max(0, Math.floor(args.maxContextMessageChars)), MAX_HOST_CONTEXT_MESSAGE_CHARS),
     ...(args.contextNow !== undefined ? { now: contextNowValue(args.contextNow) } : {}),
+    ...(args.includeResearch !== undefined ? { includeResearch: args.includeResearch } : {}),
     ...(args.inboxConfig !== undefined ? { inboxConfig: args.inboxConfig } : {}),
     ...(args.contextMessages !== undefined
       ? { contextMessages: await filterAcknowledgedContextMessages(args.projectRoot, args.contextMessages) }
@@ -1346,6 +1348,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         properties: {
           task: { type: "string", description: "Current user message or concise task statement." },
           projectRoot: { type: "string", description: "Optional repository root already loaded with project_context_load. When provided, MSSR can select modular project context/directives for this route stage." },
+          contextIncludeResearch: { type: "boolean", description: "Explicitly include paused research-scope project context modules. These remain paused unless this option is true." },
           context: { type: "string", maxLength: 4000, description: "Bounded resolved context from the recent relevant conversation. For multi-turn specialized work, normally pass a 500-2000 character summary covering the accepted goal, constraints, completed work/current phase, and unresolved references, even when the current message is not an obvious acknowledgment. Omit only for a genuinely standalone first turn. Do not send hidden chain-of-thought, irrelevant history, or a full transcript." },
           intent: structuredIntentInputSchema,
           caller: { type: "string", enum: [...SKILL_CALLERS], default: "other", description: "Client executing the route. Use codex-local or opencode-local for those local hosts, chatgpt-web when local access is mediated by Bridge, or other when unknown." },
@@ -1381,6 +1384,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
         properties: {
           task: { type: "string", description: "Current user message or concise task statement." },
           projectRoot: { type: "string", description: "Optional repository root already loaded with project_context_load. When provided, MSSR can select modular project context/directives for this route stage." },
+          contextIncludeResearch: { type: "boolean", description: "Explicitly include paused research-scope project context modules. These remain paused unless this option is true." },
           context: { type: "string", maxLength: 4000, description: "Bounded resolved context from the recent relevant conversation. For multi-turn specialized work, normally pass a 500-2000 character summary covering the accepted goal, constraints, completed work/current phase, and unresolved references, even when the current message is not an obvious acknowledgment. Omit only for a genuinely standalone first turn. Do not send hidden chain-of-thought, irrelevant history, or a full transcript." },
           intent: structuredIntentInputSchema,
           caller: { type: "string", enum: [...SKILL_CALLERS], default: "other", description: "Client executing the route. Use codex-local or opencode-local for those local hosts, chatgpt-web when local access is mediated by Bridge, or other when unknown." },
@@ -1692,6 +1696,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
             projectRoot,
             intent: routedIntent,
             stage: route.stage,
+            includeResearch: args.contextIncludeResearch === true,
             contextNow: args.contextNow,
             maxProjectContextChars,
             maxProjectContextModules,
@@ -1723,6 +1728,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
       const bootstrapArguments = {
         task,
         projectRoot: args.projectRoot,
+        contextIncludeResearch: args.contextIncludeResearch === true,
         context: args.context ?? "",
         intent: intentResult.intent,
         caller: args.caller ?? "other",
@@ -1835,6 +1841,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
             projectRoot,
             intent: routedIntent,
             stage: route.stage,
+            includeResearch: args.contextIncludeResearch === true,
             contextNow: args.contextNow,
             maxProjectContextChars,
             maxProjectContextModules,
@@ -1862,6 +1869,7 @@ export const skillCatalogToolModule: BridgeToolModule = {
             stage: route.stage,
             maxContextChars: maxProjectContextChars,
             includeCore: false,
+            includeResearch: args.contextIncludeResearch === true,
           }))
         : null;
       const changeHistorySelection = shouldLoadProjectChangeHistory({ intent: routedIntent, stage: route.stage });
