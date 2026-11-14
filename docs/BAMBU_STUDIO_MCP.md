@@ -4,7 +4,7 @@
 
 El servidor MCP es un proyecto autónomo: `D:\Dev\bambu-studio-mcp\server.py`.
 
-MauroPrime Bridge es **cliente** de este servidor mediante el SDK MCP y el transporte `stdio`. El adaptador vive en `src/tools/bambu-tools.ts`; no contiene ningún algoritmo de 3MF ni de renderizado.
+MauroPrime Bridge es **cliente** de este servidor mediante el SDK MCP y el transporte `stdio`. El adaptador vive en `src/tools/bambu-mcp-connection.ts`. El proveedor implementa el análisis de 3MF y G-code y genera las vistas.
 
 ```text
 ChatGPT → Bridge MCP (bambu_* tools)
@@ -48,6 +48,17 @@ set BAMBU_BRIDGE_TEST_BUILD=.bridge\bambu-stage-dist&& node scripts\test-bambu-s
 ```
 
 No reiniciar el Bridge activo por cambios de docs. Para activar una versión nueva del código, primero QA, preservar rollback/estados, compilar desde el `BridgeCodeRoot` real y usar el watchdog con `bridge_request_restart`, comprobando `bridge_health` y el catálogo posterior.
+
+### Catálogo web y recarga selectiva del proveedor
+
+En Bridge 0.6.188, las herramientas de análisis pertenecen al proveedor Bambu. El adaptador activo es `src/tools/bambu-mcp-connection.ts`. Si ChatGPT muestra un wrapper plano como `bambu_slice_inspect` y responde `Unknown tool`, comparar el catálogo de la sesión mediante `bridge_connector_catalog_compare` y consultar el registro vivo mediante `bridge_tool_schema`.
+
+1. Consultar `bambu_mcp_status`. Si informa `sourceChanged=true`, invocar `bambu_mcp_reconnect` con `confirmation=RECONNECT_BAMBU_PROVIDER`. Cuando el conector no lo expone directamente, delegar con `bridge_tool_action` y el mismo nombre en `toolName` y `confirmToolName`.
+2. Verificar `sourceChanged=false`, versión, generación y herramientas con `bambu_mcp_status` y `bambu_mcp_tool_list`. Comprobar que HTTP y túnel conservan su disponibilidad. No reiniciar Bridge para corregir un catálogo privado de la sesión web.
+3. Consultar el esquema de `bambu_mcp_tool_call` y el catálogo Bambu. Si la entrada directa está ausente, delegar `bambu_mcp_tool_call` con `bridge_tool_action`. En los argumentos internos, repetir el nombre exacto de la herramienta Bambu en `toolName` y `confirmToolName` y pasar sus argumentos de proveedor.
+4. Para ver relleno desde un G-code laminado, usar `bambu_slice_colored_layer_save` con `colorBy=feature`, una altura Z y un rectángulo XY sobre la pieza. Para ver cómo se apilan las extrusiones dentro del brazo, usar `bambu_slice_section_save` con el eje y la coordenada de corte. `bambu_slice_features_inspect` confirma ajustes y cuantifica las líneas. El render geométrico del 3MF editable no contiene esas trayectorias.
+
+**Verificado desde ChatGPT Web el 13/11/2026 a las 22:20 ART.** El catálogo de esta sesión exponía 21 wrappers Bambu retirados y omitía la reconexión y el proxy directos. La delegación anterior actualizó el proceso hijo de 0.16.0 a 0.17.0, generación 2, 58 herramientas y huellas de fuente iguales. El boot HTTP y la disponibilidad del túnel se conservaron. Las llamadas delegadas de resumen, capa coloreada y corte vertical devolvieron resultados válidos usando el G-code del soporte de casco. La llamada plana `bambu_slice_inspect` volvió a responder `Unknown tool` tras la recarga, con el mismo G-code que funcionó por el proxy. Fricción residual: actualizar la proyección del catálogo en el conector web para que deje de sugerir wrappers obsoletos. La delegación vigente queda como ruta verificada mientras la sesión exponga el catálogo anterior.
 
 ## Activación verificada (2026-10-22)
 
