@@ -29,7 +29,7 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 **Verificación:** `npm ci --ignore-scripts --offline`, `npm run check`, `npm run build`, `node scripts/test-project-change-consistency.mjs`, `npm run test:mssr-bridge-integration`, `npm run test:project-context` y `npm run test:mssr-consistency` pasaron con MSSR 0.2.158. En el repo candidate, `project_context_health` quedó `WATCH` sin findings `REVIEW` y `project_change_consistency` devolvió `publishReady=true`, sin issues. El paquete publicado no se intentó: el registro público devuelve 404. El runtime no se reinició: a 05:35Z Bridge seguía ready con 196 herramientas y sin fallas de transporte, pero reportó 15 sesiones (7 requests activos, 8 idle), 148 stalls (máximo 11,303 ms) y 14 errores cliente. El watchdog detiene el proceso Bridge para `mode=http`, por lo que se pospuso la activación para no interrumpir esos requests; la causa de los stalls/errores sigue sin resolver.
 
-**Seguimiento:** activar 0.6.189 solo cuando las sesiones actuales terminen o exista una ventana segura. Actualizar luego la adopción del MSSR MCP local 0.2.157 si aparece un mecanismo de reload soportado.
+**Seguimiento:** cuando terminen los requests activos o haya una ventana segura, correr `npm ci` + build en el main checkout (source/lock 0.6.189/0.2.158; `node_modules`/`dist` siguen en 0.2.147/0.6.188), pedir restart `http` y verificar el paquete runtime efectivo. Actualizar luego la adopción del MSSR MCP local 0.2.157 si aparece un mecanismo de reload soportado. La lectura local de 05:50Z aún encontró 8 sesiones con requests activos; no se reinició.
 
 ---
 
