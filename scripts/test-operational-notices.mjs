@@ -90,6 +90,12 @@ assert.equal(resolvedSkill[0].details?.event, "resolved");
 assert.equal(buildSkillHealthNoticeInputs(skillSnapshot(skill("watch", ["growth"])), null).length, 0, "WATCH stays quiet by default");
 
 const reviewFinding = { code: "oversized-authority", target: ".mssr/PROJECT_STATE.md", recommendation: "Modularize reviewed state." };
+const initialProjectWatch = buildProjectHealthNoticeInputs(
+  projectSnapshot(project("watch", [{ code: "growth", target: "context", recommendation: "Observe." }])),
+  null,
+);
+assert.equal(initialProjectWatch.length, 0, "Project Health WATCH stays visible in the dashboard but silent in bridgeNotices");
+
 const initialProjectReview = buildProjectHealthNoticeInputs(projectSnapshot(project("review", [reviewFinding])), null);
 assert.equal(initialProjectReview.length, 1);
 assert.equal(initialProjectReview[0].code, "mssr-project-health-review");

@@ -491,12 +491,28 @@ function renderProjectHealth(report) {
     const tone = item.level === 'review' ? 'bad' : 'warn';
     const delta = item.deltaFindings === null || item.deltaFindings === undefined ? '—' : (Number(item.deltaFindings) > 0 ? '+' : '') + num(item.deltaFindings);
     const reasons = (item.findingCodes || []).join(', ') || '—';
+    const findings = Array.isArray(item.findings) ? item.findings.slice(0, 24) : [];
+    const findingDetails = findings.map((finding) => '<li><code>' + esc(finding.code || 'finding') + '</code> · <strong>' + esc(finding.target || '—') + '</strong><div>' + esc(finding.recommendation || 'Revisar con el owner del proyecto.') + '</div></li>').join('');
+    const referenceCandidates = Array.isArray(item.referenceCandidates)
+      ? item.referenceCandidates.slice(0, 12)
+      : (Array.isArray(item.referenceHighCandidates) ? item.referenceHighCandidates.slice(0, 8).map((candidate) => ({ path: candidate, priority: 'high', reasons: [] })) : []);
+    const referenceDetails = referenceCandidates.map((candidate) => '<li><code>' + esc(candidate.priority || 'candidate') + '</code> · ' + esc(candidate.path || '—') + (Array.isArray(candidate.reasons) && candidate.reasons.length ? '<div>' + esc(candidate.reasons.join(', ')) + '</div>' : '') + '</li>').join('');
+    const referenceSummary = Number(item.referenceCandidateCount || 0) > 0
+      ? '<p>' + num(item.referenceCandidateCount) + ' referencia(s) candidatas · ' + num(item.referenceHighPriorityCount) + ' alta(s) · ' + num(item.referenceMediumPriorityCount) + ' media(s) · ' + num(item.referenceLowPriorityCount) + ' baja(s) · ' + num(item.referenceConnectedCount) + ' conectada(s). Candidatas requieren revisión del owner; no se vinculan automáticamente.</p>'
+      : '';
+    const disclosure = findingDetails || referenceDetails || referenceSummary
+      ? '<details class="project-health-details" data-ux-layer="detail"><summary>Ver recomendaciones y evidencia (' + num(findings.length) + ' hallazgos · ' + num(item.referenceCandidateCount || 0) + ' referencias)</summary>' +
+        (findingDetails ? '<h4>Hallazgos MSSR</h4><ul>' + findingDetails + '</ul>' : '') +
+        (referenceSummary ? '<h4>Referencias documentales</h4>' + referenceSummary + (referenceDetails ? '<ul>' + referenceDetails + '</ul>' : '') : '') +
+        (item.referenceAuditTruncated || Number(item.referenceCandidateCount || 0) > referenceCandidates.length ? '<p>La lista de referencias está acotada; ejecuta Project Context Health para inspeccionar el resultado completo.</p>' : '') +
+        '</details>'
+      : '';
     return '<tr>' +
       '<td><code>' + esc(item.relativeRoot || item.name || '—') + '</code></td>' +
       '<td><span class="status-pill" data-tone="' + tone + '"><span class="dot ' + tone + '"></span><span>' + esc(String(item.level || '').toUpperCase()) + '</span></span></td>' +
       '<td>' + num(item.coreEntries) + ' core · ' + num(item.modules) + ' módulos</td>' +
       '<td>' + esc(delta) + '</td>' +
-      '<td class="recent-detail"><code>' + esc(reasons) + '</code><div>' + esc(item.level === 'review' ? 'usar planner / maintenance' : 'revisar en mantenimiento') + '</div></td>' +
+      '<td class="recent-detail"><code>' + esc(reasons) + '</code><div>' + esc(item.level === 'review' ? 'usar planner / maintenance' : 'revisar en mantenimiento') + '</div>' + disclosure + '</td>' +
     '</tr>';
   }).join('');
 }

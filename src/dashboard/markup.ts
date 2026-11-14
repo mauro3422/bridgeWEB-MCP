@@ -509,7 +509,7 @@ export const dashboardMarkup = `
       </article>
 
       <article class="card span-12">
-        <div class="card-header"><div><div class="card-kicker">Auditoría diaria · project control plane</div><h2 class="card-title">Salud de contexto de proyectos</h2><p class="card-description">MSSR revisa inicialización, tamaño de PROJECT_*, presión de core/módulos y knowledge no indexado en el workspace. WATCH queda silencioso; REVIEW genera atención y un plan, nunca autoedición.</p></div><span id="mssr-project-health-status" class="status-pill" data-tone="info"><span class="dot info"></span><span>sin snapshot</span></span></div>
+        <div class="card-header"><div><div class="card-kicker">Auditoría diaria · project control plane</div><h2 class="card-title">Salud de contexto de proyectos</h2><p class="card-description">MSSR revisa inicialización, tamaño de PROJECT_*, presión de core/módulos y knowledge no indexado en el workspace. WATCH queda visible y silencioso: abre el detalle para ver targets, recomendaciones y referencias candidatas. REVIEW genera atención y un plan, nunca autoedición.</p></div><span id="mssr-project-health-status" class="status-pill" data-tone="info"><span class="dot info"></span><span>sin snapshot</span></span></div>
         <div class="card-body">
           <div class="metric-grid">
             <div class="metric-card"><div class="metric-label">Proyectos</div><div id="mssr-project-health-projects" class="metric-value">—</div><div class="metric-note"><span id="mssr-project-health-initialized">—</span> inicializados</div></div>

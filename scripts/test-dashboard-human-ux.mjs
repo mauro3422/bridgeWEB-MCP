@@ -12,6 +12,10 @@ assert.match(html, /class="portfolio-item"/, "Individual tools must use detail d
 assert.match(html, /data-ux-layer="detail"/, "Dashboard must expose detail-layer metadata");
 assert.match(html, /function groupToolNotices\(items\)/, "Repeated notices must be accumulated before rendering");
 assert.match(html, /class="notice-group"/, "Notice groups must be progressively disclosed");
+assert.match(html, /WATCH queda visible y silencioso: abre el detalle/, "The Project Health contract must distinguish expandable WATCH from interruptive REVIEW notices");
+assert.match(html, /class="project-health-details" data-ux-layer="detail"/, "Project health findings and references must be expandable without generating per-WATCH notices");
+assert.match(html, /finding\.recommendation/, "Project health detail must expose MSSR's owner-review recommendation");
+assert.match(html, /item\.referenceCandidates/, "Project health detail must expose bounded reference candidate metadata");
 assert.match(html, /data-ux-layer="raw"/, "Forensic notice evidence must remain reachable as a raw layer");
 assert.match(html, /Eventos raw \(/, "Raw notice events must remain explicitly reachable");
 assert.match(html, /Requiere atención/, "Attention-first tool group must be present");

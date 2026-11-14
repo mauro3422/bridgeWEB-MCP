@@ -44,6 +44,11 @@ export type ProjectHealthItem = {
   referenceConnectedCount: number;
   referenceAuditTruncated: boolean;
   referenceHighCandidates: string[];
+  referenceCandidates: Array<{
+    path: string;
+    priority: "high" | "medium" | "low";
+    reasons: string[];
+  }>;
 };
 export type ProjectHealthSnapshot = {
   observedAt: string;
@@ -261,6 +266,11 @@ export async function collectProjectHealthSnapshot(options: {
         .filter((candidate) => candidate.reviewPriority === "high")
         .slice(0, 8)
         .map((candidate) => candidate.path),
+      referenceCandidates: (referenceAudit?.candidates ?? []).slice(0, 12).map((candidate) => ({
+        path: candidate.path,
+        priority: candidate.reviewPriority,
+        reasons: candidate.reasons.slice(0, 4),
+      })),
     });
   }
 

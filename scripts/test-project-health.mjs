@@ -183,6 +183,8 @@ try {
   assert.equal(healthyProject.referenceCandidateCount >= 1, true);
   assert.equal(healthyProject.referenceHighPriorityCount >= 1, true);
   assert.equal(healthyProject.referenceHighCandidates.includes("ROADMAP.md"), true);
+  assert.equal(healthyProject.referenceCandidates.some((candidate) => candidate.path === "ROADMAP.md" && candidate.priority === "high"), true,
+    "Project Health snapshots must preserve bounded candidate paths and priority for expandable owner review");
   assert.equal(healthyProject.workspaceStatus.status, "valid");
   assert.equal(healthyProject.workspaceStatus.state, "abandoned-or-replaced");
   assert.equal(healthyProject.workspaceStatus.updatedAt, "2026-08-15T19:30:00.000Z");
@@ -282,6 +284,7 @@ try {
     assert.equal(dashboard.includes('id="mssr-project-health"'), true);
     assert.equal(dashboard.includes('/api/dashboard/snapshot'), true);
     assert.equal(dashboard.includes('renderProjectHealth(projectHealth)'), true);
+    assert.equal(dashboard.includes('Ver recomendaciones y evidencia'), true, "Dashboard project health must expose details on demand instead of hiding WATCH recommendations behind aggregate codes");
     assert.equal(dashboard.includes('id="mssr-runtime-health-status"'), true);
     assert.equal(dashboard.includes('renderRuntimeHealth(runtimeHealth)'), true);
   } finally {

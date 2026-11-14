@@ -7,6 +7,9 @@
 **MSSR hosts:** Bridge loads 0.2.159. Codex-local MCP was last observed at 0.2.157; no supported safe reload path was found, so it remains separate and untouched. The public npm registry previously returned 404; Bridge uses the exact vendored artifact.
 **Pending:** resolve a safe Codex-local MSSR reload; investigate historical 0.6.188 stalls/client errors and per-probe tunnel readiness; profile an isolated SQLite snapshot; finish authorized generic-MIME import/hash/no-overwrite check; refresh ChatGPT Web catalog; review 10 reference candidates (4 medium, 6 low). Historical `traceId=null` is reproduced; ambiguous writes remain blocked.
 
+## Project Health recommendation expansion — 0.6.191 candidate (2026-11-14)
+The local 0.6.191 candidate retains and renders up to 12 document-reference paths with priority/reasons, alongside each bounded MSSR health finding's target/recommendation, in a collapsed dashboard disclosure. WATCH remains quiet in `bridgeNotices`; REVIEW keeps its existing deduplicated notice path. The active Bridge is still 0.6.190 until controlled HTTP-only adoption. The persisted dashboard health snapshot is from 2026-11-05 and is due for refresh after startup; adoption verification must confirm the refreshed snapshot includes `referenceCandidates`.
+
 ## Current MSSR learning state
 Jev and semantic-experience proposals remain shadow evidence: they do not become training truth, change routing, or rewrite project authorities. Reliability evaluation still needs independent owner-labeled holdouts and separate retrieval, selection, exact-fetch, abstention and synthesis measurements.
 
