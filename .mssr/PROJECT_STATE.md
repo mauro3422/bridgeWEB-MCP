@@ -1,6 +1,6 @@
 # Bridge project state
 ## Current local release and recovery (2026-11-14)
-**Active runtime:** Bridge 0.6.189 PID `20388`, boot `adc5296e-a075-4249-a1ad-42bd971ce042`; started 06:04Z. At 06:04:39Z `/status` and readiness were good on 3001/8081, with 0 sessions, stalls, and client errors. HTTP watchdog restarted; tunnel PID `19000` stayed up.
+**Active runtime:** Bridge 0.6.189 PID `20388`, boot `adc5296e-a075-4249-a1ad-42bd971ce042`; started 06:04Z. At 06:11Z `/status` and readiness were good on 3001/8081, with 1 active session, 5 event-loop stalls (1,671 ms max; latest 403 ms), and 0 client errors. HTTP watchdog runs as PID `14920`; tunnel PID `19000` stayed up.
 **Source release:** Bridge 0.6.189 is published to `origin/main` at commit `d267d32` with exact MSSR 0.2.158 bytes (SHA-256 `7a76c13c4f287221be8ce4395d2861a88210a480872b03a4d2767abf5f13cb8d`). Main install, `npm run check`, and build now pass; lifecycle integration and Project Context suites passed on the isolated candidate. See `changelogs/0.6.189.md`.
 **MSSR hosts:** active Bridge loads 0.2.158. Codex-local MCP reports 0.2.157 and has no supported safe reload path identified. Public npm registry returns 404; no registry publish was attempted.
 **Project Context health:** valid manifest, 31 modules, no missing sources or unindexed knowledge. Health is `WATCH` with no `REVIEW` findings; 10 documentation-reference candidates and four module-budget notices remain advisory.
