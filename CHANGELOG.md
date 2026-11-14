@@ -2,7 +2,7 @@
 
 The canonical Bridge release history now lives under [`changelogs/`](changelogs/INDEX.md).
 
-- Current source release: [0.6.191](changelogs/0.6.191.md) (expandable Project Health recommendations and bounded reference candidates; WATCH stays quiet and REVIEW notifies)
+- Current source release: [0.6.192](changelogs/0.6.192.md) (refresh legacy Project Health snapshots once so the dashboard can show reference details)
 - Version index: [changelogs/INDEX.md](changelogs/INDEX.md)
 - Historical monolithic archive: [changelogs/LEGACY.md](changelogs/LEGACY.md)
 

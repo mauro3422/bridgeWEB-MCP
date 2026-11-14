@@ -306,7 +306,8 @@ export async function captureProjectHealthIfDue(options: {
   const store = await readStore(filePath);
   const latest = store.snapshots.at(-1);
   const latestMs = latest ? Date.parse(latest.observedAt) : Number.NaN;
-  const due = options.force === true || !Number.isFinite(latestMs) || now.getTime() - latestMs >= intervalMs;
+  const missingReferenceCandidates = latest?.projects.some((project) => !Array.isArray(project.referenceCandidates)) ?? false;
+  const due = options.force === true || missingReferenceCandidates || !Number.isFinite(latestMs) || now.getTime() - latestMs >= intervalMs;
   if (!due) return { captured: false, filePath, latest, previous: store.snapshots.at(-2) ?? null, snapshotCount: store.snapshots.length };
 
   const snapshot = await collectProjectHealthSnapshot({ workspaceRoot: options.workspaceRoot, now, maxDepth: options.maxDepth });

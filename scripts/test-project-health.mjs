@@ -210,6 +210,28 @@ try {
   assert.equal(second.captured, false);
   assert.equal(second.snapshotCount, 1);
 
+  const legacyStore = JSON.parse(await fs.readFile(store, "utf8"));
+  for (const project of legacyStore.snapshots.at(-1).projects) delete project.referenceCandidates;
+  await fs.writeFile(store, `${JSON.stringify(legacyStore, null, 2)}\n`, "utf8");
+  const migrated = await captureProjectHealthIfDue({
+    workspaceRoot: root,
+    filePath: store,
+    maxDepth: 2,
+    now: new Date("2026-08-15T20:20:00Z"),
+  });
+  assert.equal(migrated.captured, true, "A legacy snapshot missing reference candidates must refresh before the normal interval elapses");
+  assert.equal(migrated.snapshotCount, 2);
+  assert.equal(migrated.latest.projects.every((project) => Array.isArray(project.referenceCandidates)), true);
+
+  const afterMigration = await captureProjectHealthIfDue({
+    workspaceRoot: root,
+    filePath: store,
+    maxDepth: 2,
+    now: new Date("2026-08-15T20:30:00Z"),
+  });
+  assert.equal(afterMigration.captured, false, "The schema refresh must be one-time once candidate arrays are present");
+  assert.equal(afterMigration.snapshotCount, 2);
+
   const report = await getProjectHealthReport(store);
   assert.equal(report.latest.counts.review, 1);
   assert.equal(report.policy.autoEdit, false);
