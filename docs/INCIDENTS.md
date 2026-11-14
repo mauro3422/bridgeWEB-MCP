@@ -21,7 +21,7 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 ## 2026-11-14 — Bridge MSSR vendor rejected `curationScope`
 
-**Estado:** corrección y regresión verificadas en el candidato Bridge 0.6.189; runtime 0.6.188 conserva MSSR 0.2.147 hasta una ventana segura de activación. Owner: adaptador MSSR de `bridge-mcp`.
+**Estado:** corrección y regresión verificadas; Bridge 0.6.189 está publicado en `origin/main` en `d267d32`. El runtime 0.6.188 conserva MSSR 0.2.147 hasta una ventana segura de activación. Owner: adaptador MSSR de `bridge-mcp`.
 
 **Síntoma y evidencia:** al evaluar el manifest canónico de MSSR 0.2.158 con Bridge 0.6.188, la copia vendorizada 0.2.147 rechazó `curationScope` como clave desconocida; `project_change_consistency` informó manifest inválido y no quedó listo para persistencia. El package local MSSR 0.2.158 contiene la clave opcional con los valores `active` y `research`; su release receipt pasó `npm run verify` y `npm run release:gate` en el commit `762f0e79eef1bf97fea837072ad027f66c8c0597`.
 
@@ -29,7 +29,7 @@ Registrar aquí los defectos propios de `bridge-mcp`. Los incidentes de routing/
 
 **Verificación:** `npm ci --ignore-scripts --offline`, `npm run check`, `npm run build`, `node scripts/test-project-change-consistency.mjs`, `npm run test:mssr-bridge-integration` y `npm run test:project-context` pasaron con MSSR 0.2.158. En el repo candidate, `project_context_health` quedó `WATCH` sin findings `REVIEW` y `project_change_consistency` devolvió `publishReady=true`, con solo `project-knowledge-review-due` como advisory. El paquete publicado no se intentó: el registro público devuelve 404. El runtime no se reinició: Bridge health a 05:20Z confirmó readiness HTTP 200, 196 herramientas, sin fallas de transporte, sin reinicio pendiente y 13 sesiones activas a 05:19Z.
 
-**Seguimiento:** publicar 0.6.189 mediante fast-forward normal y activar solo cuando las sesiones actuales terminen o exista una ventana segura. Actualizar luego la adopción del MSSR MCP local 0.2.157 si aparece un mecanismo de reload soportado.
+**Seguimiento:** activar 0.6.189 solo cuando las sesiones actuales terminen o exista una ventana segura. Actualizar luego la adopción del MSSR MCP local 0.2.157 si aparece un mecanismo de reload soportado.
 
 ---
 
